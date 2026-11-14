@@ -59,6 +59,9 @@ pub enum SessionMutationError {
     /// TypeScript `Ute` kept changing the text for ten rounds; the payload is the first 100 UTF-16 units of the input.
     #[error("Unicode sanitization reached maximum iterations (10) for input: {0}")]
     UnicodeSanitization(String),
+    /// No home directory for the config directory, where Python raises `RuntimeError`.
+    #[error(transparent)]
+    HomeDirectory(#[from] crate::HomeDirectoryError),
 }
 
 impl From<ForkTsError> for SessionMutationError {
@@ -764,36 +767,23 @@ pub(crate) fn build_fork_lines(
     Ok((forked_session_id, lines))
 }
 
-fn environment_files() -> Option<SessionFiles> {
-    SessionFiles::from_environment()
-}
-
-fn unresolved(session_id: &str) -> SessionMutationError {
-    SessionMutationError::NotFound {
-        session_id: session_id.to_owned(),
-        directory: None,
-    }
+fn environment_files() -> Result<SessionFiles, SessionMutationError> {
+    Ok(SessionFiles::from_environment()?)
 }
 
 /// [`SessionFiles::rename_session`] over the environment's config directory.
 pub fn rename_session(session_id: &str, title: &str, directory: Option<&Path>) -> Result<(), SessionMutationError> {
-    environment_files()
-        .ok_or_else(|| unresolved(session_id))?
-        .rename_session(session_id, title, directory)
+    environment_files()?.rename_session(session_id, title, directory)
 }
 
 /// [`SessionFiles::tag_session`] over the environment's config directory.
 pub fn tag_session(session_id: &str, tag: Option<&str>, directory: Option<&Path>) -> Result<(), SessionMutationError> {
-    environment_files()
-        .ok_or_else(|| unresolved(session_id))?
-        .tag_session(session_id, tag, directory)
+    environment_files()?.tag_session(session_id, tag, directory)
 }
 
 /// [`SessionFiles::delete_session`] over the environment's config directory.
 pub fn delete_session(session_id: &str, directory: Option<&Path>) -> Result<(), SessionMutationError> {
-    environment_files()
-        .ok_or_else(|| unresolved(session_id))?
-        .delete_session(session_id, directory)
+    environment_files()?.delete_session(session_id, directory)
 }
 
 /// [`SessionFiles::fork_session`] over the environment's config directory.
@@ -803,10 +793,5 @@ pub fn fork_session(
     up_to_message_id: Option<&str>,
     title: Option<&str>,
 ) -> Result<ForkSessionResult, SessionMutationError> {
-    environment_files().ok_or_else(|| unresolved(session_id))?.fork_session(
-        session_id,
-        directory,
-        up_to_message_id,
-        title,
-    )
+    environment_files()?.fork_session(session_id, directory, up_to_message_id, title)
 }

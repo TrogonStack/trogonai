@@ -43,7 +43,7 @@ function selected(name, files, event) {
 for (const event of ['pull_request', 'push']) {
   test(`${event}: canary fix plus proto configuration avoids unrelated suites`, () => {
     const files = [
-      '.config/mise/tasks/github-actions/canary-is-branch-tip',
+      '.config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip',
       'buf.gen.yaml',
       'tests/github_actions/test_canary_is_branch_tip.py',
     ];
@@ -54,7 +54,7 @@ for (const event of ['pull_request', 'push']) {
   });
 
   test(`${event}: canary helper and tests need only automation validation`, () => {
-    const files = ['.config/mise/tasks/github-actions/canary-is-branch-tip', 'tests/github_actions/test_canary_is_branch_tip.py'];
+    const files = ['.config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip', 'tests/github_actions/test_canary_is_branch_tip.py'];
     for (const suite of ['rust', 'go', 'proto']) assert.equal(selected(suite, files, event), false);
     assert.deepEqual(selected('codeql', files, event), []);
   });
@@ -75,8 +75,10 @@ const rustInputs = [
   'rsworkspace/crates/platform/trogon-gateway/src/lib.rs',
   'rsworkspace/Cargo.lock', 'rsworkspace/rust-toolchain.toml',
   '.github/actions/setup-rust/action.yml', '.config/mise/config.toml', '.config/mise/mise.lock',
-  '.config/mise/tasks/github-actions/rust-components',
-  '.config/mise/tasks/github-actions/dylint-tests',
+  '.config/mise/tasks/github/actions/setup-rust/rust-components',
+  '.config/mise/tasks/github/workflows/ci-rust/dylint-tests',
+  '.config/mise/tasks/github/workflows/ci-rust/result',
+  '.config/mise/tasks/rust/coverage',
   '.config/mise/tasks/artifacts/wasm-components',
   '.config/mise/tasks/proto/schedules-descriptor-set',
   '.config/mise/tasks/rust/wasm-target', '.config/mise/lib/shared.sh',
@@ -91,6 +93,7 @@ for (const file of [
   'goworkspace/internal/protowit/generate.go', 'goworkspace/go.mod',
   '.config/mise/tasks/check/go', '.config/mise/tasks/test/go/race',
   '.config/mise/tasks/build/go', '.config/mise/lib/shared.sh',
+  '.config/mise/tasks/github/workflows/ci-go/result',
   'proto/trogonai/scheduler/schedules/v1/schedule_completed.proto', 'buf.yaml', 'buf.lock',
   '.config/mise/config.toml', '.config/mise/mise.lock',
 ]) test(`Go dependency: ${file}`, () => assert.equal(selected('go', [file], 'pull_request'), true));
@@ -98,8 +101,8 @@ for (const file of [
 for (const file of [
   'buf.gen.yaml', 'proto/trogonai/policy/subjects/v1alpha1/subject.proto',
   '.config/mise/tasks/proto/generate', '.config/mise/tasks/proto/format/rust',
-  '.config/mise/lib/proto-plugin', '.config/mise/tasks/github-actions/assert-proto-generated',
-  '.config/mise/tasks/github-actions/assert-key-custody-proto-generated',
+  '.config/mise/lib/proto-plugin', '.config/mise/tasks/github/workflows/ci-proto/assert-proto-generated',
+  '.config/mise/tasks/github/workflows/ci-proto/assert-key-custody-proto-generated',
   'tests/proto/validate.py', 'tsworkspace/pnpm-lock.yaml',
   'rsworkspace/crates/platform/trogonai-proto/src/gen/mod.rs',
 ]) test(`Proto dependency: ${file}`, () => assert.equal(selected('proto', [file], 'pull_request'), true));
@@ -112,7 +115,7 @@ for (const [file, language] of [
 ]) test(`CodeQL language: ${file}`, () => assert.deepEqual(selected('codeql', [file], 'pull_request'), [language]));
 
 test('automation changes cannot hide generated Rust changes', () => {
-  const files = ['.config/mise/tasks/github-actions/canary-is-branch-tip', 'rsworkspace/crates/platform/trogonai-proto/src/gen/mod.rs'];
+  const files = ['.config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip', 'rsworkspace/crates/platform/trogonai-proto/src/gen/mod.rs'];
   assert.equal(selected('rust', files, 'pull_request'), true);
   assert.equal(selected('proto', files, 'pull_request'), true);
   assert.deepEqual(selected('codeql', files, 'pull_request'), ['rust']);
@@ -175,7 +178,13 @@ test('empty CodeQL matrices are skipped and selected build modes are preserved',
   assert.deepEqual(value.values().map((item) => item.coerceString()), ['go', 'javascript-typescript', 'rust']);
 });
 
-test('CodeQL result reports every outcome so branch rules can require it', () => {
+function runResult(workflow, step, env) {
+  assert.equal(step.run, `mise run --skip-tools github:workflows:${workflow}:result`);
+  const task = path.join(root, `.config/mise/tasks/github/workflows/${workflow}/result`);
+  return spawnSync(task, [], { env: { ...process.env, MISE_PROJECT_ROOT: root, ...env }, encoding: 'utf8' });
+}
+
+test('CodeQL result reports every outcome so branch rules can require it', async () => {
   const job = workflows.codeql.jobs.result;
   assert.equal(job.name, 'CodeQL result');
   assert.deepEqual(job.needs, ['changes', 'analyze']);
@@ -183,8 +192,8 @@ test('CodeQL result reports every outcome so branch rules can require it', () =>
   const step = job.steps.at(-1);
   assert.deepEqual(step.env, {
     SELECTION_RESULT: '${{ needs.changes.result }}',
-    SELECTED_LANGUAGES: '${{ needs.changes.outputs.changes }}',
-    ANALYZE_RESULT: '${{ needs.analyze.result }}',
+    SELECTED: "${{ needs.changes.outputs.changes != '[]' }}",
+    JOB_RESULTS: '${{ needs.analyze.result }}',
   });
   for (const [selection, languages, analyze, status] of [
     ['success', '["rust"]', 'success', 0],
@@ -195,9 +204,10 @@ test('CodeQL result reports every outcome so branch rules can require it', () =>
     ['success', '["rust"]', 'failure', 1],
     ['success', '["rust"]', 'cancelled', 1],
   ]) {
-    const env = { ...process.env, SELECTION_RESULT: selection, SELECTED_LANGUAGES: languages, ANALYZE_RESULT: analyze };
-    const run = spawnSync('bash', ['-c', step.run], { env, encoding: 'utf8' });
-    assert.equal(run.status, status, `selection ${selection} ${languages}, analyze ${analyze}`);
+    const context = { needs: { changes: { outputs: { changes: languages } } } };
+    const selected = (await evaluate(step.env.SELECTED, context)).coerceString();
+    const run = runResult('codeql', step, { SELECTION_RESULT: selection, SELECTED: selected, JOB_RESULTS: analyze });
+    assert.equal(run.status, status, `selection ${selection} ${languages}, analyze ${analyze}: ${run.stderr}`);
   }
 });
 
@@ -222,9 +232,8 @@ test('Rust, Go and Proto results cover every job so branch rules can require the
       ['success', 'true', 'success failure', 1],
       ['success', 'true', 'cancelled success', 1],
     ]) {
-      const env = { ...process.env, SELECTION_RESULT: selection, SELECTED: selected, JOB_RESULTS: results };
-      const run = spawnSync('bash', ['-c', step.run], { env, encoding: 'utf8' });
-      assert.equal(run.status, status, `${suite}: selection ${selection} ${selected}, jobs ${results}`);
+      const run = runResult(`ci-${suite}`, step, { SELECTION_RESULT: selection, SELECTED: selected, JOB_RESULTS: results });
+      assert.equal(run.status, status, `${suite}: selection ${selection} ${selected}, jobs ${results}: ${run.stderr}`);
     }
   }
 });
@@ -243,6 +252,10 @@ test('actual direct and transitive mise dependencies remain selected', () => {
       const source = fs.readFileSync(path.join(root, file), 'utf8');
       assert.equal(selected(suite, [file], 'pull_request'), true, `${suite} depends on ${file}`);
       for (const [, list] of source.matchAll(/^#MISE depends(?:_post)?=(\[.*\])/gm)) pending.push(...JSON.parse(list));
+      for (const [, task] of source.matchAll(/mise run(?: --[\w-]+)* ([\w:-]+)/g)) pending.push(task);
+      for (const [lib] of source.matchAll(/\.config\/mise\/lib\/[\w.-]+/g)) {
+        assert.equal(selected(suite, [lib], 'pull_request'), true, `${suite} depends on ${lib}`);
+      }
     }
   }
 });
@@ -263,7 +276,7 @@ test('selection starts with approved actions and the repo-owned CLI', () => {
   const job = load('.github/workflows/ci-selection.yml').jobs.filter;
   const filter = job.steps.find((step) => step.id === 'filter');
   assert.equal(filter.uses, undefined);
-  assert.equal(filter.run, 'mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:filter');
+  assert.equal(filter.run, 'mise run --skip-tools github:workflows:ci-selection:filter');
   assert.equal(filter.env.GH_TOKEN, '${{ github.token }}');
 });
 
@@ -348,4 +361,45 @@ test('actionlint installs through the supported mise backend', () => {
   const tools = fs.readFileSync(path.join(root, '.config/mise/config.toml'), 'utf8');
   assert.match(tools, /^"github:rhysd\/actionlint" = "\d+\.\d+\.\d+"$/m);
   assert.equal(job.steps.some((step) => step.uses?.startsWith('taiki-e/install-action@')), false);
+});
+
+// Python tasks keep the language they were written in; their parsing logic has
+// no reasonable bash equivalent.
+const pythonTasks = new Set([
+  '.config/mise/tasks/github/workflows/ci-adr/lint-adr-refs',
+  '.config/mise/tasks/github/workflows/ci-rust/decider-test-suites',
+  '.config/mise/tasks/github/workflows/ci-rust/enforce-cargo-license',
+]);
+
+function assertOwnedTask(run, kind, owner, where) {
+  const pattern = new RegExp(`^mise run (?:--skip-tools )?(github:${kind}:${owner.replace(/[.-]/g, '\\$&')}:[a-z0-9-]+)$`);
+  const match = run.match(pattern);
+  assert.ok(match, `${where} must run one github:${kind}:${owner} task, got ${JSON.stringify(run)}`);
+  const file = `.config/mise/tasks/${match[1].replaceAll(':', '/')}`;
+  assert.ok(fs.existsSync(path.join(root, file)), `${where} runs missing task ${file}`);
+  assert.notEqual(fs.statSync(path.join(root, file)).mode & 0o111, 0, `${file} is executable`);
+  const source = fs.readFileSync(path.join(root, file), 'utf8');
+  if (pythonTasks.has(file)) {
+    assert.match(source, /^#!\/usr\/bin\/env python3\n#MISE description="/, file);
+  } else {
+    assert.match(source, /^#!\/usr\/bin\/env bash\n#MISE description="[^"]+"\n(?:#MISE .*\n)*set -euo pipefail\n/, file);
+  }
+}
+
+test('workflow and action steps each run one task owned by that workflow or action', () => {
+  for (const entry of fs.readdirSync(path.join(root, '.github/workflows'))) {
+    const owner = entry.replace(/\.ya?ml$/, '');
+    for (const [id, job] of Object.entries(load(`.github/workflows/${entry}`).jobs)) {
+      for (const step of job.steps ?? []) {
+        if (step.run !== undefined) assertOwnedTask(step.run, 'workflows', owner, `${entry}/${id}`);
+      }
+    }
+  }
+  for (const owner of fs.readdirSync(path.join(root, '.github/actions'))) {
+    const action = load(`.github/actions/${owner}/action.yml`);
+    for (const step of action.runs.steps ?? []) {
+      if (step.run !== undefined) assertOwnedTask(step.run, 'actions', owner, `actions/${owner}`);
+    }
+  }
+  assert.equal(fs.existsSync(path.join(root, '.config/mise/tasks/github-actions')), false);
 });

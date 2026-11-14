@@ -1,6 +1,11 @@
-use std::path::Path;
+use std::{
+    ffi::OsStr,
+    path::{Component, Path},
+};
 
 use unicode_normalization::UnicodeNormalization;
+
+use crate::adapters::{EnvironmentVariable, SystemEnvironment};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SessionProjectKey(String);
@@ -16,12 +21,22 @@ pub enum SessionProjectKeyError {
 }
 
 impl SessionProjectKey {
-    pub fn new(value: impl Into<String>) -> Result<Self, SessionProjectKeyError> {
+    /// A key for a project, as upstream builds it: the project name is not validated.
+    ///
+    /// Stores that turn a key into a file path must apply their own safety rules; [`SessionProjectKey::checked`] is
+    /// the opt-in constructor that rejects a name that is not a safe file name component.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// A key whose project name must be a safe file name component: not empty, not `.` or `..`, no separator, control
+    /// or Windows-reserved character, no trailing dot or space and not a reserved device name.
+    pub fn checked(value: impl Into<String>) -> Result<Self, SessionProjectKeyError> {
         let value = value.into();
         if !crate::session_path_component::is_safe(&value) {
             return Err(SessionProjectKeyError::Invalid);
         }
-        Ok(Self(value))
+        Ok(Self::new(value))
     }
 
     pub fn for_directory(directory: &Path) -> Result<Self, SessionProjectKeyError> {
@@ -37,7 +52,7 @@ impl SessionProjectKey {
             .map_err(SessionProjectKeyError::Directory)?;
         let absolute = absolute.to_str().ok_or(SessionProjectKeyError::NotUnicode)?;
         let normalized = platform_nfc(&without_verbatim_prefix(absolute), crate::SummaryDialect::TypeScript);
-        Self::new(sanitize_path(&normalized, crate::SummaryDialect::TypeScript))
+        Ok(Self::new(sanitize_path(&normalized, crate::SummaryDialect::TypeScript)))
     }
 
     /// Upstream TypeScript `Wn(directory, env)` through a filesystem adapter: the path is resolved lexically, its real
@@ -53,7 +68,7 @@ impl SessionProjectKey {
         let resolved = filesystem.canonicalize(&lexical).unwrap_or(lexical);
         let text = resolved.to_string_lossy();
         let canonical = platform_nfc(&without_verbatim_prefix(&text), crate::SummaryDialect::TypeScript);
-        Self::new(project_name_with(&canonical, config_dir, name_override))
+        Ok(Self::new(project_name_with(&canonical, config_dir, name_override)))
     }
 
     pub fn as_str(&self) -> &str {
@@ -155,10 +170,15 @@ pub(crate) fn canonicalize_lenient_in(directory: &Path, dialect: crate::SummaryD
     platform_nfc(&without_verbatim_prefix(&text), dialect)
 }
 
+/// The name a project-directory listing compares on. Both upstream SDKs lowercase it on Windows and compare it
+/// exactly elsewhere.
+pub(crate) fn fold_directory_name(name: &str, windows: bool) -> String {
+    if windows { name.to_lowercase() } else { name.to_owned() }
+}
+
 /// Node `path.resolve(directory ?? ".")`: absolute against the current directory, with `.` and `..` folded
 /// lexically and no trailing separator.
 pub(crate) fn lexical_resolve(directory: &Path) -> std::path::PathBuf {
-    use std::path::Component;
     let directory = if directory.as_os_str().is_empty() {
         Path::new(".")
     } else {
@@ -210,8 +230,13 @@ pub(crate) fn project_name_with(canonical: &str, config_dir: Option<&str>, name_
 
 /// Upstream `_o` / `Wn(directory)`: [`project_name_with`] over the process environment.
 pub(crate) fn project_name_ts(canonical: &str) -> String {
-    let config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
-    let name = std::env::var("CLAUDE_CODE_PROJECT_DIR_NAME").ok();
+    let unicode_var = |key: &str| {
+        SystemEnvironment
+            .var_os(OsStr::new(key))
+            .and_then(|value| value.into_string().ok())
+    };
+    let config_dir = unicode_var("CLAUDE_CONFIG_DIR");
+    let name = unicode_var("CLAUDE_CODE_PROJECT_DIR_NAME");
     project_name_with(canonical, config_dir.as_deref(), name.as_deref())
 }
 
@@ -229,16 +254,9 @@ pub fn project_key_for_directory_in(
     dialect: crate::SummaryDialect,
 ) -> Result<SessionProjectKey, SessionProjectKeyError> {
     let directory = directory.unwrap_or_else(|| Path::new("."));
-    if dialect == crate::SummaryDialect::TypeScript {
-        let config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
-        let name_override = std::env::var("CLAUDE_CODE_PROJECT_DIR_NAME").ok();
-        return SessionProjectKey::for_directory_ts_with_filesystem(
-            directory,
-            &crate::adapters::NativeFileSystem,
-            config_dir.as_deref(),
-            name_override.as_deref(),
-        );
-    }
     let canonical = canonicalize_lenient_in(directory, dialect);
-    SessionProjectKey::new(sanitize_path(&canonical, dialect))
+    Ok(SessionProjectKey::new(match dialect {
+        crate::SummaryDialect::TypeScript => project_name_ts(&canonical),
+        crate::SummaryDialect::Python => sanitize_path(&canonical, dialect),
+    }))
 }

@@ -1,3 +1,5 @@
+use crate::constants::DIGITS;
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ControlRequestId(String);
 
@@ -12,6 +14,11 @@ impl ControlRequestId {
         Self(typescript_id(math_random()))
     }
 
+    /// TypeScript `randomUUID()`, the id of a control request the SDK sends for an in-process server's message.
+    pub(crate) fn random_uuid() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+
     /// Python `f"req_{counter}_{os.urandom(4).hex()}"`, where `counter` counts the requests sent so far,
     /// this one included.
     pub(crate) fn python(counter: u64) -> Self {
@@ -24,8 +31,6 @@ impl ControlRequestId {
         Self(format!("req_{counter}_{hex}"))
     }
 }
-
-const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
 /// V8 `Math.random()`: 52 random mantissa bits scaled into `[0, 1)`. The low 62 bits of a version 4 UUID are
 /// all random.

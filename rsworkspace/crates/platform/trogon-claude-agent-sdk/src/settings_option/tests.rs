@@ -101,7 +101,7 @@ fn expect_python(name: &str, options: ClaudeAgentOptions) {
             let error = error.split(" Expecting ").next().unwrap_or(error);
             assert!(got.starts_with("Failed to load settings: "), "{name}: {got}");
             if error.contains("[Errno") {
-                assert_eq!(got, format!("{error}"), "{name}");
+                assert_eq!(got, error, "{name}");
             }
         }
         None => {
@@ -396,6 +396,26 @@ fn a_utf8_byte_order_mark_is_dropped_from_a_python_settings_file() {
 }
 
 #[test]
+fn python_keeps_settings_numbers_as_json_loads_reads_them() {
+    let options = ClaudeAgentOptions {
+        argv_style: ArgvStyle::Python,
+        settings: Some(SettingsInput::from_wire_string(
+            r#"{"n": 123456789012345678901234567890, "m": -0, "f": 1.0, "e": 1E400, "x": NaN}"#,
+        )),
+        sandbox: sandbox("{}"),
+        ..Default::default()
+    };
+    let argv = run(&options, &Files::new()).unwrap_or_default();
+    assert!(
+        argv.contains(
+            &r#"{"n": 123456789012345678901234567890, "m": 0, "f": 1.0, "e": Infinity, "x": NaN, "sandbox": {}}"#
+                .to_owned()
+        ),
+        "{argv:?}"
+    );
+}
+
+#[test]
 fn a_python_settings_file_holding_a_non_object_raises_the_python_type_error() {
     let mut files = Files::new();
     files.contents = b"\"text\"".to_vec();
@@ -433,4 +453,85 @@ fn a_lone_dash_value_stays_a_separate_token() {
     };
     let argv = run(&options, &Files::new()).unwrap_or_default();
     assert_eq!(argv[5..], ["--flag", "-"]);
+}
+
+#[test]
+fn typescript_repeated_extra_arguments_collapse_before_settings_are_merged() {
+    let options = typescript(ClaudeAgentOptions {
+        extra_args: vec![extra("a", Some("1")), extra("b", None), extra("a", Some("2"))],
+        settings: settings(r#"{"r":2}"#).map(SettingsInput::inline),
+        ..Default::default()
+    });
+    let tokens = run(&options, &Files::new()).unwrap_or_default();
+    assert_eq!(tokens.iter().filter(|token| *token == "--a").count(), 1);
+    assert!(tokens.windows(3).any(|window| window == ["--a", "2", "--b"]));
+}
+
+/// The `--settings` value TypeScript passes for `settings` text merged with `sandbox`, or its error.
+fn typescript_merged(settings: &str, sandbox_json: &str) -> Result<String, String> {
+    let options = typescript(ClaudeAgentOptions {
+        settings: Some(SettingsInput::json(settings)),
+        sandbox: sandbox(sandbox_json),
+        ..Default::default()
+    });
+    run(&options, &Files::new()).map(|argv| argv.last().cloned().unwrap_or_default())
+}
+
+#[test]
+fn typescript_trims_settings_text_as_javascript_trims_it() {
+    // `JSON.parse` refuses the byte order mark it keeps, so the document is read as empty.
+    assert_eq!(
+        typescript_merged("\u{feff}\u{a0}{\"a\":1}\u{2028}\u{3000}", r#"{"enabled":true}"#),
+        Ok(r#"{"sandbox":{"enabled":true,"failIfUnavailable":true}}"#.to_owned())
+    );
+    assert_eq!(
+        typescript_merged("\u{85}{\"a\":1}", r#"{"enabled":true}"#),
+        Err("Cannot use both a settings file path and the sandbox option. Include the sandbox configuration in your settings file instead.".to_owned())
+    );
+}
+
+#[test]
+fn typescript_reads_settings_numbers_past_the_double_range_as_json_parse_does() {
+    assert_eq!(
+        typescript_merged(
+            r#"{"n":1e400,"m":-1e400,"k":9223372036854775808,"sandbox":{"x":[1e400,2]}}"#,
+            r#"{"enabled":true}"#
+        ),
+        Ok(
+            r#"{"n":null,"m":null,"k":9223372036854776000,"sandbox":{"x":[null,2],"enabled":true,"failIfUnavailable":true}}"#
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn a_sandbox_number_equal_to_an_infinity_marker_keeps_its_value() {
+    assert_eq!(
+        typescript_merged(
+            r#"{"sandbox":{"network":{"httpProxyPort":1}}}"#,
+            r#"{"enabled":true,"network":{"httpProxyPort":9223372036854775808.0,"x":[1.5,-4611686018427387904.0]}}"#
+        ),
+        Ok(
+            r#"{"sandbox":{"network":{"httpProxyPort":9223372036854776000,"x":[1.5,-4611686018427388000]},"enabled":true,"failIfUnavailable":true}}"#
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn python_strips_settings_text_as_str_strip_does() {
+    let options = |settings: &str| ClaudeAgentOptions {
+        argv_style: ArgvStyle::Python,
+        settings: Some(SettingsInput::from_wire_string(settings)),
+        sandbox: sandbox(r#"{"enabled":true}"#),
+        ..Default::default()
+    };
+    let argv = run(&options("\u{1c}{\"a\": 1}\u{1f}"), &Files::new()).unwrap_or_default();
+    assert!(
+        argv.contains(&r#"{"a": 1, "sandbox": {"enabled": true}}"#.to_owned()),
+        "{argv:?}"
+    );
+    let files = Files::new();
+    assert!(run(&options("\u{feff}{\"a\": 1}"), &files).is_err());
+    assert_eq!(*files.asked.borrow(), [PathBuf::from("\u{feff}{\"a\": 1}")]);
 }

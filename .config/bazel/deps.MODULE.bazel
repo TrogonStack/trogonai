@@ -1,6 +1,8 @@
 bazel_dep(name = "rules_rust", version = "0.75.0")
 bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "gazelle", version = "0.54.0")
+bazel_dep(name = "aspect_rules_js", version = "3.6.1")
+bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
 bazel_dep(name = "mise-bazel")
 local_path_override(
     module_name = "mise-bazel",
@@ -11,7 +13,14 @@ local_path_override(
 # Bazel resolves a tool only when a target uses it.
 mise = use_extension("@mise-bazel//mise:extensions.bzl", "mise")
 mise.config(file = "//.config/mise:config.toml")
-use_repo(mise, "mise", "mise_go", "mise_rust")
+use_repo(mise, "mise", "mise_go", "mise_node", "mise_rust")
+
+# Registered before the toolchains that rules_nodejs declares for itself, so
+# Bazel resolves Node.js to the mise install and never downloads one.
+register_toolchains(
+    "@mise_node//:node_toolchain",
+    "@mise_node//:node_runtime_toolchain",
+)
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(versions = [])
@@ -48,3 +57,50 @@ use_repo(
     "com_github_stretchr_testify",
     "org_golang_google_protobuf",
 )
+
+# One translation per pnpm lockfile. pnpm owns the lockfiles; Bazel only reads them.
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm_docs",
+    data = [
+        "//docs:package.json",
+        "//docs:pnpm-workspace.yaml",
+    ],
+    pnpm_lock = "//docs:pnpm-lock.yaml",
+    update_pnpm_lock = False,
+    verify_node_modules_ignored = "//:.bazelignore",
+)
+npm.npm_translate_lock(
+    name = "npm_tsworkspace",
+    data = [
+        "//tsworkspace:package.json",
+        "//tsworkspace:pnpm-workspace.yaml",
+        "//tsworkspace/apps/console:package.json",
+        "//tsworkspace/packages/proto:package.json",
+        "//tsworkspace/packages/slack-bolt-fixtures:package.json",
+    ],
+    npmrc = "//tsworkspace:.npmrc",
+    pnpm_lock = "//tsworkspace:pnpm-lock.yaml",
+    # Some packages reach modules they do not declare: jest-dom augments and
+    # imports vitest, and the TanStack declarations import react, whose types
+    # live in @types/react. pnpm makes that work through its hidden hoisting,
+    # which rules_js does not reproduce, so these are hoisted explicitly to
+    # the workspace root, where the lookup from the package store reaches them.
+    public_hoist_packages = {
+        "@types/react": ["tsworkspace"],
+        "vitest": ["tsworkspace"],
+    },
+    update_pnpm_lock = False,
+    verify_node_modules_ignored = "//:.bazelignore",
+)
+use_repo(npm, "npm_docs", "npm_tsworkspace")
+
+# rules_ts runs its own copy of the TypeScript compiler, fetched from the npm
+# registry. The version comes from the console package manifest and the
+# integrity from the same pnpm lockfile entry, so both stay in step with pnpm.
+typescript = use_extension("@aspect_rules_ts//ts:extensions.bzl", "typescript")
+typescript.deps(
+    integrity = "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
+    version_from = "//tsworkspace/apps/console:package.json",
+)
+use_repo(typescript, "npm_typescript")

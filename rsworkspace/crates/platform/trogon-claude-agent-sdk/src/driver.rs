@@ -1,19 +1,23 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     future::{Future, pending},
     sync::Arc,
     time::Duration,
 };
 
 use tokio::{
-    sync::oneshot,
+    sync::{mpsc::UnboundedSender, oneshot},
     task::{AbortHandle, JoinHandle, JoinSet},
-    time::{Instant, sleep_until, timeout},
+    time::{Instant, sleep, sleep_until, timeout},
 };
 
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
+    constants::{
+        self, PYTHON_INITIALIZE_TIMEOUT_SECONDS, PYTHON_INT_LITERAL_REPR_CHARS, TYPESCRIPT_INITIALIZE_TIMEOUT,
+    },
+    python_text,
     wire::{
         self, ControlResponse, Frame, IncomingControl,
         runtime_payload::{
@@ -22,14 +26,16 @@ use crate::{
     },
 };
 
+#[path = "mcp_manifest.rs"]
+mod mcp_manifest;
+
 pub(crate) enum Command {
-    Initialize {
-        response: oneshot::Sender<Result<crate::ConnectionInfo, Error>>,
-    },
+    /// TypeScript `initialize({first})`: the connect-time request, or `reinitialize()` resending it.
+    Initialize { first: bool, response: ControlSender },
     SetMcpServers {
-        external: BTreeMap<crate::McpServerName, crate::McpServerOptions>,
-        embedded: BTreeMap<crate::McpServerName, Arc<dyn crate::SdkMcpServer>>,
-        response: oneshot::Sender<Result<JsonObject, Error>>,
+        external: crate::McpServers,
+        embedded: crate::SdkMcpServers,
+        response: ControlSender,
     },
     Prompt {
         input: crate::UserInput,
@@ -38,14 +44,21 @@ pub(crate) enum Command {
     Control {
         operation: ControlOperation,
         request: serde_json::Value,
-        response: oneshot::Sender<Result<JsonObject, Error>>,
+        response: ControlSender,
+    },
+    /// A control whose `response` field is returned as sent, `None` when the frame has none.
+    RawControl {
+        operation: ControlOperation,
+        request: serde_json::Value,
+        response: ControlSender,
     },
     FinishInput {
         completion: Completion,
+        /// The prompts the caller wrote itself, TypeScript `streamInput`'s `count` and Python's `written`, which
+        /// count per call. `None` counts every prompt written on the session.
+        written: Option<usize>,
         response: oneshot::Sender<Result<(), Error>>,
     },
-    /// TypeScript `abortController.abort()`: stop the process now and end the run with an `AbortError`.
-    Abort,
 }
 
 #[derive(Clone, Copy)]
@@ -54,25 +67,13 @@ pub(crate) enum Completion {
     Run,
 }
 
+/// What the Rust limits count: inputs the CLI still owes a result and tracked tasks. When stdin closes is
+/// `RunEnd`'s alone.
 #[derive(Default)]
 struct RunState {
     input_done: Option<Completion>,
-    result_received: bool,
-    turn_active: bool,
-    session_state: Option<SessionState>,
     tasks: HashSet<String>,
-    awaiting_continuation: bool,
-    deadline: Option<Instant>,
     pending_inputs: VecDeque<Option<crate::MessageId>>,
-}
-
-#[derive(Clone, Copy)]
-enum SessionState {
-    Idle,
-    Running,
-    RequiresAction,
-    /// A state this SDK does not know yet. It is treated as not idle.
-    Unknown,
 }
 
 impl RunState {
@@ -84,9 +85,6 @@ impl RunState {
     ) -> Result<(), Error> {
         match message {
             Message::Result(message) => {
-                self.result_received = true;
-                self.turn_active = false;
-                self.awaiting_continuation = false;
                 if let Some(count) = message.queued_turn_count {
                     let count = usize::try_from(count).unwrap_or(usize::MAX);
                     if queued_limit.is_some_and(|limit| count > limit) {
@@ -95,36 +93,11 @@ impl RunState {
                     while self.pending_inputs.len() > count {
                         self.pending_inputs.pop_front();
                     }
-                    if count > 0 {
-                        self.awaiting_continuation = true;
-                    }
                 } else {
                     self.pending_inputs.pop_front();
                 }
             }
-            Message::Assistant(message) if message.parent_tool_use_id.is_none() => {
-                self.turn_active = true;
-                self.deadline = None;
-            }
-            Message::StreamEvent(message) if message.parent_tool_use_id.is_none() => {
-                self.turn_active = true;
-                self.deadline = None;
-            }
             Message::System(message) => match message.subtype.as_str() {
-                "session_state_changed" => {
-                    self.session_state = Some(match message.data.get("state").and_then(serde_json::Value::as_str) {
-                        Some("idle") => SessionState::Idle,
-                        Some("running") => SessionState::Running,
-                        Some("requires_action") => SessionState::RequiresAction,
-                        _ => SessionState::Unknown,
-                    });
-                    if matches!(self.session_state, Some(SessionState::Idle)) && self.result_received {
-                        self.awaiting_continuation = false;
-                    }
-                    if matches!(self.session_state, Some(SessionState::RequiresAction)) {
-                        self.deadline = None;
-                    }
-                }
                 "task_started"
                     if matches!(
                         message.data.get("task_type").and_then(serde_json::Value::as_str),
@@ -148,11 +121,8 @@ impl RunState {
                                 .and_then(serde_json::Value::as_str),
                             Some("completed" | "failed" | "stopped" | "killed")
                         );
-                    if terminal
-                        && let Some(id) = message.data.get("task_id").and_then(serde_json::Value::as_str)
-                        && self.tasks.remove(id)
-                    {
-                        self.awaiting_continuation = true;
+                    if terminal && let Some(id) = message.data.get("task_id").and_then(serde_json::Value::as_str) {
+                        self.tasks.remove(id);
                     }
                 }
                 _ => {}
@@ -160,22 +130,6 @@ impl RunState {
             _ => {}
         }
         Ok(())
-    }
-
-    fn settled(&self, callbacks: usize) -> bool {
-        self.result_received
-            && match self.input_done {
-                Some(Completion::Turn) => callbacks == 0,
-                Some(Completion::Run) => {
-                    !self.turn_active
-                        && self.pending_inputs.is_empty()
-                        && callbacks == 0
-                        && self.tasks.is_empty()
-                        && !self.awaiting_continuation
-                        && matches!(self.session_state, None | Some(SessionState::Idle))
-                }
-                None => false,
-            }
     }
 }
 
@@ -189,37 +143,143 @@ struct PendingControl {
     deadline: Option<Instant>,
 }
 
+/// Receives a control success's `response` field, `None` when the frame has none (TypeScript `undefined`).
+pub(crate) type ControlSender = oneshot::Sender<Result<Option<serde_json::Value>, Error>>;
+
 enum ControlResponder {
-    Initialize(oneshot::Sender<Result<crate::ConnectionInfo, Error>>),
+    Initialize {
+        first: bool,
+        response: ControlSender,
+    },
     Control {
         operation: ControlOperation,
-        response: oneshot::Sender<Result<JsonObject, Error>>,
+        response: ControlSender,
+    },
+    Raw {
+        operation: ControlOperation,
+        response: ControlSender,
     },
 }
 
 impl ControlResponder {
     fn operation(&self) -> ControlOperation {
         match self {
-            Self::Initialize(_) => ControlOperation::Initialize,
-            Self::Control { operation, .. } => *operation,
+            Self::Initialize { .. } => ControlOperation::Initialize,
+            Self::Control { operation, .. } | Self::Raw { operation, .. } => *operation,
         }
     }
 
     fn send_error(self, error: Error) {
         match self {
-            Self::Initialize(response) => {
-                let _ = response.send(Err(error));
-            }
-            Self::Control { response, .. } => {
+            Self::Initialize { response, .. } | Self::Control { response, .. } | Self::Raw { response, .. } => {
                 let _ = response.send(Err(error));
             }
         }
     }
+
+    /// Python `close()` cancels the reader without failing the requests still waiting, so each one runs out its own
+    /// timeout. Without a deadline it waits until the caller stops waiting.
+    fn time_out_at(self, deadline: Option<Instant>) {
+        let operation = self.operation();
+        let (Self::Initialize { mut response, .. } | Self::Control { mut response, .. }) = self;
+        tokio::spawn(async move {
+            let expired = match deadline {
+                Some(deadline) => tokio::select! {
+                    () = sleep_until(deadline) => true,
+                    () = response.closed() => false,
+                },
+                None => {
+                    response.closed().await;
+                    false
+                }
+            };
+            if expired {
+                let _ = response.send(Err(Error::ControlTimeout { operation }));
+            }
+        });
+    }
 }
 
-type CallbackOutput = (ControlRequestId, Result<serde_json::Value, ProtocolError>);
+/// The response a callback writes; `None` when the request stays unanswered.
+type CallbackOutput = (ControlRequestId, Result<Option<serde_json::Value>, ProtocolError>);
 
-type McpSessions = BTreeMap<crate::McpServerName, Arc<dyn crate::SdkMcpSession>>;
+type McpSessions = indexmap::IndexMap<crate::McpServerName, Arc<dyn crate::SdkMcpSession>>;
+
+/// What an in-process server's transport sent, on its way back to the driver.
+pub(crate) enum McpTransportEvent {
+    Message { server: String, message: JsonObject },
+    Failed { key: String },
+}
+
+/// `pendingMcpResponses`: shared with the manifest capture, whose per-server handshakes register waiters too.
+#[derive(Clone, Default)]
+pub(crate) struct WaiterTable(Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<Result<JsonObject, ()>>>>>);
+
+impl WaiterTable {
+    /// Replacing an entry drops the earlier waiter, which is then never answered.
+    pub(crate) fn insert(&self, key: String, waiter: oneshot::Sender<Result<JsonObject, ()>>) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, waiter);
+    }
+
+    pub(crate) fn remove(&self, key: &str) -> Option<oneshot::Sender<Result<JsonObject, ()>>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(key)
+    }
+}
+
+/// The TypeScript `Query` state behind `mcp_message`: `pendingMcpResponses`, keyed by the JavaScript text
+/// `${server_name}:${id}`, and the work that feeds it.
+pub(crate) struct McpRouting {
+    waiters: WaiterTable,
+    tasks: JoinSet<()>,
+    outbound: tokio::sync::mpsc::UnboundedSender<McpTransportEvent>,
+    inbound: tokio::sync::mpsc::UnboundedReceiver<McpTransportEvent>,
+    /// `initializeHasBeenWritten`: set once the first `initialize` request has been written.
+    initialize_written: bool,
+    /// `afterInitialize`: forwarded frames waiting for the `initialize` request, in order.
+    held: std::collections::VecDeque<serde_json::Value>,
+    /// `sdkMcpToolsChangedDuringCapture`: servers that announced a tool list change before `initialize`.
+    tools_changed: std::collections::BTreeSet<String>,
+}
+
+impl McpRouting {
+    /// Forwards what a session's transport sends on its own: notifications, server requests and late replies.
+    fn forward(&mut self, name: &crate::McpServerName, session: &Arc<dyn crate::SdkMcpSession>) {
+        if let Some(mut unsolicited) = session.take_outbound() {
+            let outbound = self.outbound.clone();
+            let server = name.as_str().to_owned();
+            self.tasks.spawn(async move {
+                while let Some(message) = unsolicited.recv().await {
+                    let event = McpTransportEvent::Message {
+                        server: server.clone(),
+                        message,
+                    };
+                    if outbound.send(event).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    }
+
+    pub(crate) fn new() -> Self {
+        let (outbound, inbound) = tokio::sync::mpsc::unbounded_channel();
+        Self {
+            waiters: WaiterTable::default(),
+            tasks: JoinSet::new(),
+            outbound,
+            inbound,
+            initialize_written: false,
+            held: std::collections::VecDeque::new(),
+            tools_changed: std::collections::BTreeSet::new(),
+        }
+    }
+}
 
 enum State {
     Initializing,
@@ -243,6 +303,8 @@ where
     shutdown: oneshot::Receiver<()>,
     /// The shutdown signal has been taken, so the receiver must not be polled again.
     shutdown_seen: bool,
+    /// TypeScript `abortController`: once cancelled, the process is stopped and the run ends with an `AbortError`.
+    abort: crate::CancellationToken,
     limits: Limits,
     handler: Option<Arc<dyn ToolPermissionHandler>>,
     pending: HashMap<ControlRequestId, PendingControl>,
@@ -252,28 +314,53 @@ where
     /// Python: callbacks that lost their request id to a duplicate still run and answer, but a cancel no longer
     /// reaches them.
     detached_callbacks: HashMap<tokio::task::Id, crate::CancellationToken>,
+    /// TypeScript: callbacks whose request was cancelled. Their signal fired and their request id is free again,
+    /// but they still run and their answer is still written.
+    cancelled_callbacks: HashSet<tokio::task::Id>,
     hook_callbacks: HashMap<String, HookCallback>,
     sdk_mcp_servers: McpSessions,
-    pending_mcp: Option<(ControlRequestId, McpSessions)>,
+    mcp: McpRouting,
+    /// `captureSdkMcpManifests`, in the TypeScript dialect only: Python has no manifest capture.
+    capture_manifests: bool,
     initialize_request: serde_json::Value,
     initialize_expectations: InitializeExpectations,
     initialize_timeout: Option<Duration>,
     elicitation_handler: Option<Arc<dyn crate::ElicitationHandler>>,
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
-    dialog_kinds: HashSet<String>,
+    oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
+    host_auth_token_handler: Option<Arc<dyn crate::HostAuthTokenHandler>>,
+    /// The work secret answerer and `uiHost` that `ClientHandle` installs.
+    host: crate::remote_control::HostState,
     session: Option<crate::SessionRuntime<F>>,
     mirror_flush: Option<MirrorBarrier>,
     deferred_messages: VecDeque<(Message, Option<MirrorBarrier>)>,
+    /// Frames the run-end machine has not seen yet. Both upstream readers wait for the transcript flush before they
+    /// handle a result, so the machine sees a result, and every frame after it, only once that flush finished. The flag
+    /// marks a result that starts a flush.
+    held_observations: VecDeque<(Message, bool)>,
+    /// TypeScript `promptHold`: while the first initialize is unanswered and a blocking hook or managed settings
+    /// need its confirmation, prompts and most controls wait behind it.
+    initialize_hold: bool,
+    /// What the handles see of `initialize_hold`.
+    prompt_hold: PromptHold,
+    held_commands: VecDeque<Command>,
     next_id: u64,
+    /// The `mcp_message` ids of the line just read, until the Python `mcp_message` handler takes them.
+    wire_ids: Option<crate::McpWireIds>,
     state: State,
     run_state: RunState,
+    run_end: crate::run_end::RunEnd,
     argv_style: crate::ArgvStyle,
     message_decoding: crate::MessageDecoding,
+    js_runtime: crate::JsRuntime,
     /// The last `is_error` result, kept while nothing else has arrived since, to turn the exit error into a
     /// result error the way both upstream SDKs do.
     last_error_result: Option<JsonObject>,
     /// The CLI path until the first `system`/`init` message has been checked, then `None`.
     version_check: Option<String>,
+    latest_commands: LatestCommands,
+    /// See [`SpawnOptions::startup_tap`].
+    startup_tap: Option<UnboundedSender<crate::startup_timeout::StartupEvent>>,
     /// `verbatim_prompts`: every user message is marked `client_composed`.
     verbatim_prompts: bool,
     /// Python warns at the first init message when the CLI predates `client_composed`; TypeScript does not.
@@ -320,11 +407,46 @@ fn strings(values: &[String]) -> serde_json::Value {
     serde_json::Value::Array(values.iter().cloned().map(serde_json::Value::String).collect())
 }
 
-/// The object a control response carries, with an absent or null `response` read as an empty one.
-fn control_object(response: serde_json::Value) -> Result<JsonObject, Error> {
-    match response {
-        serde_json::Value::Null => Ok(JsonObject::new()),
-        other => serde_json::from_value(other).map_err(|error| ProtocolError::from(error).into()),
+/// The `response` a control success carries: Python reads anything but an object, an absent one included, as
+/// `{}`; TypeScript keeps the value as sent and an absent one as `undefined`, which is `None` here.
+fn control_value(style: crate::ArgvStyle, response: Option<serde_json::Value>) -> Option<serde_json::Value> {
+    match (style, response) {
+        (crate::ArgvStyle::Python, Some(serde_json::Value::Object(object))) => Some(serde_json::Value::Object(object)),
+        (crate::ArgvStyle::Python, _) => Some(serde_json::Value::Object(JsonObject::new())),
+        (crate::ArgvStyle::TypeScript, response) => response,
+    }
+}
+
+/// The command list the CLI announced last, which TypeScript `supportedCommands()` prefers to the initialize one.
+pub(crate) type LatestCommands = Arc<std::sync::Mutex<Option<serde_json::Value>>>;
+
+/// TypeScript `promptHold` as `Query.streamInput` reads it, shared with the handles.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub(crate) enum HoldState {
+    /// `promptHold === undefined`: no hold applies, or the first initialize was confirmed.
+    Clear = 0,
+    /// The first initialize is unanswered and what is written waits behind it.
+    Pending = 1,
+    /// The first initialize failed: the hold stays set and resolves `false`.
+    Failed = 2,
+}
+
+/// See [`HoldState`]. The driver sets it; `stream_input` reads it.
+#[derive(Clone, Default)]
+pub(crate) struct PromptHold(Arc<std::sync::atomic::AtomicU8>);
+
+impl PromptHold {
+    pub(crate) fn state(&self) -> HoldState {
+        match self.0.load(std::sync::atomic::Ordering::Acquire) {
+            1 => HoldState::Pending,
+            2 => HoldState::Failed,
+            _ => HoldState::Clear,
+        }
+    }
+
+    fn set(&self, state: HoldState) {
+        self.0.store(state as u8, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -340,13 +462,6 @@ fn javascript_string(support: crate::FeatureSupport) -> &'static str {
 fn initialize_config(
     options: &ClaudeAgentOptions,
 ) -> Result<(serde_json::Value, HashMap<String, HookCallback>, InitializeExpectations), Error> {
-    if options
-        .mcp_servers
-        .keys()
-        .any(|name| options.sdk_mcp_servers.contains_key(name))
-    {
-        return Err(Error::DuplicateMcpServer);
-    }
     if !options.supported_dialog_kinds.is_empty() && options.user_dialog_handler.is_none() {
         return Err(Error::DialogKindsWithoutHandler);
     }
@@ -400,12 +515,20 @@ fn initialize_config(
             options
                 .agents
                 .iter()
-                .map(|(name, definition)| definition.to_wire_json().map(|value| (name.as_str().to_owned(), value)))
+                .map(|(name, definition)| {
+                    definition
+                        .to_wire_json_for(options.argv_style)
+                        .map(|value| (name.as_str().to_owned(), value))
+                })
                 .collect::<Result<JsonObject, _>>()
                 .map_err(ProtocolError::from)?,
         )
     };
-    let supported_dialog_kinds = (!options.supported_dialog_kinds.is_empty()).then(|| {
+    // TypeScript sends a `hooks` object and a `supportedDialogKinds` list whenever the caller gave one, even empty.
+    let send_empty = |when_empty: crate::EmptyCollection| typescript && when_empty == crate::EmptyCollection::Sent;
+    let supported_dialog_kinds = (!options.supported_dialog_kinds.is_empty()
+        || send_empty(options.supported_dialog_kinds_when_empty))
+    .then(|| {
         options
             .supported_dialog_kinds
             .iter()
@@ -421,8 +544,17 @@ fn initialize_config(
     };
     let flag = |value: Option<bool>| value.map(serde_json::Value::Bool);
     let text = |value: &Option<String>| value.clone().map(serde_json::Value::String);
+    // TypeScript names its in-process MCP servers in `initialize`; Python only lists them in `--mcp-config`.
+    let sdk_mcp_servers = (typescript && !options.sdk_mcp_servers.is_empty()).then(|| {
+        options
+            .sdk_mcp_servers
+            .keys()
+            .map(crate::McpServerName::as_str)
+            .collect()
+    });
     let request = InitializeRequest {
-        hooks: (!options.hooks.is_empty()).then_some(hooks),
+        hooks: (!options.hooks.is_empty() || send_empty(options.hooks_when_empty)).then_some(hooks),
+        sdk_mcp_servers,
         json_schema: options.output_schema.as_ref().map(crate::OutputSchema::as_json),
         system_prompt: prompt.system_prompt,
         append_system_prompt: prompt.append_system_prompt,
@@ -475,11 +607,18 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     pub commands: crate::channel::Receiver<Command>,
     pub messages: crate::channel::Sender<Message>,
     pub shutdown: oneshot::Receiver<()>,
+    pub abort: crate::CancellationToken,
     pub terminal: oneshot::Sender<Result<(), Error>>,
     pub transport: T,
     pub initialization: Initialization,
     /// The CLI path to check against the minimum version, for a transport that runs the CLI itself.
     pub version_check: Option<String>,
+    pub latest_commands: LatestCommands,
+    pub prompt_hold: PromptHold,
+    pub host: crate::remote_control::HostState,
+    /// `startup()`: the hook and startup-mark frames, for the initialize timer. Closing the receiver ends the
+    /// observation.
+    pub startup_tap: Option<UnboundedSender<crate::startup_timeout::StartupEvent>>,
 }
 
 /// The initialize request and the callbacks it registers, built before any transport exists so that a bad
@@ -489,6 +628,8 @@ pub(crate) struct Initialization {
     hook_callbacks: HashMap<String, HookCallback>,
     expectations: InitializeExpectations,
     timeout: Option<Duration>,
+    /// The run-end ceiling, or `None` when the environment asks for no limit.
+    run_end: Option<Duration>,
 }
 
 impl Initialization {
@@ -512,94 +653,53 @@ impl Initialization {
             hook_callbacks,
             expectations,
             timeout,
+            run_end: crate::run_end_ceiling::resolve(options, environment),
         })
     }
 }
 
-const TYPESCRIPT_INITIALIZE_TIMEOUT: Duration = Duration::from_millis(660_000);
+impl Initialization {
+    /// Sends `supportedDialogKinds: []` when no kind was configured, as the browser query does for an empty list.
+    pub(crate) fn declare_dialog_kinds(&mut self) {
+        if let Some(request) = self.request.as_object_mut() {
+            request
+                .entry("supportedDialogKinds")
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        }
+    }
+}
 
-/// Python: `max(int(os.environ.get("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "60000")) / 1000, 60)` seconds.
+/// Python: `max(int(os.environ.get("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "60000")) / 1000.0, 60.0)` seconds, handed
+/// to `anyio.fail_after`. A wait too long for `Duration` never ends, as Python's does not in practice.
 pub(crate) fn python_initialize_timeout(value: Option<std::ffi::OsString>) -> Result<Duration, Error> {
-    let floor = Duration::from_secs(60);
+    let seconds = python_initialize_seconds(value.as_deref())?;
+    Ok(Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX))
+}
+
+/// The float of seconds Python computes, with the error each step of that expression raises.
+pub(crate) fn python_initialize_seconds(value: Option<&std::ffi::OsStr>) -> Result<f64, Error> {
     let Some(value) = value else {
-        return Ok(floor);
+        return Ok(PYTHON_INITIALIZE_TIMEOUT_SECONDS);
     };
-    let text = value.to_string_lossy();
-    let milliseconds = python_int(&text).ok_or_else(|| Error::InvalidStreamCloseTimeout {
-        literal: python_repr(&text),
-    })?;
-    Ok(match milliseconds {
-        PythonInt::Negative => floor,
-        PythonInt::Positive(milliseconds) => Duration::from_millis(milliseconds).max(floor),
-    })
-}
-
-enum PythonInt {
-    Negative,
-    /// Saturated at `u64::MAX`, which is longer than any wait.
-    Positive(u64),
-}
-
-/// The values Python's `int(text)` accepts in base 10: surrounding whitespace, one sign, and ASCII digits with
-/// single underscores between them.
-fn python_int(text: &str) -> Option<PythonInt> {
-    let text = text.trim();
-    let (negative, digits) = match text.as_bytes().first() {
-        Some(b'-') => (true, &text[1..]),
-        Some(b'+') => (false, &text[1..]),
-        _ => (false, text),
-    };
-    if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
-        return None;
-    }
-    let mut value = 0_u64;
-    for byte in digits.bytes() {
-        match byte {
-            b'_' => {}
-            b'0'..=b'9' => value = value.saturating_mul(10).saturating_add(u64::from(byte - b'0')),
-            _ => return None,
+    let text = python_text::from_os_str(value);
+    let milliseconds = match python_text::int(&text) {
+        Ok(milliseconds) => milliseconds.to_f64().ok_or(Error::StreamCloseTimeoutOverflow)?,
+        Err(python_text::IntError::InvalidLiteral) => {
+            return Err(Error::InvalidStreamCloseTimeout {
+                literal: python_text::repr(&text)
+                    .chars()
+                    .take(PYTHON_INT_LITERAL_REPR_CHARS)
+                    .collect(),
+            });
         }
-    }
-    Some(if negative && value > 0 {
-        PythonInt::Negative
-    } else {
-        PythonInt::Positive(value)
-    })
-}
-
-/// Python's `repr` of a string, as its `int()` error quotes it.
-fn python_repr(text: &str) -> String {
-    let quote = if text.contains('\'') && !text.contains('"') {
-        '"'
-    } else {
-        '\''
+        Err(python_text::IntError::TooManyDigits(digits)) => return Err(Error::StreamCloseTimeoutDigits { digits }),
     };
-    let mut repr = String::with_capacity(text.len() + 2);
-    repr.push(quote);
-    for character in text.chars() {
-        match character {
-            '\\' => repr.push_str("\\\\"),
-            '\n' => repr.push_str("\\n"),
-            '\r' => repr.push_str("\\r"),
-            '\t' => repr.push_str("\\t"),
-            character if character == quote => {
-                repr.push('\\');
-                repr.push(character);
-            }
-            character if u32::from(character) < 0x20 || character == '\u{7f}' => {
-                let code = u32::from(character);
-                repr.push_str("\\x");
-                repr.extend(
-                    [code >> 4, code & 0xf]
-                        .into_iter()
-                        .filter_map(|digit| char::from_digit(digit, 16)),
-                );
-            }
-            character => repr.push(character),
-        }
-    }
-    repr.push(quote);
-    repr
+    let seconds = milliseconds / 1000.0;
+    Ok(if PYTHON_INITIALIZE_TIMEOUT_SECONDS > seconds {
+        PYTHON_INITIALIZE_TIMEOUT_SECONDS
+    } else {
+        seconds
+    })
 }
 
 /// Connects the transport and starts the driver task.
@@ -612,12 +712,24 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         commands,
         messages,
         shutdown,
+        abort,
         terminal,
         mut transport,
         initialization,
         version_check,
+        latest_commands,
+        prompt_hold,
+        host,
+        startup_tap,
     } = input;
     transport.connect().await?;
+    let capture_manifests = options.argv_style == crate::ArgvStyle::TypeScript
+        && options.captures_sdk_mcp_manifests(std::env::var_os("CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS").as_deref());
+    let initialize_hold = options.argv_style == crate::ArgvStyle::TypeScript
+        && (initialization.expectations.blocking_hooks || initialization.expectations.managed_settings);
+    if initialize_hold {
+        prompt_hold.set(HoldState::Pending);
+    }
     let driver = Driver {
         transport,
         input_ended: false,
@@ -626,6 +738,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         overflow: VecDeque::new(),
         shutdown,
         shutdown_seen: false,
+        abort,
         limits: options.limits,
         handler: options.permission_handler,
         pending: HashMap::new(),
@@ -633,37 +746,53 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         callback_handles: HashMap::new(),
         callback_signals: HashMap::new(),
         detached_callbacks: HashMap::new(),
+        cancelled_callbacks: HashSet::new(),
         hook_callbacks: initialization.hook_callbacks,
         sdk_mcp_servers: options
             .sdk_mcp_servers
             .iter()
             .map(|(name, server)| (name.clone(), server.open_session()))
             .collect(),
-        pending_mcp: None,
+        mcp: McpRouting::new(),
+        capture_manifests,
         initialize_request: initialization.request,
         initialize_expectations: initialization.expectations,
         initialize_timeout: initialization.timeout,
         elicitation_handler: options.elicitation_handler,
         user_dialog_handler: options.user_dialog_handler,
-        dialog_kinds: options
-            .supported_dialog_kinds
-            .iter()
-            .map(|kind| kind.as_str().to_owned())
-            .collect(),
+        oauth_token_handler: options.oauth_token_handler,
+        host_auth_token_handler: options.host_auth_token_handler,
+        host,
         session,
         mirror_flush: None,
         deferred_messages: VecDeque::new(),
+        held_observations: VecDeque::new(),
+        initialize_hold,
+        prompt_hold,
+        held_commands: VecDeque::new(),
         next_id: 0,
+        wire_ids: None,
         state: State::Initializing,
         run_state: RunState::default(),
+        run_end: crate::run_end::RunEnd::new(options.argv_style, initialization.run_end),
         argv_style: options.argv_style,
         message_decoding: options.message_decoding,
+        js_runtime: options.js_runtime,
         last_error_result: None,
         version_check,
+        latest_commands,
+        startup_tap,
         verbatim_prompts: options.verbatim_prompts == crate::VerbatimPrompts::Enabled,
         warn_unsupported_verbatim: options.verbatim_prompts == crate::VerbatimPrompts::Enabled
             && options.argv_style == crate::ArgvStyle::Python,
     };
+    let mut driver = driver;
+    // Only the TypeScript `Query` forwards what a server's transport sends on its own.
+    if driver.argv_style == crate::ArgvStyle::TypeScript {
+        for (name, session) in &driver.sdk_mcp_servers {
+            driver.mcp.forward(name, session);
+        }
+    }
     Ok(tokio::spawn(driver.run(terminal)))
 }
 
@@ -678,6 +807,7 @@ where
             outcome => outcome,
         };
         self.callbacks.abort_all();
+        self.mcp.tasks.abort_all();
         for signal in self.callback_signals.values().chain(self.detached_callbacks.values()) {
             signal.cancel();
         }
@@ -712,7 +842,12 @@ where
         let outcome = combine_outcomes(outcome, mirror_cleanup);
         self.flush_overflow().await;
         for (_, pending) in self.pending.drain() {
-            pending.response.send_error(Error::DriverStopped);
+            match (self.shutdown_seen, self.argv_style) {
+                // TypeScript `close()` rejects what is still unanswered with "Query closed before response received".
+                (true, crate::ArgvStyle::TypeScript) => pending.response.send_error(Error::QueryClosed),
+                (true, crate::ArgvStyle::Python) => pending.response.time_out_at(pending.deadline),
+                (false, _) => pending.response.send_error(Error::DriverStopped),
+            }
         }
         self.commands.close();
         drop(self.messages);
@@ -764,32 +899,24 @@ where
                 self.shutdown_seen = true;
                 return Ok(());
             }
+            if self.abort.is_cancelled() {
+                return Err(crate::AbortError::PROCESS.into());
+            }
             if let Some(error) = self.expired_control() {
                 return Err(error);
             }
-            if self.run_state.settled(self.running_callbacks()) && self.mirror_flush.is_none() {
+            if self.run_end.close_due() {
+                self.run_end.closing_input();
                 self.end_input().await;
             }
-            let between_turns = self.run_state.input_done.is_some()
-                && self.run_state.result_received
-                && !self.run_state.turn_active
-                && self.running_callbacks() == 0
-                && self.run_state.tasks.is_empty()
-                && !matches!(self.run_state.session_state, Some(SessionState::RequiresAction));
-            if between_turns && self.input_open() {
-                if self.run_state.deadline.is_none() {
-                    self.run_state.deadline = Instant::now().checked_add(self.limits.run_end_timeout.as_duration());
-                }
-            } else {
-                self.run_state.deadline = None;
-            }
             let deadline = self.pending.values().filter_map(|request| request.deadline).min();
-            let run_deadline = self.run_state.deadline;
+            let run_deadline = self.run_end.deadline();
             // Python stops reading stdout while its message buffer is full, so nothing else on stdout is handled
             // until the caller takes a message.
             let reading = self.overflow.is_empty() && !self.deferred_full();
             tokio::select! {
                 _ = &mut self.shutdown => { self.shutdown_seen = true; return Ok(()); }
+                () = self.abort.cancelled() => return Err(crate::AbortError::PROCESS.into()),
                 ready = self.messages.ready(), if !self.overflow.is_empty() => {
                     if !ready { return Err(Error::DriverStopped); }
                     self.drain_overflow()?;
@@ -797,17 +924,34 @@ where
                 message = self.transport.read_message(), if reading => {
                     let Some(message) = message? else {
                         self.finish_mirror().await?;
-                        return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
+                        self.run_end.reader_gone();
+                        // A clean exit in the middle of a turn ends the messages in both SDKs; only a failed exit
+                        // is an error, and the process close reports it.
+                        let unfinished = match self.state {
+                            State::Initializing => true,
+                            State::Running => self.limits.end_without_result == crate::EndWithoutResult::Fail,
+                            State::Idle => false,
+                        };
+                        return if unfinished || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
                     };
+                    self.wire_ids = self.transport.take_wire_ids();
+                    self.tap_startup(&message);
                     let parsed = self.decode_message(message)?;
                     self.frame(parsed).await?;
                 }
                 flushed = async { match self.mirror_flush.as_mut() { Some(flush) => flush.await, None => pending().await } }, if self.mirror_flush.is_some() => {
                     self.mirror_flush = None;
+                    self.release_observations();
                     let failures = flushed?;
                     for failure in failures { self.publish(failure.into_message().map_err(ProtocolError::from)?)?; }
                     self.publish_deferred()?;
                 }
+                outbound = self.mcp.inbound.recv() => {
+                    if let Some(event) = outbound {
+                        self.mcp_transport_event(event).await?;
+                    }
+                }
+                _ = self.mcp.tasks.join_next(), if !self.mcp.tasks.is_empty() => {}
                 command = self.commands.recv() => {
                     let Some(command) = command else { return Ok(()); };
                     self.command(command).await?;
@@ -817,7 +961,10 @@ where
                         Some(Ok((task_id, (id, response)))) if self.callback_handles.get(&id).is_some_and(|handle| handle.id() == task_id) => {
                             self.callback_handles.remove(&id);
                             self.callback_signals.remove(&id);
-                            self.write_response(response).await?;
+                            self.write_callback_response(response).await?;
+                        }
+                        Some(Ok((task_id, (_, response)))) if self.cancelled_callbacks.remove(&task_id) => {
+                            self.write_callback_response(response).await?;
                         }
                         Some(Ok((task_id, (id, response)))) if self.detached_callbacks.remove(&task_id).is_some() => {
                             // Python's `finally` pops the request id whichever task holds it, so the live task
@@ -826,10 +973,10 @@ where
                                 let signal = self.callback_signals.remove(&id).unwrap_or_default();
                                 self.detached_callbacks.insert(handle.id(), signal);
                             }
-                            self.write_response(response).await?;
+                            self.write_callback_response(response).await?;
                         }
-                        Some(Err(error)) if error.is_cancelled() => {}
-                        Some(Err(error)) if self.detached_callbacks.contains_key(&error.id()) || self.callback_handles.values().any(|handle| handle.id() == error.id()) => return Err(Error::CallbackTask(error)),
+                        // An aborted task, or the callback of a request cancelled from the session, ends quietly.
+                        Some(Err(error)) if !error.is_cancelled() && !self.cancelled_callbacks.remove(&error.id()) && (self.detached_callbacks.contains_key(&error.id()) || self.callback_handles.values().any(|handle| handle.id() == error.id())) => return Err(Error::CallbackTask(error)),
                         _ => {}
                     }
                 }
@@ -837,16 +984,49 @@ where
                     if let Some(error) = self.expired_control() { return Err(error); }
                 }
                 _ = async { match run_deadline { Some(deadline) => sleep_until(deadline).await, None => pending::<()>().await } } => {
-                    tracing::debug!(timeout = ?self.limits.run_end_timeout.as_duration(), "no idle state after the last result; ending the run");
-                    self.run_state.deadline = None;
-                    self.end_input().await;
+                    self.run_end.ceiling_elapsed();
                 }
             }
         }
     }
 
+    /// `hasBidirectionalNeeds()`. TypeScript: SDK MCP servers, hooks, a permission, elicitation or user dialog
+    /// handler, an auth callback or a work secret answerer. Python's `_has_bidirectional_needs` knows only SDK MCP
+    /// servers, hooks and the permission callback, because it has no other callback.
+    fn bidirectional_needs(&self) -> bool {
+        let hooks = self
+            .initialize_request
+            .get("hooks")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|hooks| !hooks.is_empty());
+        let common = !self.sdk_mcp_servers.is_empty() || hooks || self.handler.is_some();
+        match self.argv_style {
+            crate::ArgvStyle::Python => common,
+            crate::ArgvStyle::TypeScript => {
+                common
+                    || self.elicitation_handler.is_some()
+                    || self.user_dialog_handler.is_some()
+                    || self.oauth_token_handler.is_some()
+                    || self.host_auth_token_handler.is_some()
+                    || self.host.answerer().is_some()
+            }
+        }
+    }
+
+    /// Hands the frames the startup timer follows to `startup()` while it still waits for initialize.
+    fn tap_startup(&mut self, frame: &JsonObject) {
+        let Some(tap) = &self.startup_tap else {
+            return;
+        };
+        if tap.is_closed() {
+            self.startup_tap = None;
+        } else if let Some(event) = crate::startup_timeout::StartupEvent::from_frame(frame, Instant::now()) {
+            let _ = tap.send(event);
+        }
+    }
+
     fn running_callbacks(&self) -> usize {
-        self.callback_handles.len() + self.detached_callbacks.len()
+        self.callback_handles.len() + self.detached_callbacks.len() + self.cancelled_callbacks.len()
     }
 
     /// The control request whose wait ran out, answered with its timeout error, which also ends the run.
@@ -873,7 +1053,12 @@ where
                 Error::ControlTimeout { operation }
             }
         };
+        let first_initialize = matches!(request.response, ControlResponder::Initialize { first: true, .. });
         request.response.send_error(error());
+        // The timer calls `cleanup(error)`, which ends the run.
+        if first_initialize && self.initialize_hold {
+            self.abandon_initialize(&std::sync::Arc::new(error()));
+        }
         Some(error())
     }
 
@@ -892,10 +1077,13 @@ where
             crate::RequestIdExhaustion::Wrap => self.next_id.wrapping_add(1),
             crate::RequestIdExhaustion::Fail => self.next_id.checked_add(1).ok_or(Error::RequestIdExhausted)?,
         };
-        Ok(match self.argv_style {
+        let id = match self.argv_style {
             crate::ArgvStyle::TypeScript => ControlRequestId::typescript(),
             crate::ArgvStyle::Python => ControlRequestId::python(self.next_id),
-        })
+        };
+        // TypeScript `request`: `this.transport.expectControlResponse?.(id)` before the request is written.
+        self.transport.expect_control_response(id.as_str());
+        Ok(id)
     }
     fn controls_full(&self) -> bool {
         self.limits
@@ -903,7 +1091,13 @@ where
             .is_some_and(|limit| self.pending.len() >= limit.get())
     }
 
+    #[cfg(test)]
     async fn admit_callback(&mut self, id: &ControlRequestId) -> Result<bool, Error> {
+        Ok(self.admit_request(id)? && self.admit_capacity(id).await?)
+    }
+
+    /// Applies the duplicate policy to a request whose id is still in flight.
+    fn admit_request(&mut self, id: &ControlRequestId) -> Result<bool, Error> {
         if let Some(handle) = self.callback_handles.get(id) {
             match self.limits.duplicate_control_requests {
                 crate::DuplicateControlRequests::Skip => {
@@ -920,6 +1114,12 @@ where
                 crate::DuplicateControlRequests::Fail => return Err(ProtocolError::DuplicateControlRequest.into()),
             }
         }
+        Ok(true)
+    }
+
+    /// Applies the opt-in limit on running callbacks before a handler starts; requests answered at once never
+    /// count against it.
+    async fn admit_capacity(&mut self, id: &ControlRequestId) -> Result<bool, Error> {
         if self
             .limits
             .max_incoming_callbacks
@@ -932,11 +1132,399 @@ where
         Ok(true)
     }
 
-    async fn command(&mut self, command: Command) -> Result<(), Error> {
+    /// Answers one admitted inbound control request the way the dialect's SDK does.
+    async fn control_request(&mut self, id: ControlRequestId, request: IncomingControl) -> Result<(), Error> {
+        let style = self.argv_style;
+        let python = style == crate::ArgvStyle::Python;
+        match request {
+            IncomingControl::Unsupported { subtype } => {
+                if let Some(response) = wire::unsupported_response(&id, &subtype, style) {
+                    self.write_response(response).await?;
+                }
+            }
+            IncomingControl::Permission(mut request) => {
+                // `claude_agent_sdk` reads `input`, then checks for a callback, then rebuilds the suggestions,
+                // then reads `tool_name`, answering the first `KeyError` or `from_dict` failure with its message.
+                let input = request.raw_request.get("input").cloned();
+                if python && input.is_none() {
+                    return self.write_response(wire::callback_error_response(&id, "'input'")).await;
+                }
+                let Some(handler) = self.handler.clone() else {
+                    return self
+                        .write_response(wire::missing_permission_handler_response(&id, style))
+                        .await;
+                };
+                if python {
+                    match crate::permission_suggestions::python(request.raw_request.get("permission_suggestions")) {
+                        Ok(suggestions) => request.suggestions = suggestions,
+                        Err(message) => return self.write_response(wire::callback_error_response(&id, &message)).await,
+                    }
+                    if !request.raw_request.contains_key("tool_name") {
+                        return self
+                            .write_response(wire::callback_error_response(&id, "'tool_name'"))
+                            .await;
+                    }
+                }
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let input = input.unwrap_or(serde_json::Value::Null);
+                let tool_use_id = request.tool_use_id.clone();
+                let signal = request.signal.clone();
+                let callback_id = id.clone();
+                let fallback = wire::permission_response(
+                    &id,
+                    input.clone(),
+                    tool_use_id.as_ref(),
+                    PermissionDecision::deny("Permission callback timed out"),
+                    style,
+                );
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    let decision = handler.decide(*request).await;
+                    wire::permission_response(&callback_id, input, tool_use_id.as_ref(), decision, style)
+                });
+            }
+            IncomingControl::Hook {
+                callback_id,
+                input,
+                tool_use_id,
+            } => {
+                let Some(callback) = self.hook_callbacks.get(&callback_id).cloned() else {
+                    return self
+                        .write_response(wire::unknown_hook_response(&id, &callback_id))
+                        .await;
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::HookRequest {
+                    input,
+                    tool_use_id,
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "SDK hook callback timed out").map(Some);
+                self.spawn_callback(id, signal, callback.timeout, fallback, async move {
+                    match callback.handler.call(request).await {
+                        Ok(output) => wire::success_response(&response_id, output.to_wire_json()?).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::Mcp { server_name, message } => match style {
+                crate::ArgvStyle::TypeScript => self.typescript_mcp_message(id, server_name, message).await?,
+                crate::ArgvStyle::Python => self.python_mcp_message(id, server_name, message).await?,
+            },
+            IncomingControl::Elicitation(request) => {
+                let Some(handler) = self.elicitation_handler.clone() else {
+                    // TypeScript declines; Python does not handle the subtype at all.
+                    let response = if python {
+                        wire::callback_error_response(&id, "Unsupported control request subtype: elicitation")
+                    } else {
+                        wire::success_response(
+                            &id,
+                            crate::ElicitationResponse::Decline
+                                .to_wire_json()
+                                .map_err(ProtocolError::from)?,
+                        )
+                    };
+                    return self.write_response(response).await;
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::ElicitationRequest {
+                    server_name: crate::McpServerName::from(request.server_name),
+                    message: request.message,
+                    mode: request.mode.map(crate::ElicitationMode::from),
+                    url: request.url,
+                    elicitation_id: request.elicitation_id,
+                    requested_schema: request.requested_schema,
+                    title: request.title,
+                    display_name: request.display_name,
+                    description: request.description,
+                    request_id: id.clone(),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::success_response(
+                    &id,
+                    crate::ElicitationResponse::Cancel
+                        .to_wire_json()
+                        .map_err(ProtocolError::from)?,
+                )
+                .map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(crate::ElicitationResponse::AnsweredOutOfBand) => Ok(None),
+                        Ok(response) => wire::success_response(&response_id, response.to_wire_json()?).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::UserDialog {
+                kind,
+                payload,
+                tool_use_id,
+            } => {
+                let Some(handler) = self.user_dialog_handler.clone() else {
+                    // TypeScript stays silent so a capable client, or the worker's deadline, settles the dialog;
+                    // Python does not handle the subtype at all.
+                    if python && let Some(response) = wire::unsupported_response(&id, "request_user_dialog", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::UserDialogRequest {
+                    dialog_kind: crate::DialogKind::from(kind),
+                    payload,
+                    tool_use_id,
+                    request_id: id.clone(),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::success_response(
+                    &id,
+                    crate::UserDialogResponse::Cancelled
+                        .to_wire_json()
+                        .map_err(ProtocolError::from)?,
+                )
+                .map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(crate::UserDialogResponse::AnsweredOutOfBand) => Ok(None),
+                        Ok(response) => wire::success_response(&response_id, response.to_wire_json()?).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::OAuthTokenRefresh { kind, token_state } => {
+                // Python has no token callbacks and answers the subtype as unsupported.
+                let handler = self.oauth_token_handler.clone().filter(|_| !python);
+                let Some(handler) = handler else {
+                    if let Some(response) = wire::unsupported_response(&id, "oauth_token_refresh", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::OAuthTokenRequest {
+                    kind,
+                    token_state: crate::OAuthTokenState::from_wire(token_state.as_deref()),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "getOAuthToken callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(response) => wire::success_response(&response_id, response.to_wire_json()).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::HostAuthTokenRefresh { status } => {
+                let handler = self.host_auth_token_handler.clone().filter(|_| !python);
+                let Some(handler) = handler else {
+                    if let Some(response) = wire::unsupported_response(&id, "host_auth_token_refresh", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::HostAuthTokenRequest {
+                    status,
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "getHostAuthToken callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(token) => {
+                            wire::success_response(&response_id, crate::auth_token::host_auth_wire_json(&token))
+                                .map(Some)
+                        }
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::RemoteControlWork { session_id } => {
+                let Some(answerer) = self.host.answerer().filter(|_| !python) else {
+                    if let Some(response) = wire::unsupported_response(&id, "remote_control_work_secret", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                match crate::remote_control::same_requested_session(&answerer.session_id, session_id.as_ref()) {
+                    Err(message) => return self.write_response(wire::callback_error_response(&id, &message)).await,
+                    Ok(false) => {
+                        return self
+                            .write_response(wire::callback_error_response(
+                                &id,
+                                "remote_control_work_secret names a session this host did not attach.",
+                            ))
+                            .await;
+                    }
+                    Ok(true) => {}
+                }
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::WorkSecretRefreshRequest {
+                    session_id: answerer.session_id.clone(),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "refreshWorkSecret callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match answerer.refresh.call(request).await {
+                        Ok(secret) => {
+                            let secret = secret.filter(|secret| !secret.is_empty());
+                            let mut response = JsonObject::new();
+                            response.insert("work_secret".into(), secret.map_or(serde_json::Value::Null, Into::into));
+                            wire::success_response(&response_id, response).map(Some)
+                        }
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::Ui { subtype, payload } => {
+                let handler = self
+                    .host
+                    .ui_host()
+                    .filter(|_| !python)
+                    .and_then(|host| host.handler(&subtype));
+                let Some(handler) = handler else {
+                    if let Some(response) = wire::unsupported_response(&id, &subtype, style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::UiRequest {
+                    payload,
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "uiHost callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(Some(response)) => wire::success_response(&response_id, response).map(Some),
+                        Ok(None) => wire::success_without_response(&response_id).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// `sdk.mjs` `writeBehindPromptHold`: what waits for the first initialize to be confirmed. A prompt always
+    /// does, `interrupt` and `cancel_async_message` do, and with managed settings every request but `initialize`
+    /// and `get_binary_version` does. Ending the input waits behind a held prompt, since the stream writes in
+    /// order.
+    fn held_by_initialize(&self, command: &Command) -> bool {
+        if !self.initialize_hold {
+            return false;
+        }
+        let managed = self.initialize_expectations.managed_settings;
         match command {
-            Command::Initialize { response } => {
-                self.start_control(ControlResponder::Initialize(response), self.initialize_request.clone())
-                    .await?;
+            Command::Prompt { .. } => true,
+            Command::Control { request, .. } | Command::RawControl { request, .. } => {
+                let subtype = request.get("subtype").and_then(serde_json::Value::as_str);
+                matches!(subtype, Some("interrupt" | "cancel_async_message"))
+                    || (managed && !matches!(subtype, Some("initialize" | "get_binary_version")))
+            }
+            Command::SetMcpServers { .. } => managed,
+            Command::FinishInput { .. } => !self.held_commands.is_empty(),
+            Command::Initialize { .. } => false,
+        }
+    }
+
+    /// The first initialize was confirmed: what waited behind it goes out in order.
+    async fn release_held_commands(&mut self) -> Result<(), Error> {
+        if self.initialize_hold {
+            self.prompt_hold.set(HoldState::Clear);
+        }
+        self.initialize_hold = false;
+        while let Some(command) = self.held_commands.pop_front() {
+            self.command(command).await?;
+        }
+        Ok(())
+    }
+
+    /// The first initialize failed. `sdk.mjs` `cleanup(error)` rejects every request still unanswered with that
+    /// error, and what waited behind the hold is never written: a prompt resolves quietly, the way the hold
+    /// resolves `false`, and a held request rejects with the same error.
+    fn abandon_initialize(&mut self, error: &std::sync::Arc<Error>) {
+        if self.initialize_hold {
+            self.prompt_hold.set(HoldState::Failed);
+        }
+        self.initialize_hold = false;
+        for command in self.held_commands.drain(..) {
+            match command {
+                Command::Prompt { response, .. } | Command::FinishInput { response, .. } => {
+                    let _ = response.send(Ok(()));
+                }
+                Command::Control { response, .. }
+                | Command::RawControl { response, .. }
+                | Command::SetMcpServers { response, .. }
+                | Command::Initialize { response, .. } => {
+                    let _ = response.send(Err(Error::InitializationFailed(error.clone())));
+                }
+            }
+        }
+        for (_, pending) in self.pending.drain() {
+            pending.response.send_error(Error::InitializationFailed(error.clone()));
+        }
+    }
+
+    async fn command(&mut self, command: Command) -> Result<(), Error> {
+        if self.held_by_initialize(&command) {
+            self.held_commands.push_back(command);
+            return Ok(());
+        }
+        match command {
+            Command::Initialize { first, response } => {
+                let mut request = self.initialize_request.clone();
+                // TypeScript captures SDK MCP server manifests for the first initialize only:
+                // `e && captureSdkMcpManifests === true && sdkMcpServers.size > 0`.
+                if !first && let Some(object) = request.as_object_mut() {
+                    object.remove("sdkMcpServerManifests");
+                }
+                if first
+                    && self.capture_manifests
+                    && !self.sdk_mcp_servers.is_empty()
+                    && let Some(manifests) = self.capture_sdk_mcp_manifests().await?
+                {
+                    crate::mcp_routing::insert_manifests(&mut request, manifests);
+                }
+                crate::mcp_routing::trim_changed_manifests(&mut request, &self.mcp.tools_changed);
+                self.mcp.tools_changed.clear();
+                let started = self
+                    .start_control(ControlResponder::Initialize { first, response }, request)
+                    .await;
+                // `finally { markInitializeWritten() }`: forwarded frames go out behind the request, in order.
+                self.mcp.initialize_written = true;
+                started?;
+                while let Some(frame) = self.mcp.held.pop_front() {
+                    self.write_response(Ok(frame)).await?;
+                }
             }
             Command::SetMcpServers {
                 external,
@@ -947,14 +1535,13 @@ where
                     let _ = response.send(Err(Error::NotReadyForWriting));
                     return Ok(());
                 }
-                if self.pending_mcp.is_some() {
-                    let _ = response.send(Err(Error::McpUpdateInProgress));
-                    return Ok(());
-                }
                 if self.controls_full() {
                     let _ = response.send(Err(Error::TooManyControls));
                     return Ok(());
                 }
+                // TypeScript `setMcpServers`: in-process servers are swapped before the request is sent, kept
+                // ones keep their session, and every registered one is listed after the external configs,
+                // replacing an external config of the same name in place like an object spread.
                 let mut servers = serde_json::Map::new();
                 for (name, config) in external {
                     servers.insert(
@@ -962,30 +1549,31 @@ where
                         config.to_wire_json().map_err(ProtocolError::from)?,
                     );
                 }
-                let mut sessions = BTreeMap::new();
+                let mut sessions = McpSessions::new();
                 for (name, registry) in embedded {
-                    if servers.contains_key(name.as_str()) {
-                        let _ = response.send(Err(Error::DuplicateMcpServer));
-                        return Ok(());
-                    }
                     servers.insert(
                         name.as_str().to_owned(),
                         EmbeddedMcpPayload::Sdk { name: name.as_str() }.to_value()?,
                     );
-                    let session = self
-                        .sdk_mcp_servers
-                        .get(&name)
-                        .cloned()
-                        .unwrap_or_else(|| registry.open_session());
+                    let session = match self.sdk_mcp_servers.get(&name).cloned() {
+                        Some(session) => session,
+                        None => {
+                            let session = registry.open_session();
+                            if self.argv_style == crate::ArgvStyle::TypeScript {
+                                self.mcp.forward(&name, &session);
+                            }
+                            session
+                        }
+                    };
                     sessions.insert(name, session);
                 }
+                self.sdk_mcp_servers = sessions;
                 let id = self.next_request_id()?;
                 let frame = wire::control_request(
                     &id,
                     RequestPayload::McpSetServers { servers }.to_value()?,
                     self.argv_style,
                 )?;
-                self.pending_mcp = Some((id.clone(), sessions));
                 self.write(frame).await?;
                 self.pending.insert(
                     id,
@@ -1010,11 +1598,13 @@ where
                     return Ok(());
                 }
                 match self.state {
-                    State::Initializing => {
+                    // TypeScript writes a prompt right behind the initialize request; only Python waits for the
+                    // response before it lets one through.
+                    State::Initializing if self.argv_style == crate::ArgvStyle::Python => {
                         let _ = response.send(Err(Error::NotInitialized));
                         return Ok(());
                     }
-                    State::Idle | State::Running => {}
+                    State::Initializing | State::Idle | State::Running => {}
                 }
                 if self
                     .limits
@@ -1032,8 +1622,7 @@ where
                 }
                 self.write(frame).await?;
                 self.state = State::Running;
-                self.run_state.result_received = false;
-                self.run_state.turn_active = true;
+                self.run_end.prompt_written();
                 self.run_state.pending_inputs.push_back(input.uuid.clone());
                 let _ = response.send(Ok(()));
             }
@@ -1045,34 +1634,48 @@ where
                 self.start_control(ControlResponder::Control { operation, response }, request)
                     .await?;
             }
-            Command::FinishInput { completion, response } => {
+            Command::RawControl {
+                operation,
+                request,
+                response,
+            } => {
+                self.start_control(ControlResponder::Raw { operation, response }, request)
+                    .await?;
+            }
+            Command::FinishInput {
+                completion,
+                written,
+                response,
+            } => {
                 self.run_state.input_done = Some(completion);
+                let needs = self.bidirectional_needs();
+                self.run_end
+                    .finish(matches!(completion, Completion::Turn), needs, written);
                 let _ = response.send(Ok(()));
             }
-            Command::Abort => return Err(crate::AbortError::PROCESS.into()),
         }
         Ok(())
     }
 
-    /// Applies the initialize checks of `sdk.mjs` `Query.initialize`, in its order.
-    fn finish_initialize(
+    /// Applies the initialize checks of `sdk.mjs` `Query.initialize({first})`, in its order. A refusal ends the
+    /// session, after a `reinitialize()` too.
+    async fn finish_initialize(
         &mut self,
-        sender: oneshot::Sender<Result<crate::ConnectionInfo, Error>>,
-        response: serde_json::Value,
+        first: bool,
+        sender: ControlSender,
+        response: Option<serde_json::Value>,
     ) -> Result<(), Error> {
-        // Python reads anything but an object as `{}`; TypeScript keeps the value as sent.
-        let response = match (self.argv_style, response) {
-            (crate::ArgvStyle::Python, serde_json::Value::Object(object)) => serde_json::Value::Object(object),
-            (crate::ArgvStyle::Python, _) => serde_json::Value::Object(JsonObject::new()),
-            (crate::ArgvStyle::TypeScript, response) => response,
-        };
-        let connection_info = crate::ConnectionInfo::from_json(response);
+        let response = control_value(self.argv_style, response);
+        let connection_info = crate::ConnectionInfo::from_response(response.clone());
         let expectations = self.initialize_expectations;
         let refusal: Option<fn() -> Error> = if expectations.blocking_hooks
             && connection_info.hook_on_failure_supported != crate::FeatureSupport::Supported
         {
             Some(|| Error::BlockingHooksUnsupported)
-        } else if expectations.blocking_hooks && connection_info.hooks_applied == crate::FeatureSupport::Unsupported {
+        } else if expectations.blocking_hooks
+            && first
+            && connection_info.hooks_applied == crate::FeatureSupport::Unsupported
+        {
             Some(|| Error::HooksNotApplied)
         } else if expectations.managed_settings
             && connection_info.managed_settings_applied != crate::FeatureSupport::Supported
@@ -1082,18 +1685,26 @@ where
             None
         };
         if let Some(error) = refusal {
+            if self.argv_style == crate::ArgvStyle::TypeScript {
+                self.abandon_initialize(&std::sync::Arc::new(error()));
+            }
             let _ = sender.send(Err(error()));
             return Err(error());
         }
         if expectations.plugins > 0 && connection_info.plugins_applied != crate::FeatureSupport::Supported {
             tracing::warn!(
-                "[Query.initialize] Claude Code reported plugins_applied={} for {} plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with.",
-                javascript_string(connection_info.plugins_applied),
-                expectations.plugins
+                plugins_applied = javascript_string(connection_info.plugins_applied),
+                plugins = expectations.plugins,
+                "[Query.initialize] Claude Code did not apply the plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with."
             );
         }
-        self.state = State::Idle;
-        let _ = sender.send(Ok(connection_info));
+        if first && matches!(self.state, State::Initializing) {
+            self.state = State::Idle;
+        }
+        let _ = sender.send(Ok(response));
+        if first {
+            self.release_held_commands().await?;
+        }
         Ok(())
     }
 
@@ -1148,7 +1759,30 @@ where
                     Message::System(system) if system.subtype == "session_state_changed" => {}
                     _ => self.last_error_result = None,
                 }
+                if let Message::System(system) = &message
+                    && system.subtype == "commands_changed"
+                    && let Some(commands @ serde_json::Value::Array(_)) = system.raw.get("commands")
+                {
+                    *self
+                        .latest_commands
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(commands.clone());
+                }
+                // TypeScript `dropUnreadHookProgress`: while `startup()` waits, hook progress is not kept.
+                if self.startup_tap.as_ref().is_some_and(|tap| !tap.is_closed())
+                    && let Message::System(system) = &message
+                    && system.subtype == "hook_progress"
+                {
+                    return Ok(());
+                }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
+                let flushing = matches!(message, Message::Result(_)) && self.session.is_some();
+                if flushing || self.mirror_flush.is_some() || !self.held_observations.is_empty() {
+                    self.held_observations.push_back((message.clone(), flushing));
+                } else {
+                    let needs = self.bidirectional_needs();
+                    self.run_end.observe(&message, needs);
+                }
                 // Both SDKs drop the state changes the CLI sent only because the SDK asked for them.
                 if let Message::System(system) = &message
                     && system.subtype == "session_state_changed"
@@ -1182,7 +1816,7 @@ where
                 }
             }
             Frame::ControlResponse { id, response } => {
-                let Some(mut pending) = self.pending.remove(&id) else {
+                let Some(pending) = self.pending.remove(&id) else {
                     // One line on purpose: with the `log` feature of `tracing` enabled by another workspace
                     // member, the macro repeats each field expression for the log fallback, and the
                     // fallback copy on a line of its own is never executed, which reads as uncovered.
@@ -1193,249 +1827,78 @@ where
                 let operation = pending.response.operation();
                 match response {
                     ControlResponse::Success(response) => {
-                        let response = match pending.response {
-                            ControlResponder::Initialize(sender) => return self.finish_initialize(sender, response),
-                            responder => {
-                                pending.response = responder;
-                                control_object(response)?
+                        let (response, sender) = match pending.response {
+                            ControlResponder::Initialize {
+                                first,
+                                response: sender,
+                            } => {
+                                return self.finish_initialize(first, sender, response).await;
+                            }
+                            ControlResponder::Raw { response: sender, .. } => {
+                                let _ = sender.send(Ok(response));
+                                return Ok(());
+                            }
+                            ControlResponder::Control { response: sender, .. } => {
+                                (control_value(self.argv_style, response), sender)
                             }
                         };
                         if operation == ControlOperation::Interrupt
+                            && let Some(object) = response.as_ref().and_then(serde_json::Value::as_object)
                             && let crate::InterruptReceipt::Reported {
                                 cancelled: Some(cancelled),
                                 ..
-                            } = crate::InterruptReceipt::from_json(response.clone())
+                            } = crate::InterruptReceipt::from_json(object.clone())
                         {
                             self.run_state
                                 .pending_inputs
                                 .retain(|input| input.as_ref().is_none_or(|input| !cancelled.contains(input)));
                         }
-                        if let Some((_, mut sessions)) = self.pending_mcp.take_if(|(request_id, _)| *request_id == id) {
-                            let result: crate::McpSetServersResult =
-                                serde_json::from_value(response.clone().into()).map_err(ProtocolError::from)?;
-                            for (name, previous) in &self.sdk_mcp_servers {
-                                if result.errors.contains_key(name.as_str()) {
-                                    sessions.insert(name.clone(), previous.clone());
-                                }
-                            }
-                            sessions.retain(|name, _| {
-                                !result.errors.contains_key(name.as_str()) || self.sdk_mcp_servers.contains_key(name)
-                            });
-                            self.sdk_mcp_servers = sessions;
-                        }
-                        match pending.response {
-                            ControlResponder::Initialize(_) => {}
-                            ControlResponder::Control { response: sender, .. } => {
-                                let _ = sender.send(Ok(response));
-                            }
-                        }
+                        let _ = sender.send(Ok(response));
                     }
-                    ControlResponse::Error(error) => {
-                        if operation == ControlOperation::McpSetServers {
-                            self.pending_mcp = None;
-                        }
+                    ControlResponse::Error { message, error_code } => {
+                        let first_initialize =
+                            matches!(pending.response, ControlResponder::Initialize { first: true, .. });
                         pending.response.send_error(Error::ControlRejected {
                             operation,
-                            rejection: ControlRejectionError(error),
+                            rejection: ControlRejectionError::new(message.clone(), error_code.clone(), self.argv_style),
                         });
+                        // The hold turns a failed first initialize into the end of the run, with that error.
+                        if first_initialize && self.initialize_hold {
+                            self.abandon_initialize(&std::sync::Arc::new(Error::ControlRejected {
+                                operation,
+                                rejection: ControlRejectionError::new(
+                                    message.clone(),
+                                    error_code.clone(),
+                                    self.argv_style,
+                                ),
+                            }));
+                            return Err(Error::ControlRejected {
+                                operation,
+                                rejection: ControlRejectionError::new(message, error_code, self.argv_style),
+                            });
+                        }
                     }
                 }
             }
-            Frame::ControlRequest { id, request } => match (request, self.user_dialog_handler.clone()) {
-                (IncomingControl::UserDialog { kind, .. }, _) if !self.dialog_kinds.contains(&kind) => {}
-                (IncomingControl::UserDialog { .. }, None) => {}
-                (IncomingControl::Unsupported, _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    self.write_response(wire::unsupported_response(&id)).await?;
+            Frame::ControlRequest { id, request } => {
+                if self.admit_request(&id)? {
+                    self.control_request(id, request).await?;
                 }
-                (IncomingControl::Malformed(error), _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    tracing::warn!(
-                        ?error,
-                        "answering a malformed permission request with an error response"
-                    );
-                    self.write_response(wire::malformed_response(&id)).await?;
-                }
-                (IncomingControl::Permission(request), _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    let input = request.input.clone();
-                    let signal = request.signal.clone();
-                    if let Some(handler) = self.handler.clone() {
-                        let callback_id = id.clone();
-                        let fallback = wire::permission_response(
-                            &id,
-                            input.clone(),
-                            PermissionDecision::deny("Permission callback timed out"),
-                        );
-                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                            wire::permission_response(&callback_id, input, handler.decide(request).await)
-                        });
-                    } else {
-                        self.write_response(wire::permission_response(
-                            &id,
-                            input,
-                            PermissionDecision::deny("No permission handler is available"),
-                        ))
-                        .await?;
-                    }
-                }
-                (
-                    IncomingControl::Hook {
-                        callback_id,
-                        input,
-                        tool_use_id,
-                    },
-                    _,
-                ) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    if let Some(callback) = self.hook_callbacks.get(&callback_id).cloned() {
-                        let signal = crate::CancellationToken::new();
-                        let request = crate::HookRequest {
-                            input,
-                            tool_use_id,
-                            signal: signal.clone(),
-                        };
-                        let response_id = id.clone();
-                        let fallback = wire::callback_error_response(&id, "SDK hook callback timed out");
-                        self.spawn_callback(id, signal, callback.timeout, fallback, async move {
-                            match callback.handler.call(request).await {
-                                Ok(output) => wire::success_response(&response_id, output.to_wire_json()?),
-                                Err(_) => wire::callback_error_response(&response_id, "SDK hook callback failed"),
-                            }
-                        });
-                    } else {
-                        self.write_response(wire::callback_error_response(&id, "Unknown SDK hook callback"))
-                            .await?;
-                    }
-                }
-                (IncomingControl::Mcp { server_name, message }, _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    let name = crate::McpServerName::from(server_name);
-                    let server = self
-                        .pending_mcp
-                        .as_ref()
-                        .and_then(|(_, sessions)| sessions.get(&name))
-                        .or_else(|| self.sdk_mcp_servers.get(&name))
-                        .cloned();
-                    if let Some(server) = server {
-                        let signal = crate::CancellationToken::new();
-                        let callback_signal = signal.clone();
-                        let response_id = id.clone();
-                        let fallback = wire::callback_error_response(&id, "SDK MCP request timed out");
-                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                            match server.request(message, callback_signal).await {
-                                Ok(response) => {
-                                    wire::success_response(&response_id, McpResponsePayload::new(response)?)
-                                }
-                                Err(_) => wire::callback_error_response(&response_id, "SDK MCP request failed"),
-                            }
-                        });
-                    } else {
-                        self.write_response(wire::callback_error_response(&id, "Unknown SDK MCP server"))
-                            .await?;
-                    }
-                }
-                (IncomingControl::Elicitation(request), _) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    if let Some(handler) = self.elicitation_handler.clone() {
-                        let signal = crate::CancellationToken::new();
-                        let mode = match request.mode.as_deref() {
-                            None | Some("form") => crate::ElicitationMode::Form,
-                            Some("url") => crate::ElicitationMode::Url,
-                            _ => {
-                                return self
-                                    .write_response(wire::callback_error_response(&id, "Unsupported elicitation mode"))
-                                    .await;
-                            }
-                        };
-                        let request = crate::ElicitationRequest {
-                            server_name: crate::McpServerName::from(request.server_name),
-                            message: request.message,
-                            mode,
-                            url: request.url,
-                            elicitation_id: request.elicitation_id,
-                            requested_schema: request.requested_schema,
-                            title: request.title,
-                            display_name: request.display_name,
-                            description: request.description,
-                            signal: signal.clone(),
-                        };
-                        let response_id = id.clone();
-                        let fallback = wire::success_response(
-                            &id,
-                            crate::ElicitationResponse::Cancel
-                                .to_wire_json()
-                                .map_err(ProtocolError::from)?,
-                        );
-                        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                            let response = handler
-                                .call(request)
-                                .await
-                                .unwrap_or(crate::ElicitationResponse::Cancel);
-                            wire::success_response(&response_id, response.to_wire_json()?)
-                        });
-                    } else {
-                        self.write_response(wire::success_response(
-                            &id,
-                            crate::ElicitationResponse::Cancel
-                                .to_wire_json()
-                                .map_err(ProtocolError::from)?,
-                        ))
-                        .await?;
-                    }
-                }
-                (
-                    IncomingControl::UserDialog {
-                        kind,
-                        payload,
-                        tool_use_id,
-                    },
-                    Some(handler),
-                ) => {
-                    if !self.admit_callback(&id).await? {
-                        return Ok(());
-                    }
-                    let signal = crate::CancellationToken::new();
-                    let request = crate::UserDialogRequest {
-                        dialog_kind: crate::DialogKind::from(kind),
-                        payload,
-                        tool_use_id,
-                        signal: signal.clone(),
-                    };
-                    let response_id = id.clone();
-                    let fallback = wire::success_response(
-                        &id,
-                        crate::UserDialogResponse::Cancelled
-                            .to_wire_json()
-                            .map_err(ProtocolError::from)?,
-                    );
-                    self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-                        let response = handler
-                            .call(request)
-                            .await
-                            .unwrap_or(crate::UserDialogResponse::Cancelled);
-                        wire::success_response(&response_id, response.to_wire_json()?)
-                    });
-                }
-            },
+            }
             Frame::Cancel { id } => {
                 if let Some(handle) = self.callback_handles.remove(&id) {
                     if let Some(signal) = self.callback_signals.remove(&id) {
                         signal.cancel();
                     }
-                    handle.abort();
+                    match self.argv_style {
+                        // TypeScript aborts the request's signal and forgets the id; the handler keeps running and
+                        // its answer is still written.
+                        crate::ArgvStyle::TypeScript => {
+                            self.cancelled_callbacks.insert(handle.id());
+                        }
+                        // Python cancels the handler task, which writes nothing.
+                        crate::ArgvStyle::Python => handle.abort(),
+                    }
                 }
             }
             Frame::TranscriptMirror { file_path, entries } => {
@@ -1513,6 +1976,307 @@ where
         matches!(self.limits.message_buffer, crate::MessageBuffer::Backpressure(capacity) if self.deferred_messages.len() >= capacity.get())
     }
 
+    /// `sdk.mjs` `mcp_message`: an unknown server or a message that is not an object fails the control request.
+    /// A request registers a waiter under `${server_name}:${id}` and waits for the server's transport to send a
+    /// message under that id, however long it takes; a second request under the same key replaces the first
+    /// waiter, which is then never answered. Anything else is handed to the server and acknowledged at once.
+    async fn typescript_mcp_message(
+        &mut self,
+        id: ControlRequestId,
+        server_name: Option<serde_json::Value>,
+        message: Option<serde_json::Value>,
+    ) -> Result<(), Error> {
+        let (name, session) = match &server_name {
+            Some(serde_json::Value::String(name)) => (
+                name.clone(),
+                self.sdk_mcp_servers
+                    .get(&crate::McpServerName::from(name.as_str()))
+                    .cloned(),
+            ),
+            _ => (String::new(), None),
+        };
+        let Some(session) = session else {
+            let text = format!(
+                "SDK MCP server not found: {}",
+                crate::mcp_routing::js_string(server_name.as_ref())
+            );
+            return self.write_response(wire::callback_error_response(&id, &text)).await;
+        };
+        let message = match message {
+            Some(serde_json::Value::Object(message)) => Some(message),
+            // An array is an object to `in`, so it is handed over like a notification.
+            Some(serde_json::Value::Array(_)) => None,
+            other => {
+                let text = crate::mcp_routing::typescript_not_an_object(other.as_ref(), self.js_runtime);
+                return self.write_response(wire::callback_error_response(&id, &text)).await;
+            }
+        };
+        if let Some(message) = message
+            .as_ref()
+            .filter(|message| crate::mcp_routing::typescript_expects_response(message))
+        {
+            if !self.admit_capacity(&id).await? {
+                return Ok(());
+            }
+            let message = message.clone();
+            let key = format!("{name}:{}", crate::mcp_routing::js_string(message.get("id")));
+            let (waiter, answer) = oneshot::channel();
+            // Replacing the entry drops the earlier waiter, whose control request is never answered.
+            self.mcp.waiters.insert(key.clone(), waiter);
+            let signal = crate::CancellationToken::new();
+            let callback_signal = signal.clone();
+            let response_id = id.clone();
+            let fallback = wire::callback_error_response(&id, "SDK MCP request failed").map(Some);
+            let outbound = self.mcp.outbound.clone();
+            self.mcp.tasks.spawn(async move {
+                match session.request(message, callback_signal).await {
+                    Ok(Some(message)) => {
+                        let _ = outbound.send(McpTransportEvent::Message { server: name, message });
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::debug!(%error, "SDK MCP server failed to handle a request");
+                        let _ = outbound.send(McpTransportEvent::Failed { key });
+                    }
+                }
+            });
+            // `sdk.mjs` has no timeout on this wait: it ends when the server answers or the query closes.
+            self.spawn_callback(id, signal, None, fallback, async move {
+                match answer.await {
+                    Ok(Ok(response)) => wire::success_response(
+                        &response_id,
+                        McpResponsePayload {
+                            mcp_response: serde_json::Value::Object(response),
+                        },
+                    )
+                    .map(Some),
+                    Ok(Err(())) => wire::callback_error_response(&response_id, "SDK MCP request failed").map(Some),
+                    Err(_) => pending().await,
+                }
+            });
+            return Ok(());
+        }
+        if let Some(message) = message {
+            // `transport.onmessage` runs the server's handling up to its first wait before the acknowledgment is
+            // written; whatever is left keeps running on its own.
+            let mut delivery = Box::pin(async move {
+                match session.request(message, crate::CancellationToken::new()).await {
+                    Ok(response) => response,
+                    Err(error) => {
+                        tracing::debug!(%error, "SDK MCP server failed to handle a message");
+                        None
+                    }
+                }
+            });
+            let polled = std::future::poll_fn(|context| std::task::Poll::Ready(delivery.as_mut().poll(context))).await;
+            match polled {
+                std::task::Poll::Ready(Some(message)) => self.route_mcp_message(name, message).await?,
+                std::task::Poll::Ready(None) => {}
+                std::task::Poll::Pending => {
+                    let outbound = self.mcp.outbound.clone();
+                    self.mcp.tasks.spawn(async move {
+                        if let Some(message) = delivery.await {
+                            let _ = outbound.send(McpTransportEvent::Message { server: name, message });
+                        }
+                    });
+                }
+            }
+        }
+        self.write_response(wire::success_response(
+            &id,
+            McpResponsePayload {
+                mcp_response: crate::mcp_routing::typescript_acknowledgment(),
+            },
+        ))
+        .await
+    }
+
+    /// `sdk.mjs` `captureSdkMcpServerManifests`: handshakes every in-process server at once, waiting at most
+    /// `$8` for all of them, while what their transports send is routed as usual.
+    async fn capture_sdk_mcp_manifests(&mut self) -> Result<Option<JsonObject>, Error> {
+        let started = std::time::Instant::now();
+        let mut tasks = JoinSet::new();
+        for (name, session) in &self.sdk_mcp_servers {
+            tasks.spawn(
+                mcp_manifest::Capture {
+                    name: name.as_str().to_owned(),
+                    session: session.clone(),
+                    waiters: self.mcp.waiters.clone(),
+                    outbound: self.mcp.outbound.clone(),
+                }
+                .run(),
+            );
+        }
+        let servers = tasks.len();
+        let mut captured = HashMap::new();
+        let deadline = sleep(constants::MCP_MANIFEST_CAPTURE_DEADLINE);
+        tokio::pin!(deadline);
+        let mut settled = true;
+        loop {
+            tokio::select! {
+                joined = tasks.join_next() => match joined {
+                    None => break,
+                    Some(Ok(Some((name, manifest)))) => {
+                        captured.insert(name, manifest);
+                    }
+                    Some(_) => {}
+                },
+                event = self.mcp.inbound.recv() => {
+                    if let Some(event) = event {
+                        self.mcp_transport_event(event).await?;
+                    }
+                }
+                () = &mut deadline => {
+                    settled = false;
+                    break;
+                }
+                _ = &mut self.shutdown => {
+                    self.shutdown_seen = true;
+                    return Err(Error::ShutdownRequested);
+                }
+            }
+        }
+        if !settled {
+            // `sdk.mjs` routes each transport message and records each finished handshake the moment it happens, so
+            // whatever is already queued when the deadline fires still counts.
+            while let Ok(event) = self.mcp.inbound.try_recv() {
+                self.mcp_transport_event(event).await?;
+            }
+            while let Some(joined) = tasks.try_join_next() {
+                if let Ok(Some((name, manifest))) = joined {
+                    captured.insert(name, manifest);
+                }
+            }
+        }
+        // `n = true`: replies that come later are ignored, and the drop rule of `route_mcp_message` takes them.
+        tasks.abort_all();
+        let elapsed = started.elapsed().as_millis();
+        if !settled {
+            tracing::warn!(
+                captured = captured.len(),
+                servers,
+                "in-process MCP servers captured within {} ms; the rest will handshake over the control channel",
+                constants::MCP_MANIFEST_CAPTURE_DEADLINE.as_millis()
+            );
+        }
+        if captured.is_empty() {
+            return Ok(None);
+        }
+        let manifests: JsonObject = self
+            .sdk_mcp_servers
+            .keys()
+            .filter_map(|name| {
+                captured
+                    .remove(name.as_str())
+                    .map(|manifest| (name.as_str().to_owned(), serde_json::Value::Object(manifest)))
+            })
+            .collect();
+        tracing::debug!(servers = ?manifests.keys().collect::<Vec<_>>(), elapsed_ms = %elapsed, "SDK MCP manifests captured");
+        Ok(Some(manifests))
+    }
+
+    /// `sdk.mjs` `sendMcpServerMessageToCli`: a message from a server's transport resolves the waiter under
+    /// `${server_name}:${id}`; with no waiter, a late `sdk-manifest-capture:` reply is dropped and anything else
+    /// (a notification, a server request, an unmatched or repeated response) goes to the CLI as an `mcp_message`
+    /// control request under a random UUID.
+    /// What an in-process server's transport sent: a message to route, or a failed send that fails its waiter.
+    async fn mcp_transport_event(&mut self, event: McpTransportEvent) -> Result<(), Error> {
+        match event {
+            McpTransportEvent::Message { server, message } => self.route_mcp_message(server, message).await,
+            McpTransportEvent::Failed { key } => {
+                if let Some(waiter) = self.mcp.waiters.remove(&key) {
+                    let _ = waiter.send(Err(()));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    async fn route_mcp_message(&mut self, server: String, message: JsonObject) -> Result<(), Error> {
+        if let Some(id) = message.get("id").filter(|id| !id.is_null()) {
+            let key = format!("{server}:{}", crate::mcp_routing::js_string(Some(id)));
+            if let Some(waiter) = self.mcp.waiters.remove(&key) {
+                let _ = waiter.send(Ok(message));
+                return Ok(());
+            }
+            if matches!(id, serde_json::Value::String(text) if text.starts_with("sdk-manifest-capture:")) {
+                tracing::debug!(%server, "dropping a late manifest-capture reply");
+                return Ok(());
+            }
+        }
+        let id = ControlRequestId::random_uuid();
+        let request = RequestPayload::McpMessage {
+            server_name: &server,
+            message: &message,
+        }
+        .to_value()?;
+        let frame = wire::mcp_forward(&id, request)?;
+        if !self.mcp.initialize_written {
+            if crate::mcp_routing::is_tools_list_changed(&message) {
+                self.mcp.tools_changed.insert(server);
+            }
+            self.mcp.held.push_back(frame);
+            return Ok(());
+        }
+        self.write_response(Ok(frame)).await
+    }
+
+    /// The Python `Query` `mcp_message`: a missing field fails the control request, and everything else is
+    /// answered with an `mcp_response`, a JSON-RPC error when the message could not be delivered.
+    async fn python_mcp_message(
+        &mut self,
+        id: ControlRequestId,
+        server_name: Option<serde_json::Value>,
+        message: Option<serde_json::Value>,
+    ) -> Result<(), Error> {
+        let ids = self.wire_ids.take().unwrap_or_default();
+        let truthy = crate::python_json::is_truthy;
+        let (Some(server_name), Some(message)) = (server_name.filter(truthy), message.filter(truthy)) else {
+            return self
+                .write_response(wire::callback_error_response(
+                    &id,
+                    "Missing server_name or message for MCP request",
+                ))
+                .await;
+        };
+        // The `assert isinstance` checks fail with an `AssertionError` whose text is empty.
+        let (serde_json::Value::String(server_name), serde_json::Value::Object(mut message)) = (server_name, message)
+        else {
+            return self.write_response(wire::callback_error_response(&id, "")).await;
+        };
+        ids.apply_to(&mut message);
+        let Some(session) = self
+            .sdk_mcp_servers
+            .get(&crate::McpServerName::from(server_name.as_str()))
+            .cloned()
+        else {
+            let mut mcp_response =
+                crate::mcp_routing::python_error(&message, -32601, format!("Server '{server_name}' not found"));
+            ids.echo(&mut mcp_response);
+            return self
+                .write_response(wire::success_response(&id, McpResponsePayload { mcp_response }))
+                .await;
+        };
+        if !self.admit_capacity(&id).await? {
+            return Ok(());
+        }
+        let signal = crate::CancellationToken::new();
+        let callback_signal = signal.clone();
+        let response_id = id.clone();
+        let fallback = wire::callback_error_response(&id, "SDK MCP request timed out").map(Some);
+        self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+            let mut mcp_response = match session.request(message.clone(), callback_signal).await {
+                Ok(Some(response)) => serde_json::Value::Object(response),
+                Ok(None) => crate::mcp_routing::python_acknowledgment(),
+                Err(crate::McpServerError::Protocol(text)) => crate::mcp_routing::python_error(&message, -32603, text),
+                Err(error) => crate::mcp_routing::python_error(&message, -32603, error.to_string()),
+            };
+            ids.echo(&mut mcp_response);
+            wire::success_response(&response_id, McpResponsePayload { mcp_response }).map(Some)
+        });
+        Ok(())
+    }
+
     fn callback_timeout(&self) -> Option<Duration> {
         self.limits.callback_timeout.map(crate::Timeout::as_duration)
     }
@@ -1529,9 +2293,30 @@ where
         Ok(())
     }
 
+    /// A flush finished: the run-end machine sees the result that started it and the frames after it, up to the
+    /// next result that starts a flush of its own.
+    fn release_observations(&mut self) {
+        let mut released_flush = false;
+        while let Some((_, flushing)) = self.held_observations.front() {
+            if *flushing {
+                if released_flush {
+                    break;
+                }
+                released_flush = true;
+            }
+            let Some((message, _)) = self.held_observations.pop_front() else {
+                break;
+            };
+            let needs = self.bidirectional_needs();
+            self.run_end.observe(&message, needs);
+        }
+    }
+
     async fn finish_mirror(&mut self) -> Result<(), Error> {
         while let Some(flush) = self.mirror_flush.take() {
-            for failure in flush.await? {
+            let failures = flush.await?;
+            self.release_observations();
+            for failure in failures {
                 self.publish(failure.into_message().map_err(ProtocolError::from)?)?;
             }
             self.publish_deferred()?;
@@ -1579,10 +2364,10 @@ where
         id: ControlRequestId,
         signal: crate::CancellationToken,
         deadline: Option<Duration>,
-        fallback: Result<serde_json::Value, ProtocolError>,
+        fallback: Result<Option<serde_json::Value>, ProtocolError>,
         future: Fut,
     ) where
-        Fut: Future<Output = Result<serde_json::Value, ProtocolError>> + Send + 'static,
+        Fut: Future<Output = Result<Option<serde_json::Value>, ProtocolError>> + Send + 'static,
     {
         let callback_id = id.clone();
         let callback_signal = signal.clone();
@@ -1603,6 +2388,17 @@ where
         self.callback_signals.insert(id, signal);
     }
 
+    /// Writes a callback's answer, if it has one.
+    async fn write_callback_response(
+        &mut self,
+        response: Result<Option<serde_json::Value>, ProtocolError>,
+    ) -> Result<(), Error> {
+        match response.transpose() {
+            Some(frame) => self.write_response(frame).await,
+            None => Ok(()),
+        }
+    }
+
     async fn write_response(&mut self, frame: Result<serde_json::Value, ProtocolError>) -> Result<(), Error> {
         let frame = frame?;
         if !self.input_open() {
@@ -1617,8 +2413,8 @@ where
     async fn write(&mut self, frame: serde_json::Value) -> Result<(), Error> {
         // Each SDK writes its own JSON spelling: TypeScript `JSON.stringify`, Python `json.dumps`.
         let mut text = match self.argv_style {
-            crate::ArgvStyle::TypeScript => serde_json::to_string(&frame),
-            crate::ArgvStyle::Python => crate::python_json::to_string(&frame),
+            crate::ArgvStyle::TypeScript => crate::js_json::to_string(&frame),
+            crate::ArgvStyle::Python => crate::python_json::to_string(&frame).map(crate::mcp_wire_ids::splice_markers),
         }
         .map_err(ProtocolError::from)?;
         text.push('\n');
@@ -1628,6 +2424,7 @@ where
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
         tokio::select! {
             _ = &mut self.shutdown => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
+            () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
         }
     }

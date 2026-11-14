@@ -14,7 +14,7 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -24,13 +24,14 @@ use tokio::{
     time::timeout,
 };
 use trogon_claude_agent_sdk::{
-    AgentName, CallbackError, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, Content, ContentBlock,
+    AgentName, ArgvStyle, CallbackError, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, Content, ContentBlock,
     ContinueConversation, Customizations, DialogKind, ElicitationMode, ElicitationRequest, ElicitationResponse, Error,
-    HookEvent, HookFailureMode, HookRegistration, HookRequest, JsonObject, McpFuture, McpServerName, McpServerOptions,
-    McpUrl, Message, MessageId, PermissionDecision, Prompt, ProtocolError, QueueCapacity, ResultStatus, SdkMcpServer,
-    SdkMcpSession, SessionEntry, SessionError, SessionFork, SessionKey, SessionPersistence, SessionProjectKey,
-    SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreOptions, SystemPrompt, Timeout,
-    ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
+    HookEvent, HookFailureMode, HookRegistration, HookRequest, JsRuntime, JsonObject, LocalMcpServer,
+    LocalMcpServerOptions, McpFuture, McpRemoteServerOptions, McpServerDialect, McpServerName, McpServerOptions,
+    McpServers, Message, MessageId, PermissionDecision, Prompt, ProtocolError, QueueCapacity, ResultStatus,
+    SdkMcpServer, SdkMcpServers, SdkMcpSession, SessionEntry, SessionError, SessionFork, SessionKey,
+    SessionPersistence, SessionProjectKey, SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreOptions,
+    SystemPrompt, Timeout, ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
     adapters::{NativeFileSystem, RuntimeAdapters, SpawnProcess, TokioProcessSpawner},
     query_turn_with_adapters, query_with_adapters,
     test_support::FixedEnvironment,
@@ -47,6 +48,16 @@ fn options() -> Result<ClaudeAgentOptions, Box<dyn std::error::Error>> {
     let mut options = ClaudeAgentOptions::default();
     options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(1)));
     options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_secs(5)));
+    Ok(options)
+}
+
+/// Options with a permission callback, which is a bidirectional need: the run keeps stdin open until it settles
+/// instead of closing it as soon as the input is finished, as both upstream SDKs do.
+fn options_with_needs() -> Result<ClaudeAgentOptions, Box<dyn std::error::Error>> {
+    let mut options = options()?;
+    options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        PermissionDecision::allow()
+    }));
     Ok(options)
 }
 
@@ -118,14 +129,23 @@ impl ScriptedCli {
 }
 
 async fn connect(options: ClaudeAgentOptions) -> Result<(ClaudeSdkClient, ScriptedCli), Box<dyn std::error::Error>> {
+    let (client, cli, _) = connect_reading_initialize(options).await?;
+    Ok((client, cli))
+}
+
+/// Like [`connect`], also returning the `initialize` request frame and the text it was written as.
+async fn connect_reading_initialize(
+    options: ClaudeAgentOptions,
+) -> Result<(ClaudeSdkClient, ScriptedCli, (Value, String)), Box<dyn std::error::Error>> {
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
     let connecting = tokio::spawn(ClaudeSdkClient::connect_with_adapters(options, adapters(process)));
     let request = cli.read().await?;
     assert_eq!(request["request"]["subtype"], "initialize");
+    let text = serde_json::to_string(&request)?;
     cli.success(&request, json!({"hooks_applied":true,"hook_on_failure_supported":true}))
         .await?;
-    Ok((connecting.await??, cli))
+    Ok((connecting.await??, cli, (request, text)))
 }
 
 fn result() -> Value {
@@ -283,7 +303,7 @@ async fn s13_empty_hooks_are_ignored_and_hook_callback_count_is_unbounded() -> T
 #[tokio::test]
 /// Both upstream SDKs write input whenever it arrives, so a prompt sent mid-turn reaches the CLI.
 async fn s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recoverable() -> TestResult {
-    let mut configured = options()?;
+    let mut configured = options_with_needs()?;
     configured.limits.input_after_finish = trogon_claude_agent_sdk::InputAfterFinish::Reject;
     let (mut client, mut cli) = connect(configured).await?;
     client.query(Prompt::from("first")).await?;
@@ -343,9 +363,9 @@ async fn query_facades_expose_handles_and_cleanup_after_completion_or_early_clos
             assert!(query.next_message().await?.is_none());
             assert!(query.next_message().await?.is_none());
             assert!(query.handle().is_none());
-            query.close().await?;
+            query.disconnect().await?;
         } else {
-            let closing = tokio::spawn(query.close());
+            let closing = tokio::spawn(query.disconnect());
             assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
             cli.end(0);
             closing.await??;
@@ -418,7 +438,7 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
                     .sdk_mcp_servers
                     .insert(McpServerName::from("local"), Arc::new(FailedMcp));
                 (
-                    json!({"subtype":"mcp_message","server_name":"local","message":{}}),
+                    json!({"subtype":"mcp_message","server_name":"local","message":{"jsonrpc":"2.0","id":1,"method":"ping"}}),
                     "error",
                 )
             }
@@ -432,18 +452,18 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
                 }));
                 (
                     json!({"subtype":"elicitation","mcp_server_name":"local","message":"request","mode":"future"}),
-                    "error",
+                    "success",
                 )
             }
             CallbackCase::UrlElicitation => {
                 configured.elicitation_handler = Some(Arc::new(|request: ElicitationRequest| async move {
-                    assert_eq!(request.mode, ElicitationMode::Url);
+                    assert_eq!(request.mode, Some(ElicitationMode::Url));
                     assert_eq!(request.url.as_deref(), Some("https://example.com/approval"));
                     Err(CallbackError::Cancelled)
                 }));
                 (
                     json!({"subtype":"elicitation","mcp_server_name":"local","message":"request","mode":"url","url":"https://example.com/approval"}),
-                    "success",
+                    "error",
                 )
             }
             CallbackCase::FailedDialog => {
@@ -452,7 +472,7 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
                     Some(Arc::new(|_: UserDialogRequest| async { Err(CallbackError::Cancelled) }));
                 (
                     json!({"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{}}),
-                    "success",
+                    "error",
                 )
             }
         };
@@ -462,11 +482,20 @@ async fn callback_failures_return_bounded_protocol_fallbacks_without_stopping_co
         let response = cli.read().await?;
         assert_eq!(response["response"]["request_id"], "callback-one");
         assert_eq!(response["response"]["subtype"], expected);
-        if matches!(case, CallbackCase::MissingElicitation | CallbackCase::UrlElicitation) {
-            assert_eq!(response["response"]["response"]["action"], "cancel");
+        if matches!(
+            case,
+            CallbackCase::MissingElicitation | CallbackCase::InvalidElicitation
+        ) {
+            assert_eq!(response["response"]["response"], json!({"action":"decline"}));
         }
-        if matches!(case, CallbackCase::FailedDialog) {
-            assert_eq!(response["response"]["response"]["behavior"], "cancelled");
+        if matches!(
+            case,
+            CallbackCase::FailedHook | CallbackCase::UrlElicitation | CallbackCase::FailedDialog
+        ) {
+            assert_eq!(response["response"]["error"], "This operation was aborted");
+        }
+        if matches!(case, CallbackCase::UnknownHook) {
+            assert_eq!(response["response"]["error"], "No hook callback found for ID: missing");
         }
         let handle = client.handle();
         let control = tokio::spawn(async move { handle.set_model(None).await });
@@ -492,68 +521,605 @@ async fn pending_controls_and_mcp_replacements_reject_overlapping_admission() ->
         Err(Error::TooManyControls)
     ));
     assert!(matches!(
-        client.handle().set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await,
+        client
+            .handle()
+            .set_mcp_servers(McpServers::new(), SdkMcpServers::new())
+            .await,
         Err(Error::TooManyControls)
     ));
     cli.success(&request, json!({})).await?;
     pending.await??;
-    let handle = client.handle();
-    let replacing = tokio::spawn(async move { handle.set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await });
-    let request = cli.read().await?;
-    assert!(matches!(
-        client.handle().set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await,
-        Err(Error::McpUpdateInProgress)
-    ));
-    cli.success(&request, json!({"added":[],"removed":[],"errors":{}}))
-        .await?;
-    replacing.await??;
-    let name = McpServerName::from("duplicate");
-    let external = BTreeMap::from([(
-        name.clone(),
-        McpServerOptions::Http {
-            url: McpUrl::new("https://example.com/mcp")?,
-            headers: BTreeMap::new(),
-        },
-    )]);
-    let embedded: BTreeMap<McpServerName, Arc<dyn SdkMcpServer>> =
-        BTreeMap::from([(name, Arc::new(FailedMcp) as Arc<dyn SdkMcpServer>)]);
-    assert!(matches!(
-        client.handle().set_mcp_servers(external, embedded).await,
-        Err(Error::DuplicateMcpServer)
-    ));
     cli.disconnect(client).await?;
     Ok(())
 }
 
+/// TypeScript `setMcpServers` is not serialized: a second replacement goes out while the first is pending.
 #[tokio::test]
-async fn partial_mcp_errors_preserve_previous_server_and_omit_failed_new_server() -> TestResult {
+async fn r18_mcp_replacements_are_not_serialized() -> TestResult {
+    let (client, mut cli) = connect(options()?).await?;
+    let first = client.handle();
+    let first = tokio::spawn(async move { first.set_mcp_servers(McpServers::new(), SdkMcpServers::new()).await });
+    let first_request = cli.read().await?;
+    let second = client.handle();
+    let second = tokio::spawn(async move { second.set_mcp_servers(McpServers::new(), SdkMcpServers::new()).await });
+    let second_request = cli.read().await?;
+    assert_eq!(second_request["request"]["subtype"], "mcp_set_servers");
+    assert_ne!(first_request["request_id"], second_request["request_id"]);
+    cli.success(&second_request, json!({"added":[],"removed":[],"errors":{}}))
+        .await?;
+    cli.success(&first_request, json!({"added":[],"removed":[],"errors":{}}))
+        .await?;
+    second.await??;
+    first.await??;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// TypeScript spreads in-process servers over external configs, so a shared name silently becomes the
+/// in-process server and keeps the external entry's position.
+#[tokio::test]
+async fn r17_in_process_mcp_server_replaces_an_external_config_of_the_same_name() -> TestResult {
+    let (client, mut cli) = connect(options()?).await?;
+    let external = McpServers::from([
+        (
+            McpServerName::from("duplicate"),
+            McpServerOptions::Http(McpRemoteServerOptions::new("https://example.com/mcp")),
+        ),
+        (
+            McpServerName::from("other"),
+            McpServerOptions::Http(McpRemoteServerOptions::new("https://example.com/other")),
+        ),
+    ]);
+    let embedded = SdkMcpServers::from([(
+        McpServerName::from("duplicate"),
+        Arc::new(FailedMcp) as Arc<dyn SdkMcpServer>,
+    )]);
+    let handle = client.handle();
+    let replacing = tokio::spawn(async move { handle.set_mcp_servers(external, embedded).await });
+    let request = cli.read().await?;
+    assert_eq!(
+        serde_json::to_string(&request["request"]["servers"])?,
+        r#"{"duplicate":{"type":"sdk","name":"duplicate"},"other":{"type":"http","url":"https://example.com/other"}}"#
+    );
+    cli.success(
+        &request,
+        json!({"added":["duplicate","other"],"removed":[],"errors":{}}),
+    )
+    .await?;
+    replacing.await??;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// TypeScript disconnects removed in-process servers and connects new ones before `mcp_set_servers` is
+/// sent, and never reconciles them against the response errors.
+#[tokio::test]
+async fn mcp_replacement_swaps_in_process_servers_before_the_response() -> TestResult {
     let mut configured = options()?;
     configured
         .sdk_mcp_servers
         .insert(McpServerName::from("previous"), Arc::new(FailedMcp));
     let (client, mut cli) = connect(configured).await?;
-    let embedded: BTreeMap<McpServerName, Arc<dyn SdkMcpServer>> = BTreeMap::from([(
+    let embedded = SdkMcpServers::from([(
         McpServerName::from("fresh"),
         Arc::new(FailedMcp) as Arc<dyn SdkMcpServer>,
     )]);
     let handle = client.handle();
-    let replacing = tokio::spawn(async move { handle.set_mcp_servers(BTreeMap::new(), embedded).await });
+    let replacing = tokio::spawn(async move { handle.set_mcp_servers(McpServers::new(), embedded).await });
     let request = cli.read().await?;
-    cli.success(
-        &request,
-        json!({"added":[],"removed":[],"errors":{"previous":"retain previous","fresh":"reject fresh"}}),
-    )
-    .await?;
-    assert_eq!(replacing.await??.errors.len(), 2);
     for (name, expected) in [
-        ("previous", "SDK MCP request failed"),
-        ("fresh", "Unknown SDK MCP server"),
+        ("previous", "SDK MCP server not found: previous"),
+        ("fresh", "SDK MCP request failed"),
     ] {
-        cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":name,"message":{}}})).await?;
+        cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":name,"message":{"jsonrpc":"2.0","id":1,"method":"ping"}}})).await?;
         let response = cli.read().await?;
         assert_eq!(response["response"]["subtype"], "error");
         assert_eq!(response["response"]["error"], expected);
     }
+    cli.success(
+        &request,
+        json!({"added":[],"removed":[],"errors":{"fresh":"reject fresh"}}),
+    )
+    .await?;
+    let replaced = replacing.await??;
+    assert_eq!(
+        replaced.as_json().map(|reply| &reply["errors"]),
+        Some(&json!({"fresh":"reject fresh"}))
+    );
+    cli.send(json!({"type":"control_request","request_id":"lookup","request":{"subtype":"mcp_message","server_name":"fresh","message":{"jsonrpc":"2.0","id":2,"method":"ping"}}})).await?;
+    let response = cli.read().await?;
+    assert_eq!(response["response"]["error"], "SDK MCP request failed");
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// Sends one `mcp_message` control request and returns the control response that answers it.
+async fn mcp_message(cli: &mut ScriptedCli, id: &str, mut request: Value) -> Result<Value, Box<dyn std::error::Error>> {
+    request["subtype"] = json!("mcp_message");
+    cli.send(json!({"type":"control_request","request_id":id,"request":request}))
+        .await?;
+    let response = cli.read().await?;
+    assert_eq!(response["response"]["request_id"], id, "{response}");
+    Ok(response["response"].clone())
+}
+
+fn local_mcp_server(dialect: McpServerDialect) -> Arc<dyn SdkMcpServer> {
+    Arc::new(LocalMcpServer::from(LocalMcpServerOptions {
+        dialect,
+        ..LocalMcpServerOptions::new(McpServerName::from("local"))
+    }))
+}
+
+/// `sdk.mjs` fails an `mcp_message` for an unknown server or a message that is not an object, waits on a
+/// request for as long as the server takes, and acknowledges anything else with id 0 once it is handed over.
+#[tokio::test]
+async fn mcp_message_routes_like_the_typescript_query() -> TestResult {
+    let mut configured = options()?;
+    configured.sdk_mcp_servers.insert(
+        McpServerName::from("local"),
+        local_mcp_server(McpServerDialect::TypeScript),
+    );
+    let (client, mut cli) = connect(configured).await?;
+    let ping = json!({"jsonrpc":"2.0","id":7,"method":"ping"});
+    for (request, error) in [
+        (
+            json!({"server_name":"missing","message":ping}),
+            "SDK MCP server not found: missing",
+        ),
+        (json!({"message":ping}), "SDK MCP server not found: undefined"),
+        (
+            json!({"server_name":null,"message":ping}),
+            "SDK MCP server not found: null",
+        ),
+        (json!({"server_name":1.0,"message":ping}), "SDK MCP server not found: 1"),
+        (
+            json!({"server_name":"local"}),
+            "Cannot use 'in' operator to search for 'method' in undefined",
+        ),
+        (
+            json!({"server_name":"local","message":"text"}),
+            "Cannot use 'in' operator to search for 'method' in text",
+        ),
+    ] {
+        let response = mcp_message(&mut cli, "failed", request).await?;
+        assert_eq!(response["subtype"], "error");
+        assert_eq!(response["error"], error);
+    }
+    let answered = mcp_message(&mut cli, "request", json!({"server_name":"local","message":ping})).await?;
+    assert_eq!(
+        answered["response"],
+        json!({"mcp_response":{"result":{},"jsonrpc":"2.0","id":7}})
+    );
+    for message in [
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        json!({"jsonrpc":"2.0","id":null,"method":"ping"}),
+        json!({"jsonrpc":"2.0","id":3,"result":{}}),
+        json!([]),
+    ] {
+        let acknowledged = mcp_message(
+            &mut cli,
+            "notification",
+            json!({"server_name":"local","message":message}),
+        )
+        .await?;
+        assert_eq!(acknowledged["subtype"], "success");
+        assert_eq!(
+            acknowledged["response"],
+            json!({"mcp_response":{"jsonrpc":"2.0","result":{},"id":0}})
+        );
+    }
+    // The server never answers a message its schema rejects, so the control request stays open.
+    cli.send(json!({"type":"control_request","request_id":"silent","request":{"subtype":"mcp_message","server_name":"local","message":{"jsonrpc":"1.0","id":4,"method":"ping"}}})).await?;
+    let after = mcp_message(&mut cli, "after", json!({"server_name":"local","message":ping})).await?;
+    assert_eq!(after["response"]["mcp_response"]["id"], 7);
+    cli.send(json!({"type":"control_cancel_request","request_id":"silent"}))
+        .await?;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// Under Bun, JavaScriptCore words the `TypeError` for a `message` that is not an object after the bundled
+/// parameter, so every such value fails with the same text.
+#[tokio::test]
+async fn mcp_message_reports_a_non_object_message_like_bun() -> TestResult {
+    let mut configured = options()?;
+    configured.js_runtime = JsRuntime::Bun;
+    configured.sdk_mcp_servers.insert(
+        McpServerName::from("local"),
+        local_mcp_server(McpServerDialect::TypeScript),
+    );
+    let (client, mut cli) = connect(configured).await?;
+    for request in [
+        json!({"server_name":"local"}),
+        json!({"server_name":"local","message":"text"}),
+        json!({"server_name":"local","message":7}),
+    ] {
+        let response = mcp_message(&mut cli, "failed", request).await?;
+        assert_eq!(response["subtype"], "error");
+        assert_eq!(response["error"], "e is not an Object. (evaluating '\"method\" in e')");
+    }
+    let ping = json!({"jsonrpc":"2.0","id":7,"method":"ping"});
+    let missing = mcp_message(&mut cli, "missing", json!({"server_name":"missing","message":ping})).await?;
+    assert_eq!(missing["error"], "SDK MCP server not found: missing");
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// An in-process server whose transport sends what each message it receives asks for: `params.send` lists
+/// replies, each after its `delay_ms` or, with none, as the answer to the call itself.
+struct ScriptedMcpServer {
+    received: Arc<Mutex<Vec<Value>>>,
+    /// What the transport sends as it connects, before the SDK has written `initialize`.
+    connect_send: Vec<JsonObject>,
+    /// What the server answers each manifest capture message with, by method: `{delay_ms, message}`.
+    capture_replies: Value,
+    /// The manifest capture messages the server was handed.
+    capture_received: Arc<Mutex<Vec<Value>>>,
+}
+
+struct ScriptedMcpSession {
+    received: Arc<Mutex<Vec<Value>>>,
+    capture_replies: Value,
+    capture_received: Arc<Mutex<Vec<Value>>>,
+    outbound: tokio::sync::mpsc::UnboundedSender<JsonObject>,
+    inbound: Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<JsonObject>>>,
+}
+
+impl SdkMcpServer for ScriptedMcpServer {
+    fn open_session(&self) -> Arc<dyn SdkMcpSession> {
+        let (outbound, inbound) = tokio::sync::mpsc::unbounded_channel();
+        for message in &self.connect_send {
+            let _ = outbound.send(message.clone());
+        }
+        Arc::new(ScriptedMcpSession {
+            received: self.received.clone(),
+            capture_replies: self.capture_replies.clone(),
+            capture_received: self.capture_received.clone(),
+            outbound,
+            inbound: Mutex::new(Some(inbound)),
+        })
+    }
+}
+
+impl SdkMcpSession for ScriptedMcpSession {
+    fn request(&self, message: JsonObject, _signal: CancellationToken) -> McpFuture<'_> {
+        Box::pin(async move {
+            let capturing = message
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.starts_with("sdk-manifest-capture:"))
+                || message.get("method").and_then(Value::as_str) == Some("notifications/initialized");
+            if capturing {
+                let method = message
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                self.capture_received
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(Value::Object(message));
+                let Some(Value::Object(reply)) = self.capture_replies[method.as_str()].get("message").cloned() else {
+                    return Ok(None);
+                };
+                let delay = self.capture_replies[method.as_str()]["delay_ms"].as_u64().unwrap_or(0);
+                let outbound = self.outbound.clone();
+                drop(tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    let _ = outbound.send(reply);
+                }));
+                return Ok(None);
+            }
+            let entries = message
+                .get("params")
+                .and_then(|params| params.get("send"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            self.received
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Value::Object(message));
+            let mut immediate = None;
+            for entry in entries {
+                let Some(Value::Object(reply)) = entry.get("message").cloned() else {
+                    continue;
+                };
+                match entry.get("delay_ms").and_then(Value::as_u64) {
+                    Some(delay) => {
+                        let outbound = self.outbound.clone();
+                        drop(tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_millis(delay)).await;
+                            let _ = outbound.send(reply);
+                        }));
+                    }
+                    None if immediate.is_none() => immediate = Some(reply),
+                    None => {
+                        let _ = self.outbound.send(reply);
+                    }
+                }
+            }
+            Ok(immediate)
+        })
+    }
+
+    fn take_outbound(&self) -> Option<tokio::sync::mpsc::UnboundedReceiver<JsonObject>> {
+        self.inbound.lock().unwrap_or_else(PoisonError::into_inner).take()
+    }
+}
+
+fn is_uuid(text: &str) -> bool {
+    text.len() == 36
+        && text.char_indices().all(|(index, character)| match index {
+            8 | 13 | 18 | 23 => character == '-',
+            _ => character.is_ascii_hexdigit(),
+        })
+}
+
+/// Replays `tests/fixtures/sdk_mcp/mcp_message_routing.json`, which `sdk.mjs` 0.3.323 `query()` produced when a
+/// fake CLI sent each case's frames: a waiter is keyed by the JavaScript text `${server_name}:${id}`, so ids
+/// `1` and `"1"` collide and the replaced waiter's request is never answered; a message from a server with no
+/// waiter goes to the CLI as an `mcp_message` control request under a random UUID, except a late
+/// `sdk-manifest-capture:` reply, which is dropped; nothing times out; and closing writes nothing.
+#[tokio::test]
+async fn mcp_message_routing_replays_the_typescript_golden() -> TestResult {
+    let golden: Value = serde_json::from_str(include_str!("fixtures/sdk_mcp/mcp_message_routing.json"))?;
+    let cases = golden["cases"]
+        .as_array()
+        .ok_or_else(|| io::Error::other("golden cases"))?;
+    for case in cases {
+        let name = case["name"].as_str().unwrap_or("unnamed");
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let mut configured = options()?;
+        let servers = case["servers"].as_array().cloned().unwrap_or_else(|| vec![json!("s")]);
+        // The upstream run set `CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS`, which the option stands in for here.
+        if case.get("disable_env").is_some() {
+            configured.capture_sdk_mcp_manifests = Some(false);
+        }
+        let capture_received: Vec<_> = servers.iter().map(|_| Arc::new(Mutex::new(Vec::new()))).collect();
+        for (index, server) in servers.iter().enumerate() {
+            let server = server.as_str().unwrap_or("s");
+            configured.sdk_mcp_servers.insert(
+                McpServerName::from(server),
+                Arc::new(ScriptedMcpServer {
+                    received: received.clone(),
+                    capture_replies: case["capture_replies"][server].clone(),
+                    capture_received: capture_received[index].clone(),
+                    connect_send: case["connect_send"][server.as_str().unwrap_or("s")]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|message| message.as_object().cloned())
+                        .collect(),
+                }),
+            );
+        }
+        let (client, mut cli, (initialize, initialize_text)) = connect_reading_initialize(configured).await?;
+        // `initialize` carries `sdkMcpServerManifests` exactly as upstream built it, key order included.
+        assert_eq!(
+            initialize["request"].get("sdkMcpServerManifests"),
+            case.get("initialize_manifests"),
+            "{name}"
+        );
+        if let Some(manifests) = case.get("initialize_manifests") {
+            let wanted = serde_json::to_string(manifests)?;
+            assert!(
+                initialize_text.contains(&format!("\"sdkMcpServerManifests\":{wanted}")),
+                "{name}"
+            );
+        }
+        for step in case["steps"].as_array().cloned().unwrap_or_default() {
+            tokio::time::sleep(Duration::from_millis(step["wait_ms"].as_u64().unwrap_or(0))).await;
+            cli.send(step["frame"].clone()).await?;
+        }
+        let mut forwarded = case["expect_text"].as_array().cloned().unwrap_or_default().into_iter();
+        for expected in case["expect"].as_array().cloned().unwrap_or_default() {
+            let mut frame = cli.read().await?;
+            if frame["type"] == "control_request" {
+                let id = frame["request_id"].as_str().unwrap_or_default().to_owned();
+                assert!(is_uuid(&id), "{name}: {id}");
+                // The forwarded frame keeps upstream's key order, `type`, `request_id`, `request`.
+                let text = serde_json::to_string(&frame)?.replace(&id, "<uuid>");
+                assert_eq!(Value::String(text), forwarded.next().unwrap_or(Value::Null), "{name}");
+                frame["request_id"] = json!("<uuid>");
+            }
+            assert_eq!(frame, expected, "{name}");
+        }
+        let quiet = case["quiet_ms"].as_u64().unwrap_or(300);
+        assert!(
+            timeout(Duration::from_millis(quiet), cli.read()).await.is_err(),
+            "{name}: the CLI received a frame the upstream SDK does not send"
+        );
+        let seen = received.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        assert_eq!(Value::Array(seen), case["server_received"], "{name}");
+        for (index, server) in servers.iter().enumerate() {
+            let server = server.as_str().unwrap_or("s");
+            let handed = capture_received[index]
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            let wanted = case["capture_received"][server].as_array().cloned().unwrap_or_default();
+            assert_eq!(handed, wanted, "{name}: capture messages handed to {server}");
+        }
+        // Closing with requests still waiting writes nothing, as the upstream transport is already closed.
+        cli.disconnect(client).await?;
+    }
+    Ok(())
+}
+
+/// Rust only: upstream turns the capture off with an environment variable and no query option, so
+/// `capture_sdk_mcp_manifests: Some(false)` is this crate's own switch. Off, `initialize` carries no manifests and
+/// the server is never handshaken; on, it carries the server's manifest.
+#[tokio::test]
+async fn manifest_capture_follows_the_option() -> TestResult {
+    for (setting, captured) in [(Some(false), false), (Some(true), true), (None, true)] {
+        let mut configured = options()?;
+        configured.capture_sdk_mcp_manifests = setting;
+        configured.sdk_mcp_servers.insert(
+            McpServerName::from("local"),
+            local_mcp_server(McpServerDialect::TypeScript),
+        );
+        let (client, cli, (initialize, _)) = connect_reading_initialize(configured).await?;
+        let manifests = initialize["request"].get("sdkMcpServerManifests");
+        assert_eq!(manifests.is_some(), captured, "{setting:?}");
+        if captured {
+            assert_eq!(
+                manifests.and_then(|manifests| manifests["local"]["initializeResult"]["serverInfo"]["name"].as_str()),
+                Some("local")
+            );
+        }
+        cli.disconnect(client).await?;
+    }
+    Ok(())
+}
+
+/// The Python `Query` fails an `mcp_message` without a server name or message, and answers everything else with
+/// an `mcp_response`: a JSON-RPC error under the message's id when it could not be delivered.
+#[tokio::test]
+async fn mcp_message_routes_like_the_python_query() -> TestResult {
+    let mut configured = options()?;
+    configured.argv_style = ArgvStyle::Python;
+    configured
+        .sdk_mcp_servers
+        .insert(McpServerName::from("local"), local_mcp_server(McpServerDialect::Python));
+    let (client, mut cli) = connect(configured).await?;
+    let ping = json!({"jsonrpc":"2.0","id":5,"method":"ping"});
+    for (request, error) in [
+        (
+            json!({"message":ping}),
+            "Missing server_name or message for MCP request",
+        ),
+        (
+            json!({"server_name":"","message":ping}),
+            "Missing server_name or message for MCP request",
+        ),
+        (
+            json!({"server_name":"local","message":{}}),
+            "Missing server_name or message for MCP request",
+        ),
+        (json!({"server_name":5,"message":ping}), ""),
+        (json!({"server_name":"local","message":[1]}), ""),
+    ] {
+        let response = mcp_message(&mut cli, "failed", request).await?;
+        assert_eq!(response["subtype"], "error");
+        assert_eq!(response["error"], error);
+    }
+    for (message, expected) in [
+        (
+            ping.clone(),
+            json!({"jsonrpc":"2.0","id":5,"error":{"code":-32601,"message":"Server 'missing' not found"}}),
+        ),
+        (
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            json!({"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"Server 'missing' not found"}}),
+        ),
+    ] {
+        let response = mcp_message(&mut cli, "unknown", json!({"server_name":"missing","message":message})).await?;
+        assert_eq!(response["subtype"], "success");
+        assert_eq!(
+            serde_json::to_string(&response["response"]["mcp_response"])?,
+            serde_json::to_string(&expected)?
+        );
+    }
+    let answered = mcp_message(&mut cli, "request", json!({"server_name":"local","message":ping})).await?;
+    assert_eq!(
+        answered["response"],
+        json!({"mcp_response":{"jsonrpc":"2.0","id":5,"result":{}}})
+    );
+    let acknowledged = mcp_message(
+        &mut cli,
+        "notification",
+        json!({"server_name":"local","message":{"jsonrpc":"2.0","method":"notifications/initialized"}}),
+    )
+    .await?;
+    assert_eq!(
+        serde_json::to_string(&acknowledged["response"]["mcp_response"])?,
+        r#"{"jsonrpc":"2.0","result":{}}"#
+    );
+    let unreadable = mcp_message(
+        &mut cli,
+        "unreadable",
+        json!({"server_name":"local","message":{"jsonrpc":"1.0","id":6,"method":"ping"}}),
+    )
+    .await?;
+    assert_eq!(unreadable["subtype"], "success");
+    assert_eq!(unreadable["response"]["mcp_response"]["id"], 6);
+    assert_eq!(unreadable["response"]["mcp_response"]["error"]["code"], -32603);
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// A server whose handling of every message waits once before it fails, and then reports that it finished.
+struct LateFailingMcp {
+    finished: Arc<tokio::sync::Notify>,
+}
+impl SdkMcpServer for LateFailingMcp {
+    fn open_session(&self) -> Arc<dyn SdkMcpSession> {
+        Arc::new(Self {
+            finished: Arc::clone(&self.finished),
+        })
+    }
+}
+impl SdkMcpSession for LateFailingMcp {
+    fn request(&self, _: JsonObject, _: CancellationToken) -> McpFuture<'_> {
+        let finished = Arc::clone(&self.finished);
+        Box::pin(async move {
+            tokio::task::yield_now().await;
+            finished.notify_one();
+            Err(CallbackError::Cancelled.into())
+        })
+    }
+}
+
+/// `sdk.mjs` acknowledges a notification once `transport.onmessage` returns, so a server that is still working on
+/// it, and later fails, does not hold the acknowledgment back.
+#[tokio::test]
+async fn typescript_mcp_message_acknowledges_a_notification_the_server_finishes_later() -> TestResult {
+    let finished = Arc::new(tokio::sync::Notify::new());
+    let mut configured = options()?;
+    configured.sdk_mcp_servers.insert(
+        McpServerName::from("late"),
+        Arc::new(LateFailingMcp {
+            finished: Arc::clone(&finished),
+        }),
+    );
+    let (client, mut cli) = connect(configured).await?;
+    let acknowledged = mcp_message(
+        &mut cli,
+        "notification",
+        json!({"server_name":"late","message":{"jsonrpc":"2.0","method":"notifications/initialized"}}),
+    )
+    .await?;
+    assert_eq!(acknowledged["subtype"], "success");
+    assert_eq!(
+        acknowledged["response"],
+        json!({"mcp_response":{"jsonrpc":"2.0","result":{},"id":0}})
+    );
+    timeout(Duration::from_secs(5), finished.notified()).await?;
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+/// The Python `Query` answers a request the server fails with a JSON-RPC internal error under the request's id.
+#[tokio::test]
+async fn python_mcp_message_answers_a_failed_request_with_an_internal_error() -> TestResult {
+    let mut configured = options()?;
+    configured.argv_style = ArgvStyle::Python;
+    configured
+        .sdk_mcp_servers
+        .insert(McpServerName::from("failed"), Arc::new(FailedMcp));
+    let (client, mut cli) = connect(configured).await?;
+    let response = mcp_message(
+        &mut cli,
+        "failed",
+        json!({"server_name":"failed","message":{"jsonrpc":"2.0","id":8,"method":"ping"}}),
+    )
+    .await?;
+    assert_eq!(response["subtype"], "success");
+    assert_eq!(
+        response["response"]["mcp_response"],
+        json!({"jsonrpc":"2.0","id":8,"error":{"code":-32603,"message":"MCP callback failed"}})
+    );
     cli.disconnect(client).await?;
     Ok(())
 }
@@ -590,32 +1156,77 @@ async fn callback_capacity_is_bounded_and_cancellation_preserves_control_progres
     let observed = started.clone();
     let mut configured = options()?;
     configured.limits.max_incoming_callbacks = Some(QueueCapacity::new(1)?);
-    configured.permission_handler = Some(Arc::new(move |_: ToolPermissionRequest| {
+    configured.permission_handler = Some(Arc::new(move |request: ToolPermissionRequest| {
         observed.notify_one();
-        async { std::future::pending::<PermissionDecision>().await }
+        async move {
+            request.signal.cancelled().await;
+            PermissionDecision::deny("cancelled")
+        }
     }));
     configured.supported_dialog_kinds = vec![DialogKind::from("fixture")];
     configured.user_dialog_handler = Some(Arc::new(|_: UserDialogRequest| async { Err(CallbackError::Cancelled) }));
+    configured.hooks = vec![HookRegistration {
+        event: HookEvent::PreToolUse,
+        matcher: None,
+        callbacks: vec![Arc::new(|_: HookRequest| async { Err(CallbackError::Cancelled) })],
+        timeout: None,
+        on_failure: Some(HookFailureMode::Continue),
+    }];
+    configured
+        .sdk_mcp_servers
+        .insert(McpServerName::from("local"), Arc::new(FailedMcp));
+    configured.elicitation_handler = Some(Arc::new(|_: ElicitationRequest| async {
+        Ok(ElicitationResponse::Decline)
+    }));
     let (client, mut cli) = connect(configured).await?;
     cli.send(json!({"type":"control_request","request_id":"pending","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
     started.notified().await;
-    for request in [
-        json!({"subtype":"future_callback"}),
-        json!({"subtype":"can_use_tool","tool_name":"Read","input":{}}),
-        json!({"subtype":"can_use_tool","input":{}}),
-        json!({"subtype":"hook_callback","callback_id":"missing","input":{}}),
-        json!({"subtype":"mcp_message","server_name":"missing","message":{}}),
-        json!({"subtype":"elicitation","mcp_server_name":"local","message":"request","mode":"form"}),
-        json!({"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{}}),
+    let busy = json!({"subtype":"error","request_id":"excess","error":"Too many outstanding SDK callbacks"});
+    for (request, expected) in [
+        (
+            json!({"subtype":"future_callback"}),
+            json!({"subtype":"error","request_id":"excess","error":"Unsupported control request subtype: future_callback","error_code":"unsupported_request"}),
+        ),
+        (
+            json!({"subtype":"can_use_tool","tool_name":"Read","input":{}}),
+            busy.clone(),
+        ),
+        (json!({"subtype":"can_use_tool","input":{}}), busy.clone()),
+        (
+            json!({"subtype":"hook_callback","callback_id":"missing","input":{}}),
+            json!({"subtype":"error","request_id":"excess","error":"No hook callback found for ID: missing"}),
+        ),
+        (
+            json!({"subtype":"hook_callback","callback_id":"hook_0","input":{}}),
+            busy.clone(),
+        ),
+        (
+            json!({"subtype":"mcp_message","server_name":"missing","message":{}}),
+            json!({"subtype":"error","request_id":"excess","error":"SDK MCP server not found: missing"}),
+        ),
+        (
+            json!({"subtype":"mcp_message","server_name":"local","message":{"jsonrpc":"2.0","id":1,"method":"ping"}}),
+            busy.clone(),
+        ),
+        (
+            json!({"subtype":"elicitation","mcp_server_name":"local","message":"request","mode":"form"}),
+            busy.clone(),
+        ),
+        (
+            json!({"subtype":"request_user_dialog","dialog_kind":"fixture","payload":{}}),
+            busy.clone(),
+        ),
     ] {
         cli.send(json!({"type":"control_request","request_id":"excess","request":request}))
             .await?;
         let response = cli.read().await?;
-        assert_eq!(response["response"]["request_id"], "excess");
-        assert_eq!(response["response"]["error"], "Too many outstanding SDK callbacks");
+        assert_eq!(response["response"], expected);
     }
     cli.send(json!({"type":"control_cancel_request","request_id":"pending"}))
         .await?;
+    let cancelled = cli.read().await?;
+    assert_eq!(cancelled["response"]["request_id"], "pending");
+    assert_eq!(cancelled["response"]["response"]["behavior"], "deny");
     cli.send(json!({"type":"control_request","request_id":"after-cancel","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
     let handle = client.handle();
     let control = tokio::spawn(async move { handle.set_model(None).await });
@@ -702,6 +1313,7 @@ async fn unknown_permission_suggestion_values_reach_the_callback_and_round_trip(
             PermissionDecision::Allow {
                 updated_input: None,
                 updated_permissions: Some(request.suggestions),
+                decision_classification: None,
             }
         }
     }));
@@ -719,51 +1331,80 @@ async fn unknown_permission_suggestion_values_reach_the_callback_and_round_trip(
     Ok(())
 }
 
+/// `sdk.mjs` hands broken suggestions and a missing `tool_name` to `canUseTool` as sent; `claude_agent_sdk`
+/// answers each with the message of the exception `from_dict` or the missing key raises. Either way the session
+/// goes on.
 #[tokio::test]
-async fn malformed_permission_requests_get_an_error_response_and_the_session_continues() -> TestResult {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let counted = calls.clone();
-    let mut configured = options()?;
-    configured.permission_handler = Some(Arc::new(move |_: ToolPermissionRequest| {
-        counted.fetch_add(1, Ordering::SeqCst);
-        async { PermissionDecision::allow() }
-    }));
-    let (mut client, mut cli) = connect(configured).await?;
-    for (index, malformed) in [
-        json!({"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[{"destination":"session"}]}),
-        json!({"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[
-            {"type":"addRules","rules":{},"behavior":"allow","destination":"session"}
-        ]}),
-        json!({"subtype":"can_use_tool","input":{}}),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let id = format!("malformed-{index}");
-        cli.send(json!({"type":"control_request","request_id":id,"request":malformed}))
-            .await?;
-        let response = cli.read().await?;
-        assert_eq!(response["response"]["subtype"], "error");
-        assert_eq!(response["response"]["request_id"], id);
-    }
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    cli.send(json!({"type":"control_request","request_id":"valid","request":{
-        "subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[{"type":"future","destination":"x"}]
-    }}))
-    .await?;
-    let response = cli.read().await?;
-    assert_eq!(response["response"]["subtype"], "success");
-    assert_eq!(response["response"]["response"]["behavior"], "allow");
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    cli.send(result()).await?;
-    loop {
-        match client.next_message().await? {
-            Some(Message::Result(_)) => break,
-            Some(_) => {}
-            None => return Err("session ended before the result".into()),
+async fn malformed_permission_requests_reach_typescript_and_get_python_error_responses() -> TestResult {
+    let malformed = [
+        (
+            json!({"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[{"destination":"session"}]}),
+            "'type'",
+        ),
+        (
+            json!({"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[
+                {"type":"addRules","rules":{"a":1},"behavior":"allow","destination":"session"}
+            ]}),
+            "string indices must be integers, not 'str'",
+        ),
+        (json!({"subtype":"can_use_tool","input":{}}), "'tool_name'"),
+    ];
+    for style in [ArgvStyle::TypeScript, ArgvStyle::Python] {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let counted = calls.clone();
+        let mut configured = options()?;
+        configured.argv_style = style;
+        configured.permission_handler = Some(Arc::new(move |request: ToolPermissionRequest| {
+            counted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Value::Object(request.raw_request));
+            async { PermissionDecision::allow() }
+        }));
+        let (mut client, mut cli) = connect(configured).await?;
+        for (index, (request, error)) in malformed.iter().enumerate() {
+            let id = format!("malformed-{index}");
+            cli.send(json!({"type":"control_request","request_id":id,"request":request}))
+                .await?;
+            let response = cli.read().await?;
+            assert_eq!(response["response"]["request_id"], id);
+            if style == ArgvStyle::TypeScript {
+                assert_eq!(response["response"]["subtype"], "success");
+                assert_eq!(response["response"]["response"]["behavior"], "allow");
+            } else {
+                assert_eq!(response["response"]["subtype"], "error");
+                assert_eq!(response["response"]["error"], *error);
+            }
         }
+        let seen = calls.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if style == ArgvStyle::TypeScript {
+            let mut expected = malformed.iter().map(|(request, _)| request.clone()).collect::<Vec<_>>();
+            for request in &mut expected {
+                if let Some(request) = request.as_object_mut() {
+                    request.remove("subtype");
+                }
+            }
+            assert_eq!(seen, expected);
+        } else {
+            assert!(seen.is_empty());
+        }
+        cli.send(json!({"type":"control_request","request_id":"valid","request":{
+            "subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[{"type":"future","destination":"x"}]
+        }}))
+        .await?;
+        let response = cli.read().await?;
+        assert_eq!(response["response"]["subtype"], "success");
+        assert_eq!(response["response"]["response"]["behavior"], "allow");
+        cli.send(result()).await?;
+        loop {
+            match client.next_message().await? {
+                Some(Message::Result(_)) => break,
+                Some(_) => {}
+                None => return Err("session ended before the result".into()),
+            }
+        }
+        cli.disconnect(client).await?;
     }
-    cli.disconnect(client).await?;
     Ok(())
 }
 
@@ -815,7 +1456,7 @@ async fn background_task_ledger_rejects_new_tasks_at_its_limit_but_accepts_dupli
 #[tokio::test]
 async fn task_terminal_states_and_session_idle_complete_a_finished_run() -> TestResult {
     for status in ["completed", "failed", "stopped", "killed"] {
-        let (mut client, mut cli) = connect(options()?).await?;
+        let (mut client, mut cli) = connect(options_with_needs()?).await?;
         client.send_prompt(Prompt::from("run with background task")).await?;
         cli.read().await?;
         client.finish_input().await?;
@@ -848,7 +1489,7 @@ async fn task_terminal_states_and_session_idle_complete_a_finished_run() -> Test
 
 #[tokio::test]
 async fn error_results_and_queue_retractions_preserve_run_completion() -> TestResult {
-    let (mut client, mut cli) = connect(options()?).await?;
+    let (mut client, mut cli) = connect(options_with_needs()?).await?;
     let mut first = UserInput::from(Prompt::from("first"));
     first.uuid = Some(MessageId::from("queued-first"));
     let mut second = UserInput::from(Prompt::from("second"));
@@ -856,6 +1497,11 @@ async fn error_results_and_queue_retractions_preserve_run_completion() -> TestRe
     client.stream_input(futures_util::stream::iter([first, second])).await?;
     cli.read().await?;
     cli.read().await?;
+    // A CLI that reports its session state keeps the run open until `idle`, as `sdk.mjs` does; without state
+    // events the result alone would close stdin before the interrupt below.
+    cli.send(json!({"type":"system","subtype":"session_state_changed","state":"running"}))
+        .await?;
+    assert!(matches!(client.next_message().await?, Some(Message::System(_))));
     let mut response = result();
     response["queued_turn_count"] = 1.into();
     response["is_error"] = true.into();
@@ -911,9 +1557,9 @@ fn configured_store(
     let mut configured = options()?;
     let mut store_options = SessionStoreOptions::from(store);
     store_options.config_directory = Some(directory.to_path_buf());
-    store_options.project_key = Some(SessionProjectKey::new("project")?);
+    store_options.project_key = Some(SessionProjectKey::new("project"));
     store_options.limits.append_timeout = Timeout::new(Duration::from_secs(10));
-    store_options.limits.flush_timeout = Timeout::new(Duration::from_millis(100));
+    store_options.limits.flush_timeout = Some(Timeout::new(Duration::from_millis(100)));
     configured.cwd = Some(directory.to_path_buf());
     configured.session_store = Some(store_options);
     Ok(configured)
@@ -975,7 +1621,7 @@ async fn m13_s19_unmappable_and_oversized_mirror_frames_are_never_rejected() -> 
     cli.send(eager_mirror_frame(directory.path())).await?;
     control_barrier(&client, &mut cli).await?;
     cli.disconnect(client).await?;
-    let key = SessionKey::new(SessionProjectKey::new("project")?, "memory-session".into())?;
+    let key = SessionKey::new(SessionProjectKey::new("project"), "memory-session".into());
     let stored = store.load(&key).await?.ok_or("oversized frame was not mirrored")?;
     assert_eq!(stored.len(), 2);
     assert_ne!(events.load(Ordering::SeqCst), 0);
@@ -1023,7 +1669,7 @@ async fn shutdown_collects_each_queued_mirror_fence_and_retains_append_failures(
         let mut configured = eager_store(store.clone(), directory.path())?;
         if let Some(store) = &mut configured.session_store {
             // A failing append is retried twice with backoff before it is reported.
-            store.limits.flush_timeout = Timeout::new(Duration::from_secs(5));
+            store.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(5)));
         }
         let (client, mut cli) = connect(configured).await?;
         client.send_prompt(Prompt::from("mirror run")).await?;
@@ -1094,7 +1740,7 @@ async fn mirror_fence_does_not_make_the_deferred_message_queue_unbounded() -> Te
 #[tokio::test]
 async fn owner_disposal_interrupts_a_backpressured_write() -> TestResult {
     let mut configured = options()?;
-    configured.limits.max_buffer_size = Some(NonZeroUsize::new(16 * 1024 * 1024).ok_or("invalid limit")?);
+    configured.limits.max_buffer_size = Some(16 * 1024 * 1024);
     let (client, cli) = connect(configured).await?;
     let ScriptedCli {
         lines,
@@ -1164,7 +1810,7 @@ async fn a_control_request_after_the_run_settled_fails_only_that_request() -> Te
     let handle = client.handle();
     assert!(matches!(handle.set_model(None).await, Err(Error::NotReadyForWriting)));
     assert!(matches!(
-        handle.set_mcp_servers(BTreeMap::new(), BTreeMap::new()).await,
+        handle.set_mcp_servers(McpServers::new(), SdkMcpServers::new()).await,
         Err(Error::NotReadyForWriting)
     ));
     assert!(matches!(
@@ -1213,7 +1859,7 @@ async fn a_turn_keeps_stdin_open_until_an_in_flight_callback_answers() -> TestRe
     assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
     cli.end(0);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     Ok(())
 }
 
@@ -1258,7 +1904,7 @@ async fn a_callback_answered_after_the_run_settled_is_dropped_without_stopping_t
     timeout(Duration::from_secs(2), dropped.notified()).await?;
     cli.end(0);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     Ok(())
 }
 
@@ -1380,7 +2026,7 @@ async fn a_mirror_failure_that_cannot_be_published_is_logged_and_does_not_fail_s
     let mut configured = eager_store(store.clone(), directory.path())?;
     configured.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
     if let Some(store) = &mut configured.session_store {
-        store.limits.flush_timeout = Timeout::new(Duration::from_secs(5));
+        store.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(5)));
     }
     let (client, mut cli) = connect(configured).await?;
     cli.send(json!({"type":"system","subtype":"fills_the_queue"})).await?;
@@ -1459,11 +2105,11 @@ async fn a_stderr_pipe_that_stays_open_is_reported_beside_the_error_that_ended_t
 async fn startup_fails_before_a_healthy_shutdown() -> Result<bool, Box<dyn std::error::Error>> {
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
-    let querying = tokio::spawn(query_with_adapters(
-        Prompt::from("prompt"),
-        options()?,
-        adapters(process),
-    ));
+    // Python style: TypeScript hands the query back without waiting for the prompt to be written, so only Python
+    // reports a startup failure from `query`.
+    let mut python = options()?;
+    python.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    let querying = tokio::spawn(query_with_adapters(Prompt::from("prompt"), python, adapters(process)));
     let request = cli.read().await?;
     cli.success(&request, json!({"hooks_applied":true,"hook_on_failure_supported":true}))
         .await?;

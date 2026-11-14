@@ -1,0 +1,1337 @@
+{
+ "capture": "Real runtimes, Windows path modules, working directory C:\\work. typescript: the transcript-path-to-key function (AD) from @anthropic-ai/claude-agent-sdk 0.3.323 sdk.mjs run with Node path.win32 relative, sep and isAbsolute. python: claude_agent_sdk 0.2.181 file_path_to_session_key on CPython 3.12.16 with ntpath as os.path and PureWindowsPath as Path. ntpath.abspath is replaced by an emulation of GetFullPathName (https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfullpathnamew), the Win32 call ntpath.abspath makes only on Windows: a rooted path takes the working directory's drive, a drive-relative path of another drive is rooted on that drive, anything else joins the working directory. That emulation, and anything a real Windows file system decides, needs a capture on Windows. python_since_3_13 is present only where CPython 3.13 and later differ: 3.12 ntpath.relpath ends with ntpath.join, which restarts at a part such as a:b, and 3.13 joins the parts with a separator instead. null means the SDK returns no key.",
+ "cwd": "C:\\work",
+ "cases": [
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\agent-1.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\workflows\\run-1\\agent-2.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/workflows/run-1/agent-2"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/workflows/run-1/agent-2"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\agent-3",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-3"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-3"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\tasks\\notes",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "tasks/notes"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "tasks/notes"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\x.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.txt",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": ""
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": ""
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\a\\b\\c\\d\\e.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/b/c/d/e"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/b/c/d/e"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\a\\b.jsonl.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/b.jsonl"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a/b.jsonl"
+   }
+  },
+  {
+   "file_path": "C:/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:/sessions/projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:/sessions/projects/proj/123e4567-e89b-42d3-a456-426614174000/subagents/agent-1.jsonl",
+   "projects_dir": "C:/sessions/projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj/123e4567-e89b-42d3-a456-426614174000\\subagents/agent-1.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "C:/sessions\\projects/proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions/projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "c:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\SESSIONS\\Projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\Proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "c:\\SESSIONS\\projects",
+   "typescript": {
+    "project_key": "Proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "Proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\SubAgents\\Agent-1.JSONL",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "SubAgents/Agent-1.JSONL"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "SubAgents/Agent-1.JSONL"
+   }
+  },
+  {
+   "file_path": "C:\\Sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\PROJECTS",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\École\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "École",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "École",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\école\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\SESSIONS\\projects",
+   "typescript": {
+    "project_key": "école",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "école",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\SESSIONS\\É\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\é",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\İ\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\i",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\Σ\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\σ",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\Σ\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\ς",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\K\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\k",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\ß\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\SS",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\SESSIONS\\PROJECTS\\MyProj\\123E4567-E89B-42D3-A456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "MyProj",
+    "session_id": "123E4567-E89B-42D3-A456-426614174000"
+   },
+   "python": {
+    "project_key": "MyProj",
+    "session_id": "123E4567-E89B-42D3-A456-426614174000"
+   }
+  },
+  {
+   "file_path": "D:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "D:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "c:\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "D:\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\other\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects2\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\..\\escape.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\..\\..\\escape\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\p1\\..\\p2\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "p2",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "p2",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\.\\proj\\.\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\.\\subagents\\.\\agent-1.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\..\\subagents\\agent-1.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\..\\..\\x\\agent-1.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\\\proj\\\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\\\agent-1.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl\\",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\..",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\..",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\..\\..",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\..\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\..\\..\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\..",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects\\",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects\\\\",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects\\.",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\.\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\other\\..\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects\\..",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects\\proj",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "rel\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\agent-1.jsonl",
+   "projects_dir": "rel\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "./rel/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel/projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": ".\\rel\\.\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel\\other\\..\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\work\\rel\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\work\\rel\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "c:\\WORK\\rel\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "rel\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "rel\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "c:\\Work\\REL\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "..\\x\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "..\\x",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": ".",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "",
+   "projects_dir": "",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\work",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\work\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": ".",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "\\\\srv\\share\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\\\srv\\share\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "//srv/share/projects/proj/123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "//srv/share/projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "\\\\SRV\\Share\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\\\srv\\share\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "\\\\srv\\share\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\agent-1.jsonl",
+   "projects_dir": "\\\\srv\\share\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "\\\\srv\\share\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\\\srv\\share",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "\\\\srv\\share\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\\\srv\\share\\",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "\\\\srv\\other\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\\\srv\\share\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "\\\\srv2\\share\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\\\srv\\share\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\\\srv\\share\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "\\\\srv\\share\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": null
+  },
+  {
+   "file_path": "\\\\srv\\share\\projects\\..\\..\\proj\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "\\\\srv\\share",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\con\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "con",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": {
+    "project_key": "con",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\con.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "con"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "con"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\nul.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/nul"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/nul"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj \\123e4567-e89b-42d3-a456-426614174000 .jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj ",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000 "
+   },
+   "python": {
+    "project_key": "proj ",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000 "
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj.\\123e4567-e89b-42d3-a456-426614174000.\\a.\\b.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj.",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000.",
+    "subpath": "a./b"
+   },
+   "python": {
+    "project_key": "proj.",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000.",
+    "subpath": "a./b"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\a:b\\c.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:b/c"
+   },
+   "python": null,
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:b/c"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\é中.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/é中"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/é中"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\not-a-uuid.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "not-a-uuid"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "not-a-uuid"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\subagents\\agent-1.JSONL",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1.JSONL"
+   },
+   "python": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1.JSONL"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\a:x\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "a:x",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\a:x\\123e4567-e89b-42d3-a456-426614174000\\subagents\\agent-1.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "a:x",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "subagents/agent-1"
+   },
+   "python": {
+    "project_key": "a:",
+    "session_id": "x",
+    "subpath": "123e4567-e89b-42d3-a456-426614174000/subagents/agent-1"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\a:\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": {
+    "project_key": "a:",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python_since_3_13": null
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\a:x.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "a:x"
+   },
+   "python": {
+    "project_key": "a:",
+    "session_id": "x"
+   },
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "a:x"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\a:\\c.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:/c"
+   },
+   "python": {
+    "project_key": "a:",
+    "session_id": "c"
+   },
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:/c"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\a:x\\A:y\\c.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:x/A:y/c"
+   },
+   "python": {
+    "project_key": "A:",
+    "session_id": "x",
+    "subpath": "y/c"
+   },
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:x/A:y/c"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\a:x\\a:y\\c.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:x/a:y/c"
+   },
+   "python": {
+    "project_key": "a:",
+    "session_id": "x",
+    "subpath": "y/c"
+   },
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:x/a:y/c"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\a:x\\b:y\\c.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:x/b:y/c"
+   },
+   "python": null,
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "a:x/b:y/c"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\1:x\\c.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "1:x/c"
+   },
+   "python": null,
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "1:x/c"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\é:x\\c.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "é:x/c"
+   },
+   "python": null,
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "é:x/c"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\sub\\c:d\\e.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "sub/c:d/e"
+   },
+   "python": null,
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "sub/c:d/e"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\proj\\123e4567-e89b-42d3-a456-426614174000\\sub\\x\\c:.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "sub/x/c:"
+   },
+   "python": {
+    "project_key": "c:",
+    "session_id": ""
+   },
+   "python_since_3_13": {
+    "project_key": "proj",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "sub/x/c:"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\p:q\\123e4567-e89b-42d3-a456-426614174000\\x\\y.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": {
+    "project_key": "p:q",
+    "session_id": "123e4567-e89b-42d3-a456-426614174000",
+    "subpath": "x/y"
+   },
+   "python": {
+    "project_key": "p:",
+    "session_id": "q",
+    "subpath": "123e4567-e89b-42d3-a456-426614174000/x/y"
+   }
+  },
+  {
+   "file_path": "C:\\sessions\\projects\\a:x\\a:y\\123e4567-e89b-42d3-a456-426614174000.jsonl",
+   "projects_dir": "C:\\sessions\\projects",
+   "typescript": null,
+   "python": {
+    "project_key": "a:",
+    "session_id": "x",
+    "subpath": "y/123e4567-e89b-42d3-a456-426614174000"
+   },
+   "python_since_3_13": {
+    "project_key": "a:",
+    "session_id": "x",
+    "subpath": "a:y/123e4567-e89b-42d3-a456-426614174000"
+   }
+  }
+ ]
+}

@@ -15,10 +15,12 @@ use url::Url;
 use crate::{
     constants::{SETTINGS_SCHEMA_JSON, SETTINGS_SCHEMA_SAFE_INTEGER},
     settings_merge_spec::MergeSpec,
+    settings_numbers::js_value,
     settings_read_spec::ReadSpec,
     settings_schema_builtins::{
         Batteries, Payload, Predicate, Transform, payload_for, predicate_for, sentinel, transform_for,
     },
+    settings_schema_ports::js_string,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -39,6 +41,8 @@ pub(crate) struct SettingsSchema {
     roots: HashMap<String, Arc<Node>>,
     read: ReadSpec,
     merge: MergeSpec,
+    #[cfg(test)]
+    policy: policy::PolicySpec,
 }
 
 #[derive(Debug)]
@@ -74,6 +78,8 @@ enum Check {
 enum Node {
     Optional(Arc<Node>),
     Str(Vec<Check>),
+    /// `z.coerce.string()`: the input goes through JavaScript `String()` before the checks.
+    CoercedStr(Vec<Check>),
     Num(Vec<Check>),
     Boolean,
     Unknown,
@@ -163,6 +169,8 @@ impl SettingsSchema {
             read: ReadSpec::from_json(read).map_err(SettingsSchemaError::Malformed)?,
             merge: MergeSpec::from_json(document.get("merge").ok_or_else(|| malformed("merge"))?)
                 .map_err(SettingsSchemaError::Malformed)?,
+            #[cfg(test)]
+            policy: policy::PolicySpec::from_json(read).map_err(SettingsSchemaError::Malformed)?,
         })
     }
 
@@ -184,7 +192,7 @@ impl SettingsSchema {
         self.root_output(name, Some(value))?
     }
 
-    fn root_output(&self, name: &str, value: Option<&Value>) -> Option<Option<Value>> {
+    pub(crate) fn root_output(&self, name: &str, value: Option<&Value>) -> Option<Option<Value>> {
         self.roots.get(name)?.validate(value).ok()
     }
 
@@ -293,6 +301,7 @@ impl<'a> Builder<'a> {
         let checks = || self.checks(description);
         let node = match kind {
             "optional" => Node::Optional(inner("inner")?),
+            "string" if description.get("coerce") == Some(&Value::Bool(true)) => Node::CoercedStr(checks()?),
             "string" => Node::Str(checks()?),
             "number" => Node::Num(checks()?),
             "boolean" => Node::Boolean,
@@ -456,7 +465,7 @@ fn utf16_length(text: &str) -> usize {
 
 fn json_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
-        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
+        (Value::Number(left), Value::Number(right)) => js_value(left) == js_value(right),
         _ => left == right,
     }
 }
@@ -467,21 +476,16 @@ impl Check {
             Check::MinLength(minimum) => length_of(value).is_none_or(|length| length >= *minimum),
             Check::MaxLength(maximum) => length_of(value).is_none_or(|length| length <= *maximum),
             Check::LengthEquals(expected) => length_of(value).is_none_or(|length| length == *expected),
-            Check::SafeInteger => value
-                .as_f64()
+            Check::SafeInteger => number_of(value)
                 .is_none_or(|number| number.fract() == 0.0 && number.abs() <= SETTINGS_SCHEMA_SAFE_INTEGER),
             Check::GreaterThan {
                 value: bound,
                 inclusive,
-            } => value
-                .as_f64()
-                .is_none_or(|number| if *inclusive { number >= *bound } else { number > *bound }),
+            } => number_of(value).is_none_or(|number| if *inclusive { number >= *bound } else { number > *bound }),
             Check::LessThan {
                 value: bound,
                 inclusive,
-            } => value
-                .as_f64()
-                .is_none_or(|number| if *inclusive { number <= *bound } else { number < *bound }),
+            } => number_of(value).is_none_or(|number| if *inclusive { number <= *bound } else { number < *bound }),
             Check::Pattern(regex) => value.as_str().is_none_or(|text| regex.is_match(text.as_bytes())),
             Check::StartsWith(prefix) => value.as_str().is_none_or(|text| text.starts_with(prefix.as_str())),
             Check::Url => value.as_str().is_none_or(|text| Url::parse(text).is_ok()),
@@ -544,8 +548,21 @@ impl Node {
                 Some(value @ Value::String(_)) if all_pass(checks, value) => Ok(Some(value.clone())),
                 _ => Err(()),
             },
+            Node::CoercedStr(checks) => {
+                let value = Value::String(input.map_or_else(|| "undefined".to_owned(), js_string));
+                if all_pass(checks, &value) {
+                    Ok(Some(value))
+                } else {
+                    Err(())
+                }
+            }
+            // zod v4 `z.number()` refuses the infinities.
             Node::Num(checks) => match input {
-                Some(value @ Value::Number(_)) if all_pass(checks, value) => Ok(Some(value.clone())),
+                Some(value @ Value::Number(number))
+                    if js_value(number).is_some_and(f64::is_finite) && all_pass(checks, value) =>
+                {
+                    Ok(Some(value.clone()))
+                }
                 _ => Err(()),
             },
             Node::Boolean => match input {
@@ -653,7 +670,9 @@ impl Node {
     fn collect_unported(&self, found: &mut Vec<String>) {
         match self {
             Node::Optional(inner) | Node::Lazy(inner) | Node::Catch { inner, .. } => inner.collect_unported(found),
-            Node::Str(checks) | Node::Num(checks) => found.extend(checks.iter().filter_map(Check::unported)),
+            Node::Str(checks) | Node::CoercedStr(checks) | Node::Num(checks) => {
+                found.extend(checks.iter().filter_map(Check::unported))
+            }
             Node::Array { element, checks } => {
                 element.collect_unported(found);
                 found.extend(checks.iter().filter_map(Check::unported));
@@ -677,6 +696,15 @@ impl Node {
         }
     }
 }
+
+/// The JavaScript number a settings value holds, with the number markers read back.
+fn number_of(value: &Value) -> Option<f64> {
+    value.as_number().and_then(js_value)
+}
+
+#[cfg(test)]
+#[path = "settings_schema_policy.rs"]
+mod policy;
 
 #[cfg(test)]
 #[path = "settings_schema_tests.rs"]

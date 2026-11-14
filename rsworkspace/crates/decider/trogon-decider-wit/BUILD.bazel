@@ -1,6 +1,22 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
+# The WIT contract, for crates whose `export_decider!` expansion reads it.
+filegroup(
+    name = "wit",
+    srcs = glob(["wit/**"]),
+    visibility = ["//visibility:public"],
+)
+
 workspace_crate(
     name = "trogon-decider-wit",
-    data = glob(["wit/**"]),
+    compile_data = [":wit"],
+    crate_features = [
+        "guest",
+        "host",
+    ],
+    data = [":wit"],
+    # WIT_DIR bakes this path into a constant that `export_decider!` reads while
+    # other crates compile. The default points into this action's sandbox, which
+    # no other action sees, so it points at the execution root instead.
+    rustc_env = {"CARGO_MANIFEST_DIR": "$${exec_root}/" + package_name()},
 )

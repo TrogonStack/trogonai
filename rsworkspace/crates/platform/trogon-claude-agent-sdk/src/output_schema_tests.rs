@@ -35,3 +35,12 @@ fn schemas_are_kept_verbatim_even_when_they_do_not_compile() -> Result<(), Box<d
     }
     Ok(())
 }
+
+#[test]
+fn a_compiling_schema_describes_why_an_instance_fails() -> Result<(), Box<dyn std::error::Error>> {
+    let schema = OutputSchema::new(serde_json::from_value(json!({"type":"object","required":["ok"]}))?);
+    assert_eq!(schema.validation_error(&json!({"ok":true})), None);
+    let message = schema.validation_error(&json!({})).ok_or("the instance matched")?;
+    assert!(message.contains("\"ok\""), "{message}");
+    Ok(())
+}

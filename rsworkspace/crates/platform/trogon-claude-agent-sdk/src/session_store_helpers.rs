@@ -5,7 +5,7 @@
 //! `import_session_to_store`. Project keys use the TypeScript sanitization the transcript mirror uses, so they match
 //! what a mirrored or imported session was stored under.
 
-use crate::constants::{DEFAULT_IMPORT_BATCH, LIST_LOAD_CONCURRENCY, LITE_READ_BUF_SIZE, MAX_IMPORT_BYTES};
+use crate::constants::{DEFAULT_IMPORT_BATCH, LIST_LOAD_CONCURRENCY, MAX_IMPORT_BYTES};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -18,87 +18,23 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
     ChainAlgorithm, JsonObject, MessageOptions, MessagePage, SdkSessionInfo, SessionEntry, SessionFiles, SessionId,
-    SessionKey, SessionKeyError, SessionMessage, SessionMutationError, SessionProjectKey, SessionProjectKeyError,
-    SessionStore, SessionStoreError, SessionStoreOperation, SessionSubpath, SummaryDialect,
-    project_key_for_directory_in,
+    SessionKey, SessionMessage, SessionMutationError, SessionProjectKey, SessionStore, SessionStoreError,
+    SessionStoreOperation, SessionSubpath, SummaryDialect, project_key_for_directory_in,
     session_files::{
-        LiteSessionFile, extract_first_prompt_from_head, parse_session_info_from_lite, read_agent_metadata_sidecar,
-        sort_page, valid_uuid,
+        extract_first_prompt_from_head, parse_session_info_from_lite, read_agent_metadata_sidecar, sort_page,
+        valid_uuid,
     },
     session_mutations::{build_fork_lines, iso_now, partition_fork_entry, py_strip, sanitize_unicode},
     session_project_key::canonicalize_lenient_in,
     session_prompt::iso_to_epoch_ms,
+    session_store_shared::{
+        ImportOptions, SessionStoreHelperError, StoreListOptions, invalid_session, jsonl_to_lite, main_key, not_found,
+    },
     session_summary::summary_entry_to_sdk_info,
     session_transcript::{
         entries_to_session_messages, entries_to_subagent_messages, is_transcript_entry, parent_ids_from_agent_metadata,
     },
 };
-
-#[derive(Debug, thiserror::Error)]
-pub enum SessionStoreHelperError {
-    #[error(transparent)]
-    Mutation(#[from] SessionMutationError),
-    #[error(transparent)]
-    Store(#[from] SessionStoreError),
-    #[error(transparent)]
-    Project(#[from] SessionProjectKeyError),
-    #[error(transparent)]
-    Key(#[from] SessionKeyError),
-    #[error("session store implements no {0}; it cannot serve this helper")]
-    UnsupportedStore(&'static str),
-    /// TypeScript `listSessions` on a store with neither `listSessionSummaries` nor `listSessions`.
-    #[error(
-        "sessionStore.listSessions is not implemented -- cannot list sessions. Provide a store with a listSessions() method."
-    )]
-    ListNotImplemented,
-    /// TypeScript `listSubagents` on a store without `listSubkeys`.
-    #[error(
-        "sessionStore.listSubkeys is not implemented -- cannot list subagents. Provide a store with a listSubkeys() method."
-    )]
-    ListSubkeysNotImplemented,
-    #[error(transparent)]
-    Messages(#[from] crate::MessagesError),
-    #[error("session file I/O failed")]
-    Io(#[source] std::io::Error),
-    #[error("session transcript line is not valid JSON")]
-    Encoding(#[source] serde_json::Error),
-    #[error("session transcript line is not a JSON object")]
-    NotObject,
-}
-
-/// Arguments of [`list_sessions_from_store`].
-#[derive(Clone, Debug, Default)]
-pub struct StoreListOptions {
-    /// Project directory the key is derived from; the current directory when empty.
-    pub directory: Option<PathBuf>,
-    pub limit: Option<usize>,
-    pub offset: usize,
-    /// How the store's summary sidecars were folded; match the dialect the store was built with.
-    pub summary_dialect: SummaryDialect,
-}
-
-/// Arguments of [`import_session_to_store`].
-#[derive(Clone, Debug)]
-pub struct ImportOptions {
-    pub directory: Option<PathBuf>,
-    pub include_subagents: bool,
-    /// Entries per `append`; zero means the default of 500.
-    pub batch_size: usize,
-    /// Whose import rules apply: TypeScript keys the session by the project directory it names, Python by the name of
-    /// the on-disk project directory the session was found in.
-    pub dialect: SummaryDialect,
-}
-
-impl Default for ImportOptions {
-    fn default() -> Self {
-        Self {
-            directory: None,
-            include_subagents: true,
-            batch_size: DEFAULT_IMPORT_BATCH,
-            dialect: SummaryDialect::TypeScript,
-        }
-    }
-}
 
 fn project_key(directory: Option<&Path>) -> Result<SessionProjectKey, SessionStoreHelperError> {
     Ok(project_key_for_directory_in(
@@ -114,22 +50,6 @@ fn project_path(directory: Option<&Path>) -> String {
             .unwrap_or_else(|| Path::new(".")),
         crate::SummaryDialect::Python,
     )
-}
-
-pub(crate) fn main_key(project: SessionProjectKey, session_id: &str) -> Result<SessionKey, SessionStoreHelperError> {
-    Ok(SessionKey::new(project, SessionId::from(session_id))?)
-}
-
-pub(crate) fn invalid_session(session_id: &str) -> SessionStoreHelperError {
-    SessionMutationError::InvalidSessionId(session_id.to_owned()).into()
-}
-
-pub(crate) fn not_found(session_id: &str) -> SessionStoreHelperError {
-    SessionMutationError::NotFound {
-        session_id: session_id.to_owned(),
-        directory: None,
-    }
-    .into()
 }
 
 /// Upstream `_entries_to_jsonl`: one compact line per entry with `type` hoisted first, because the lite parse scans
@@ -152,25 +72,6 @@ fn entries_to_jsonl(entries: &[SessionEntry]) -> String {
         out.push_str("}\n");
     }
     out
-}
-
-/// Upstream `_jsonl_to_lite`: the same head and tail slices the disk path would read.
-pub(crate) fn jsonl_to_lite(jsonl: &str, mtime: u64) -> LiteSessionFile {
-    let bytes = jsonl.as_bytes();
-    let size = bytes.len();
-    let window = LITE_READ_BUF_SIZE as usize;
-    let head = String::from_utf8_lossy(&bytes[..size.min(window)]).into_owned();
-    let tail = if size > window {
-        String::from_utf8_lossy(&bytes[size - window..]).into_owned()
-    } else {
-        head.clone()
-    };
-    LiteSessionFile {
-        mtime,
-        size: size as u64,
-        head,
-        tail,
-    }
 }
 
 /// Upstream `_mtime_from_jsonl_tail`: the last entry's timestamp, else the current time.
@@ -212,17 +113,12 @@ async fn derive_infos_via_load(
     project: &SessionProjectKey,
     project_path: &str,
 ) -> Vec<SdkSessionInfo> {
-    let keys: Vec<Option<SessionKey>> = listing
+    let keys: Vec<SessionKey> = listing
         .iter()
-        .map(|(id, _)| SessionKey::new(project.clone(), id.clone()).ok())
+        .map(|(id, _)| SessionKey::new(project.clone(), id.clone()))
         .collect();
-    let outcomes: Vec<Option<Result<Option<Vec<SessionEntry>>, SessionStoreError>>> = stream::iter(keys.iter())
-        .map(|key| async move {
-            match key {
-                Some(key) => Some(store.load(key).await),
-                None => None,
-            }
-        })
+    let outcomes: Vec<Result<Option<Vec<SessionEntry>>, SessionStoreError>> = stream::iter(keys.iter())
+        .map(|key| store.load(key))
         .buffered(LIST_LOAD_CONCURRENCY)
         .collect()
         .await;
@@ -230,15 +126,15 @@ async fn derive_infos_via_load(
     let mut results = Vec::new();
     for ((id, mtime), outcome) in listing.iter().zip(outcomes) {
         match outcome {
-            Some(Ok(Some(entries))) if !entries.is_empty() => {
+            Ok(Some(entries)) if !entries.is_empty() => {
                 let lite = jsonl_to_lite(&entries_to_jsonl(&entries), *mtime);
                 if let Some(mut info) = parse_session_info_from_lite(id.as_str(), &lite, Some(project_path)) {
                     info.last_modified = *mtime;
                     results.push(info);
                 }
             }
-            Some(Ok(_)) => {}
-            Some(Err(_)) | None => results.push(SdkSessionInfo {
+            Ok(_) => {}
+            Err(_) => results.push(SdkSessionInfo {
                 session_id: id.clone(),
                 summary: String::new(),
                 last_modified: *mtime,
@@ -383,7 +279,7 @@ async fn py_get_session_info_from_store(
     if valid_uuid(session_id).is_none() {
         return Ok(None);
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let entries = load_entries(store, &key).await?;
     if entries.is_empty() {
         return Ok(None);
@@ -407,7 +303,7 @@ async fn py_get_session_messages_from_store(
     if valid_uuid(session_id).is_none() {
         return Ok(Vec::new());
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let entries = load_entries(store, &key).await?;
     Ok(entries_to_session_messages(&filter_transcript(entries), page))
 }
@@ -424,7 +320,7 @@ async fn py_list_subagents_from_store(
     if !store.supports(SessionStoreOperation::ListSubkeys) {
         return Err(SessionStoreHelperError::UnsupportedStore("list_subkeys"));
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let mut seen = HashSet::new();
     let mut ids = Vec::new();
     for subpath in store.list_subkeys(&key).await? {
@@ -453,7 +349,7 @@ async fn py_get_subagent_messages_from_store(
         return Ok(Vec::new());
     }
     let project = project_key(directory)?;
-    let base = main_key(project, session_id)?;
+    let base = main_key(project, session_id);
     let mut subpath = format!("subagents/agent-{agent_id}");
     if store.supports(SessionStoreOperation::ListSubkeys) {
         let target = format!("agent-{agent_id}");
@@ -467,10 +363,7 @@ async fn py_get_subagent_messages_from_store(
             None => return Ok(Vec::new()),
         }
     }
-    let Ok(subpath) = SessionSubpath::new(subpath) else {
-        return Ok(Vec::new());
-    };
-    let key = base.with_subpath(subpath);
+    let key = base.with_subpath(SessionSubpath::new(subpath));
     let entries = load_entries(store, &key).await?;
 
     let mut metadata: Option<JsonObject> = None;
@@ -518,7 +411,7 @@ async fn py_rename_session_via_store(
     if stripped.is_empty() {
         return Err(SessionMutationError::EmptyTitle.into());
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let entry = metadata_entry([
         ("type", Value::from("custom-title")),
         ("customTitle", Value::from(stripped)),
@@ -548,7 +441,7 @@ async fn py_tag_session_via_store(
         }
         None => String::new(),
     };
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     let entry = metadata_entry([
         ("type", Value::from("tag")),
         ("tag", Value::from(tag)),
@@ -570,7 +463,7 @@ async fn py_delete_session_via_store(
     if !store.supports(SessionStoreOperation::Delete) {
         return Ok(());
     }
-    let key = main_key(project_key(directory)?, session_id)?;
+    let key = main_key(project_key(directory)?, session_id);
     store.delete(&key).await?;
     Ok(())
 }
@@ -616,7 +509,7 @@ async fn py_fork_session_via_store(
         return Err(SessionMutationError::InvalidMessageId(message_id.to_owned()).into());
     }
     let project = project_key(directory)?;
-    let source = main_key(project.clone(), session_id)?;
+    let source = main_key(project.clone(), session_id);
     let loaded = load_entries(store, &source).await?;
     if loaded.is_empty() {
         return Err(not_found(session_id));
@@ -650,7 +543,7 @@ async fn py_fork_session_via_store(
             Err(error) => Err(SessionStoreHelperError::Encoding(error)),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let destination = main_key(project, &forked)?;
+    let destination = main_key(project, &forked);
     store.append(&destination, &entries).await?;
     Ok(crate::ForkSessionResult {
         session_id: SessionId::from(forked),
@@ -677,14 +570,14 @@ async fn py_import_session_to_store(
         .and_then(Path::file_name)
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let project = SessionProjectKey::new(project_name)?;
+    let project = SessionProjectKey::new(project_name);
     let batch_size = if options.batch_size == 0 {
         DEFAULT_IMPORT_BATCH
     } else {
         options.batch_size
     };
 
-    let main = main_key(project.clone(), session_id)?;
+    let main = main_key(project.clone(), session_id);
     append_jsonl_in_batches(&resolved, &main, store, batch_size).await?;
     if !options.include_subagents {
         return Ok(());
@@ -702,7 +595,7 @@ async fn py_import_session_to_store(
         if let Some(last) = parts.last_mut() {
             last.truncate(last.len().saturating_sub(".jsonl".len()));
         }
-        let subpath = SessionSubpath::new(parts.join("/")).map_err(SessionKeyError::from)?;
+        let subpath = SessionSubpath::new(parts.join("/"));
         let key = main.clone().with_subpath(subpath);
         append_jsonl_in_batches(&file, &key, store, batch_size).await?;
         if let Some(mut metadata) = read_agent_metadata_sidecar(&file) {

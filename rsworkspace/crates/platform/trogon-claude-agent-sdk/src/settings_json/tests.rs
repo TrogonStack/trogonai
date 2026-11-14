@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{js_normalize, js_stringify, python_dumps};
+use super::{js_float, js_normalize, js_stringify, python_dumps};
 
 fn parse(text: &str) -> Value {
     serde_json::from_str(text).unwrap_or(Value::Null)
@@ -25,6 +25,13 @@ fn javascript_switches_to_exponents_at_the_same_thresholds() {
 }
 
 #[test]
+fn javascript_prints_a_non_finite_double_as_null() {
+    assert_eq!(js_float(f64::NAN), "null");
+    assert_eq!(js_float(f64::INFINITY), "null");
+    assert_eq!(js_float(f64::NEG_INFINITY), "null");
+}
+
+#[test]
 fn normalizing_matches_the_stringified_form() {
     let value = parse(r#"{"b":1,"2":1.0}"#);
     assert_eq!(js_normalize(&value).to_string(), "{\"2\":1,\"b\":1}");
@@ -37,4 +44,10 @@ fn python_separates_with_spaces_and_escapes_non_ascii() {
         python_dumps(&value),
         "{\"a\": [1, 2.0, \"\\u00e9\\u007f\\ud83d\\ude00\"], \"b\": {\"c\": null}, \"d\": 1e+16, \"e\": 1e-07}"
     );
+}
+
+#[test]
+fn python_escapes_quotes_backslashes_and_control_characters_and_keeps_a_fraction() {
+    let value = json!(["\"\\\n\r\t\u{8}\u{c}", 1.5, -0.25]);
+    assert_eq!(python_dumps(&value), r#"["\"\\\n\r\t\b\f", 1.5, -0.25]"#);
 }

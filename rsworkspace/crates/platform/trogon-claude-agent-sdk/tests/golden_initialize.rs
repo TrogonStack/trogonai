@@ -53,13 +53,12 @@ fn accepting() -> Value {
     json!({"hooks_applied":true,"hook_on_failure_supported":true,"claude_code_version":"2.1.319"})
 }
 
-async fn connect(
-    options: ClaudeAgentOptions,
-    response: Value,
-) -> (
+type Connected = (
     Result<ClaudeSdkClient, Error>,
     tokio::task::JoinHandle<Result<Vec<String>, std::io::Error>>,
-) {
+);
+
+async fn connect(options: ClaudeAgentOptions, response: Value) -> Connected {
     let (process, harness) = ScriptedProcessSpawner::new();
     let server = tokio::spawn(serve(harness, response));
     let client = ClaudeSdkClient::connect_with_adapters(
@@ -246,6 +245,28 @@ async fn dialog_kinds_without_a_handler_are_refused_before_initialize() -> Resul
     Ok(())
 }
 
+/// `sdk.mjs` hands the Query back before initialize is answered, so a refusal ends the run and rejects
+/// `initializationResult()` with the same error. Returns that error after checking both places agree.
+async fn refusal(client: Result<ClaudeSdkClient, Error>) -> Result<Arc<Error>, Box<dyn std::error::Error>> {
+    let mut client = client?;
+    let rejected = client
+        .handle()
+        .initialization_result()
+        .await
+        .err()
+        .ok_or("initializationResult() must reject")?;
+    let Error::InitializationFailed(inner) = rejected else {
+        return Err(format!("expected the shared initialize failure, got {rejected:?}").into());
+    };
+    let ended = client
+        .next_message()
+        .await
+        .err()
+        .ok_or("the run must end with the refusal")?;
+    assert_eq!(ended.to_string(), inner.to_string());
+    Ok(inner)
+}
+
 fn blocking_hook() -> Vec<HookRegistration> {
     vec![HookRegistration {
         event: HookEvent::Stop,
@@ -261,8 +282,8 @@ async fn blocking_hooks_need_on_failure_support() -> Result<(), Box<dyn std::err
     let mut options = base();
     options.hooks = blocking_hook();
     let (client, _server) = connect(options, json!({"hooks_applied":true})).await;
-    let error = client.err().ok_or("a CLI without on_failure support must be refused")?;
-    assert!(matches!(error, Error::BlockingHooksUnsupported), "{error:?}");
+    let error = refusal(client).await?;
+    assert!(matches!(*error, Error::BlockingHooksUnsupported), "{error:?}");
     assert_eq!(
         error.to_string(),
         "The process answering initialize does not honor on_failure on hook matchers, so a hook that fails would \
@@ -283,8 +304,8 @@ async fn hooks_that_were_not_applied_are_refused() -> Result<(), Box<dyn std::er
     let mut options = base();
     options.hooks = blocking_hook();
     let (client, _server) = connect(options, json!({"hooks_applied":false,"hook_on_failure_supported":true})).await;
-    let error = client.err().ok_or("unapplied hooks must be refused")?;
-    assert!(matches!(error, Error::HooksNotApplied), "{error:?}");
+    let error = refusal(client).await?;
+    assert!(matches!(*error, Error::HooksNotApplied), "{error:?}");
     assert_eq!(
         error.typescript_message().as_deref(),
         Some(
@@ -311,7 +332,10 @@ async fn a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_pyt
         options.argv_style = style;
         let (client, server) = connect(options, json!(42)).await;
         let client = client?;
-        assert_eq!(client.connection_info().as_json(), &expected);
+        assert_eq!(
+            client.handle().initialization_result().await?.as_json(),
+            Some(&expected)
+        );
         client.disconnect().await?;
         server.await??;
     }

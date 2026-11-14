@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::{SettingsMap, merge_with_union};
+use super::{SettingsMap, merge_with_union, set_path};
 use crate::{constants::SETTINGS_SCHEMA_JSON, settings_json::js_stringify};
 
 fn object(value: &Value) -> SettingsMap {
@@ -37,4 +37,13 @@ fn the_extracted_rules_name_every_special_key() {
         merge["shallowObjectKeys"],
         serde_json::json!(["extraKnownMarketplaces", "managedMcpServers"])
     );
+}
+
+#[test]
+fn setting_at_an_empty_path_leaves_the_settings_alone() {
+    let before = object(&serde_json::json!({"model": "a", "permissions": {"allow": ["x"]}}));
+    let mut settings = before.clone();
+    set_path(&mut settings, &[], Some(&Value::Bool(true)));
+    set_path(&mut settings, &[], None);
+    assert_eq!(settings, before);
 }

@@ -179,3 +179,121 @@ fn await_initialize_is_skipped_when_an_sdk_url_is_present() {
     request_await_initialize(&mut runtime);
     assert!(runtime.extra_args.is_empty());
 }
+
+fn with_workload(workload: &str, extra: Vec<ExtraArgument>) -> ClaudeAgentOptions {
+    ClaudeAgentOptions {
+        workload: Some(workload.into()),
+        extra_args: extra,
+        ..ClaudeAgentOptions::default()
+    }
+}
+
+fn flag(name: &str, value: Option<&str>) -> ExtraArgument {
+    ExtraArgument {
+        flag: name.into(),
+        value: value.map(str::to_owned),
+    }
+}
+
+#[test]
+fn workload_is_appended_after_the_built_in_flags() {
+    let all = tokens(&with_workload("cron", Vec::new()));
+    assert_eq!(all[5..], ["--workload", "cron"]);
+}
+
+#[test]
+fn workload_replaces_an_extra_argument_of_the_same_name_in_place() {
+    let options = with_workload(
+        "cron",
+        vec![flag("foo", Some("x")), flag("workload", Some("old")), flag("bar", None)],
+    );
+    assert_eq!(tokens(&options)[5..], ["--foo", "x", "--workload", "cron", "--bar"]);
+}
+
+#[test]
+fn an_empty_workload_sends_nothing_and_python_ignores_it() {
+    assert_eq!(
+        tokens(&with_workload("", vec![flag("workload", Some("old"))]))[5..],
+        ["--workload", "old"]
+    );
+    let mut python = with_workload("cron", Vec::new());
+    python.argv_style = ArgvStyle::Python;
+    assert!(!tokens(&python).contains(&"--workload".to_owned()));
+}
+
+#[test]
+fn workload_precedes_await_initialize_and_an_existing_await_flag_becomes_bare_in_place() {
+    let mut options = ClaudeAgentOptions {
+        workload: Some("cron".into()),
+        ..resumed()
+    };
+    request_await_initialize(&mut options);
+    assert_eq!(
+        tokens(&options)[5..],
+        ["--continue", "--workload", "cron", "--await-initialize"]
+    );
+
+    let mut explicit = ClaudeAgentOptions {
+        extra_args: vec![flag("await-initialize", Some("x")), flag("tail", None)],
+        ..resumed()
+    };
+    request_await_initialize(&mut explicit);
+    assert_eq!(tokens(&explicit)[5..], ["--continue", "--await-initialize", "--tail"]);
+}
+
+#[test]
+fn an_explicit_await_initialize_extra_is_overwritten_in_place() {
+    let mut options = ClaudeAgentOptions {
+        extra_args: vec![
+            ExtraArgument {
+                flag: "await-initialize".into(),
+                value: Some("no".into()),
+            },
+            ExtraArgument {
+                flag: "other".into(),
+                value: None,
+            },
+        ],
+        ..resumed()
+    };
+    request_await_initialize(&mut options);
+    assert_eq!(options.extra_args.len(), 2);
+    assert_eq!(options.extra_args[0].flag, "await-initialize");
+    assert_eq!(options.extra_args[0].value, None);
+}
+
+#[test]
+fn a_repeated_await_initialize_extra_is_forced_bare_at_its_first_position() {
+    let mut options = ClaudeAgentOptions {
+        extra_args: vec![
+            ExtraArgument {
+                flag: "await-initialize".into(),
+                value: Some("first".into()),
+            },
+            ExtraArgument {
+                flag: "other".into(),
+                value: None,
+            },
+            ExtraArgument {
+                flag: "await-initialize".into(),
+                value: Some("last".into()),
+            },
+        ],
+        ..resumed()
+    };
+    request_await_initialize(&mut options);
+    assert!(
+        options
+            .extra_args
+            .iter()
+            .all(|extra| extra.flag != "await-initialize" || extra.value.is_none())
+    );
+    let entries = crate::settings_option::typescript_extra_entries(&options).ok();
+    assert_eq!(
+        entries.map(|entries| entries
+            .into_iter()
+            .map(|(flag, value)| (flag, value.is_none()))
+            .collect::<Vec<_>>()),
+        Some(vec![("await-initialize".to_owned(), true), ("other".to_owned(), true)])
+    );
+}

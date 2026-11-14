@@ -11,6 +11,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use crate::{
@@ -21,8 +22,10 @@ use crate::{
         SETTINGS_PATH_WITH_SANDBOX_ERROR,
     },
     process_options::ArgvStyle,
+    python_json_value::{PythonJsonValue, PythonNumber, python_json_dumps, python_json_loads},
+    python_text,
     settings_json::{js_normalize, js_stringify, python_dumps},
-    skills::python_repr,
+    settings_numbers::same_value_zero,
 };
 
 /// TypeScript's `managedSettingsViaInitialize`.
@@ -100,7 +103,7 @@ fn unique(items: Vec<Value>) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::with_capacity(items.len());
     for item in items {
         let primitive = !matches!(item, Value::Array(_) | Value::Object(_));
-        if primitive && out.contains(&item) {
+        if primitive && out.iter().any(|seen| same_value_zero(seen, &item)) {
             continue;
         }
         out.push(item);
@@ -137,9 +140,27 @@ fn merge(base: Option<&Value>, patch: &Map<String, Value>, path: &str) -> Map<St
     merged
 }
 
-fn looks_like_json(text: &str) -> bool {
-    let trimmed = text.trim();
+/// Whether settings text, once trimmed the way the dialect trims it, is braced like a JSON object.
+fn looks_like_json(trimmed: &str) -> bool {
     trimmed.starts_with('{') && trimmed.ends_with('}')
+}
+
+/// The sandbox option with every finite number that holds an infinity marker's value kept as the equal integer, so
+/// the merge does not read it as an infinity.
+fn unmark_numbers(value: &mut Value) {
+    match value {
+        Value::Number(number) if number.is_f64() => {
+            if let Some(float) = number
+                .as_f64()
+                .filter(|float| crate::settings_numbers::is_marker_value(*float))
+            {
+                *value = crate::settings_numbers::finite_number(float);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(unmark_numbers),
+        Value::Object(entries) => entries.values_mut().for_each(unmark_numbers),
+        _ => {}
+    }
 }
 
 fn domain_rules_set(network: Option<&Value>) -> bool {
@@ -154,17 +175,20 @@ fn domain_rules_set(network: Option<&Value>) -> bool {
     network.contains_key("allowedDomains") || denied > 0 || network.get("strictAllowlist") == Some(&Value::Bool(true))
 }
 
-/// `_8`: the settings document with `sandbox` merged in.
-fn merge_sandbox(settings: Option<&OsString>, sandbox: &Map<String, Value>) -> Result<String, Error> {
+/// `_8`: the settings document with `sandbox` merged in. The text is trimmed as `String.prototype.trim` trims and
+/// read as `JSON.parse` reads it, so a number past the double range is `Infinity` and prints as `null`.
+fn merge_sandbox(settings: Option<&OsString>, mut sandbox: Map<String, Value>) -> Result<String, Error> {
+    sandbox.values_mut().for_each(unmark_numbers);
+    let sandbox = &sandbox;
     let text = settings.map(|value| value.to_string_lossy().into_owned());
     let text = text.filter(|text| !text.is_empty());
     if let Some(text) = &text
-        && !looks_like_json(text)
+        && !looks_like_json(crate::session_prompt::js_trim(text))
     {
         return Err(OptionError::new(SETTINGS_PATH_WITH_SANDBOX_ERROR).into());
     }
     let mut document = text
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|text| crate::settings_parse::parse_json(&text).ok())
         .and_then(|value| match value {
             Value::Object(map) => Some(map),
             _ => None,
@@ -207,7 +231,9 @@ fn merge_sandbox(settings: Option<&OsString>, sandbox: &Map<String, Value>) -> R
         merged.insert("failIfUnavailable".into(), Value::Bool(true));
     }
     document.insert("sandbox".into(), Value::Object(merged));
-    Ok(js_stringify(&Value::Object(document)))
+    let mut document = Value::Object(document);
+    crate::settings_numbers::infinities_to_null(&mut document);
+    Ok(js_stringify(&document))
 }
 
 fn sandbox_object(sandbox: &SandboxSettings) -> Result<Map<String, Value>, Error> {
@@ -222,11 +248,22 @@ pub(crate) type ExtraEntry = (String, Option<OsString>);
 
 /// TypeScript's `extraArgs` after `settings` is added and `_8` merges the sandbox, in emission order.
 pub(crate) fn typescript_extra_entries(options: &ClaudeAgentOptions) -> Result<Vec<ExtraEntry>, Error> {
-    let mut entries: Vec<ExtraEntry> = options
-        .extra_args
-        .iter()
-        .map(|extra| (extra.flag.clone(), extra.value.as_deref().map(OsString::from)))
-        .collect();
+    // The upstream spread `{...extraArgs}` keeps a repeated key at its first position with its last value.
+    let mut entries: Vec<ExtraEntry> = Vec::new();
+    for extra in &options.extra_args {
+        let value = extra.value.as_deref().map(OsString::from);
+        match entries.iter_mut().find(|(flag, _)| *flag == extra.flag) {
+            Some(entry) => entry.1 = value,
+            None => entries.push((extra.flag.clone(), value)),
+        }
+    }
+    // `extraArgs` is `{...extraArgs, workload}`: it exists before the settings merge, so settings see it last.
+    if let Some(workload) = options.workload.as_deref().filter(|workload| !workload.is_empty()) {
+        match entries.iter_mut().find(|(flag, _)| flag == "workload") {
+            Some(entry) => entry.1 = Some(OsString::from(workload)),
+            None => entries.push(("workload".into(), Some(OsString::from(workload)))),
+        }
+    }
     let set = |entries: &mut Vec<ExtraEntry>, value: OsString| match entries
         .iter_mut()
         .find(|(flag, _)| flag == "settings")
@@ -245,7 +282,7 @@ pub(crate) fn typescript_extra_entries(options: &ClaudeAgentOptions) -> Result<V
             .iter()
             .find(|(flag, _)| flag == "settings")
             .and_then(|(_, value)| value.as_ref());
-        let merged = merge_sandbox(current, &sandbox_object(sandbox)?)?;
+        let merged = merge_sandbox(current, sandbox_object(sandbox)?)?;
         set(&mut entries, OsString::from(merged));
     }
     Ok(entries)
@@ -258,19 +295,22 @@ fn python_os_error(error: &io::Error, path: &Path) -> String {
             let reason = text
                 .rsplit_once(" (os error")
                 .map_or(text.as_str(), |(reason, _)| reason);
-            format!("[Errno {code}] {reason}: {}", python_repr(&path.to_string_lossy()))
+            format!(
+                "[Errno {code}] {reason}: {}",
+                python_text::repr(&python_text::from_os_str(path.as_os_str()))
+            )
         }
         None => text,
     }
 }
 
-fn python_type_error(value: &Value) -> &'static str {
+fn python_type_error(value: &PythonJsonValue) -> &'static str {
     match value {
-        Value::Array(_) => "list indices must be integers or slices, not str",
-        Value::String(_) => "'str' object does not support item assignment",
-        Value::Bool(_) => "'bool' object does not support item assignment",
-        Value::Number(number) if number.is_f64() => "'float' object does not support item assignment",
-        Value::Number(_) => "'int' object does not support item assignment",
+        PythonJsonValue::Array(_) => "list indices must be integers or slices, not str",
+        PythonJsonValue::String(_) => "'str' object does not support item assignment",
+        PythonJsonValue::Bool(_) => "'bool' object does not support item assignment",
+        PythonJsonValue::Number(PythonNumber::Float(_)) => "'float' object does not support item assignment",
+        PythonJsonValue::Number(PythonNumber::Int(_)) => "'int' object does not support item assignment",
         _ => "'NoneType' object does not support item assignment",
     }
 }
@@ -299,9 +339,9 @@ where
         return Ok(settings.filter(|text| !text.is_empty()));
     };
     let failed = |reason: String| -> Error { OptionError::new(format!("Failed to load settings: {reason}")).into() };
-    let mut document = Value::Object(Map::new());
+    let mut document = PythonJsonValue::Object(IndexMap::new());
     if let Some(settings) = settings {
-        let trimmed = settings.trim().to_owned();
+        let trimmed = crate::session_mutations::py_strip(&settings).to_owned();
         let text = if looks_like_json(&trimmed) {
             trimmed
         } else {
@@ -322,13 +362,16 @@ where
             })?;
             text.strip_prefix('\u{feff}').map(str::to_owned).unwrap_or(text)
         };
-        document = serde_json::from_str(&text).map_err(|error| failed(error.to_string()))?;
+        document = python_json_loads(&text).map_err(|error| failed(error.to_string()))?;
     }
-    let Value::Object(map) = &mut document else {
+    let PythonJsonValue::Object(map) = &mut document else {
         return Err(failed(python_type_error(&document).to_owned()));
     };
-    map.insert("sandbox".into(), Value::Object(sandbox_object(sandbox)?));
-    Ok(Some(python_dumps(&document)))
+    map.insert(
+        "sandbox".into(),
+        PythonJsonValue::from(&Value::Object(sandbox_object(sandbox)?)),
+    );
+    Ok(Some(python_json_dumps(&document)))
 }
 
 #[cfg(test)]

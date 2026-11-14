@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 use std::{
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
@@ -82,34 +84,48 @@ impl DriverFixture {
             overflow: VecDeque::new(),
             shutdown: shutdown_rx,
             shutdown_seen: false,
+            abort: crate::CancellationToken::new(),
             limits: Limits::default(),
             handler,
             message_decoding: crate::MessageDecoding::TypeScript,
+            js_runtime: crate::JsRuntime::Node,
             pending: HashMap::new(),
             callbacks: JoinSet::new(),
             callback_handles: HashMap::new(),
             callback_signals: HashMap::new(),
             detached_callbacks: HashMap::new(),
+            cancelled_callbacks: HashSet::new(),
             hook_callbacks: HashMap::new(),
-            sdk_mcp_servers: BTreeMap::new(),
-            pending_mcp: None,
+            sdk_mcp_servers: McpSessions::new(),
+            mcp: McpRouting::new(),
+            capture_manifests: false,
             initialize_request: crate::wire::runtime_payload::InitializeRequest::default()
                 .into_payload(crate::ArgvStyle::TypeScript)
                 .to_value()?,
             initialize_expectations: InitializeExpectations::default(),
             initialize_timeout: None,
             version_check: None,
+            latest_commands: LatestCommands::default(),
+            startup_tap: None,
             verbatim_prompts: false,
             warn_unsupported_verbatim: false,
             elicitation_handler: None,
             user_dialog_handler: None,
-            dialog_kinds: HashSet::new(),
+            oauth_token_handler: None,
+            host_auth_token_handler: None,
+            host: crate::remote_control::HostState::default(),
             session: None,
             mirror_flush: None,
             deferred_messages: VecDeque::new(),
+            held_observations: VecDeque::new(),
+            initialize_hold: false,
+            prompt_hold: PromptHold::default(),
+            held_commands: VecDeque::new(),
             next_id: 0,
+            wire_ids: None,
             state: State::Idle,
             run_state: RunState::default(),
+            run_end: crate::run_end::RunEnd::new(crate::ArgvStyle::TypeScript, Some(Duration::from_secs(600))),
             argv_style: crate::ArgvStyle::TypeScript,
             last_error_result: None,
         };
@@ -193,9 +209,15 @@ async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), B
         replacement_retained,
         "a stale allow completion removed the replacement callback"
     );
-    assert!(outcome.is_err(), "a stale completion emitted a response to the CLI");
+    assert!(outcome.is_err(), "the event loop stopped");
     assert!(elapsed >= Duration::from_millis(100));
     assert!(elapsed <= Duration::from_millis(101));
+    // TypeScript still writes what a cancelled handler returns.
+    let stale = fixture.harness.written.try_recv()?;
+    assert!(
+        stale.contains(r#""request_id":"reused-id""#) && stale.contains(r#""behavior":"allow""#),
+        "{stale}"
+    );
     fixture.finish().await
 }
 
@@ -203,6 +225,7 @@ async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), B
 async fn initialization_owns_admission_until_the_handshake_completes() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     fixture.driver.state = State::Initializing;
+    fixture.driver.argv_style = crate::ArgvStyle::Python;
     let (response, receiver) = oneshot::channel();
     fixture
         .driver
@@ -308,7 +331,7 @@ async fn a_stale_panicked_callback_cannot_terminate_the_current_session() -> Res
         id.clone(),
         crate::CancellationToken::new(),
         Some(Duration::from_secs(1)),
-        wire::callback_error_response(&id, "fallback"),
+        wire::callback_error_response(&id, "fallback").map(Some),
         async { std::panic::resume_unwind(Box::new("scripted stale callback failure")) },
     );
     timeout(Duration::from_secs(1), async {
@@ -381,6 +404,33 @@ async fn eof_mirror_drain_publishes_failures_before_deferred_messages() -> Resul
     assert!(
         matches!(fixture.messages.recv().await, Some(Message::System(message)) if message.subtype == "after_fence")
     );
+    fixture.finish().await
+}
+
+/// Both upstream readers wait for the transcript flush before they handle a result, so the run ends, and stdin
+/// closes, only after it; a frame after the result waits behind it.
+#[tokio::test]
+async fn a_result_reaches_the_run_end_machine_only_after_its_flush() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let decode = |value: serde_json::Value| {
+        let raw = value.as_object().cloned().unwrap_or_default();
+        crate::message_decode::typed(&raw, crate::MessageDecoding::TypeScript)
+    };
+    let result = decode(serde_json::json!({
+        "type": "result", "subtype": "success", "is_error": false, "duration_ms": 1, "duration_api_ms": 1,
+        "num_turns": 1, "session_id": "s", "result": "done",
+    }));
+    let later = decode(serde_json::json!({
+        "type": "system", "subtype": "session_state_changed", "state": "idle", "session_id": "s",
+    }));
+    fixture.driver.run_end.prompt_written();
+    fixture.driver.run_end.finish(false, true);
+    fixture.driver.held_observations.push_back((result, true));
+    fixture.driver.held_observations.push_back((later, false));
+    assert!(!fixture.driver.run_end.close_due());
+    fixture.driver.release_observations();
+    assert!(fixture.driver.held_observations.is_empty());
+    assert!(fixture.driver.run_end.close_due());
     fixture.finish().await
 }
 
@@ -504,7 +554,7 @@ async fn a_typescript_initialize_expiry_is_initialize_not_confirmed() -> Result<
     fixture.driver.pending.insert(
         ControlRequestId::from("initialize"),
         PendingControl {
-            response: ControlResponder::Initialize(response),
+            response: ControlResponder::Initialize { first: true, response },
             deadline: Some(Instant::now()),
         },
     );
@@ -525,7 +575,7 @@ async fn an_initialize_armed_only_by_managed_settings_expires_with_their_message
     fixture.driver.pending.insert(
         ControlRequestId::from("initialize"),
         PendingControl {
-            response: ControlResponder::Initialize(response),
+            response: ControlResponder::Initialize { first: true, response },
             deadline: Some(Instant::now()),
         },
     );
@@ -535,6 +585,69 @@ async fn an_initialize_armed_only_by_managed_settings_expires_with_their_message
     ));
     assert!(matches!(receiver.await?, Err(Error::ManagedSettingsNotConfirmed)));
     fixture.finish().await
+}
+
+/// What the TypeScript SDK shows for a request that waited behind an initialize that never answered: the
+/// timer's own message, and nothing held was ever written.
+#[tokio::test(start_paused = true)]
+async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects_what_was_held()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(TYPESCRIPT_INITIALIZE_TIMEOUT, Duration::from_secs(660));
+    for (blocking_hooks, expected) in [
+        (
+            true,
+            "Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session.",
+        ),
+        (
+            false,
+            "Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session.",
+        ),
+    ] {
+        let mut fixture = DriverFixture::new()?;
+        fixture.driver.initialize_hold = true;
+        fixture.driver.initialize_expectations.blocking_hooks = blocking_hooks;
+        fixture.driver.initialize_expectations.managed_settings = !blocking_hooks;
+        fixture.driver.initialize_timeout = Some(TYPESCRIPT_INITIALIZE_TIMEOUT);
+        let (initialize, initialized) = oneshot::channel();
+        let (prompt, prompted) = oneshot::channel();
+        let (control, controlled) = oneshot::channel();
+        let started = Instant::now();
+        fixture.driver.pending.insert(
+            ControlRequestId::from("initialize"),
+            PendingControl {
+                response: ControlResponder::Initialize {
+                    first: true,
+                    response: initialize,
+                },
+                deadline: fixture.driver.control_deadline(ControlOperation::Initialize),
+            },
+        );
+        fixture.driver.held_commands.push_back(Command::Prompt {
+            input: crate::Prompt::from("hi").into(),
+            response: prompt,
+        });
+        fixture.driver.held_commands.push_back(Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        });
+        let outcome = fixture.driver.event_loop().await;
+        assert_eq!(started.elapsed(), TYPESCRIPT_INITIALIZE_TIMEOUT);
+        assert_eq!(outcome.err().map(|error| error.to_string()).as_deref(), Some(expected));
+        assert_eq!(
+            initialized.await?.err().map(|error| error.to_string()).as_deref(),
+            Some(expected)
+        );
+        // The prompt is dropped unsent, and the held control fails with the same message.
+        assert!(matches!(prompted.await?, Ok(())));
+        assert!(matches!(
+            controlled.await?,
+            Err(Error::InitializationFailed(inner)) if inner.to_string() == expected
+        ));
+        assert!(fixture.driver.held_commands.is_empty());
+        fixture.finish().await?;
+    }
+    Ok(())
 }
 
 #[tokio::test(start_paused = true)]
@@ -625,7 +738,7 @@ async fn a_duplicate_in_flight_request_is_skipped_or_run_by_policy() -> Result<(
         id.clone(),
         crate::CancellationToken::new(),
         None,
-        wire::callback_error_response(&id, "fallback"),
+        wire::callback_error_response(&id, "fallback").map(Some),
         pending(),
     );
     assert!(!fixture.driver.admit_callback(&id).await?);
@@ -649,24 +762,62 @@ async fn a_duplicate_in_flight_request_is_skipped_or_run_by_policy() -> Result<(
 
 #[test]
 fn python_initialize_timeout_reads_the_stream_close_variable() -> Result<(), Error> {
-    let parse = |value: &str| python_initialize_timeout(Some(value.into()));
     assert_eq!(python_initialize_timeout(None)?, Duration::from_secs(60));
-    assert_eq!(parse("90000")?, Duration::from_secs(90));
-    assert_eq!(parse(" +120_500\n")?, Duration::from_millis(120_500));
-    assert_eq!(parse("1000")?, Duration::from_secs(60));
-    assert_eq!(parse("-5")?, Duration::from_secs(60));
-    assert_eq!(parse("99999999999999999999999")?, Duration::from_millis(u64::MAX));
-    for (value, message) in [
-        ("1.5", "invalid literal for int() with base 10: '1.5'"),
-        ("", "invalid literal for int() with base 10: ''"),
-        ("1__0", "invalid literal for int() with base 10: '1__0'"),
-        ("it's", "invalid literal for int() with base 10: \"it's\""),
-        ("a\tb\\", "invalid literal for int() with base 10: 'a\\tb\\\\'"),
-        ("\u{1}", "invalid literal for int() with base 10: '\\x01'"),
-    ] {
-        assert_eq!(parse(value).map_err(|error| error.to_string()), Err(message.to_owned()));
+    assert_eq!(
+        python_initialize_timeout(Some(" +120_500\n".into()))?,
+        Duration::from_millis(120_500)
+    );
+    assert_eq!(python_initialize_timeout(Some("1".repeat(308).into()))?, Duration::MAX);
+    assert!(matches!(
+        python_initialize_timeout(Some("1.5".into())),
+        Err(Error::InvalidStreamCloseTimeout { .. })
+    ));
+    Ok(())
+}
+
+/// Replays what the Python SDK's client computed for `initialize_timeout` from each captured variable value.
+#[cfg(unix)]
+#[test]
+fn python_initialize_seconds_match_the_captured_goldens() -> Result<(), Box<dyn std::error::Error>> {
+    let goldens: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/python_text/goldens.json"))?;
+    let cases = goldens["stream_close_timeout"]
+        .as_array()
+        .ok_or("no stream_close_timeout goldens")?;
+    assert_eq!(cases.len(), 61);
+    for case in cases {
+        let bytes = case["value"].as_str().map(hex_bytes).transpose()?;
+        let result = python_initialize_seconds(bytes.as_deref().map(OsStr::from_bytes));
+        if let Some(seconds) = case["seconds"].as_str() {
+            assert_eq!(
+                result.ok().map(f64::to_bits),
+                Some(seconds.parse::<f64>()?.to_bits()),
+                "{case}"
+            );
+            continue;
+        }
+        let kind = result.as_ref().err().map(|error| {
+            if matches!(error, Error::StreamCloseTimeoutOverflow) {
+                "OverflowError"
+            } else {
+                "ValueError"
+            }
+        });
+        assert_eq!(kind, case["error_type"].as_str(), "{case}");
+        assert_eq!(
+            result.err().map(|error| error.to_string()).as_deref(),
+            case["error"].as_str(),
+            "{case}"
+        );
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn hex_bytes(hex: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(hex.get(index..index + 2).unwrap_or_default(), 16))
+        .collect()
 }
 
 fn settings(text: &str) -> Option<crate::Settings> {

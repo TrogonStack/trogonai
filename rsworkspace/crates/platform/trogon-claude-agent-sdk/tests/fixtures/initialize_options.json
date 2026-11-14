@@ -175,5 +175,29 @@
    ""
   ],
   "py_user_client_composed": false
+ },
+ "agent_every_field": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"agents\":{\"rev\":{\"description\":\"d\",\"tools\":[\"Read\",\"mcp__x__*\"],\"disallowedTools\":[\"Bash\"],\"prompt\":\"p\",\"model\":\"sonnet\",\"mcpServers\":[\"named\",{\"inline\":{\"type\":\"sse\",\"url\":\"https://example.com/events\"}},{\"bare\":{\"command\":\"c\"}}],\"criticalSystemReminder_EXPERIMENTAL\":\"crit\",\"skills\":[\"s\"],\"initialPrompt\":\"go\",\"maxTurns\":0,\"autoCompactWindow\":1000,\"background\":true,\"omitClaudeMd\":true,\"memory\":\"project\",\"effort\":3,\"permissionMode\":\"plan\",\"observer\":\"obs\",\"observerMessage\":\"om\",\"zz\":1},\"alpha\":{\"description\":\"a\",\"prompt\":\"q\"}}}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"agents\":{\"rev\":{\"description\":\"d\",\"prompt\":\"p\",\"tools\":[\"Read\",\"mcp__x__*\"],\"disallowedTools\":[\"Bash\"],\"model\":\"sonnet\",\"skills\":[\"s\"],\"memory\":\"project\",\"mcpServers\":[\"named\",{\"inline\":{\"type\":\"sse\",\"url\":\"https://example.com/events\"}},{\"bare\":{\"command\":\"c\"}}],\"initialPrompt\":\"go\",\"maxTurns\":0,\"background\":true,\"effort\":3,\"permissionMode\":\"plan\"},\"alpha\":{\"description\":\"a\",\"prompt\":\"q\"}}}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ]
+ },
+ "agent_raw_values": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"agents\":{\"rev\":{\"description\":\"d\",\"tools\":[],\"prompt\":\"p\",\"mcpServers\":[7,{\"s\":{\"command\":\"c\",\"args\":[\"a\"]},\"t\":{\"type\":\"http\",\"url\":\"https://example.com/mcp\"}}],\"maxTurns\":-1,\"background\":false,\"effort\":2.5}}}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"agents\":{\"rev\":{\"description\":\"d\",\"prompt\":\"p\",\"tools\":[],\"mcpServers\":[7,{\"s\":{\"command\":\"c\",\"args\":[\"a\"]},\"t\":{\"type\":\"http\",\"url\":\"https://example.com/mcp\"}}],\"maxTurns\":-1,\"background\":false,\"effort\":2.5}}}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ]
+ },
+ "agent_named_effort": {
+  "ts_request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"agents\":{\"z\":{\"description\":\"d\",\"prompt\":\"p\",\"effort\":\"xhigh\",\"permissionMode\":\"custom\"},\"b\":{\"description\":\"d2\",\"prompt\":\"p2\",\"memory\":\"local\"}}}",
+  "py_request": "{\"subtype\":\"initialize\",\"hooks\":null,\"agents\":{\"z\":{\"description\":\"d\",\"prompt\":\"p\",\"effort\":\"xhigh\",\"permissionMode\":\"custom\"},\"b\":{\"description\":\"d2\",\"prompt\":\"p2\",\"memory\":\"local\"}}}",
+  "py_prompt_argv": [
+   "--system-prompt",
+   ""
+  ]
  }
 }

@@ -6,16 +6,18 @@ use std::{
     io,
     path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use trogon_claude_agent_sdk::adapters::{
-    CheckReadable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind, EnvironmentVariable, ExecuteFile,
-    ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus, HostIdentity, LinkMetadata, OperatingSystem,
-    ReadDirectory, ReadFile, ReadLink, ReadSymlinkMetadata, WallClock,
+    CanonicalizePath, CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind,
+    EffectiveGroupId, EffectiveUserId, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest,
+    ExecuteFileStatus, HomeDirectory, HostIdentity, LinkMetadata, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId,
+    ReadDirectory, ReadFile, ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
+    SupplementaryGroupIds, WallClock,
 };
 
 /// A host made of maps, so every platform branch runs on any machine.
@@ -29,9 +31,37 @@ pub struct FakeHost {
     pub unreadable: BTreeSet<PathBuf>,
     pub links: BTreeMap<PathBuf, PathBuf>,
     pub commands: BTreeMap<String, ExecuteFileOutcome>,
-    pub runs: Mutex<Vec<String>>,
-    /// Milliseconds since the epoch the host's clock shows; a command moves it by the time the command took.
+    /// Every command line run, shared with the copies a background read takes.
+    pub runs: Arc<Mutex<Vec<String>>>,
+    /// Milliseconds since the epoch the host's clock shows. Commands leave it alone: the resolver counts the
+    /// `duration_ms` they report, the way the oracle's fake clock counts a fixture's `durations`.
     pub clock_ms: AtomicU64,
+    /// While set, every command waits before it answers, shared with the copies a background read takes.
+    pub held: Arc<(Mutex<bool>, Condvar)>,
+    /// Whether running a command fails the read the way a host that throws does.
+    pub throws: bool,
+}
+
+/// A copy sees the files and commands as they are now and the clock where it stands now, and records its runs
+/// with the original.
+impl Clone for FakeHost {
+    fn clone(&self) -> Self {
+        Self {
+            system: self.system.clone(),
+            user: self.user.clone(),
+            cwd: self.cwd.clone(),
+            env: self.env.clone(),
+            files: self.files.clone(),
+            directories: self.directories.clone(),
+            unreadable: self.unreadable.clone(),
+            links: self.links.clone(),
+            commands: self.commands.clone(),
+            runs: Arc::clone(&self.runs),
+            clock_ms: AtomicU64::new(self.clock_ms.load(Ordering::SeqCst)),
+            held: Arc::clone(&self.held),
+            throws: self.throws,
+        }
+    }
 }
 
 impl FakeHost {
@@ -46,9 +76,21 @@ impl FakeHost {
             unreadable: BTreeSet::new(),
             links: BTreeMap::new(),
             commands: BTreeMap::new(),
-            runs: Mutex::new(Vec::new()),
+            runs: Arc::new(Mutex::new(Vec::new())),
             clock_ms: AtomicU64::new(0),
+            held: Arc::new((Mutex::new(false), Condvar::new())),
+            throws: false,
         }
+    }
+
+    /// Makes every command wait until [`FakeHost::release_commands`].
+    pub fn hold_commands(&self) {
+        *self.held.0.lock().expect("held") = true;
+    }
+
+    pub fn release_commands(&self) {
+        *self.held.0.lock().expect("held") = false;
+        self.held.1.notify_all();
     }
 
     /// Sets the clock, in milliseconds since the epoch.
@@ -218,6 +260,105 @@ impl ReadLink for FakeHost {
     }
 }
 
+/// The maps hold no real files, so there is no native metadata to return.
+impl ReadMetadata for FakeHost {
+    type Error = io::Error;
+
+    fn metadata(&self, _path: &Path) -> Result<std::fs::Metadata, io::Error> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+}
+
+impl CanonicalizePath for FakeHost {
+    type Error = io::Error;
+
+    fn canonicalize(&self, _path: &Path) -> Result<PathBuf, io::Error> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+}
+
+impl CheckWritable for FakeHost {
+    type Error = io::Error;
+
+    fn check_writable(&self, _path: &Path) -> Result<(), io::Error> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+}
+
+/// The process ids of a platform without them, so nothing asks the maps for ownership.
+impl EffectiveUserId for FakeHost {
+    fn effective_user_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl RealUserId for FakeHost {
+    fn real_user_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl EffectiveGroupId for FakeHost {
+    fn effective_group_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl RealGroupId for FakeHost {
+    fn real_group_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl SupplementaryGroupIds for FakeHost {
+    type Error = io::Error;
+
+    fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, io::Error>> {
+        None
+    }
+}
+
+impl OpenDirectoryNoFollow for FakeHost {
+    type Error = io::Error;
+
+    fn open_directory_no_follow(&self, path: &Path) -> Result<(), io::Error> {
+        match self.symlink_metadata(path)?.kind {
+            DirectoryEntryKind::Directory => Ok(()),
+            _ => Err(io::Error::from(io::ErrorKind::NotADirectory)),
+        }
+    }
+}
+
+impl ReadFileHead for FakeHost {
+    type Error = io::Error;
+
+    fn read_file_head(&self, path: &Path, limit: usize) -> Result<Vec<u8>, io::Error> {
+        if self.links.contains_key(path) {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        let mut bytes = self.read_file(path)?;
+        bytes.truncate(limit);
+        Ok(bytes)
+    }
+}
+
+/// No folder of the fake host sits on a device of its own.
+impl ReadDeviceId for FakeHost {
+    type Error = io::Error;
+
+    fn device_id(&self, _path: &Path) -> Result<u64, io::Error> {
+        Err(not_found())
+    }
+}
+
+impl HomeDirectory for FakeHost {
+    type Error = io::Error;
+
+    fn home_directory(&self) -> Result<PathBuf, io::Error> {
+        self.env.get("HOME").map(PathBuf::from).ok_or_else(not_found)
+    }
+}
+
 impl HostIdentity for FakeHost {
     fn operating_system(&self) -> OperatingSystem {
         self.system.clone()
@@ -231,6 +372,14 @@ impl HostIdentity for FakeHost {
 impl EnvironmentVariable for FakeHost {
     fn var_os(&self, key: &OsStr) -> Option<OsString> {
         self.env.get(key.to_str()?).map(OsString::from)
+    }
+
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
+
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        None
     }
 }
 
@@ -250,14 +399,17 @@ impl ExecuteFile for FakeHost {
             line.push_str(&argument.to_string_lossy());
         }
         self.runs.lock().expect("runs").push(line.clone());
-        let outcome = self
-            .commands
+        assert!(!self.throws, "the host throws while running {line}");
+        let (held, released) = &*self.held;
+        drop(
+            released
+                .wait_while(held.lock().expect("held"), |holding| *holding)
+                .expect("held"),
+        );
+        self.commands
             .get(&line)
             .cloned()
-            .unwrap_or_else(|| spawn_error("ENOENT"));
-        self.clock_ms
-            .fetch_add(u64::try_from(outcome.duration_ms).unwrap_or(u64::MAX), Ordering::SeqCst);
-        outcome
+            .unwrap_or_else(|| spawn_error("ENOENT"))
     }
 }
 

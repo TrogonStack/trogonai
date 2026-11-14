@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 use crate::{
     constants::{SETTINGS_SCHEMA_ARRAY_SECTIONS, SETTINGS_SCHEMA_REMOTE_SCHEMES},
     session_prompt::js_trim,
+    settings_numbers::js_value,
     settings_schema_hosts::{is_http_url, is_public_https_url},
     settings_schema_paths::PathProfile,
     settings_schema_permission_rule::is_valid_permission_rule,
@@ -45,7 +46,7 @@ impl Batteries {
 /// Number-aware JSON equality: JavaScript has one number type.
 fn same_json(left: &Value, right: &Value) -> bool {
     match (left, right) {
-        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
+        (Value::Number(left), Value::Number(right)) => js_value(left) == js_value(right),
         (Value::Array(left), Value::Array(right)) => {
             left.len() == right.len() && left.iter().zip(right).all(|(a, b)| same_json(a, b))
         }

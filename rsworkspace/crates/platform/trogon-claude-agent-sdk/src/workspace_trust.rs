@@ -18,7 +18,7 @@ fn windows_absolute(path: &str) -> bool {
     }
 }
 
-fn absolute_anywhere(path: &str) -> bool {
+pub(crate) fn absolute_anywhere(path: &str) -> bool {
     path.starts_with('/') || windows_absolute(path)
 }
 

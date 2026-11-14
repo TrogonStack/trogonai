@@ -258,7 +258,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         )?;
                         if mode == "permission-cancel" {
                             emit(json!({"type":"control_cancel_request","request_id":"permission-1"}))?;
-                            emit(result("cancelled-permission"))?;
                         }
                     }
                     "hook" => {
@@ -356,19 +355,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                         emit(
                             json!({"type":"control_request","request_id":"dialog-1","request":{"subtype":"request_user_dialog","dialog_kind":if mode == "dialog" { "fixture-dialog" } else { "undeclared" },"payload":{"choice":1},"tool_use_id":"tool-dialog"}}),
                         )?;
-                        if mode == "dialog-undeclared" {
-                            emit(result("undeclared"))?;
-                        }
                     }
-                    "malformed" => emit(json!({"type":"assistant","message":{"content":[]}}))?,
-                    "oversized" => {
+                    "malformed" => {
+                        emit(json!({"type":"assistant","message":{"content":[]}}))?;
+                        emit(result(prompt))?;
+                    }
+                    "oversized" | "oversized-live" => {
                         io::stdout().write_all(&vec![b'x'; 8192])?;
                         io::stdout().write_all(b"\n")?;
                         io::stdout().flush()?;
+                        if mode == "oversized-live" {
+                            // Keeps running past the bad frame, so the SDK has to stop it.
+                            std::thread::sleep(Duration::from_secs(30));
+                        }
                     }
                     "failure" => {
                         io::stderr().write_all(&vec![b'Z'; 128 * 1024])?;
                         io::stderr().write_all(b"diagnostic-tail")?;
+                        std::process::exit(7);
+                    }
+                    "failure-secret" => {
+                        let secret = format!("sk-{}", "Ab1".repeat(8));
+                        io::stderr().write_all(format!("rejected key {secret} at startup\n").as_bytes())?;
                         std::process::exit(7);
                     }
                     "error-result-exit" => {
@@ -429,6 +437,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if mode == "controls" || mode == "mcp" || mode == "mcp-retain" {
                     let request = &value["request"];
                     emit(json!({"type":"system","subtype":"control_observed","request":request}))?;
+                    if request["subtype"] == "mcp_read_resource" && request["uri"] == "ui://local/none" {
+                        emit(
+                            json!({"type":"control_response","response":{"subtype":"success","request_id":value["request_id"]}}),
+                        )?;
+                        continue;
+                    }
+                    if request["subtype"] == "mcp_read_resource" && request["uri"] == "https://local/app" {
+                        emit(
+                            json!({"type":"control_response","response":{"subtype":"error","request_id":value["request_id"],"error":"fixture reads ui:// resources only"}}),
+                        )?;
+                        continue;
+                    }
                     let response = match field(request, "subtype")? {
                         "interrupt" => {
                             if request["cancel_queued"] == true {
@@ -445,6 +465,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             json!({"categories":[],"totalTokens":3,"maxTokens":100,"rawMaxTokens":100,"percentage":3,"model":"fixture-model","isAutoCompactEnabled":true,"memoryFiles":[],"mcpTools":[]})
                         }
                         "background_tasks" => json!({"backgrounded":true}),
+                        "mcp_read_resource" => match request["uri"].as_str() {
+                            Some("ui://local/null") => Value::Null,
+                            Some("ui://local/text") => json!("as sent"),
+                            _ => {
+                                json!({"contents":[{"uri":request["uri"],"mimeType":"text/html;profile=mcp-app","text":"<p>app</p>","_meta":{"ui":{"csp":{}}}}],"extra":true})
+                            }
+                        },
                         "mcp_set_servers" => {
                             let names = request["servers"]
                                 .as_object()
@@ -499,11 +526,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             "control_response" => {
-                if matches!(
-                    mode,
-                    "dialog-undeclared" | "dialog-undeclared-saturated" | "dialog-undeclared-duplicate"
-                ) {
-                    return Err(io::Error::other("undeclared dialog received a response").into());
+                if matches!(mode, "dialog-undeclared-saturated" | "dialog-undeclared-duplicate") {
+                    return Err(io::Error::other("unanswered dialog received a response").into());
                 }
                 if mode == "permission-context" || mode == "permission-cli-arg" {
                     emit(
@@ -512,7 +536,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     emit(result("context"))?;
                     continue;
                 }
-                if mode == "elicitation" || mode == "dialog" {
+                if mode == "elicitation" || mode == "dialog" || mode == "dialog-undeclared" {
                     emit(result(&serde_json::to_string(&value["response"]["response"])?))?;
                     continue;
                 }
@@ -526,13 +550,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
                 if mode == "permission-cancel" {
-                    return Err(io::Error::other("cancelled callback sent a response").into());
+                    assert_eq!(value["response"]["request_id"], "permission-1");
+                    emit(result(field(&value["response"]["response"], "behavior")?))?;
+                    continue;
                 }
                 if mode == "unknown-control" {
                     assert_eq!(value["response"]["subtype"], "error");
                     emit(result("unsupported-control-rejected"))?;
                 } else {
                     assert_eq!(value["response"]["request_id"], "permission-1");
+                    if value["response"]["subtype"] == "error" {
+                        emit(result(field(&value["response"], "error")?))?;
+                        continue;
+                    }
                     assert_eq!(value["response"]["subtype"], "success");
                     let decision = &value["response"]["response"];
                     let behavior = field(decision, "behavior")?;

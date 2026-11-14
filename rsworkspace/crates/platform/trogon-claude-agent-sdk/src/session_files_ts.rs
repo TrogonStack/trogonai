@@ -538,11 +538,7 @@ fn collect_page(
 }
 
 fn fold_name(name: &str) -> String {
-    if cfg!(windows) {
-        name.to_lowercase()
-    } else {
-        name.to_owned()
-    }
+    crate::session_project_key::fold_directory_name(name, cfg!(windows))
 }
 
 /// Upstream `Yl`/`u0`: some transcript in `dir` was recorded in a directory that sanitizes like `path`.

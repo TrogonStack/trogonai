@@ -1,0 +1,37 @@
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
+load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
+load("@npm_tsworkspace//tsworkspace/packages/slack-bolt-fixtures:vitest/package_json.bzl", vitest_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+filegroup(
+    name = "sources",
+    srcs = glob(["src/**/*.ts"]),
+)
+
+ts_project(
+    name = "typecheck",
+    srcs = [":sources"],
+    no_emit = True,
+    tsconfig = "tsconfig.json",
+    deps = [":node_modules"],
+)
+
+vitest_bin.vitest_test(
+    name = "test",
+    args = ["run"],
+    chdir = package_name(),
+    data = [
+        "package.json",
+        ":node_modules",
+        ":sources",
+    ],
+)
+
+oxlint_bin.oxlint_test(
+    name = "lint",
+    args = ["."],
+    chdir = package_name(),
+    data = [":sources"],
+)

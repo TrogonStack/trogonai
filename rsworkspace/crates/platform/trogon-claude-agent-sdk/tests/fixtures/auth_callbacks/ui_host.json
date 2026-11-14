@@ -1,0 +1,91 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323",
+    "python": "claude_agent_sdk 0.2.181"
+  },
+  "scenarios": {
+    "ui": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":false}}"
+      ],
+      "responses": [
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"u1\",\"response\":{\"copied\":true}}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"u2\"}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"u3\",\"error\":\"Unsupported control request subtype: ui_prompt_fill\",\"error_code\":\"unsupported_request\"}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"u4\",\"error\":\"Unsupported control request subtype: ui_prompt_suggest\",\"error_code\":\"unsupported_request\"}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"u5\",\"response\":null}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"u6\",\"error\":\"paint failed\"}}"
+      ],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request",
+        "cli sends ui_copy u1",
+        "sdk writes success response u1",
+        "cli sends ui_prompt_read u2",
+        "sdk writes success response u2",
+        "cli sends ui_prompt_fill u3",
+        "cli sends ui_prompt_suggest u4",
+        "sdk writes error response u3",
+        "sdk writes error response u4",
+        "cli sends ui_read_selection u5",
+        "sdk writes success response u5",
+        "cli sends ui_prompt_paint u6",
+        "sdk writes error response u6"
+      ],
+      "seen": {
+        "uiSeen": [
+          {
+            "m": "copy",
+            "p": {
+              "text": "hi"
+            },
+            "aborted": false
+          },
+          {
+            "m": "promptRead",
+            "p": {},
+            "aborted": false
+          },
+          {
+            "m": "readSelection",
+            "p": {},
+            "aborted": false
+          },
+          {
+            "m": "promptPaint",
+            "p": {
+              "rows": [
+                1
+              ]
+            },
+            "aborted": false
+          }
+        ]
+      }
+    },
+    "python_unsupported_ui": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--system-prompt",
+        "",
+        "--input-format",
+        "stream-json"
+      ],
+      "responses": [
+        "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p4\", \"error\": \"Unsupported control request subtype: ui_copy\"}}"
+      ]
+    }
+  }
+}

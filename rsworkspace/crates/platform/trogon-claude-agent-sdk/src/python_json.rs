@@ -3,6 +3,8 @@
 
 use std::io::{self, Write};
 
+use crate::float_digits::shortest_digits;
+
 /// `json.dumps(value)`.
 pub(crate) fn to_string<T: serde::Serialize + ?Sized>(value: &T) -> Result<String, serde_json::Error> {
     let mut out = Vec::new();
@@ -60,13 +62,13 @@ pub(crate) fn float_repr(value: f64) -> String {
     if value.is_infinite() {
         return if value > 0.0 { "Infinity" } else { "-Infinity" }.to_owned();
     }
-    let scientific = format!("{value:e}");
-    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((scientific.as_str(), "0"));
-    let exponent: i32 = exponent.parse().unwrap_or_default();
-    let (sign, mantissa) = mantissa.strip_prefix('-').map_or(("", mantissa), |rest| ("-", rest));
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let sign = if value.is_sign_negative() { "-" } else { "" };
+    if value == 0.0 {
+        return format!("{sign}0.0");
+    }
+    let (digits, point) = shortest_digits(value.abs());
+    let exponent = point - 1;
     if (-4..16).contains(&exponent) {
-        let point = exponent + 1;
         let body = if point <= 0 {
             format!("0.{}{digits}", "0".repeat(usize::try_from(-point).unwrap_or_default()))
         } else {
@@ -87,6 +89,23 @@ pub(crate) fn float_repr(value: f64) -> String {
         };
         let exponent_sign = if exponent < 0 { '-' } else { '+' };
         format!("{sign}{first}{fraction}e{exponent_sign}{:02}", exponent.abs())
+    }
+}
+
+/// Python `repr(str)`.
+pub(crate) fn python_repr(text: &str) -> String {
+    crate::python_text::repr(&crate::python_text::from_str(text))
+}
+
+/// Python truthiness of the value `json.loads` reads from this JSON.
+pub(crate) fn is_truthy(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::Bool(flag) => *flag,
+        serde_json::Value::Number(number) => number.as_f64().is_some_and(|float| float != 0.0),
+        serde_json::Value::String(text) => !text.is_empty(),
+        serde_json::Value::Array(items) => !items.is_empty(),
+        serde_json::Value::Object(object) => !object.is_empty(),
     }
 }
 
