@@ -650,6 +650,17 @@ impl Initialization {
     }
 }
 
+impl Initialization {
+    /// Sends `supportedDialogKinds: []` when no kind was configured, as the browser query does for an empty list.
+    pub(crate) fn declare_dialog_kinds(&mut self) {
+        if let Some(request) = self.request.as_object_mut() {
+            request
+                .entry("supportedDialogKinds")
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        }
+    }
+}
+
 /// Python: `max(int(os.environ.get("CLAUDE_CODE_STREAM_CLOSE_TIMEOUT", "60000")) / 1000.0, 60.0)` seconds, handed
 /// to `anyio.fail_after`. A wait too long for `Duration` never ends, as Python's does not in practice.
 pub(crate) fn python_initialize_timeout(value: Option<std::ffi::OsString>) -> Result<Duration, Error> {
@@ -1058,10 +1069,13 @@ where
             crate::RequestIdExhaustion::Wrap => self.next_id.wrapping_add(1),
             crate::RequestIdExhaustion::Fail => self.next_id.checked_add(1).ok_or(Error::RequestIdExhausted)?,
         };
-        Ok(match self.argv_style {
+        let id = match self.argv_style {
             crate::ArgvStyle::TypeScript => ControlRequestId::typescript(),
             crate::ArgvStyle::Python => ControlRequestId::python(self.next_id),
-        })
+        };
+        // TypeScript `request`: `this.transport.expectControlResponse?.(id)` before the request is written.
+        self.transport.expect_control_response(id.as_str());
+        Ok(id)
     }
 
     fn controls_full(&self) -> bool {

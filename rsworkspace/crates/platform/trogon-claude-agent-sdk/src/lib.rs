@@ -11,6 +11,7 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod auth_token;
+mod browser_query;
 mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
@@ -40,6 +41,7 @@ mod hooks;
 mod js_json;
 mod js_object_order;
 mod js_runtime;
+mod js_text;
 mod json_scan;
 mod jsonrpc_message;
 mod managed_settings_delivery;
@@ -168,6 +170,23 @@ mod settings_schema_regexp;
 mod shadow_warning;
 mod skills;
 mod startup_timeout;
+mod sse_ccr_event;
+mod sse_delivery_update;
+mod sse_drop_category;
+mod sse_drop_log;
+mod sse_error;
+mod sse_frame;
+mod sse_frame_filter;
+mod sse_http_error;
+mod sse_log_record;
+mod sse_options;
+mod sse_parser;
+mod sse_prepared_write;
+mod sse_request_id_set;
+mod sse_retry;
+mod sse_transport;
+mod sse_utf8_decoder;
+mod sse_worker_markers;
 mod stderr_tail;
 mod summary_dialect;
 mod system_prompt;
@@ -194,6 +213,10 @@ pub use agent_name::AgentName;
 pub use auth_token::{
     HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
     OAuthTokenFuture, OAuthTokenHandler, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
+};
+pub use browser_query::{
+    BrowserPrompt, BrowserQueryOptions, BrowserTransport, browser_query, get_ccr_event, get_sse_drop_counts,
+    get_sse_last_sequence_num, resume_sse_stream, suspend_sse_stream,
 };
 pub use builtin_tool_name::BuiltinToolName;
 pub use bundled_cli::{
@@ -356,6 +379,18 @@ pub use settings_sandbox::{
 };
 pub use settings_sandbox_schema::{SandboxConfigRejected, SandboxConfigSchema};
 pub use startup_timeout::StartupHooksRunning;
+pub use sse_ccr_event::SseCcrEvent;
+pub use sse_delivery_update::SseDeliveryUpdate;
+pub use sse_drop_category::SseDropCategory;
+pub use sse_error::SseError;
+pub use sse_frame::SseFrame;
+pub use sse_frame_filter::{SseEvent, SseFrameFilter};
+pub use sse_http_error::{SseHttpError, http_error_reason};
+pub use sse_log_record::{SseLogLevel, SseLogRecord};
+pub use sse_options::{CatchUpTruncatedHandler, DeliveryUpdateHandler, SseOptions};
+pub use sse_parser::SseParser;
+pub use sse_prepared_write::SsePreparedWrite;
+pub use sse_transport::{G4_TEXT_ENVELOPE_ARM_PORTED, SseHandle, SseTransport};
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
 pub use system_prompt::{CustomPrompt, PresetPrompt};

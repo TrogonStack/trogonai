@@ -100,6 +100,9 @@ impl Query {
         if matches!(message, Some(Message::Result(_))) {
             self.result_received = true;
         }
+        if let (Some(sse), Some(message)) = (&self.sse, &message) {
+            sse.mark_delivered(message.raw());
+        }
         Poll::Ready(Ok(message))
     }
 }
