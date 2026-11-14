@@ -226,7 +226,7 @@ fn strictly_equal(value: &Value, input: Input<'_>) -> bool {
 /// the discriminator.
 fn discriminated(key: &str, options: &[(Vec<Value>, Node)], input: Input<'_>) -> Outcome {
     let Input::Json(Value::Object(map)) = input else {
-        return Outcome::fail(type_issue("object", input), input);
+        return Outcome::fail(Issue::invalid_type_code_first("object", received(input)), input);
     };
     let tag = lookup(map, key);
     match options
@@ -697,7 +697,7 @@ fn object(node: &ObjectNode, input: Input<'_>) -> Outcome {
         let result = run(child, lookup(map, key));
         if *required && !has(map, key) {
             if result.issues.is_empty() {
-                issues.push(Issue::invalid_type("nonoptional", "undefined").at(Value::from(key.as_str())));
+                issues.push(Issue::invalid_type_code_first("nonoptional", "undefined").at(Value::from(key.as_str())));
             } else {
                 issues.extend(prefixed(result.issues, &Value::from(key.as_str())));
             }

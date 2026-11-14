@@ -35,6 +35,15 @@ impl Issue {
         }
     }
 
+    /// An `invalid_type` issue that zod builds with `code` before `expected`: the one `nonoptional` raises
+    /// for a missing value and the one a discriminated union raises for a value that is not an object.
+    pub(crate) fn invalid_type_code_first(expected: &str, received: &'static str) -> Self {
+        Self {
+            received,
+            ..Self::new([("code", "invalid_type".into()), ("expected", expected.into())], false)
+        }
+    }
+
     /// The `invalid_type` issue of a number that is not an integer: it names the integer format.
     pub(crate) fn invalid_int(format: &str) -> Self {
         Self {
