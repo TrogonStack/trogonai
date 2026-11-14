@@ -144,10 +144,16 @@ async fn r07_the_default_shutdown_stops_a_stuck_cli_without_an_error() -> TestRe
     Ok(())
 }
 
+/// How long the CLI may take to be reaped once `disconnect` returns. The TypeScript shutdown collects the exit status
+/// only when its SIGKILL fallback wakes, 5 seconds after the SIGTERM, so until then the stopped CLI stays a zombie that
+/// `kill -0` still finds. The window covers that delay plus room for a loaded machine to schedule the wake-up.
+#[cfg(unix)]
+const REAP_WINDOW: Duration = Duration::from_secs(5 + 10);
+
 /// The CLI is reaped in the background after `disconnect` returns, so wait for that to happen.
 #[cfg(unix)]
 async fn wait_until_reaped(pid: u32) -> TestResult {
-    timeout(Duration::from_secs(5), async {
+    timeout(REAP_WINDOW, async {
         loop {
             let alive = std::process::Command::new("kill")
                 .args(["-0", &pid.to_string()])
