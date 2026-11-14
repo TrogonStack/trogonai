@@ -903,3 +903,7 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
         file_did_not_load: file.load_state == LoadState::DidNotLoad,
     }
 }
+
+#[cfg(test)]
+#[path = "settings_resolve_policy_tests.rs"]
+mod tests;
