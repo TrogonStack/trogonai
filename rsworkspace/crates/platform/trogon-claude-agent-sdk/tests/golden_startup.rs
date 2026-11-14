@@ -69,6 +69,17 @@ async fn closing_a_warm_query_sends_no_prompt() -> Outcome {
     Ok(())
 }
 
+#[tokio::test]
+async fn a_warm_query_reports_its_initialize_answer_and_disposes_without_a_prompt() -> Outcome {
+    let (adapters, run) = start(Script::default(), &[]);
+    let warm = startup_with_adapters(StartupOptions::new(options(WORK)), adapters).await?;
+    let info = warm.connection_info().await?;
+    assert_eq!(info.as_json(), Some(&json!({"hook_on_failure_supported": true})));
+    warm.dispose().await?;
+    assert_eq!(run.lines().await?, vec![INIT.to_owned()]);
+    Ok(())
+}
+
 async fn timeout_error(script: Script) -> Outcome<InitializeTimeoutError> {
     let (adapters, run) = start(script, &[]);
     let params = StartupOptions {

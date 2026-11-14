@@ -102,3 +102,28 @@ fn escaped_lone_surrogates_are_written_as_python_keeps_them() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn short_escapes_are_read_and_written_back_as_python_writes_them() -> TestResult {
+    assert_eq!(
+        RawJsonId::parse(r#""\"\\\/\b\f\n\r\t""#)?.python_dump(),
+        r#""\"\\/\b\f\n\r\t""#
+    );
+    Ok(())
+}
+
+#[test]
+fn malformed_tokens_are_refused() {
+    for token in [r#""\x""#, r#""\u12g4""#, "[1 2]", "{1:2}", r#"{"a":1 "b":2}"#] {
+        assert_eq!(RawJsonId::parse(token), Err(RawJsonIdError::Invalid), "token {token}");
+    }
+}
+
+#[test]
+fn nesting_deeper_than_the_limit_is_refused() -> TestResult {
+    let deepest = format!("{}{}", "[".repeat(201), "]".repeat(201));
+    assert_eq!(RawJsonId::parse(&deepest)?.python_dump(), deepest);
+    let deeper = format!("{}{}", "[".repeat(202), "]".repeat(202));
+    assert_eq!(RawJsonId::parse(&deeper), Err(RawJsonIdError::Invalid));
+    Ok(())
+}

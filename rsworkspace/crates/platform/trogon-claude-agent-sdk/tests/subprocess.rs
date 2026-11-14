@@ -274,6 +274,16 @@ async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
     Ok(())
 }
 
+/// Python `ClaudeSDKClient(options).connect(prompt)`: the native connector spawns the CLI, and the prompt is written
+/// once the connection is up.
+#[tokio::test]
+async fn an_unconnected_client_spawns_the_cli_and_writes_its_prompt() -> TestResult {
+    let mut client = ClaudeSdkClient::new(options("normal")?).connect("hello").await?;
+    assert_eq!(read_result(&mut client).await?, "hello");
+    client.disconnect().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn interactive_client_reuses_one_process_for_multiple_turns() -> TestResult {
     let mut client = ClaudeSdkClient::connect(options("normal")?).await?;
