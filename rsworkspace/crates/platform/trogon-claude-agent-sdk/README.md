@@ -194,7 +194,8 @@ request and tool identities, suggestions, MCP provenance, the decision reason
 with its type and code, the matched ask rule, the computer folder, plugin and
 server prompt, plus a cancellation signal. A field of the wrong type stays in
 `additional_fields`. Decisions carry updated input, permission updates,
-interrupt and a decision classification; `AnsweredOutOfBand` writes nothing.
+interrupt and a decision classification; `AnsweredOutOfBand` writes nothing,
+and `Raw` writes any other object as returned (Python rejects it as a `dict`).
 Answers match `sdk.mjs` byte for byte by default and `claude_agent_sdk` under
 `ArgvStyle::Python`, including the answer without a handler, a callback the CLI
 cancels (TypeScript still writes its answer, Python writes nothing) and a

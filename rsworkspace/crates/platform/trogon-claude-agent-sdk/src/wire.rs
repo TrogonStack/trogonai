@@ -6,7 +6,11 @@ use serde_json::Value;
 
 use crate::{
     ControlRequestId, DenialDisposition, JsonObject, Message, MessageDecoding, PermissionDecision, ProtocolError,
-    ToolName, ToolPermissionRequest, ToolUseId, message_decode::Decoded,
+    ToolName, ToolPermissionRequest, ToolUseId,
+    constants::{
+        PERMISSION_TOOL_USE_ID_FIELD, PYTHON_DICT_TYPE, PYTHON_NONE_TYPE, PYTHON_PERMISSION_RESULT_TYPE_ERROR,
+    },
+    message_decode::Decoded,
 };
 
 pub(crate) enum Frame {
@@ -427,8 +431,10 @@ pub(crate) fn mcp_forward(id: &ControlRequestId, request: Value) -> Result<Value
 
 /// The `can_use_tool` answer in the dialect's shape, or `None` when the host answered out of band.
 ///
-/// TypeScript writes `{...result, toolUseID}` with `updatedInput` only when the handler set it. Python sends the
-/// original input when the handler left it unset and never adds `toolUseID`.
+/// TypeScript writes `{...result, toolUseID}` with `updatedInput` only when the handler set it; a raw result keeps
+/// its keys in order, takes the request's `toolUseID` in place of its own and loses its own when the request had
+/// none, as the spread does. Python sends the original input when the handler left it unset, never adds
+/// `toolUseID`, and rejects a raw result as it rejects a `dict`.
 /// `input` is the wire `input` Python echoes as `updatedInput` when the handler leaves it unset.
 pub(crate) fn permission_response(
     id: &ControlRequestId,
@@ -479,11 +485,23 @@ pub(crate) fn permission_response(
         },
         PermissionDecision::AnsweredOutOfBand if typescript => return Ok(None),
         PermissionDecision::AnsweredOutOfBand => {
-            return callback_error_response(
-                id,
-                "Tool permission callback must return PermissionResult (PermissionResultAllow or PermissionResultDeny), got <class 'NoneType'>",
-            )
-            .map(Some);
+            return callback_error_response(id, &format!("{PYTHON_PERMISSION_RESULT_TYPE_ERROR}{PYTHON_NONE_TYPE}"))
+                .map(Some);
+        }
+        PermissionDecision::Raw(mut result) if typescript => {
+            match tool_use_id {
+                Some(tool_use_id) => {
+                    result.insert(PERMISSION_TOOL_USE_ID_FIELD.to_owned(), Value::from(tool_use_id));
+                }
+                None => {
+                    result.shift_remove(PERMISSION_TOOL_USE_ID_FIELD);
+                }
+            }
+            return success_response(id, result).map(Some);
+        }
+        PermissionDecision::Raw(_) => {
+            return callback_error_response(id, &format!("{PYTHON_PERMISSION_RESULT_TYPE_ERROR}{PYTHON_DICT_TYPE}"))
+                .map(Some);
         }
         PermissionDecision::Failed { message } => return callback_error_response(id, &message).map(Some),
     };

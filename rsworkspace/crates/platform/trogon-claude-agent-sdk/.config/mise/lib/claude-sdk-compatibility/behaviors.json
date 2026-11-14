@@ -987,7 +987,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default dialect and hands every field to the callback as sent, keeping broken suggestions as PermissionUpdate::Unknown; ArgvStyle::Python reproduces claude_agent_sdk's from_dict errors and the order it raises them in."
+        "reason": "TypeScript is the default dialect and hands every field to the callback as sent, keeping broken suggestions as PermissionUpdate::Unknown and the request in ToolPermissionRequest::raw_request, and PermissionDecision::Raw returns them to the CLI unchanged; ArgvStyle::Python reproduces claude_agent_sdk from_dict errors and the order it raises them in."
       },
       "contracts": [
         "golden_inbound_control::permission_suggestions_reach_each_dialect_like_its_sdk",
@@ -3587,7 +3587,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript shape is the default; ArgvStyle::Python writes the Python shape byte for byte."
+        "reason": "The TypeScript shape is the default, and PermissionDecision::Raw writes a result no typed variant expresses as returned, with the request toolUseID spread over it; ArgvStyle::Python writes the Python shape byte for byte and answers a raw result with the TypeError Python raises for a dict."
       },
       "contracts": [
         "golden_inbound_control::permission_decisions_are_written_byte_for_byte",
