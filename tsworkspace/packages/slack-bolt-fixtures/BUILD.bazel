@@ -35,3 +35,24 @@ oxlint_bin.oxlint_test(
     chdir = package_name(),
     data = [":sources"],
 )
+
+# Every file oxfmt formats, for the format check in //tsworkspace.
+filegroup(
+    name = "fmt_inputs",
+    srcs = glob(
+        [
+            "**/*.css",
+            "**/*.html",
+            "**/*.json",
+            "**/*.ts",
+            "**/*.tsx",
+            "**/*.yaml",
+        ],
+        allow_empty = True,
+        exclude = [
+            "coverage/**",
+            "dist/**",
+        ],
+    ),
+    visibility = ["//tsworkspace:__pkg__"],
+)
