@@ -625,6 +625,9 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     /// `startup()`: the hook and startup-mark frames, for the initialize timer. Closing the receiver ends the
     /// observation.
     pub startup_tap: Option<UnboundedSender<crate::startup_timeout::StartupEvent>>,
+    /// Where the response to the connect-time initialize request goes. The driver writes that request before it
+    /// handles anything else.
+    pub first_initialize: ControlSender,
 }
 
 /// The initialize request and the callbacks it registers, built before any transport exists so that a bad
@@ -727,6 +730,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         prompt_hold,
         host,
         startup_tap,
+        first_initialize,
     } = input;
     transport.connect().await?;
     let capture_manifests = options.argv_style == crate::ArgvStyle::TypeScript
@@ -802,7 +806,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
             driver.mcp.forward(name, session);
         }
     }
-    Ok(tokio::spawn(driver.run(terminal)))
+    Ok(tokio::spawn(driver.run(first_initialize, terminal)))
 }
 
 impl<T, F> Driver<T, F>
@@ -810,8 +814,12 @@ where
     T: Transport,
     F: crate::adapters::SessionFileSystem,
 {
-    async fn run(mut self, terminal: oneshot::Sender<Result<(), Error>>) {
-        let primary = match self.event_loop().await {
+    async fn run(mut self, first_initialize: ControlSender, terminal: oneshot::Sender<Result<(), Error>>) {
+        let primary = match self.start(first_initialize).await {
+            Ok(()) => self.event_loop().await,
+            Err(error) => Err(error),
+        };
+        let primary = match primary {
             Err(Error::ShutdownRequested) => Ok(()),
             outcome => outcome,
         };
@@ -861,6 +869,20 @@ where
         self.commands.close();
         drop(self.messages);
         let _ = terminal.send(outcome);
+    }
+
+    /// Writes the connect-time initialize request. `sdk.mjs` writes it while it constructs the Query, before the
+    /// caller holds anything to close, and Python waits for its answer; either way a close that follows at once
+    /// finds the request already on stdin. A process spawned under an aborted signal writes nothing.
+    async fn start(&mut self, first_initialize: ControlSender) -> Result<(), Error> {
+        if self.abort.is_cancelled() {
+            return Err(crate::AbortError::PROCESS.into());
+        }
+        Box::pin(self.command(Command::Initialize {
+            first: true,
+            response: first_initialize,
+        }))
+        .await
     }
 
     /// Whether another document may be written: the transport is ready and input has not been ended.

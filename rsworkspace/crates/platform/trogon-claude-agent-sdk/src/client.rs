@@ -545,6 +545,7 @@ impl ClaudeSdkClient {
         };
         let latest_commands = handle.latest_commands.clone();
         let host = handle.host.clone();
+        let (first_initialize, receiver) = oneshot::channel();
         let driver = driver::spawn(driver::SpawnOptions {
             options,
             session,
@@ -560,6 +561,7 @@ impl ClaudeSdkClient {
             prompt_hold: handle.prompt_hold.clone(),
             host,
             startup_tap,
+            first_initialize,
         })
         .await?;
         let runtime = ClientRuntime {
@@ -569,10 +571,6 @@ impl ClaudeSdkClient {
             driver: Some(driver),
             process_id,
             outcome: None,
-        };
-        let receiver = match runtime.handle.start_initialize().await {
-            Ok(receiver) => receiver,
-            Err(error) => return Err(Self::failed_start(runtime, error).await),
         };
         // `startup()` and `prewarm()` wait for initialize under the startup timer, whichever dialect.
         if let Some(watch) = startup {
@@ -585,7 +583,7 @@ impl ClaudeSdkClient {
             };
         }
         match runtime.handle.style {
-            // `sdk.mjs` hands back the Query as soon as the initialize request is queued. Whatever the caller
+            // `sdk.mjs` hands back the Query as soon as the initialize request is written. Whatever the caller
             // sends next is written behind it, and a failed initialize surfaces where the initialization result
             // is read, and through the run when something depended on it.
             crate::ArgvStyle::TypeScript => {
@@ -736,13 +734,6 @@ impl ClientHandle {
         let (response, receiver) = oneshot::channel();
         self.enqueue(Command::Initialize { first, response }).await?;
         receiver.await.map_err(|_| Error::DriverStopped)?
-    }
-
-    /// Queues the connect-time initialize request and returns where its response arrives.
-    async fn start_initialize(&self) -> Result<oneshot::Receiver<Result<Option<serde_json::Value>, Error>>, Error> {
-        let (response, receiver) = oneshot::channel();
-        self.enqueue(Command::Initialize { first: true, response }).await?;
-        Ok(receiver)
     }
 
     /// TypeScript `initializationResult()`, Python `get_server_info()`: the first initialize response. TypeScript
