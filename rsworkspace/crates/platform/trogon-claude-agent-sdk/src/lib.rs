@@ -243,7 +243,7 @@ mod websocket_transport;
 mod wire;
 mod workspace_trust;
 
-pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
+pub use agent_definition::{AgentDefinition, AgentEffort, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
 pub use auth_token::{
     HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
