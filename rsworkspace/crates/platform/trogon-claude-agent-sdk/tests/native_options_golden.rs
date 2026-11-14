@@ -584,7 +584,7 @@ fn python_options(name: &str, o: &mut ClaudeAgentOptions) -> Build {
         "include_hook_events_true" => o.include_hook_events = HookEvents::Include,
         "include_partial_messages_true" => o.partial_messages = PartialMessages::Include,
         "max_budget_usd" => o.max_budget_usd = Some(UsdBudget::new(1.5)),
-        "max_budget_usd_zero" => o.max_budget_usd = Some(UsdBudget::new(0.0)),
+        "max_budget_usd_zero" => o.max_budget_usd = Some(UsdBudget::from_integer(0)),
         "max_thinking_tokens" => o.max_thinking_tokens = Some(1000),
         "max_thinking_tokens_zero" => o.max_thinking_tokens = Some(0),
         "max_turns" => o.max_turns = NonZeroUsize::new(7),

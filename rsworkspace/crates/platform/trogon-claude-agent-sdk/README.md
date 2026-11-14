@@ -669,8 +669,10 @@ Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.
 `OutputSchema::new` and `UsdBudget::new` keep any value and pass it on, as both
 upstream SDKs do; `OutputSchema::validated` and `UsdBudget::checked` opt in to
-rejecting nonlocal references and nonfinite or negative amounts. Rewind
-requires checkpointing and CLI support.
+rejecting nonlocal references and nonfinite or negative amounts.
+`UsdBudget::from_integer` keeps a Python `int` amount, which the Python SDK sends
+as `str(0)`, `0`, where the float `0.0` goes as `0.0`. Rewind requires
+checkpointing and CLI support.
 
 The default system prompt is empty; choose `SystemPrompt::ClaudeCode` for the
 CLI preset. `SystemPrompt` also carries a list of texts, the custom and preset
