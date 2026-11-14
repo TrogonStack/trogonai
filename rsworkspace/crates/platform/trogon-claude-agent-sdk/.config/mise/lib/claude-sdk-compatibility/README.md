@@ -1,8 +1,9 @@
 # Declaration readers
 
 These SDK maintenance modules read compiler declarations for compatibility work.
-They do not enforce CI or establish runtime parity. `behaviors.json` maps runtime
-behavior against both upstream SDKs.
+They do not establish runtime parity. `behaviors.json` maps runtime behavior
+against both upstream SDKs. Only its test runs in CI: `claude-sdk:test` depends
+on `claude-sdk:behavior-map`, which runs `tests/test_behavior_map.py`.
 
 Run the Python foundation tests from this directory:
 
@@ -88,12 +89,15 @@ supplies the reviewed bytes, so validation stays deterministic and never runs
 upstream code. Every pinned file must be cited by some row, so stale pins are
 rejected too.
 
-`contracts` names the Rust tests that pin each behavior, as nextest
-`binary::test` selectors. `contracts_check` requires each entry to be a
-selector from `compiled_tests`, and the mapping test checks them against the
-crate's top-level integration tests. `validate(..., require_contracts=True)`
-rejects any row without one; rows for behaviors that kept their earlier tests
-have not been linked yet. The mapping alone does not establish runtime parity.
+`contracts` names the Rust tests that pin each behavior. An integration test is
+a nextest `binary::test` selector, which `contracts_check` requires to be in the
+compiled selectors, such as those from `compiled_tests`. A unit test is a
+crate-relative `src/<path>.rs::<name>` selector, which must be one of the
+`#[test]` or `#[tokio::test]` functions that `unit_test_selectors` finds in the
+given sources. The mapping test checks both against the crate's top-level
+integration tests and every file under `src/`.
+`validate(..., require_contracts=True)` rejects any row without one. The
+mapping alone does not establish runtime parity.
 
 The reviewed-bytes test reads `upstream/typescript/<tarball>` and
 `upstream/python/<path>` in this directory and is skipped when they are

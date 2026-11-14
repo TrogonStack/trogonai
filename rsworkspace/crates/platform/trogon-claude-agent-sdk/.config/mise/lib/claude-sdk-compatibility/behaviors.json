@@ -1416,7 +1416,11 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "upstream_defaults::the_default_store_limits_bound_only_what_upstream_bounds",
+        "session_store::resume_load_timeout_does_not_install_any_files",
+        "session_store::hung_subagent_listings_and_loads_time_out_with_upstream_text"
+      ],
       "rust": [
         "src/session_resume.rs"
       ]
@@ -1446,7 +1450,9 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "session_store::timed_out_mirror_append_is_reported_and_never_retried"
+      ],
       "rust": [
         "src/transcript_mirror.rs"
       ]
@@ -2276,7 +2282,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "value_contracts::s18_structured_input_blocks_pass_through_unvalidated",
+        "user_input::structured_input_carries_blocks_and_every_identity_field"
+      ],
       "rust": [
         "src/user_input.rs"
       ]
@@ -2394,7 +2403,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "session_filesystem::w3_resume_materializes_into_a_private_temporary_directory_and_cleanup_removes_it",
+        "src/session_resume_tests.rs::resumed_files_are_written_with_a_plain_truncating_write"
+      ],
       "rust": [
         "src/session_resume.rs"
       ]
@@ -2906,7 +2918,12 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "golden_initialize::managed_settings_that_were_not_confirmed_end_the_session",
+        "golden_initialize::confirmed_managed_settings_keep_the_session",
+        "golden_initialize::plugins_that_were_not_applied_keep_the_session",
+        "src/client_tests.rs::identical_startup_policy_failures_are_not_reported_twice"
+      ],
       "rust": [
         "src/driver.rs",
         "src/error.rs"
@@ -3750,7 +3767,11 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "src/connector_vetting_tests.rs::replays_every_locate_probe_recorded_from_the_bundle",
+        "src/settings_resolve_connector_tests.rs::a_windows_final_path_reads_the_way_libuv_shortens_it",
+        "src/settings_resolve_connector_tests.rs::the_bridge_names_where_a_path_really_is"
+      ],
       "rust": [
         "src/settings_resolve_connector.rs",
         "src/connector_vetting.rs",
@@ -3780,7 +3801,12 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "src/connector_vetting_tests.rs::replays_every_locate_probe_recorded_from_the_bundle",
+        "src/settings_resolve_connector_tests.rs::windows_system_errors_take_the_code_libuv_translates_them_to",
+        "src/settings_resolve_connector_tests.rs::raw_os_errors_take_the_libuv_code_name",
+        "src/settings_resolve_connector_tests.rs::errors_without_a_known_os_code_are_named_by_their_kind"
+      ],
       "rust": [
         "src/settings_resolve_connector.rs",
         "src/constants.rs"
@@ -3809,7 +3835,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "src/connector_vetting_tests.rs::replays_every_vet_probe_recorded_from_the_bundle",
+        "src/connector_vetting_tests.rs::replays_every_locate_probe_recorded_from_the_bundle"
+      ],
       "rust": [
         "src/settings_resolve_writable.rs"
       ]
@@ -3837,7 +3866,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "src/node_path_tests.rs::replays_every_path_probe_recorded_from_node",
+        "src/node_path_tests.rs::win32_resolve_answers_what_node_answers_for_roots_drives_and_a_relative_working_directory"
+      ],
       "rust": [
         "src/node_path.rs"
       ]
@@ -3865,7 +3897,11 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "src/connector_vetting_tests.rs::replays_every_helper_probe_recorded_from_the_bundle",
+        "src/connector_vetting_tests.rs::replays_every_vet_probe_recorded_from_the_bundle",
+        "src/settings_resolve_connector_tests.rs::the_bridge_reads_the_native_host_the_way_node_does"
+      ],
       "rust": [
         "src/connector_vetting.rs",
         "src/adapters/host.rs"
@@ -3895,7 +3931,11 @@
         "kind": "rust-adaptation",
         "reason": "Rust runs nothing at load time: capture_launch_directory reads the directory once into a OnceLock the first time the settings resolver needs it, and a binary that calls it at the top of main gets the upstream import-time reading."
       },
-      "contracts": [],
+      "contracts": [
+        "src/adapters/environment_tests.rs::the_launch_directory_is_read_once_and_kept",
+        "src/settings_resolve_state_tests.rs::the_process_state_keeps_the_captured_launch_directory",
+        "src/connector_vetting_tests.rs::replays_every_helper_probe_recorded_from_the_bundle"
+      ],
       "rust": [
         "src/adapters/environment.rs",
         "src/settings_resolve_state.rs",
@@ -3925,7 +3965,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "settings_resolve::local_settings_live_under_the_working_directory",
+        "settings_resolve::cascade_merges_in_precedence_order_with_array_union_and_recursion"
+      ],
       "rust": [
         "src/settings_resolve_sources.rs"
       ]
@@ -3953,7 +3996,10 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "settings_resolve::a_relative_working_directory_is_made_absolute_before_any_source_is_read",
+        "settings_resolve::explicit_cwd_selects_the_project_files"
+      ],
       "rust": [
         "src/settings_resolve.rs",
         "src/settings_resolve_sources.rs"
@@ -3982,7 +4028,11 @@
       "decision": {
         "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "src/process_transport/tests.rs::the_delayed_kill_signals_a_process_that_is_still_running",
+        "src/process_transport/tests.rs::the_delayed_kill_leaves_a_process_that_already_exited",
+        "upstream_defaults::r07_the_default_shutdown_stops_a_stuck_cli_without_an_error"
+      ],
       "rust": [
         "src/process_transport.rs"
       ]
@@ -4421,7 +4471,7 @@
         "golden_initialize_hold::a_failed_initialize_writes_no_prompt_and_rejects_what_waited_like_sdk_mjs",
         "golden_initialize_hold::a_failed_initialize_with_managed_settings_writes_nothing_after_it_like_sdk_mjs",
         "golden_initialize_hold::the_captured_timer_matches_the_duration_and_messages_the_driver_uses",
-        "driver_tests::an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects_what_was_held"
+        "src/driver_tests.rs::an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects_what_was_held"
       ],
       "rust": [
         "src/client.rs",
