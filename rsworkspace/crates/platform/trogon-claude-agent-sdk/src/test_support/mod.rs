@@ -56,6 +56,14 @@ impl<E: EnvironmentVariable> EnvironmentVariable for WithPasswd<E> {
     }
 }
 
+/// Delegates to the wrapped environment, so session preparation sees the same temporary directory as without the
+/// passwd override.
+impl<E: TemporaryDirectory> TemporaryDirectory for WithPasswd<E> {
+    fn temp_dir(&self) -> PathBuf {
+        self.environment.temp_dir()
+    }
+}
+
 impl CurrentDirectory for FixedEnvironment {
     type Error = std::io::Error;
     fn current_dir(&self) -> Result<PathBuf, Self::Error> {
