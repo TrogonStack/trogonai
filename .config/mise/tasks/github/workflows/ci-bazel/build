@@ -3,6 +3,7 @@
 set -euo pipefail
 
 exec bazel build \
+  --config=ci \
   --disk_cache="${RUNNER_TEMP:?}/bazel-disk-cache" \
   --repository_cache="${RUNNER_TEMP:?}/bazel-repository-cache" \
   //...
