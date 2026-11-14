@@ -28,3 +28,23 @@ pub(super) const ERRNO_TABLE: &[(i32, &str, &str)] = &[
     (libc::ENOTEMPTY, "ENOTEMPTY", "directory not empty"),
     (libc::ELOOP, "ELOOP", "too many symbolic links encountered"),
 ];
+
+/// The same table keyed by the Win32 error codes libuv translates.
+#[cfg(not(unix))]
+pub(super) const ERRNO_TABLE: &[(i32, &str, &str)] = &[
+    (5, "EPERM", "operation not permitted"),
+    (2, "ENOENT", "no such file or directory"),
+    (3, "ENOENT", "no such file or directory"),
+    (8, "ENOMEM", "not enough memory"),
+    (32, "EBUSY", "resource busy or locked"),
+    (33, "EBUSY", "resource busy or locked"),
+    (80, "EEXIST", "file already exists"),
+    (183, "EEXIST", "file already exists"),
+    (17, "EXDEV", "cross-device link not permitted"),
+    (267, "ENOTDIR", "not a directory"),
+    (87, "EINVAL", "invalid argument"),
+    (4, "EMFILE", "too many open files"),
+    (112, "ENOSPC", "no space left on device"),
+    (206, "ENAMETOOLONG", "name too long"),
+    (145, "ENOTEMPTY", "directory not empty"),
+];

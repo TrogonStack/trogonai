@@ -1,4 +1,6 @@
 use std::io;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 use serde_json::Value;
 
@@ -64,7 +66,6 @@ fn base64_decoding_handles_padding_and_rejects_other_characters() -> TestResult 
 
 #[cfg(unix)]
 fn failed_with_code_one(tail: &SharedTail) -> Error {
-    use std::os::unix::process::ExitStatusExt;
     Error::Process {
         status: std::process::ExitStatus::from_raw(1 << 8),
         stderr: tail.snapshot(),

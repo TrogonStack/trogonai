@@ -135,3 +135,7 @@ pub(crate) fn user_can_write<H: SettingsHost>(
         certain,
     )
 }
+
+#[cfg(all(test, unix))]
+#[path = "settings_resolve_writable_document_tests.rs"]
+mod tests;
