@@ -242,6 +242,7 @@ mod transport;
 mod ui_host;
 mod usd_budget;
 mod user_input;
+mod user_input_priority;
 mod validation_choices;
 mod version_check;
 mod websocket_error;
@@ -517,6 +518,7 @@ pub use upstream::settings_resolution::{
 };
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
+pub use user_input_priority::UserInputPriority;
 pub use validation_choices::{ValidationChoices, ValidationChoicesError, ValidationChoicesOptions};
 pub use version_check::{parse_version, unreported_version_warning};
 pub use websocket_error::WebSocketError;

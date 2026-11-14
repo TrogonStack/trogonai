@@ -307,7 +307,8 @@ async fn s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recovera
     configured.limits.input_after_finish = trogon_claude_agent_sdk::InputAfterFinish::Reject;
     let (mut client, mut cli) = connect(configured).await?;
     client.query(Prompt::from("first")).await?;
-    assert_eq!(cli.read().await?["message"]["content"], "first");
+    // The TypeScript style writes `query(str)` as `sdk.mjs` writes a string prompt, as one text block.
+    assert_eq!(cli.read().await?["message"]["content"][0]["text"], "first");
     client.send_prompt(Prompt::from("during the turn")).await?;
     assert_eq!(cli.read().await?["message"]["content"], "during the turn");
     cli.send(result()).await?;

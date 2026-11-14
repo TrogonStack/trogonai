@@ -60,9 +60,12 @@ messages queued. `receive_messages()` streams on without stopping. `Query` and
 `ClaudeSdkClient` are themselves `futures_util::Stream`s of
 `Result<Message, Error>`, TypeScript's `for await`, ending where `next_message`
 returns `None`.
-`send_input(UserInput)` accepts structured content and message identity.
-`InputBlock` is a transparent JSON-object wrapper forwarded verbatim, with a
-`text` convenience constructor; the CLI and the Messages API validate block shapes.
+`send_input(UserInput)` accepts structured content and every `SDKUserMessage`
+field, written in declaration order with unknown keys after them.
+`UserInput::from_json` writes a message object as given, as both SDKs write a
+streamed message. `InputBlock` is a transparent JSON-object wrapper forwarded
+verbatim, with a `text` convenience constructor; the CLI and the Messages API
+validate block shapes.
 
 Ordinary sends reject overlapping turns. Use the cloneable `ClientHandle` for
 queued input or `stream_input`, and receive on the owner concurrently. Call
