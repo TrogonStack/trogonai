@@ -69,6 +69,18 @@ docker compose down
 docker volume rm trogonai_nats_data
 ```
 
+Credential ids became opaque once, in
+[ADR#0074](../../../../../docs/adr/0074-credential-platform-extraction-boundary.md)
+Decision 4, and no migration carries older data across. The gateway keeps
+credentials in the `CREDENTIAL_EVENTS` stream and the `CREDENTIAL_SNAPSHOTS`
+bucket, names no earlier build used, so it never reads an event from before
+that change. A dev environment from before it still resets with the same two
+commands, because the recovery worker's checkpoint counts positions in the
+old `GATEWAY_CREDENTIAL_EVENTS` stream and would skip the start of the new
+one. Credentials created through the management API then need to be created
+again, and their earlier OpenBao entries stay under the old paths until
+`docker compose down -v` discards them. Nothing deployed holds them.
+
 ## Webhook integrations
 
 Edit or replace `devops/docker/compose/services/trogon-gateway/gateway.toml` from the repository root to configure webhook
@@ -438,17 +450,18 @@ curl -sS "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/recovery/s
 The create, rotate, and revoke responses return credential refs, lifecycle
 state, and stream position. They must not echo the submitted secret value.
 
-To inspect an API-created value directly in local OpenBao, use the logical
-credential id from the response as the final path segment:
+To inspect an API-created value directly in local OpenBao, use the returned
+owner id and opaque credential id in
+`trogonai/{owner_id}/credentials/{credential_id}`. Set `CREDENTIAL_ID` to the
+id returned by the management API:
 
 ```bash
 docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
   bao kv get -format=json -mount=secret \
-  "trogonai/tenant-1/credentials/openbao:tenant-1:github/local:webhook_secret"
+  "trogonai/tenant-1/credentials/${CREDENTIAL_ID}"
 ```
 
-Do not percent-encode this value for the `bao` CLI. The HTTP adapter URL-encodes
-path segments internally when it calls OpenBao.
+The scope key and credential kind are not path segments.
 
 ## Verify
 

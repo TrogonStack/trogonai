@@ -14,7 +14,7 @@ use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
 
-use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
+use crate::credential::commands::domain::{CredentialIdentity, CredentialOwnerId, CredentialScope};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
@@ -61,12 +61,14 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: String) -> Route
     let integration_id = SourceIntegrationId::new("primary").unwrap();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Incidentio,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Incidentio,
+                    integration_id.clone(),
+                ),
+                CredentialKind::SigningSecret,
             ),
-            CredentialKind::SigningSecret,
             trogon_std::SecretString::new(secret).unwrap(),
         )
         .await
@@ -74,7 +76,7 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: String) -> Route
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
 
     runtime_router(

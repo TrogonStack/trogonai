@@ -1,4 +1,4 @@
-use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 
 use super::*;
 
@@ -8,8 +8,7 @@ async fn put_get_rotate_and_revoke_secret() {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let credential = store
         .put(
-            scope,
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
             SecretString::new("Bot old-token").unwrap(),
         )
         .await
@@ -52,8 +51,7 @@ async fn revoke_closes_every_version_of_the_credential() {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let credential = store
         .put(
-            scope,
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
             SecretString::new("Bot old-token").unwrap(),
         )
         .await
@@ -86,8 +84,7 @@ async fn revoke_leaves_destroyed_versions_destroyed() {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let first = store
         .put(
-            scope,
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
             SecretString::new("Bot first-token").unwrap(),
         )
         .await
@@ -126,7 +123,10 @@ async fn destroy_drops_material_and_marks_status_destroyed() {
     let store = InMemorySecretStore::default();
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let credential = store
-        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
         .await
         .unwrap();
 
@@ -153,7 +153,10 @@ async fn destroying_an_already_destroyed_version_is_idempotent() {
     let store = InMemorySecretStore::default();
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let credential = store
-        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
         .await
         .unwrap();
     let reason = SecretDestroyReason::new("compliance request").unwrap();
@@ -167,7 +170,10 @@ async fn rotate_after_destroy_fails() {
     let store = InMemorySecretStore::default();
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let credential = store
-        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
         .await
         .unwrap();
     store
@@ -191,10 +197,8 @@ async fn destroy_of_unknown_ref_returns_missing() {
     let store = InMemorySecretStore::default();
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let unknown = CredentialRef::new(
-        CredentialId::new("memory:tenant-1:discord:bot_token:missing").unwrap(),
+        CredentialIdentity::derive(scope, CredentialKind::BotToken),
         CredentialVersion::initial(),
-        &scope,
-        CredentialKind::BotToken,
     );
 
     assert!(matches!(
@@ -211,8 +215,7 @@ async fn destroying_previous_version_leaves_active_version_readable() {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let credential = store
         .put(
-            scope,
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
             SecretString::new("Bot old-token").unwrap(),
         )
         .await
@@ -243,10 +246,8 @@ async fn destroying_previous_version_leaves_active_version_readable() {
 fn unknown_credential() -> CredentialRef {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     CredentialRef::new(
-        CredentialId::new("memory:tenant-1:discord:bot_token:missing").unwrap(),
+        CredentialIdentity::derive(scope, CredentialKind::BotToken),
         CredentialVersion::initial(),
-        &scope,
-        CredentialKind::BotToken,
     )
 }
 
@@ -302,7 +303,10 @@ async fn revoke_of_a_destroyed_version_is_unwritable() {
     let store = InMemorySecretStore::default();
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let credential = store
-        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
         .await
         .unwrap();
     store
@@ -324,7 +328,10 @@ async fn rotate_of_a_previous_version_is_unwritable() {
     let store = InMemorySecretStore::default();
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
     let credential = store
-        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
         .await
         .unwrap();
     store
@@ -342,4 +349,123 @@ async fn rotate_of_a_previous_version_is_unwritable() {
             status: CredentialStatus::Previous,
         }
     );
+}
+
+#[tokio::test]
+async fn putting_after_a_destroy_assigns_the_next_version_and_keeps_the_destroyed_one() {
+    let store = InMemorySecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let destroyed = store
+        .put(
+            CredentialIdentity::derive(scope.clone(), CredentialKind::BotToken),
+            SecretString::new("Bot old-token").unwrap(),
+        )
+        .await
+        .unwrap();
+    store
+        .destroy(&destroyed, &SecretDestroyReason::new("compliance request").unwrap())
+        .await
+        .unwrap();
+
+    let reopened = store
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot new-token").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(reopened, destroyed.next_version());
+    assert_eq!(
+        store.metadata(&destroyed).await.unwrap().status(),
+        CredentialStatus::Destroyed
+    );
+    assert_eq!(
+        store.get(&reopened).await.unwrap().as_plaintext().unwrap().as_str(),
+        "Bot new-token"
+    );
+}
+
+#[tokio::test]
+async fn put_after_revoke_keeps_the_revoked_version_unreadable() {
+    let store = InMemorySecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let revoked = store
+        .put(
+            CredentialIdentity::derive(scope.clone(), CredentialKind::BotToken),
+            SecretString::new("Bot old-token").unwrap(),
+        )
+        .await
+        .unwrap();
+    store.revoke(&revoked).await.unwrap();
+
+    store
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot new-token").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        store.get(&revoked).await,
+        Err(SecretStoreError::Unreadable {
+            status: CredentialStatus::Revoked,
+            ..
+        })
+    ));
+}
+
+#[tokio::test]
+async fn putting_again_for_the_same_identity_demotes_the_earlier_version() {
+    let store = InMemorySecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let first = store
+        .put(
+            CredentialIdentity::derive(scope.clone(), CredentialKind::BotToken),
+            SecretString::new("Bot first-token").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let second = store
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot second-token").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(second.version().get(), 2);
+    assert_eq!(
+        store.metadata(&first).await.unwrap().status(),
+        CredentialStatus::Previous
+    );
+    assert_eq!(
+        store.metadata(&second).await.unwrap().status(),
+        CredentialStatus::Active
+    );
+}
+
+#[tokio::test]
+async fn putting_a_different_identity_leaves_other_credentials_untouched() {
+    let store = InMemorySecretStore::default();
+    let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+    let bot = store
+        .put(
+            CredentialIdentity::derive(scope.clone(), CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    store
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::VerificationToken),
+            SecretString::new("verification").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(store.metadata(&bot).await.unwrap().status(), CredentialStatus::Active);
 }

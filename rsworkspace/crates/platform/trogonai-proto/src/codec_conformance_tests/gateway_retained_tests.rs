@@ -3,9 +3,7 @@ use buffa::{DecodeError, DecodeOptions, HasMessageView, Message, OwnedView};
 use serde_json::{Value, json};
 
 use super::assert_json_codec;
-use super::gateway_tests::{
-    active_state, command_response, credential_ref, events, metadata, snapshots, state_metadata,
-};
+use super::gateway_tests::{CREDENTIAL_ID, active_state, command_response, events, identity, key, snapshots};
 use crate::gateway::credentials::{checkpoints_v1, idempotency_v1, state_v1, v1};
 
 macro_rules! assert_retained {
@@ -59,16 +57,15 @@ fn payload(value: &Value) -> Value {
 }
 
 #[test]
-fn credential_reference_and_metadata_handles_survive_source_drop() {
+fn credential_identity_and_key_handles_survive_source_drop() {
     assert_retained!(
-        v1::CredentialRef,
-        v1::CredentialRefOwnedView,
-        credential_ref(),
+        v1::CredentialIdentity,
+        v1::CredentialIdentityOwnedView,
+        identity(),
         |handle| {
-            assert_eq!(handle.id(), "cred-1");
-            assert_eq!(handle.version(), Some(2));
+            assert_eq!(handle.credential_id(), CREDENTIAL_ID);
             assert_eq!(handle.owner_id(), "owner-1");
-            assert_eq!(handle.scope_key(), "org/repo");
+            assert_eq!(handle.scope_key(), "github");
             assert_eq!(
                 handle.source().and_then(|value| value.as_known()),
                 Some(v1::CredentialSource::Github)
@@ -77,38 +74,16 @@ fn credential_reference_and_metadata_handles_survive_source_drop() {
                 handle.kind().and_then(|value| value.as_known()),
                 Some(v1::CredentialKind::WebhookSecret)
             );
+            assert_eq!(
+                handle.identity_version().and_then(|value| value.as_known()),
+                Some(v1::CredentialIdentityVersion::V1)
+            );
         }
     );
-    assert_retained!(
-        v1::CredentialMetadata,
-        v1::CredentialMetadataOwnedView,
-        metadata(),
-        |handle| {
-            assert!(handle.reference().as_option().is_some());
-            assert_eq!(
-                handle.status().and_then(|value| value.as_known()),
-                Some(v1::CredentialStatus::Active)
-            );
-            assert_eq!(handle.fingerprint(), "sha256:abc");
-        }
-    );
-    assert_retained!(
-        state_v1::CredentialMetadata,
-        state_v1::CredentialMetadataOwnedView,
-        state_metadata(),
-        |handle| {
-            assert!(handle.reference().as_option().is_some());
-            assert_eq!(
-                handle.status().and_then(|value| value.as_known()),
-                Some(v1::CredentialStatus::Active)
-            );
-            assert_eq!(
-                handle.storage_backend().and_then(|value| value.as_known()),
-                Some(state_v1::StorageBackend::Openbao)
-            );
-            assert_eq!(handle.fingerprint(), "sha256:abc");
-        }
-    );
+    assert_retained!(v1::CredentialKey, v1::CredentialKeyOwnedView, key(), |handle| {
+        assert_eq!(handle.credential_id(), CREDENTIAL_ID);
+        assert_eq!(handle.owner_id(), "owner-1");
+    });
 }
 
 #[test]
@@ -127,17 +102,10 @@ fn event_handles_survive_source_drop() {
         v1::CredentialWriteRequestedOwnedView,
         payload(&events[0]),
         |handle| {
-            assert_eq!(handle.credential_id(), "cred-1");
-            assert_eq!(handle.owner_id(), "owner-1");
             assert_eq!(
-                handle.source().and_then(|value| value.as_known()),
-                Some(v1::CredentialSource::Slack)
+                handle.identity().as_option().map(|identity| identity.credential_id),
+                Some(CREDENTIAL_ID)
             );
-            assert_eq!(
-                handle.kind().and_then(|value| value.as_known()),
-                Some(v1::CredentialKind::BotToken)
-            );
-            assert_eq!(handle.scope_key(), "team");
         }
     );
     assert_retained!(
@@ -145,7 +113,10 @@ fn event_handles_survive_source_drop() {
         v1::CredentialWriteFailedOwnedView,
         payload(&events[1]),
         |handle| {
-            assert_eq!(handle.credential_id(), "cred-1");
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
             assert_eq!(handle.reason(), "vault down");
         }
     );
@@ -154,7 +125,12 @@ fn event_handles_survive_source_drop() {
         v1::CredentialActivatedOwnedView,
         payload(&events[2]),
         |handle| {
-            assert!(handle.metadata().as_option().is_some());
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(1));
+            assert_eq!(handle.fingerprint(), "sha256:abc");
         }
     );
     assert_retained!(
@@ -162,7 +138,11 @@ fn event_handles_survive_source_drop() {
         v1::CredentialRotationRequestedOwnedView,
         payload(&events[3]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(1));
         }
     );
     assert_retained!(
@@ -170,7 +150,11 @@ fn event_handles_survive_source_drop() {
         v1::CredentialRotationFailedOwnedView,
         payload(&events[4]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(1));
             assert_eq!(handle.reason(), "conflict");
         }
     );
@@ -179,8 +163,13 @@ fn event_handles_survive_source_drop() {
         v1::CredentialRotatedOwnedView,
         payload(&events[5]),
         |handle| {
-            assert!(handle.previous_credential_ref().as_option().is_some());
-            assert!(handle.metadata().as_option().is_some());
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.previous_version(), Some(1));
+            assert_eq!(handle.version(), Some(2));
+            assert_eq!(handle.fingerprint(), "sha256:def");
         }
     );
     assert_retained!(
@@ -188,7 +177,11 @@ fn event_handles_survive_source_drop() {
         v1::CredentialRevokedOwnedView,
         payload(&events[6]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(2));
         }
     );
     assert_retained!(
@@ -196,7 +189,11 @@ fn event_handles_survive_source_drop() {
         v1::CredentialDestroyRequestedOwnedView,
         payload(&events[7]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(2));
             assert_eq!(handle.reason(), "expired");
         }
     );
@@ -205,7 +202,11 @@ fn event_handles_survive_source_drop() {
         v1::CredentialDestroyedOwnedView,
         payload(&events[8]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(2));
         }
     );
     assert_retained!(
@@ -213,7 +214,11 @@ fn event_handles_survive_source_drop() {
         v1::CredentialDestroyFailedOwnedView,
         payload(&events[9]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.key().as_option().map(|key| key.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(2));
             assert_eq!(handle.reason(), "timeout");
         }
     );
@@ -241,17 +246,18 @@ fn state_handles_survive_source_drop() {
         state_v1::PendingCredentialWriteStateOwnedView,
         payload(&snapshots[1]),
         |handle| {
-            assert_eq!(handle.credential_id(), "cred-1");
-            assert_eq!(handle.owner_id(), "owner-1");
+            let identity = handle.identity().as_option().expect("identity");
+            assert_eq!(identity.credential_id, CREDENTIAL_ID);
+            assert_eq!(identity.scope_key, "zoom");
             assert_eq!(
-                handle.source().and_then(|value| value.as_known()),
+                identity.source.and_then(|value| value.as_known()),
                 Some(v1::CredentialSource::Zoom)
             );
             assert_eq!(
-                handle.kind().and_then(|value| value.as_known()),
+                identity.kind.and_then(|value| value.as_known()),
                 Some(v1::CredentialKind::ClientSecret)
             );
-            assert_eq!(handle.scope_key(), "acct");
+            assert_eq!(identity.identity_version, None);
         }
     );
     assert_retained!(
@@ -259,8 +265,13 @@ fn state_handles_survive_source_drop() {
         state_v1::ActiveCredentialStateOwnedView,
         active_state(),
         |handle| {
-            assert!(handle.metadata().as_option().is_some());
-            assert_eq!(handle.previous_versions().len(), 2);
+            assert_eq!(
+                handle.identity().as_option().map(|identity| identity.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(3));
+            assert_eq!(handle.fingerprint(), "sha256:abc");
+            assert_eq!(handle.previous_versions().to_vec(), [1, 2]);
         }
     );
     assert_retained!(
@@ -268,7 +279,10 @@ fn state_handles_survive_source_drop() {
         state_v1::FailedCredentialWriteStateOwnedView,
         payload(&snapshots[3]),
         |handle| {
-            assert_eq!(handle.credential_id(), "cred-1");
+            assert_eq!(
+                handle.identity().as_option().map(|identity| identity.credential_id),
+                Some(CREDENTIAL_ID)
+            );
             assert_eq!(handle.reason(), "denied");
         }
     );
@@ -277,7 +291,7 @@ fn state_handles_survive_source_drop() {
         state_v1::RotationPendingCredentialStateOwnedView,
         payload(&snapshots[4]),
         |handle| {
-            assert!(handle.active().as_option().is_some());
+            assert_eq!(handle.active().as_option().and_then(|active| active.version), Some(3));
         }
     );
     assert_retained!(
@@ -285,7 +299,11 @@ fn state_handles_survive_source_drop() {
         state_v1::RevokedCredentialStateOwnedView,
         payload(&snapshots[5]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.identity().as_option().map(|identity| identity.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(3));
         }
     );
     assert_retained!(
@@ -293,7 +311,11 @@ fn state_handles_survive_source_drop() {
         state_v1::DestroyRequestedCredentialStateOwnedView,
         payload(&snapshots[6]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.identity().as_option().map(|identity| identity.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(3));
             assert_eq!(handle.reason(), "policy");
         }
     );
@@ -302,7 +324,11 @@ fn state_handles_survive_source_drop() {
         state_v1::DestroyedCredentialStateOwnedView,
         payload(&snapshots[7]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.identity().as_option().map(|identity| identity.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(3));
         }
     );
     assert_retained!(
@@ -310,7 +336,11 @@ fn state_handles_survive_source_drop() {
         state_v1::CleanupFailedCredentialStateOwnedView,
         payload(&snapshots[8]),
         |handle| {
-            assert!(handle.credential_ref().as_option().is_some());
+            assert_eq!(
+                handle.identity().as_option().map(|identity| identity.credential_id),
+                Some(CREDENTIAL_ID)
+            );
+            assert_eq!(handle.version(), Some(3));
             assert_eq!(handle.reason(), "orphaned");
         }
     );

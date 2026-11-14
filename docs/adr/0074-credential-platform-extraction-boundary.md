@@ -145,6 +145,10 @@ plane needs from this data, it reads as a projection over the same stream.
 
 #### Q4: The credential ref is opaque before the wire contract exists
 
+> **Amended 2026-11-08** by the Q4 amendment that follows this section. The
+> stored OpenBao path is no longer recorded in the aggregate, and data written
+> under the parseable ids is reset rather than migrated.
+
 The internal `CredentialId` stops being the parseable
 `openbao:{owner}:{scope_key}:{kind}` string while `CredentialRef` is still an
 in-process type. Because the id doubles as the aggregate stream id, the
@@ -177,6 +181,67 @@ keep that knowledge as adapter-private detail, and any protection fact a
 caller legitimately needs is expressed as protection metadata, never as a
 backend name.
 
+#### Q4 amendment: the identity is recorded once, and stored data is reset
+
+This amendment replaces the sentences of Q4 that keep the path a credential
+was written under as adapter-private state in its aggregate, that make the
+opaque id an event-store migration, and that let the aggregate's own state
+keep backend knowledge. The rest of Q4 stands, including the project-scoped
+stream subject and the [ADR#0046](./0046-project-anchored-resource-hierarchy.md) Decision 2 amendment.
+
+A credential's identity is recorded once, on the `CredentialWriteRequested`
+event that creates it: the credential id, the owner id, the source, the scope
+key, the kind, and the identity version the id was derived under. Every later
+event names the credential only by its key, the credential id and the owner
+id, beside its own facts. Repeating the identity on every event made each
+event a place where it could disagree with the first, and a replay that
+derived the id again from those fields would silently re-key a credential the
+moment the derivation changed. Replay therefore never derives the id. It
+checks each event's key against the recorded identity and against the stream
+the event was read from, and treats a mismatch as corruption. A later write
+request for the same credential must carry the recorded identity exactly.
+
+The id is a UUIDv5, derived in one place: the management API, when it
+accepts a write. The identity version names both the template and the
+namespace, and the proto contract declares them on `CredentialIdentityVersion`
+so the derivation is reproducible outside this codebase. Version 1 hashes
+`{owner_id}/{scope_key}/{kind}`. Secret store adapters, the runtime
+projection, and the recovery worker read the recorded id and never derive
+one. Because the management API finds an existing credential by deriving its
+id again, a second identity version cannot ship until a registry, backfilled
+from the write-request events, maps each owner, scope key, and kind to the id
+already recorded for it.
+
+The OpenBao path is `trogonai/{owner_id}/credentials/{credential_id}`, computed
+from the key. That is the convention
+[ADR#0046](./0046-project-anchored-resource-hierarchy.md) ratified, read
+literally, so no adapter-private path is recorded anywhere: a recorded path is
+a second source of truth for something the key already determines. The other
+adapters key their values by the credential id. No event, state, or
+metadata contract names a storage backend.
+
+Nothing deployed holds credentials created through the management API, so
+data written under the parseable ids is reset rather than migrated. The event
+stream, the snapshot bucket, and the event subjects take new names,
+`CREDENTIAL_EVENTS`, `CREDENTIAL_SNAPSHOTS`, and
+`credentials.events.v1.{project}.{credential_id}`, so a build on this contract
+never reads an event written under the earlier shape, even beside resources an
+operator has not deleted yet. The reset still clears the rest of the
+credential state, such as the recovery worker's checkpoint, which counts
+positions in the earlier stream. The migration contract still holds in
+substance: this is the only re-key, and from here on credential ids and stream
+identities are preserved verbatim.
+
+The event stream is the source of truth
+[ADR#0047](./0047-event-sourced-credential-metadata.md) made it, so its
+provisioning refuses every setting that could drop an event on its own:
+storage other than disk, retention other than limits, maximum age, messages
+per subject, total messages, total bytes, per-message expiry, and subject
+rollup. The gateway creates the stream when it is
+missing and never updates an existing one. A stream that fails the check
+stops the gateway at startup, which is safer than letting it discard a
+credential's history.
+
 ## Consequences
 
 - The gateway's current OpenBao client is prototype scaffolding with a
@@ -194,3 +259,6 @@ backend name.
   Boundaries section read as amended by Q2 and Q3, and
   [ADR#0046](./0046-project-anchored-resource-hierarchy.md) Decision 2 reads as amended by Q4 for generated credential ids. This ADR is the current
   text on cache placement and lifecycle-state placement.
+- After the Q4 amendment, the write request is the only record of how a
+  credential's id was derived. Changing the identity template is a new
+  identity version behind a backfilled registry, never an edit to version 1.

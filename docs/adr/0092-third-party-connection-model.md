@@ -442,10 +442,10 @@ What exists: an inbound-only integration. The runtime route is mounted at
 resolves `WebhookSecret` through `RuntimeCredentialResolver`, verifies the
 signature, and publishes with `Nats-Msg-Id` set to the provider's webhook id
 (`rsworkspace/crates/platform/trogon-gateway/src/source/linear/server.rs:393`).
-The credential is in the `GATEWAY_CREDENTIAL_EVENTS` stream
+The credential is in the `CREDENTIAL_EVENTS` stream
 (`rsworkspace/crates/platform/trogon-gateway/src/credential/constants.rs:3`) with
-its value in OpenBao at an adapter-private path
-(`rsworkspace/crates/platform/trogon-gateway/src/secret_store/openbao_secret_store.rs:74`).
+its value in OpenBao at a path computed from its key
+(`rsworkspace/crates/platform/trogon-gateway/src/secret_store/openbao_secret_store.rs:563`).
 
 - **No connection material goes through the gateway's store.** The store has no
   compare-and-swap, one string per credential and no OAuth kind. Token sets are
@@ -470,9 +470,9 @@ its value in OpenBao at an adapter-private path
   flip.
 - **Retire afterwards.** The legacy `WebhookSecret` credential is destroyed with
   the existing saga and the static `LinearConfig` secret is removed.
-- **Existing OpenBao entries are not rewritten.** They keep their recorded
-  adapter-private paths and ids under [ADR#0074](./0074-credential-platform-extraction-boundary.md)
-  Q4, which is the only re-key. A Connection may adopt one by `SecretRef` as a
+- **Existing OpenBao entries are not rewritten.** They keep their recorded ids
+  and the paths those ids determine under [ADR#0074](./0074-credential-platform-extraction-boundary.md)
+  Q4 as amended, which is the only re-key. A Connection may adopt one by `SecretRef` as a
   borrowed binding, and connection cleanup never destroys a borrowed secret; the
   legacy saga does.
 

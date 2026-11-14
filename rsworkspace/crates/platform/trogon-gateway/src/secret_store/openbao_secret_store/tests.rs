@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::source_integration_id::SourceIntegrationId;
 use axum::Json;
 use axum::Router;
@@ -47,10 +47,8 @@ fn rotated_credential_ref_preserves_integration_scope() {
         SourceIntegrationId::new("primary").unwrap(),
     );
     let credential = CredentialRef::new(
-        CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap(),
+        CredentialIdentity::derive(scope, CredentialKind::WebhookSecret),
         CredentialVersion::initial(),
-        &scope,
-        CredentialKind::WebhookSecret,
     );
 
     let rotated = credential.with_version(CredentialVersion::new(2).unwrap());
@@ -185,8 +183,7 @@ async fn answer_as_openbao(State(openbao): State<FakeOpenBao>, method: Method, u
 
 fn discord_bot_token(version: CredentialVersion) -> CredentialRef {
     let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
-    let id = openbao_credential_id(&scope, CredentialKind::BotToken).unwrap();
-    CredentialRef::new(id, version, &scope, CredentialKind::BotToken)
+    CredentialRef::new(CredentialIdentity::derive(scope, CredentialKind::BotToken), version)
 }
 
 #[tokio::test]
@@ -211,13 +208,7 @@ async fn metadata_failure_mentioning_404_is_a_backend_outage() {
 
     let error = openbao.store().metadata(&credential).await.unwrap_err();
 
-    assert!(matches!(
-        error,
-        SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
-            ..
-        }
-    ));
+    assert!(matches!(error, SecretStoreError::BackendUnavailable { .. }));
 }
 
 #[tokio::test]
@@ -329,17 +320,15 @@ async fn metadata_fingerprints_the_metadata_path_and_version() {
         SourceIntegrationId::new("compose-smoke").unwrap(),
     );
     let credential = CredentialRef::new(
-        openbao_credential_id(&scope, CredentialKind::WebhookSecret).unwrap(),
+        CredentialIdentity::derive(scope, CredentialKind::WebhookSecret),
         CredentialVersion::new(2).unwrap(),
-        &scope,
-        CredentialKind::WebhookSecret,
     );
 
     let metadata = openbao.store().metadata(&credential).await.unwrap();
 
     assert_eq!(
         metadata.fingerprint().as_str(),
-        "openbao:ca45fc4dbbb75097b66c4fdf179938511f07d24c06be4a794ecc31841a61b1c4"
+        "openbao:de18d0194bc3076f6dfb2582d884390d7927e48935f25e4a4464ec5204840f01"
     );
 }
 
@@ -418,7 +407,7 @@ async fn address_that_cannot_be_a_base_is_a_backend_outage() {
 
     assert!(matches!(
         error,
-        SecretStoreError::BackendUnavailable { backend: StorageBackend::OpenBao, message }
+        SecretStoreError::BackendUnavailable { message }
             if message.starts_with("failed to build endpoint url")
     ));
 }
@@ -430,17 +419,14 @@ async fn put_with_an_unparseable_write_response_is_a_backend_outage() {
 
     let error = openbao
         .store()
-        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
-            ..
-        }
-    ));
+    assert!(matches!(error, SecretStoreError::BackendUnavailable { .. }));
 }
 
 #[tokio::test]
@@ -450,17 +436,14 @@ async fn put_rejects_a_zero_version_from_the_backend() {
 
     let error = openbao
         .store()
-        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
-            ..
-        }
-    ));
+    assert!(matches!(error, SecretStoreError::BackendUnavailable { .. }));
 }
 
 #[tokio::test]
@@ -572,7 +555,7 @@ async fn revoke_reports_a_backend_that_rejects_the_delete() {
 
     assert!(matches!(
         error,
-        SecretStoreError::BackendUnavailable { backend: StorageBackend::OpenBao, message }
+        SecretStoreError::BackendUnavailable { message }
             if message.contains("500") && message.contains("sealed")
     ));
 }
@@ -628,8 +611,7 @@ async fn assert_roundtrip(store: &OpenBaoSecretStore) -> CredentialRef {
 
     let credential = store
         .put(
-            scope,
-            CredentialKind::WebhookSecret,
+            CredentialIdentity::derive(scope, CredentialKind::WebhookSecret),
             SecretString::new(TEST_INPUT).unwrap(),
         )
         .await
@@ -640,7 +622,6 @@ async fn assert_roundtrip(store: &OpenBaoSecretStore) -> CredentialRef {
 
     assert_eq!(output, TEST_INPUT);
     assert_eq!(metadata.status(), CredentialStatus::Active);
-    assert_eq!(metadata.storage_backend(), StorageBackend::OpenBao);
     assert_custom_metadata(store, &credential).await;
     credential
 }
@@ -653,13 +634,14 @@ async fn assert_custom_metadata(store: &OpenBaoSecretStore, credential: &Credent
         .expect("custom metadata to be populated on write");
 
     let expected_version = credential.version().get().to_string();
+    let expected_id = credential.id().to_string();
     assert_eq!(
         custom_metadata.get("owner_id").map(String::as_str),
         Some(credential.owner_id().as_str())
     );
     assert_eq!(
         custom_metadata.get("credential_id").map(String::as_str),
-        Some(credential.id().as_str())
+        Some(expected_id.as_str())
     );
     assert_eq!(
         custom_metadata.get("credential_kind").map(String::as_str),
@@ -682,12 +664,12 @@ async fn openbao_testcontainer_roundtrips_precise_value() {
     let credential = assert_roundtrip(&store).await;
 
     assert_eq!(
-        store.data_path(&credential),
-        "secret/data/trogonai/tenant-e2e/credentials/openbao%3Atenant-e2e%3Agithub%2Fcopy-in-out%3Awebhook_secret"
+        store.data_path(&credential.key()),
+        format!("secret/data/trogonai/tenant-e2e/credentials/{}", credential.id())
     );
     assert_eq!(
-        store.metadata_path(&credential),
-        "secret/metadata/trogonai/tenant-e2e/credentials/openbao%3Atenant-e2e%3Agithub%2Fcopy-in-out%3Awebhook_secret"
+        store.metadata_path(&credential.key()),
+        format!("secret/metadata/trogonai/tenant-e2e/credentials/{}", credential.id())
     );
 }
 
@@ -758,8 +740,8 @@ async fn openbao_dev_server_roundtrips_precise_value() {
             "credential_ref": credential.to_string(),
             "input": TEST_INPUT,
             "output": TEST_INPUT,
-            "data_path": store.data_path(&credential),
-            "metadata_path": store.metadata_path(&credential),
+            "data_path": store.data_path(&credential.key()),
+            "metadata_path": store.metadata_path(&credential.key()),
         })
     );
 }
@@ -799,13 +781,7 @@ async fn metadata_with_an_unparseable_deletion_time_is_a_backend_outage() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
-            ..
-        }
-    ));
+    assert!(matches!(error, SecretStoreError::BackendUnavailable { .. }));
 }
 
 #[tokio::test]
@@ -837,13 +813,7 @@ async fn redirects_are_not_followed_so_the_token_stays_with_openbao() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
-            ..
-        }
-    ));
+    assert!(matches!(error, SecretStoreError::BackendUnavailable { .. }));
     assert!(elsewhere.requests.lock().await.is_empty());
 }
 
@@ -854,7 +824,10 @@ async fn put_returns_the_stored_version_when_custom_metadata_cannot_be_recorded(
 
     let credential = openbao
         .store()
-        .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+        .put(
+            CredentialIdentity::derive(scope, CredentialKind::BotToken),
+            SecretString::new("Bot token").unwrap(),
+        )
         .await
         .unwrap();
 

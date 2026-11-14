@@ -9,8 +9,7 @@ use super::{
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate, fingerprint,
 };
 use crate::credential::commands::domain::{
-    CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, StorageBackend,
+    CredentialIdentity, CredentialMetadata, CredentialRef, CredentialStatus, CredentialVersion,
 };
 
 #[derive(Clone, Default)]
@@ -20,7 +19,6 @@ pub struct InMemorySecretStore {
 
 #[derive(Default)]
 struct InMemorySecretStoreState {
-    next_id: u64,
     entries: BTreeMap<CredentialRef, StoredCredential>,
 }
 
@@ -32,41 +30,37 @@ struct StoredCredential {
 }
 
 impl InMemorySecretStoreState {
-    fn next_credential_ref(
-        &mut self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-    ) -> Result<CredentialRef, SecretStoreError> {
-        self.next_id += 1;
-        let id = CredentialId::new(format!(
-            "memory:{}:{}:{}",
-            scope.scope_key(),
-            kind.as_str(),
-            self.next_id
-        ))
-        .map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
+    fn next_credential_ref(&self, identity: CredentialIdentity) -> CredentialRef {
+        let key = identity.key();
+        let version = self
+            .entries
+            .keys()
+            .filter(|credential| credential.key() == key)
+            .map(CredentialRef::version)
+            .max()
+            .map_or_else(CredentialVersion::initial, CredentialVersion::next);
 
-        Ok(CredentialRef::new(id, CredentialVersion::initial(), &scope, kind))
+        CredentialRef::new(identity, version)
     }
 }
 
 impl SecretStorePut for InMemorySecretStore {
     type Error = SecretStoreError;
 
-    async fn put(
-        &self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-        value: SecretString,
-    ) -> Result<CredentialRef, Self::Error> {
+    async fn put(&self, identity: CredentialIdentity, value: SecretString) -> Result<CredentialRef, Self::Error> {
         let mut state = self.state.lock().await;
-        let credential = state.next_credential_ref(scope, kind)?;
-        let metadata = metadata(&credential, CredentialStatus::Active)?;
+        let credential = state.next_credential_ref(identity);
+        let active_metadata = metadata(&credential, CredentialStatus::Active)?;
+        for (stored_ref, stored) in &mut state.entries {
+            if stored_ref.key() == credential.key() && stored.metadata.status() == CredentialStatus::Active {
+                stored.metadata = metadata(stored_ref, CredentialStatus::Previous)?;
+            }
+        }
         state.entries.insert(
             credential.clone(),
             StoredCredential {
                 material: Some(SecretMaterial::plaintext(value)),
-                metadata,
+                metadata: active_metadata,
                 destroy_reason: None,
             },
         );
@@ -144,7 +138,7 @@ impl SecretStoreRevoke for InMemorySecretStore {
             });
         }
         for (stored_ref, stored) in &mut state.entries {
-            if stored_ref.id() == credential.id() && stored.metadata.status() != CredentialStatus::Destroyed {
+            if stored_ref.key() == credential.key() && stored.metadata.status() != CredentialStatus::Destroyed {
                 stored.metadata = metadata(stored_ref, CredentialStatus::Revoked)?;
             }
         }
@@ -189,14 +183,8 @@ impl SecretStoreMetadata for InMemorySecretStore {
 }
 
 fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<CredentialMetadata, SecretStoreError> {
-    let fingerprint = fingerprint::digest("memory", credential)
-        .map_err(SecretStoreError::invalid_generated(StorageBackend::InMemory))?;
-    Ok(CredentialMetadata::new(
-        credential.clone(),
-        status,
-        StorageBackend::InMemory,
-        fingerprint,
-    ))
+    let fingerprint = fingerprint::digest("memory", credential).map_err(SecretStoreError::invalid_generated)?;
+    Ok(CredentialMetadata::new(credential.clone(), status, fingerprint))
 }
 
 #[cfg(test)]

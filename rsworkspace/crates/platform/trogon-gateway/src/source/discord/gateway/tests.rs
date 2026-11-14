@@ -305,6 +305,26 @@ async fn dispatch_omits_guild_id_when_absent() {
 }
 
 #[tokio::test]
+async fn dispatch_preserves_payload_without_forwarding_malformed_guild_metadata() {
+    for data in [
+        r#"{"id":"1","guild_id":true}"#,
+        r#"{"id":"1","guild_id":{}}"#,
+        r#"{"id":"1","guild_id":[]}"#,
+    ] {
+        let (b, mock) = bridge_with_mock();
+        let raw = format!(r#"{{"op":0,"t":"MESSAGE_CREATE","d":{data}}}"#);
+
+        b.dispatch(&raw).await;
+
+        let messages = mock.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(mock.published_subjects(), vec!["discord.message_create"]);
+        assert!(messages[0].headers.get(NATS_HEADER_GUILD_ID).is_none());
+        assert_eq!(messages[0].payload.as_ref(), data.as_bytes());
+    }
+}
+
+#[tokio::test]
 async fn dispatch_sets_dedup_id_for_message_create() {
     let (b, mock) = bridge_with_mock();
     b.dispatch(r#"{"op":0,"t":"MESSAGE_CREATE","s":1,"d":{"id":"msg123","channel_id":"456"}}"#)

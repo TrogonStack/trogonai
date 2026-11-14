@@ -4,15 +4,14 @@ use std::future::Future;
 use trogon_std::SecretString;
 
 use super::{SecretDestroyReason, SecretMaterial};
-use crate::credential::commands::domain::{CredentialKind, CredentialMetadata, CredentialRef, CredentialScope};
+use crate::credential::commands::domain::{CredentialIdentity, CredentialMetadata, CredentialRef};
 
 pub trait SecretStorePut: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
 
     fn put(
         &self,
-        scope: CredentialScope,
-        kind: CredentialKind,
+        identity: CredentialIdentity,
         value: SecretString,
     ) -> impl Future<Output = Result<CredentialRef, Self::Error>> + Send;
 }

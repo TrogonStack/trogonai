@@ -15,7 +15,8 @@ use trogon_decider_runtime::{
 
 use super::*;
 use crate::credential::commands::domain::{
-    CredentialFingerprint, CredentialMetadata, CredentialOwnerId, CredentialStatus, StorageBackend,
+    CredentialFingerprint, CredentialIdentityVersion, CredentialKind, CredentialMetadata, CredentialOwnerId,
+    CredentialScope, CredentialStatus,
 };
 use crate::credential::commands::proto::{
     activated_to_proto, decode_active_state, pending_write_to_proto_state, revoked_to_proto,
@@ -67,30 +68,37 @@ impl HandlerTestStreamStore {
     }
 }
 
-impl StreamRead<str> for HandlerTestStreamStore {
+impl StreamRead<CredentialKey> for HandlerTestStreamStore {
     type Error = HandlerTestStreamStoreError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(
+        &self,
+        request: ReadStreamRequest<'_, CredentialKey>,
+    ) -> Result<ReadStreamResponse, Self::Error> {
         let start = match request.from {
             ReadFrom::Beginning => 1,
             ReadFrom::Position(position) => position.as_u64(),
         };
+        let stream_id = request.stream_id.to_string();
         let events = self.events.lock().unwrap();
         Ok(ReadStreamResponse {
-            current_position: current_position(&events, request.stream_id),
+            current_position: current_position(&events, &stream_id),
             events: events
                 .iter()
-                .filter(|event| event.stream_id() == request.stream_id && event.stream_position.as_u64() >= start)
+                .filter(|event| event.stream_id() == stream_id && event.stream_position.as_u64() >= start)
                 .cloned()
                 .collect(),
         })
     }
 }
 
-impl StreamAppend<str> for HandlerTestStreamStore {
+impl StreamAppend<CredentialKey> for HandlerTestStreamStore {
     type Error = HandlerTestStreamStoreError;
 
-    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, CredentialKey>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
         let mut events = self.events.lock().unwrap();
         let append_count = self.write_preconditions.lock().unwrap().len() + 1;
         self.write_preconditions
@@ -105,7 +113,7 @@ impl StreamAppend<str> for HandlerTestStreamStore {
             }
         }
 
-        let current_position = current_position(&events, request.stream_id);
+        let current_position = current_position(&events, &request.stream_id.to_string());
         match request.stream_write_precondition {
             StreamWritePrecondition::Any => {}
             StreamWritePrecondition::StreamExists if current_position.is_some() => {}
@@ -132,25 +140,30 @@ impl StreamAppend<str> for HandlerTestStreamStore {
     }
 }
 
-impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for HandlerTestStreamStore {
+impl SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey> for HandlerTestStreamStore {
     type Error = HandlerTestStreamStoreError;
 
     async fn read_snapshot(
         &self,
-        request: ReadSnapshotRequest<'_, str>,
+        request: ReadSnapshotRequest<'_, CredentialKey>,
     ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
         Ok(ReadSnapshotResponse {
-            snapshot: self.snapshots.lock().unwrap().get(request.snapshot_id).cloned(),
+            snapshot: self
+                .snapshots
+                .lock()
+                .unwrap()
+                .get(&request.snapshot_id.to_string())
+                .cloned(),
         })
     }
 }
 
-impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for HandlerTestStreamStore {
+impl SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey> for HandlerTestStreamStore {
     type Error = HandlerTestStreamStoreError;
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, str>,
+        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, CredentialKey>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         self.snapshots
             .lock()
@@ -166,16 +179,9 @@ struct FailingSecretStore;
 impl SecretStorePut for FailingSecretStore {
     type Error = SecretStoreError;
 
-    async fn put(
-        &self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-        _value: SecretString,
-    ) -> Result<CredentialRef, Self::Error> {
-        let credential = CredentialRef::new(credential_id(), CredentialVersion::initial(), &scope, kind);
+    async fn put(&self, identity: CredentialIdentity, _value: SecretString) -> Result<CredentialRef, Self::Error> {
         Err(SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
-            message: format!("OpenBao refused {}", credential.id()),
+            message: format!("OpenBao refused {}", identity.id()),
         })
     }
 }
@@ -198,7 +204,6 @@ impl SecretStoreRotate for FailingRotateSecretStore {
 
     async fn rotate(&self, credential: &CredentialRef, _value: SecretString) -> Result<CredentialRef, Self::Error> {
         Err(SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
             message: format!("OpenBao refused rotation for {}", credential.id()),
         })
     }
@@ -222,7 +227,6 @@ impl SecretStoreDestroy for FailingDestroySecretStore {
 
     async fn destroy(&self, credential: &CredentialRef, _reason: &SecretDestroyReason) -> Result<(), Self::Error> {
         Err(SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
             message: format!("OpenBao refused destroy for {}", credential.id()),
         })
     }
@@ -272,12 +276,27 @@ fn scope() -> CredentialScope {
     CredentialScope::integration(owner_id(), SourceKind::GitHub, integration_id())
 }
 
-fn credential_id() -> CredentialId {
-    CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap()
+fn identity() -> CredentialIdentity {
+    CredentialIdentity::derive(scope(), CredentialKind::WebhookSecret)
 }
 
-fn source_scoped_credential_id() -> CredentialId {
-    CredentialId::new("openbao:tenant-1:github:webhook_secret").unwrap()
+fn credential_id() -> CredentialId {
+    identity().id().clone()
+}
+
+fn stream_id() -> CredentialKey {
+    identity().key()
+}
+
+fn source_scoped_identity() -> CredentialIdentity {
+    CredentialIdentity::derive(
+        CredentialScope::source(owner_id(), SourceKind::GitHub),
+        CredentialKind::WebhookSecret,
+    )
+}
+
+fn source_scoped_stream_id() -> CredentialKey {
+    source_scoped_identity().key()
 }
 
 fn runtime_key() -> RuntimeIntegrationKey {
@@ -289,12 +308,7 @@ fn source_runtime_key() -> RuntimeIntegrationKey {
 }
 
 fn credential_ref(version: u64) -> CredentialRef {
-    CredentialRef::new(
-        credential_id(),
-        CredentialVersion::new(version).unwrap(),
-        &scope(),
-        CredentialKind::WebhookSecret,
-    )
+    CredentialRef::new(identity(), CredentialVersion::new(version).unwrap())
 }
 
 fn destroy_reason() -> SecretDestroyReason {
@@ -302,21 +316,19 @@ fn destroy_reason() -> SecretDestroyReason {
 }
 
 fn put_command(value: &str) -> PutCredential {
-    PutCredential::new(
-        credential_id(),
-        scope(),
-        CredentialKind::WebhookSecret,
-        SecretString::new(value).unwrap(),
-    )
+    PutCredential::new(identity(), SecretString::new(value).unwrap())
 }
 
 fn source_scoped_put_command(value: &str) -> PutCredential {
-    PutCredential::new(
-        source_scoped_credential_id(),
-        CredentialScope::source(owner_id(), SourceKind::GitHub),
-        CredentialKind::WebhookSecret,
-        SecretString::new(value).unwrap(),
-    )
+    PutCredential::new(source_scoped_identity(), SecretString::new(value).unwrap())
+}
+
+/// Evolves `state` by `event` as read from the primary credential's stream.
+fn evolve(
+    state: state_v1::CredentialStateSnapshot,
+    event: &v1::CredentialEvent,
+) -> Result<state_v1::CredentialStateSnapshot, CredentialEvolveError> {
+    evolve_stream(&stream_id(), state, event)
 }
 
 fn stored_event(event: &v1::CredentialEvent, id: u128) -> Event {
@@ -334,7 +346,7 @@ fn payload_contains(payload: &[u8], needle: &str) -> bool {
 
 fn write_requested_event() -> v1::CredentialEvent {
     v1::CredentialEvent {
-        event: Some(write_requested_to_proto(&credential_id(), &scope(), CredentialKind::WebhookSecret).into()),
+        event: Some(write_requested_to_proto(&identity()).into()),
     }
 }
 
@@ -396,7 +408,7 @@ impl OpenBaoServer {
 fn recovery_plan_builds_write_activation_command_for_pending_write() {
     let state = evolve(initial_state(), &write_requested_event()).unwrap();
 
-    let command = activation_recovery_command(&credential_id(), &state, None).unwrap();
+    let command = activation_recovery_command(&stream_id(), &state, None).unwrap();
 
     assert_eq!(
         command,
@@ -407,23 +419,23 @@ fn recovery_plan_builds_write_activation_command_for_pending_write() {
 }
 
 #[test]
-fn recovery_plan_builds_write_activation_from_the_pending_scope_for_any_backend() {
-    let credential_id = CredentialId::new("memory:github/primary:webhook_secret:1").unwrap();
+fn recovery_plan_activates_the_recorded_id_without_deriving_it_again() {
+    let recorded = CredentialIdentity::new(
+        CredentialId::new("6f9619ff-8b86-4011-b42d-00c04fc964ff").unwrap(),
+        scope(),
+        CredentialKind::WebhookSecret,
+        CredentialIdentityVersion::V1,
+    );
     let state = state_v1::CredentialStateSnapshot {
-        state: Some(pending_write_to_proto_state(&credential_id, &scope(), CredentialKind::WebhookSecret).into()),
+        state: Some(pending_write_to_proto_state(&recorded).into()),
     };
 
-    let command = activation_recovery_command(&credential_id, &state, None).unwrap();
+    let command = activation_recovery_command(&recorded.key(), &state, None).unwrap();
 
     assert_eq!(
         command,
         Some(CredentialActivationRecoveryCommand::Write(
-            RecoverCredentialWriteActivation::new(CredentialRef::new(
-                credential_id,
-                CredentialVersion::initial(),
-                &scope(),
-                CredentialKind::WebhookSecret,
-            ))
+            RecoverCredentialWriteActivation::new(CredentialRef::new(recorded, CredentialVersion::initial()))
         ))
     );
 }
@@ -431,14 +443,14 @@ fn recovery_plan_builds_write_activation_from_the_pending_scope_for_any_backend(
 #[test]
 fn recovery_plan_rejects_a_pending_write_from_another_stream() {
     let state = evolve(initial_state(), &write_requested_event()).unwrap();
-    let stream_id = source_scoped_credential_id();
+    let source_scoped = source_scoped_stream_id();
 
-    let error = activation_recovery_command(&stream_id, &state, None).unwrap_err();
+    let error = activation_recovery_command(&source_scoped, &state, None).unwrap_err();
 
     assert!(matches!(
         error,
         CredentialActivationRecoveryPlanError::PendingWriteMismatch { expected, actual }
-            if expected == stream_id && actual == credential_id()
+            if expected == source_scoped && actual == stream_id()
     ));
 }
 
@@ -447,7 +459,6 @@ fn recovery_plan_builds_rotation_activation_command_for_pending_rotation() {
     let active = CredentialMetadata::new(
         credential_ref(1),
         CredentialStatus::Active,
-        StorageBackend::OpenBao,
         CredentialFingerprint::new("fingerprint").unwrap(),
     );
     let state = [
@@ -459,7 +470,7 @@ fn recovery_plan_builds_rotation_activation_command_for_pending_rotation() {
     .try_fold(initial_state(), |state, event| evolve(state, &event))
     .unwrap();
 
-    let command = activation_recovery_command(&credential_id(), &state, None).unwrap();
+    let command = activation_recovery_command(&stream_id(), &state, None).unwrap();
 
     assert_eq!(
         command,
@@ -474,7 +485,6 @@ fn recovery_plan_skips_completed_state() {
     let active = CredentialMetadata::new(
         credential_ref(1),
         CredentialStatus::Active,
-        StorageBackend::OpenBao,
         CredentialFingerprint::new("fingerprint").unwrap(),
     );
     let state = [write_requested_event(), activated_event(active)]
@@ -482,7 +492,7 @@ fn recovery_plan_skips_completed_state() {
         .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
 
-    let command = activation_recovery_command(&credential_id(), &state, None).unwrap();
+    let command = activation_recovery_command(&stream_id(), &state, None).unwrap();
 
     assert_eq!(command, None);
 }
@@ -506,7 +516,7 @@ async fn put_records_request_writes_secret_and_activates_metadata() {
     };
     let (metadata, _previous_versions) = decode_active_state("active", active).unwrap();
     assert_eq!(metadata.reference().id(), &credential_id());
-    assert_eq!(metadata.storage_backend(), StorageBackend::OpenBao);
+    assert_eq!(metadata.reference().identity(), &identity());
     assert_eq!(
         secrets
             .get(metadata.reference())
@@ -675,14 +685,9 @@ impl GatedSecretStore {
 impl SecretStorePut for GatedSecretStore {
     type Error = SecretStoreError;
 
-    async fn put(
-        &self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-        value: SecretString,
-    ) -> Result<CredentialRef, Self::Error> {
+    async fn put(&self, identity: CredentialIdentity, value: SecretString) -> Result<CredentialRef, Self::Error> {
         self.gate_first_write().await;
-        self.inner.put(scope, kind, value).await
+        self.inner.put(identity, value).await
     }
 }
 
@@ -978,13 +983,8 @@ struct CountingRotateSecretStore {
 impl SecretStorePut for CountingRotateSecretStore {
     type Error = SecretStoreError;
 
-    async fn put(
-        &self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-        value: SecretString,
-    ) -> Result<CredentialRef, Self::Error> {
-        self.inner.put(scope, kind, value).await
+    async fn put(&self, identity: CredentialIdentity, value: SecretString) -> Result<CredentialRef, Self::Error> {
+        self.inner.put(identity, value).await
     }
 }
 
@@ -1003,7 +1003,6 @@ impl SecretStoreMetadata for CountingRotateSecretStore {
     async fn metadata(&self, credential: &CredentialRef) -> Result<CredentialMetadata, Self::Error> {
         if self.metadata_outage.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(SecretStoreError::BackendUnavailable {
-                backend: StorageBackend::OpenBao,
                 message: "metadata read timed out".to_string(),
             });
         }
@@ -1376,11 +1375,7 @@ async fn runtime_handler_clones_serialize_writes_on_the_same_locks() {
     let handler = CredentialRuntimeHandler::new(events.clone(), secrets, RuntimeCredentialRegistry::default());
     let worker_handler = handler.clone();
 
-    let write_guard = worker_handler
-        .handler
-        .write_locks
-        .acquire(&put_command("secret").credential_id)
-        .await;
+    let write_guard = worker_handler.handler.write_locks.acquire(&credential_id()).await;
     let put = handler.put(put_command("secret"));
     tokio::pin!(put);
     assert!(
@@ -1452,10 +1447,10 @@ impl SecretStoreRevoke for RotationRacingRevokeSecretStore {
 
     async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
         self.revoked.lock().unwrap().push(credential.clone());
-        let current = current_position(&self.events.events(), credential.id().as_str());
+        let current = current_position(&self.events.events(), &CredentialKey::from(credential).to_string());
         self.events
             .append_stream(AppendStreamRequest {
-                stream_id: credential.id().as_str(),
+                stream_id: &CredentialKey::from(credential),
                 stream_write_precondition: StreamWritePrecondition::At(current.unwrap()),
                 events: vec![stored_event(&rotation_requested_event(credential.version().get()), 900)],
             })
@@ -1683,10 +1678,10 @@ async fn put_after_revoke_and_destroy_restarts_the_credential_on_the_next_versio
 fn recovery_after_destroy_targets_the_version_following_the_destroyed_one() {
     let destroyed_ref = credential_ref(3);
     let state = state_v1::CredentialStateSnapshot {
-        state: Some(pending_write_to_proto_state(&credential_id(), &scope(), CredentialKind::WebhookSecret).into()),
+        state: Some(pending_write_to_proto_state(&identity()).into()),
     };
 
-    let command = activation_recovery_command(&credential_id(), &state, Some(destroyed_ref.version())).unwrap();
+    let command = activation_recovery_command(&stream_id(), &state, Some(destroyed_ref.version())).unwrap();
 
     assert_eq!(
         command,
@@ -1936,7 +1931,10 @@ async fn runtime_handler_revoke_removes_projection_and_invalidates_cached_secret
 
     runtime_credentials
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential_ref, 3).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(
+            credential_ref,
+            3,
+        ))
         .await;
     assert!(matches!(
         resolver.resolve(&runtime_key(), CredentialKind::WebhookSecret).await,
@@ -1976,7 +1974,10 @@ async fn runtime_handler_destroy_removes_projection_and_invalidates_cached_secre
 
     runtime_credentials
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential_ref, 5).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(
+            credential_ref,
+            5,
+        ))
         .await;
     assert!(matches!(
         resolver.resolve(&runtime_key(), CredentialKind::WebhookSecret).await,
@@ -2073,13 +2074,8 @@ struct NextVersionOutageSecretStore {
 impl SecretStorePut for NextVersionOutageSecretStore {
     type Error = SecretStoreError;
 
-    async fn put(
-        &self,
-        scope: CredentialScope,
-        kind: CredentialKind,
-        value: SecretString,
-    ) -> Result<CredentialRef, Self::Error> {
-        self.inner.put(scope, kind, value).await
+    async fn put(&self, identity: CredentialIdentity, value: SecretString) -> Result<CredentialRef, Self::Error> {
+        self.inner.put(identity, value).await
     }
 }
 
@@ -2089,7 +2085,6 @@ impl SecretStoreMetadata for NextVersionOutageSecretStore {
     async fn metadata(&self, credential: &CredentialRef) -> Result<CredentialMetadata, Self::Error> {
         if credential.version().get() > 1 {
             return Err(SecretStoreError::BackendUnavailable {
-                backend: StorageBackend::OpenBao,
                 message: "metadata read timed out".to_string(),
             });
         }
@@ -2105,7 +2100,6 @@ impl SecretStoreRevoke for FailingRevokeSecretStore {
 
     async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
         Err(SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
             message: format!("OpenBao refused revoke for {}", credential.id()),
         })
     }
@@ -2120,13 +2114,13 @@ impl SecretStoreRevoke for ConcurrentlyRevokingSecretStore {
     type Error = SecretStoreError;
 
     async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
-        let current = current_position(&self.events.events(), credential.id().as_str());
+        let current = current_position(&self.events.events(), &CredentialKey::from(credential).to_string());
         let revoked = v1::CredentialEvent {
             event: Some(revoked_to_proto(credential).into()),
         };
         self.events
             .append_stream(AppendStreamRequest {
-                stream_id: credential.id().as_str(),
+                stream_id: &CredentialKey::from(credential),
                 stream_write_precondition: StreamWritePrecondition::At(current.unwrap()),
                 events: vec![stored_event(&revoked, 901)],
             })
@@ -2295,14 +2289,14 @@ async fn load_state_skips_events_outside_the_credential_event_set() {
     };
     events
         .append_stream(AppendStreamRequest {
-            stream_id: credential_ref.id().as_str(),
+            stream_id: &CredentialKey::from(&credential_ref),
             stream_write_precondition: StreamWritePrecondition::At(position(2)),
             events: vec![foreign],
         })
         .await
         .unwrap();
 
-    let (state, stream_position) = load_state::<_, SecretStoreError>(&events, credential_ref.id().as_str())
+    let (state, stream_position) = load_state::<_, SecretStoreError>(&events, &CredentialKey::from(&credential_ref))
         .await
         .unwrap();
 

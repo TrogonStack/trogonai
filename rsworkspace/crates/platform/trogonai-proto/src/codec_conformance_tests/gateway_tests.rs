@@ -6,10 +6,13 @@ use crate::gateway::credentials::{
     CredentialEventCase, CredentialStateSnapshotCase, checkpoints_v1, idempotency_v1, state_v1, v1,
 };
 
-pub(super) fn credential_ref() -> Value {
+pub(super) const CREDENTIAL_ID: &str = "6f9619ff-8b86-4011-b42d-00c04fc964ff";
+
+pub(super) fn identity() -> Value {
     json!({
-        "id": "cred-1", "version": "2", "ownerId": "owner-1", "source": "CREDENTIAL_SOURCE_GITHUB",
-        "scopeKey": "org/repo", "kind": "CREDENTIAL_KIND_WEBHOOK_SECRET"
+        "credentialId": CREDENTIAL_ID, "ownerId": "owner-1", "source": "CREDENTIAL_SOURCE_GITHUB",
+        "scopeKey": "github", "kind": "CREDENTIAL_KIND_WEBHOOK_SECRET",
+        "identityVersion": "CREDENTIAL_IDENTITY_VERSION_V1"
     })
 }
 
@@ -20,66 +23,49 @@ fn merged(mut base: Value, extra: Value) -> Value {
     base
 }
 
-pub(super) fn ref_with(extra: Value) -> Value {
-    merged(json!({"id": "", "ownerId": "", "scopeKey": ""}), extra)
+pub(super) fn identity_with(extra: Value) -> Value {
+    merged(json!({"credentialId": "", "ownerId": "", "scopeKey": ""}), extra)
 }
 
-pub(super) fn metadata_with(extra: Value) -> Value {
-    merged(json!({"reference": ref_with(json!({})), "fingerprint": ""}), extra)
-}
-
-pub(super) fn metadata() -> Value {
-    json!({
-        "reference": credential_ref(), "status": "CREDENTIAL_STATUS_ACTIVE", "fingerprint": "sha256:abc"
-    })
-}
-
-pub(super) fn state_metadata() -> Value {
-    json!({
-        "reference": credential_ref(), "status": "CREDENTIAL_STATUS_ACTIVE",
-        "storageBackend": "STORAGE_BACKEND_OPENBAO", "fingerprint": "sha256:abc"
-    })
+pub(super) fn key() -> Value {
+    json!({"credentialId": CREDENTIAL_ID, "ownerId": "owner-1"})
 }
 
 pub(super) fn active_state() -> Value {
     json!({
-        "metadata": state_metadata(),
-        "previousVersions": [credential_ref(), {"id": "cred-1", "version": "1", "ownerId": "", "scopeKey": ""}]
+        "identity": identity(), "version": "3", "fingerprint": "sha256:abc", "previousVersions": ["1", "2"]
     })
 }
 
 pub(super) fn events() -> [Value; 10] {
     [
-        json!({"writeRequested": {
-            "credentialId": "cred-1", "ownerId": "owner-1", "source": "CREDENTIAL_SOURCE_SLACK",
-            "kind": "CREDENTIAL_KIND_BOT_TOKEN", "scopeKey": "team"
-        }}),
-        json!({"writeFailed": {"credentialId": "cred-1", "reason": "vault down"}}),
-        json!({"activated": {"metadata": metadata()}}),
-        json!({"rotationRequested": {"credentialRef": credential_ref()}}),
-        json!({"rotationFailed": {"credentialRef": credential_ref(), "reason": "conflict"}}),
-        json!({"rotated": {"previousCredentialRef": credential_ref(), "metadata": metadata()}}),
-        json!({"revoked": {"credentialRef": credential_ref()}}),
-        json!({"destroyRequested": {"credentialRef": credential_ref(), "reason": "expired"}}),
-        json!({"destroyed": {"credentialRef": credential_ref()}}),
-        json!({"destroyFailed": {"credentialRef": credential_ref(), "reason": "timeout"}}),
+        json!({"writeRequested": {"identity": identity()}}),
+        json!({"writeFailed": {"key": key(), "reason": "vault down"}}),
+        json!({"activated": {"key": key(), "version": "1", "fingerprint": "sha256:abc"}}),
+        json!({"rotationRequested": {"key": key(), "version": "1"}}),
+        json!({"rotationFailed": {"key": key(), "version": "1", "reason": "conflict"}}),
+        json!({"rotated": {"key": key(), "previousVersion": "1", "version": "2", "fingerprint": "sha256:def"}}),
+        json!({"revoked": {"key": key(), "version": "2"}}),
+        json!({"destroyRequested": {"key": key(), "version": "2", "reason": "expired"}}),
+        json!({"destroyed": {"key": key(), "version": "2"}}),
+        json!({"destroyFailed": {"key": key(), "version": "2", "reason": "timeout"}}),
     ]
 }
 
 pub(super) fn snapshots() -> [Value; 9] {
     [
         json!({"missing": {}}),
-        json!({"pendingWrite": {
-            "credentialId": "cred-1", "ownerId": "owner-1", "source": "CREDENTIAL_SOURCE_ZOOM",
-            "kind": "CREDENTIAL_KIND_CLIENT_SECRET", "scopeKey": "acct"
-        }}),
+        json!({"pendingWrite": {"identity": identity_with(json!({
+            "credentialId": CREDENTIAL_ID, "ownerId": "owner-1", "source": "CREDENTIAL_SOURCE_ZOOM",
+            "kind": "CREDENTIAL_KIND_CLIENT_SECRET", "scopeKey": "zoom"
+        }))}}),
         json!({"active": active_state()}),
-        json!({"writeFailed": {"credentialId": "cred-1", "reason": "denied"}}),
+        json!({"writeFailed": {"identity": identity(), "reason": "denied"}}),
         json!({"rotationPending": {"active": active_state()}}),
-        json!({"revoked": {"credentialRef": credential_ref()}}),
-        json!({"destroyRequested": {"credentialRef": credential_ref(), "reason": "policy"}}),
-        json!({"destroyed": {"credentialRef": credential_ref()}}),
-        json!({"cleanupFailed": {"credentialRef": credential_ref(), "reason": "orphaned"}}),
+        json!({"revoked": {"identity": identity(), "version": "3"}}),
+        json!({"destroyRequested": {"identity": identity(), "version": "3", "reason": "policy"}}),
+        json!({"destroyed": {"identity": identity(), "version": "3"}}),
+        json!({"cleanupFailed": {"identity": identity(), "version": "3", "reason": "orphaned"}}),
     ]
 }
 
@@ -94,19 +80,24 @@ pub(super) fn command_response() -> Value {
 }
 
 #[test]
-fn credential_reference_and_metadata_keep_wire_and_json_contracts() {
-    let reference = assert_json_codec::<v1::CredentialRef>(credential_ref());
-    assert_eq!(reference.version, Some(2));
-    assert_json_codec::<v1::CredentialMetadata>(metadata());
-    assert_json_codec::<state_v1::CredentialMetadata>(state_metadata());
-    assert_json_codec::<v1::CredentialRef>(ref_with(json!({"version": "18446744073709551615"})));
+fn credential_identity_and_key_keep_wire_and_json_contracts() {
+    let identity = assert_json_codec::<v1::CredentialIdentity>(identity());
+    assert_eq!(
+        identity.identity_version,
+        Some(EnumValue::from(v1::CredentialIdentityVersion::V1))
+    );
+    assert_json_codec::<v1::CredentialIdentity>(identity_with(json!({})));
+    assert_json_codec::<v1::CredentialKey>(key());
+    assert_json_codec::<v1::CredentialKey>(json!({"credentialId": "", "ownerId": ""}));
+    let revoked = assert_json_codec::<v1::CredentialRevoked>(json!({"key": key(), "version": "18446744073709551615"}));
+    assert_eq!(revoked.version, Some(u64::MAX));
 }
 
 #[test]
 fn every_enum_value_round_trips_through_names_numbers_and_unknown_values() {
     for source in v1::CredentialSource::values() {
-        let json = ref_with(json!({"id": "c", "source": source.proto_name()}));
-        let message = assert_json_codec::<v1::CredentialRef>(json);
+        let message =
+            assert_json_codec::<v1::CredentialIdentity>(identity_with(json!({"source": source.proto_name()})));
         assert_eq!(message.source, Some(EnumValue::from(*source)));
         assert_eq!(v1::CredentialSource::from_i32(source.to_i32()), Some(*source));
         assert_eq!(
@@ -115,30 +106,23 @@ fn every_enum_value_round_trips_through_names_numbers_and_unknown_values() {
         );
     }
     for kind in v1::CredentialKind::values() {
-        let message = assert_json_codec::<v1::CredentialRef>(ref_with(json!({"id": "c", "kind": kind.proto_name()})));
+        let message = assert_json_codec::<v1::CredentialIdentity>(identity_with(json!({"kind": kind.proto_name()})));
         assert_eq!(message.kind, Some(EnumValue::from(*kind)));
         assert_eq!(v1::CredentialKind::from_i32(kind.to_i32()), Some(*kind));
         assert_eq!(v1::CredentialKind::from_proto_name(kind.proto_name()), Some(*kind));
     }
-    for status in v1::CredentialStatus::values() {
-        let message =
-            assert_json_codec::<v1::CredentialMetadata>(metadata_with(json!({"status": status.proto_name()})));
-        assert_eq!(message.status, Some(EnumValue::from(*status)));
-        assert_eq!(v1::CredentialStatus::from_i32(status.to_i32()), Some(*status));
-        assert_eq!(
-            v1::CredentialStatus::from_proto_name(status.proto_name()),
-            Some(*status)
-        );
-    }
-    for backend in state_v1::StorageBackend::values() {
-        let message = assert_json_codec::<state_v1::CredentialMetadata>(metadata_with(
-            json!({"storageBackend": backend.proto_name()}),
+    for version in v1::CredentialIdentityVersion::values() {
+        let message = assert_json_codec::<v1::CredentialIdentity>(identity_with(
+            json!({"identityVersion": version.proto_name()}),
         ));
-        assert_eq!(message.storage_backend, Some(EnumValue::from(*backend)));
-        assert_eq!(state_v1::StorageBackend::from_i32(backend.to_i32()), Some(*backend));
+        assert_eq!(message.identity_version, Some(EnumValue::from(*version)));
         assert_eq!(
-            state_v1::StorageBackend::from_proto_name(backend.proto_name()),
-            Some(*backend)
+            v1::CredentialIdentityVersion::from_i32(version.to_i32()),
+            Some(*version)
+        );
+        assert_eq!(
+            v1::CredentialIdentityVersion::from_proto_name(version.proto_name()),
+            Some(*version)
         );
     }
     for status in idempotency_v1::CredentialManagementIdempotencyStatus::values() {
@@ -157,9 +141,10 @@ fn every_enum_value_round_trips_through_names_numbers_and_unknown_values() {
     }
     assert_eq!(v1::CredentialSource::from_i32(99), None);
     assert_eq!(v1::CredentialKind::from_proto_name("CREDENTIAL_KIND_FUTURE"), None);
-    assert_json_codec::<v1::CredentialRef>(ref_with(json!({"id": "c", "source": 99, "kind": 99})));
-    assert_json_codec::<v1::CredentialMetadata>(metadata_with(json!({"status": 99})));
-    assert_json_codec::<state_v1::CredentialMetadata>(metadata_with(json!({"status": 99, "storageBackend": 99})));
+    assert_eq!(v1::CredentialIdentityVersion::from_i32(99), None);
+    assert_json_codec::<v1::CredentialIdentity>(identity_with(
+        json!({"source": 99, "kind": 99, "identityVersion": 99}),
+    ));
 }
 
 #[test]
@@ -225,9 +210,9 @@ fn event_oneof_switches_to_the_last_variant_seen_on_the_wire() {
 
 #[test]
 fn repeated_event_messages_merge_when_the_same_variant_repeats() {
-    let wire = b"\x0a\x08\x0a\x06cred-1\x0a\x04\x12\x02ow";
+    let wire = b"\x0a\x0a\x0a\x08\x0a\x06cred-1\x0a\x06\x0a\x04\x12\x02ow";
     let expected: v1::CredentialEvent = serde_json::from_value(json!({
-        "writeRequested": {"credentialId": "cred-1", "ownerId": "ow"}
+        "writeRequested": {"identity": {"credentialId": "cred-1", "ownerId": "ow"}}
     }))
     .expect("merged event");
     assert_wire_codec(wire, &expected);
@@ -283,7 +268,7 @@ fn state_payload_messages_keep_wire_and_json_contracts() {
     });
     assert_json_codec::<state_v1::PendingCredentialWriteState>(pending);
     let active = assert_json_codec::<state_v1::ActiveCredentialState>(active);
-    assert_eq!(active.previous_versions.len(), 2);
+    assert_eq!(active.previous_versions, [1, 2]);
     assert_json_codec::<state_v1::FailedCredentialWriteState>(failed);
     assert_json_codec::<state_v1::RotationPendingCredentialState>(rotation);
     assert_json_codec::<state_v1::RevokedCredentialState>(revoked);

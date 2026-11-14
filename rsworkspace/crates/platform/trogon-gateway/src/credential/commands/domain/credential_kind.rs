@@ -17,22 +17,23 @@ pub enum CredentialKind {
 }
 
 impl CredentialKind {
+    pub(crate) const ALL: [Self; 12] = [
+        Self::AppToken,
+        Self::BotToken,
+        Self::ClientSecret,
+        Self::ClientState,
+        Self::ConsumerSecret,
+        Self::SecretToken,
+        Self::ServiceAccountCredentials,
+        Self::SigningSecret,
+        Self::SigningToken,
+        Self::VerificationToken,
+        Self::WebhookSecret,
+        Self::WebhookToken,
+    ];
+
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "app_token" => Some(Self::AppToken),
-            "bot_token" => Some(Self::BotToken),
-            "client_secret" => Some(Self::ClientSecret),
-            "client_state" => Some(Self::ClientState),
-            "consumer_secret" => Some(Self::ConsumerSecret),
-            "secret_token" => Some(Self::SecretToken),
-            "service_account_credentials" => Some(Self::ServiceAccountCredentials),
-            "signing_secret" => Some(Self::SigningSecret),
-            "signing_token" => Some(Self::SigningToken),
-            "verification_token" => Some(Self::VerificationToken),
-            "webhook_secret" => Some(Self::WebhookSecret),
-            "webhook_token" => Some(Self::WebhookToken),
-            _ => None,
-        }
+        Self::ALL.into_iter().find(|kind| kind.as_str() == value)
     }
 
     pub fn as_str(self) -> &'static str {

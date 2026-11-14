@@ -5,7 +5,9 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use super::gateway_tests::{command_response, credential_ref, events, metadata, ref_with, snapshots, state_metadata};
+use super::gateway_tests::{
+    CREDENTIAL_ID, active_state, command_response, events, identity, identity_with, key, snapshots,
+};
 use crate::gateway::credentials::{checkpoints_v1, idempotency_v1, state_v1, v1};
 
 fn assert_debug_names_type<M: Message + Default + Debug>(name: &str) {
@@ -15,8 +17,8 @@ fn assert_debug_names_type<M: Message + Default + Debug>(name: &str) {
 
 #[test]
 fn debug_output_names_every_message() {
-    assert_debug_names_type::<v1::CredentialRef>("CredentialRef");
-    assert_debug_names_type::<v1::CredentialMetadata>("CredentialMetadata");
+    assert_debug_names_type::<v1::CredentialIdentity>("CredentialIdentity");
+    assert_debug_names_type::<v1::CredentialKey>("CredentialKey");
     assert_debug_names_type::<v1::CredentialEvent>("CredentialEvent");
     assert_debug_names_type::<v1::CredentialWriteRequested>("CredentialWriteRequested");
     assert_debug_names_type::<v1::CredentialWriteFailed>("CredentialWriteFailed");
@@ -28,7 +30,6 @@ fn debug_output_names_every_message() {
     assert_debug_names_type::<v1::CredentialDestroyRequested>("CredentialDestroyRequested");
     assert_debug_names_type::<v1::CredentialDestroyed>("CredentialDestroyed");
     assert_debug_names_type::<v1::CredentialDestroyFailed>("CredentialDestroyFailed");
-    assert_debug_names_type::<state_v1::CredentialMetadata>("CredentialMetadata");
     assert_debug_names_type::<state_v1::CredentialStateSnapshot>("CredentialStateSnapshot");
     assert_debug_names_type::<state_v1::CredentialMissingState>("CredentialMissingState");
     assert_debug_names_type::<state_v1::PendingCredentialWriteState>("PendingCredentialWriteState");
@@ -55,9 +56,10 @@ fn assert_type_url<M: MessageName>(name: &str) {
 
 #[test]
 fn type_urls_use_the_declaring_package() {
-    assert_type_url::<v1::CredentialRef>("CredentialRef");
+    assert_type_url::<v1::CredentialIdentity>("CredentialIdentity");
+    assert_type_url::<v1::CredentialKey>("CredentialKey");
     assert_type_url::<v1::CredentialEvent>("CredentialEvent");
-    assert_type_url::<state_v1::CredentialMetadata>("CredentialMetadata");
+    assert_type_url::<state_v1::ActiveCredentialState>("ActiveCredentialState");
     assert_type_url::<state_v1::CredentialStateSnapshot>("CredentialStateSnapshot");
     assert_type_url::<checkpoints_v1::RuntimeProjectionCheckpoint>("RuntimeProjectionCheckpoint");
     assert_type_url::<idempotency_v1::CredentialRefResponse>("CredentialRefResponse");
@@ -65,44 +67,48 @@ fn type_urls_use_the_declaring_package() {
 
 #[test]
 fn builder_setters_populate_explicit_presence_fields() {
-    let reference = v1::CredentialRef {
-        id: "cred-1".into(),
+    let built = v1::CredentialIdentity {
+        credential_id: CREDENTIAL_ID.into(),
         owner_id: "owner-1".into(),
-        scope_key: "org/repo".into(),
+        scope_key: "github".into(),
         ..Default::default()
     }
-    .with_version(2)
     .with_source(v1::CredentialSource::Github)
-    .with_kind(v1::CredentialKind::WebhookSecret);
-    assert_eq!(serde_json::to_value(&reference).expect("reference"), credential_ref());
+    .with_kind(v1::CredentialKind::WebhookSecret)
+    .with_identity_version(v1::CredentialIdentityVersion::V1);
+    assert_eq!(serde_json::to_value(&built).expect("identity"), identity());
+    let credential_key = v1::CredentialKey {
+        credential_id: CREDENTIAL_ID.into(),
+        owner_id: "owner-1".into(),
+    };
 
-    let live = v1::CredentialMetadata {
-        reference: reference.clone().into(),
+    let events = events();
+    let activated = v1::CredentialActivated {
+        key: credential_key.clone().into(),
         fingerprint: "sha256:abc".into(),
         ..Default::default()
     }
-    .with_status(v1::CredentialStatus::Active);
-    assert_eq!(serde_json::to_value(&live).expect("metadata"), metadata());
-
-    let stored = state_v1::CredentialMetadata {
-        reference: reference.clone().into(),
-        fingerprint: "sha256:abc".into(),
+    .with_version(1);
+    assert_eq!(
+        serde_json::to_value(&activated).expect("activated"),
+        payload(&events[2])
+    );
+    let rotated = v1::CredentialRotated {
+        key: credential_key.into(),
+        fingerprint: "sha256:def".into(),
         ..Default::default()
     }
-    .with_status(v1::CredentialStatus::Active)
-    .with_storage_backend(state_v1::StorageBackend::Openbao);
-    assert_eq!(serde_json::to_value(&stored).expect("state metadata"), state_metadata());
-
-    let write = v1::CredentialWriteRequested::default()
-        .with_source(v1::CredentialSource::Slack)
-        .with_kind(v1::CredentialKind::BotToken);
-    assert_eq!(write.source, Some(EnumValue::from(v1::CredentialSource::Slack)));
-    assert_eq!(write.kind, Some(EnumValue::from(v1::CredentialKind::BotToken)));
-    let pending = state_v1::PendingCredentialWriteState::default()
-        .with_source(v1::CredentialSource::Zoom)
-        .with_kind(v1::CredentialKind::ClientSecret);
-    assert_eq!(pending.source, Some(EnumValue::from(v1::CredentialSource::Zoom)));
-    assert_eq!(pending.kind, Some(EnumValue::from(v1::CredentialKind::ClientSecret)));
+    .with_previous_version(1)
+    .with_version(2);
+    assert_eq!(serde_json::to_value(&rotated).expect("rotated"), payload(&events[5]));
+    let active = state_v1::ActiveCredentialState {
+        identity: built.into(),
+        fingerprint: "sha256:abc".into(),
+        previous_versions: vec![1, 2],
+        ..Default::default()
+    }
+    .with_version(3);
+    assert_eq!(serde_json::to_value(&active).expect("active"), active_state());
 
     let projection = checkpoints_v1::RuntimeProjectionCheckpoint::default().with_last_scanned_sequence(9);
     assert_eq!(projection.last_scanned_sequence, Some(9));
@@ -167,8 +173,8 @@ fn package_registries_expose_every_message_type_url() {
     checkpoints_v1::register_types(&mut registry);
     idempotency_v1::register_types(&mut registry);
     let events = events();
-    assert_registered::<v1::CredentialRef>(&registry, credential_ref());
-    assert_registered::<v1::CredentialMetadata>(&registry, metadata());
+    assert_registered::<v1::CredentialIdentity>(&registry, identity());
+    assert_registered::<v1::CredentialKey>(&registry, key());
     assert_registered::<v1::CredentialEvent>(&registry, events[0].clone());
     assert_registered::<v1::CredentialWriteRequested>(&registry, payload(&events[0]));
     assert_registered::<v1::CredentialWriteFailed>(&registry, payload(&events[1]));
@@ -181,7 +187,6 @@ fn package_registries_expose_every_message_type_url() {
     assert_registered::<v1::CredentialDestroyed>(&registry, payload(&events[8]));
     assert_registered::<v1::CredentialDestroyFailed>(&registry, payload(&events[9]));
     let snapshots = snapshots();
-    assert_registered::<state_v1::CredentialMetadata>(&registry, state_metadata());
     assert_registered::<state_v1::CredentialStateSnapshot>(&registry, snapshots[2].clone());
     assert_registered::<state_v1::CredentialMissingState>(&registry, json!({}));
     assert_registered::<state_v1::PendingCredentialWriteState>(&registry, payload(&snapshots[1]));
@@ -237,8 +242,7 @@ where
 fn enum_json_accepts_names_numbers_and_null_and_rejects_everything_else() {
     assert_enum_json::<v1::CredentialSource>("CREDENTIAL_SOURCE_PLAID", 15, 99);
     assert_enum_json::<v1::CredentialKind>("CREDENTIAL_KIND_WEBHOOK_SECRET", 9, 99);
-    assert_enum_json::<v1::CredentialStatus>("CREDENTIAL_STATUS_PREVIOUS", 3, 99);
-    assert_enum_json::<state_v1::StorageBackend>("STORAGE_BACKEND_OPENBAO", 2, 99);
+    assert_enum_json::<v1::CredentialIdentityVersion>("CREDENTIAL_IDENTITY_VERSION_V1", 1, 99);
     assert_enum_json::<idempotency_v1::CredentialManagementIdempotencyStatus>(
         "CREDENTIAL_MANAGEMENT_IDEMPOTENCY_STATUS_COMPLETED",
         2,
@@ -247,14 +251,20 @@ fn enum_json_accepts_names_numbers_and_null_and_rejects_everything_else() {
 }
 
 #[test]
-fn reference_json_normalizes_snake_case_aliases() {
-    let parsed: v1::CredentialRef = serde_json::from_value(json!({
-        "id": "cred-1", "version": 2, "owner_id": "owner-1", "source": 2,
-        "scope_key": "org/repo", "kind": 9
+fn identity_json_normalizes_snake_case_aliases() {
+    let parsed: v1::CredentialIdentity = serde_json::from_value(json!({
+        "credential_id": CREDENTIAL_ID, "owner_id": "owner-1", "source": 2,
+        "scope_key": "github", "kind": 9, "identity_version": 1
     }))
     .expect("aliases");
-    assert_eq!(serde_json::to_value(parsed).expect("canonical"), credential_ref());
-    assert_eq!(ref_with(json!({})), json!({"id": "", "ownerId": "", "scopeKey": ""}));
+    assert_eq!(serde_json::to_value(parsed).expect("canonical"), identity());
+    let parsed: v1::CredentialKey =
+        serde_json::from_value(json!({"credential_id": CREDENTIAL_ID, "owner_id": "owner-1"})).expect("key aliases");
+    assert_eq!(serde_json::to_value(parsed).expect("canonical key"), key());
+    assert_eq!(
+        identity_with(json!({})),
+        json!({"credentialId": "", "ownerId": "", "scopeKey": ""})
+    );
 }
 
 #[test]
@@ -265,12 +275,8 @@ fn enum_values_participate_in_repeated_proto_json() {
     );
     super::assert_proto_sequence(vec![v1::CredentialKind::AppToken], json!(["CREDENTIAL_KIND_APP_TOKEN"]));
     super::assert_proto_sequence(
-        vec![v1::CredentialStatus::Revoked],
-        json!(["CREDENTIAL_STATUS_REVOKED"]),
-    );
-    super::assert_proto_sequence(
-        vec![state_v1::StorageBackend::InMemory],
-        json!(["STORAGE_BACKEND_IN_MEMORY"]),
+        vec![v1::CredentialIdentityVersion::V1],
+        json!(["CREDENTIAL_IDENTITY_VERSION_V1"]),
     );
     super::assert_proto_sequence(
         vec![idempotency_v1::CredentialManagementIdempotencyStatus::InProgress],

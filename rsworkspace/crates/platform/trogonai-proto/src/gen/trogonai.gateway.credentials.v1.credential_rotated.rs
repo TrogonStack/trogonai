@@ -5,24 +5,35 @@
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct CredentialRotated {
-    /// Field 1: `previous_credential_ref`
-    #[serde(rename = "previousCredentialRef", alias = "previous_credential_ref")]
-    pub previous_credential_ref: ::buffa::MessageField<
-        CredentialRef,
-        ::buffa::Inline<CredentialRef>,
-    >,
-    /// Field 2: `metadata`
-    #[serde(rename = "metadata")]
-    pub metadata: ::buffa::MessageField<
-        CredentialMetadata,
-        ::buffa::Inline<CredentialMetadata>,
-    >,
+    /// Field 1: `key`
+    #[serde(rename = "key")]
+    pub key: ::buffa::MessageField<CredentialKey, ::buffa::Inline<CredentialKey>>,
+    /// Field 2: `previous_version`
+    #[serde(
+        rename = "previousVersion",
+        alias = "previous_version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub previous_version: ::core::option::Option<u64>,
+    /// Field 3: `version`
+    #[serde(
+        rename = "version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub version: ::core::option::Option<u64>,
+    /// Field 4: `fingerprint`
+    #[serde(rename = "fingerprint", with = "::buffa::json_helpers::proto_string")]
+    pub fingerprint: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for CredentialRotated {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("CredentialRotated")
-            .field("previous_credential_ref", &self.previous_credential_ref)
-            .field("metadata", &self.metadata)
+            .field("key", &self.key)
+            .field("previous_version", &self.previous_version)
+            .field("version", &self.version)
+            .field("fingerprint", &self.fingerprint)
             .finish()
     }
 }
@@ -32,6 +43,22 @@ impl CredentialRotated {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialRotated";
+}
+impl CredentialRotated {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::previous_version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_previous_version(mut self, value: u64) -> Self {
+        self.previous_version = Some(value);
+        self
+    }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_version(mut self, value: u64) -> Self {
+        self.version = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(CredentialRotated);
 impl ::buffa::MessageName for CredentialRotated {
@@ -53,22 +80,21 @@ impl ::buffa::Message for CredentialRotated {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.previous_credential_ref.is_set() {
+        if self.key.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.previous_credential_ref.compute_size(__cache);
+            let inner_size = self.key.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
-        if self.metadata.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.metadata.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
-                    + inner_size as u64;
+        if let Some(v) = self.previous_version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
+        if let Some(v) = self.version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
+        }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.fingerprint) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -78,22 +104,21 @@ impl ::buffa::Message for CredentialRotated {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.previous_credential_ref.is_set() {
+        if self.key.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.previous_credential_ref.write_to(__cache, buf);
+            self.key.write_to(__cache, buf);
         }
-        if self.metadata.is_set() {
-            ::buffa::types::put_len_delimited_header(
-                2u32,
-                u64::from(__cache.consume_next()),
-                buf,
-            );
-            self.metadata.write_to(__cache, buf);
+        if let Some(v) = self.previous_version {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
         }
+        if let Some(v) = self.version {
+            ::buffa::types::put_uint64_field(3u32, v, buf);
+        }
+        ::buffa::types::put_string_field(4u32, &self.fingerprint, buf);
     }
     fn merge_field(
         &mut self,
@@ -112,7 +137,7 @@ impl ::buffa::Message for CredentialRotated {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.previous_credential_ref.get_or_insert_default(),
+                    self.key.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
@@ -120,13 +145,27 @@ impl ::buffa::Message for CredentialRotated {
             2u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.previous_version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
+            }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::Message::merge_length_delimited(
-                    self.metadata.get_or_insert_default(),
-                    buf,
-                    ctx,
-                )?;
+                ::buffa::types::merge_string(&mut self.fingerprint, buf)?;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -135,8 +174,10 @@ impl ::buffa::Message for CredentialRotated {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.previous_credential_ref = ::buffa::MessageField::none();
-        self.metadata = ::buffa::MessageField::none();
+        self.key = ::buffa::MessageField::none();
+        self.previous_version = ::core::option::Option::None;
+        self.version = ::core::option::Option::None;
+        self.fingerprint.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for CredentialRotated {

@@ -4,10 +4,24 @@ use trogon_decider_nats::snapshot_key;
 use trogon_nats::jetstream::{MockJetStreamKvClient, MockJetStreamKvStore};
 use trogonai_proto::gateway::credentials::state_v1;
 
+use crate::credential::commands::domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
+};
+
+fn stream_id(owner_id: &str) -> CredentialKey {
+    let owner = CredentialOwnerId::new(owner_id).unwrap();
+    CredentialIdentity::derive(
+        CredentialScope::source(owner, SourceKind::GitHub),
+        CredentialKind::WebhookSecret,
+    )
+    .key()
+}
+
 #[test]
 fn snapshot_id_uses_nats_safe_deterministic_key() {
-    let snapshot_id = credential_snapshot_id("openbao:tenant-1:github/primary:webhook_secret");
+    let snapshot_id = credential_snapshot_id(&stream_id("tenant-1"));
 
+    assert_eq!(snapshot_id, credential_snapshot_id(&stream_id("tenant-1")));
     assert!(snapshot_id.starts_with("credential."));
     assert_eq!(snapshot_id.len(), "credential.".len() + 32);
     assert!(
@@ -20,15 +34,23 @@ fn snapshot_id_uses_nats_safe_deterministic_key() {
 }
 
 #[test]
-fn snapshot_key_keeps_raw_credential_id_out_of_nats_kv_key() {
-    let raw_stream_id = "openbao:tenant-1:github/primary:webhook_secret";
-    let snapshot_id = credential_snapshot_id(raw_stream_id);
+fn snapshot_id_differs_between_projects_for_the_same_slot() {
+    assert_ne!(
+        credential_snapshot_id(&stream_id("tenant-1")),
+        credential_snapshot_id(&stream_id("tenant-2"))
+    );
+}
+
+#[test]
+fn snapshot_key_keeps_the_project_and_credential_id_out_of_nats_kv_key() {
+    let stream_id = stream_id("tenant:1.a");
+    let snapshot_id = credential_snapshot_id(&stream_id);
     let key = snapshot_key::<state_v1::CredentialStateSnapshot>(&snapshot_id).unwrap();
 
     assert!(key.starts_with("snapshots.data.trogonai.gateway.credentials.state.v1.CredentialStateSnapshot."));
-    assert!(!key.contains(raw_stream_id));
+    assert!(!key.contains("tenant"));
+    assert!(!key.contains(&stream_id.credential_id().to_string()));
     assert!(!key.contains(':'));
-    assert!(!key.contains('/'));
     assert!(key.ends_with(&snapshot_id));
 }
 

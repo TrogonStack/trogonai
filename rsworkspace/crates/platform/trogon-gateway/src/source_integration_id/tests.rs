@@ -1,6 +1,11 @@
 use super::*;
 
 #[test]
+fn rejects_empty_ids() {
+    assert_eq!(SourceIntegrationId::new(""), Err(SourceIntegrationIdError::Empty));
+}
+
+#[test]
 fn accepts_route_safe_ids() {
     let id = SourceIntegrationId::new("acme-main_1").unwrap();
 
@@ -44,4 +49,20 @@ fn rejects_too_long_ids_with_actual_length() {
 
     assert_eq!(err, SourceIntegrationIdError::TooLong(200));
     assert_eq!(err.to_string(), "source integration id exceeds maximum length: 200");
+}
+
+#[test]
+fn maps_every_subject_token_violation_to_its_integration_id_error() {
+    assert_eq!(
+        SourceIntegrationIdError::from_subject_token_violation(SubjectTokenViolationError::Empty),
+        SourceIntegrationIdError::Empty
+    );
+    assert_eq!(
+        SourceIntegrationIdError::from_subject_token_violation(SubjectTokenViolationError::InvalidCharacter('.')),
+        SourceIntegrationIdError::InvalidCharacter('.')
+    );
+    assert_eq!(
+        SourceIntegrationIdError::from_subject_token_violation(SubjectTokenViolationError::TooLong(129)),
+        SourceIntegrationIdError::TooLong(129)
+    );
 }

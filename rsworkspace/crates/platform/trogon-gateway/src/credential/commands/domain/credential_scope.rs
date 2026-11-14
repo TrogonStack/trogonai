@@ -2,7 +2,7 @@ use crate::source_integration_id::SourceIntegrationId;
 
 use super::{CredentialOwnerId, SourceKind};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CredentialScope {
     Source {
         owner_id: CredentialOwnerId,
