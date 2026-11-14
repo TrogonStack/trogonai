@@ -230,6 +230,8 @@ pub(crate) struct ProcessTransport {
     /// TypeScript's `endInput` ends the stream but keeps the transport ready, so a later write is dropped without
     /// an error (`[ProcessTransport] Dropping write to ended stdin stream`).
     input_ended: bool,
+    /// The reader reached the end of stdout, so the CLI finished on its own rather than being stopped.
+    stdout_ended: bool,
     /// The `mcp_message` ids of the line `read_message` returned last, for the Python dialect.
     wire_ids: Option<crate::McpWireIds>,
     /// TypeScript's `forwardedAbort` for a `spawn_claude_code_process` process, with the caller's abort controller
@@ -321,6 +323,7 @@ impl ProcessTransport {
             closed,
             forced: false,
             input_ended: false,
+            stdout_ended: false,
             wire_ids: None,
             forwarded_abort,
         })
@@ -476,6 +479,7 @@ impl Transport for ProcessTransport {
     async fn read_message(&mut self) -> Result<Option<JsonObject>, Error> {
         loop {
             let Some(frame) = self.frames.next().await? else {
+                self.stdout_ended = true;
                 return Ok(None);
             };
             if !frame.trim_ascii_start().starts_with(b"{") {
@@ -529,7 +533,14 @@ impl Transport for ProcessTransport {
             return Ok(());
         };
         let exit_code = crate::error::exit_code(&status);
-        self.closed.record(ClosedReason::after_stop(self.argv_style, exit_code));
+        // Python's clean end of the stream closes the transport (`_ready` is false) before a later write, which
+        // then reports "not ready"; a failed exit or a stopped run leaves it ready and reports the terminated process.
+        let reason = if self.argv_style == ArgvStyle::Python && self.stdout_ended && !self.forced && status.success() {
+            ClosedReason::NotReady
+        } else {
+            ClosedReason::after_stop(self.argv_style, exit_code)
+        };
+        self.closed.record(reason);
         if !self.forced && !status.success() {
             return Err(Error::Process { status, stderr });
         }
