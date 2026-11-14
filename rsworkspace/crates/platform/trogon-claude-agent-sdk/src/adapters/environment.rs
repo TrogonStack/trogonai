@@ -14,6 +14,21 @@ pub trait EnvironmentVariable {
     fn vars_os(&self) -> Vec<(OsString, OsString)> {
         Vec::new()
     }
+
+    /// The home directory of the effective user from the passwd database, which is what Node's `os.homedir()` falls
+    /// back to when `HOME` is unset (libuv `uv_os_get_passwd` reads the effective user id).
+    ///
+    /// The default asks the operating system; an adapter that stands in for the process environment overrides it so
+    /// the answer stays deterministic.
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        super::passwd::effective_user_home()
+    }
+
+    /// The home directory of the real user from the passwd database, which is what Python's `Path.home()` falls back
+    /// to when `HOME` is unset (`pwd.getpwuid(os.getuid())` reads the real user id).
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        super::passwd::real_user_home()
+    }
 }
 
 /// Returns the directory for temporary files exactly as [`std::env::temp_dir`] does.

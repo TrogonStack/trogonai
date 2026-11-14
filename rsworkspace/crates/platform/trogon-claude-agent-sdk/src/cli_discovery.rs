@@ -4,7 +4,30 @@
 use crate::constants::{UNIX_HINT, WINDOWS_HINT};
 use std::path::{Path, PathBuf};
 
-use crate::{adapters::ReadMetadata, environment_plan::Inherited};
+use crate::{
+    Error,
+    adapters::{EnvironmentVariable, ReadMetadata},
+    environment_plan::Inherited,
+    home_directory::{HomeDirectoryError, Platform, python_home, python_join},
+};
+
+/// Why discovery failed: nothing was found, or Python's `Path.home()` raised while building the location list.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub(crate) enum CliDiscoveryError {
+    #[error(transparent)]
+    NotFound(#[from] CliNotFoundError),
+    #[error(transparent)]
+    Home(#[from] HomeDirectoryError),
+}
+
+impl From<CliDiscoveryError> for Error {
+    fn from(error: CliDiscoveryError) -> Self {
+        match error {
+            CliDiscoveryError::NotFound(error) => Self::CliNotFound(error),
+            CliDiscoveryError::Home(error) => Self::HomeDirectory(error),
+        }
+    }
+}
 
 /// No Claude Code executable was found on `PATH` or in the well-known install locations.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -35,25 +58,29 @@ fn is_executable<F: ReadMetadata<Error = std::io::Error>>(filesystem: &F, path: 
     is_file(filesystem, path)
 }
 
-pub(crate) fn discover<F: ReadMetadata<Error = std::io::Error>>(
+/// Python `_find_cli`: the `PATH` lookup first, then the well-known install locations under `Path.home()`. The
+/// home is read from the process environment like `Path.home()` does and only after the `PATH` lookup missed,
+/// because the location list is built after `shutil.which`; a home that cannot be determined raises there.
+pub(crate) fn discover<E: EnvironmentVariable, F: ReadMetadata<Error = std::io::Error>>(
+    environment: &E,
     inherited: &Inherited,
     filesystem: &F,
     windows: bool,
-) -> Result<PathBuf, CliNotFoundError> {
+) -> Result<PathBuf, CliDiscoveryError> {
     let path_variable = inherited.get(std::ffi::OsStr::new("PATH")).cloned().unwrap_or_default();
-    let home = inherited
-        .get(std::ffi::OsStr::new(if windows { "USERPROFILE" } else { "HOME" }))
-        .or_else(|| inherited.get(std::ffi::OsStr::new("HOME")))
-        .map(PathBuf::from);
-    let mut locations: Vec<PathBuf> = Vec::new();
-    if windows {
+    let platform = if windows { Platform::Windows } else { Platform::Posix };
+    let locations: Vec<PathBuf> = if windows {
         for directory in std::env::split_paths(&path_variable) {
             let executable = directory.join("claude.exe");
             if directory.is_absolute() && is_file(filesystem, &executable) {
                 return Ok(executable);
             }
         }
-        locations.extend(home.iter().map(|home| home.join(".local/bin/claude.exe")));
+        vec![python_join(
+            platform,
+            &python_home(environment, platform)?,
+            ".local/bin/claude.exe",
+        )]
     } else {
         for directory in std::env::split_paths(&path_variable) {
             let executable = directory.join("claude");
@@ -61,23 +88,23 @@ pub(crate) fn discover<F: ReadMetadata<Error = std::io::Error>>(
                 return Ok(executable);
             }
         }
-        if let Some(home) = &home {
-            locations.push(home.join(".npm-global/bin/claude"));
-        }
-        locations.push(PathBuf::from("/usr/local/bin/claude"));
-        if let Some(home) = &home {
-            locations.push(home.join(".local/bin/claude"));
-            locations.push(home.join("node_modules/.bin/claude"));
-            locations.push(home.join(".yarn/bin/claude"));
-            locations.push(home.join(".claude/local/claude"));
-        }
-    }
+        let home = python_home(environment, platform)?;
+        let under_home = |segment: &str| python_join(platform, &home, segment);
+        vec![
+            under_home(".npm-global/bin/claude"),
+            PathBuf::from("/usr/local/bin/claude"),
+            under_home(".local/bin/claude"),
+            under_home("node_modules/.bin/claude"),
+            under_home(".yarn/bin/claude"),
+            under_home(".claude/local/claude"),
+        ]
+    };
     locations
         .into_iter()
         .find(|path| is_file(filesystem, path))
-        .ok_or(CliNotFoundError {
+        .ok_or(CliDiscoveryError::NotFound(CliNotFoundError {
             message: if windows { WINDOWS_HINT } else { UNIX_HINT },
-        })
+        }))
 }
 
 #[cfg(all(test, unix))]

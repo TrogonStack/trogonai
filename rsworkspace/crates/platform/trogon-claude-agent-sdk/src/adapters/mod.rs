@@ -2,6 +2,7 @@ mod environment;
 mod extract;
 mod filesystem;
 mod host;
+mod passwd;
 mod process;
 mod wall_clock;
 

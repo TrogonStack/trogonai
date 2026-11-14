@@ -37,6 +37,7 @@ mod error;
 mod extract_from_bunfs;
 mod float_digits;
 mod framing;
+mod home_directory;
 mod hooks;
 mod js_json;
 mod js_object_order;
@@ -257,6 +258,7 @@ pub use error::{
     python_process_error_text,
 };
 pub use extract_from_bunfs::{extract_from_bunfs, extract_from_bunfs_with};
+pub use home_directory::HomeDirectoryError;
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,

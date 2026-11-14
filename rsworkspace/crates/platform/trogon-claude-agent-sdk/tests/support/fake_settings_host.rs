@@ -365,6 +365,14 @@ impl EnvironmentVariable for FakeHost {
     fn var_os(&self, key: &OsStr) -> Option<OsString> {
         self.env.get(key.to_str()?).map(OsString::from)
     }
+
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
+
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
 }
 
 impl CurrentDirectory for FakeHost {

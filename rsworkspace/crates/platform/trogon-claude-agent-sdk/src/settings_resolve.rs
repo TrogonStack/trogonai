@@ -31,6 +31,8 @@ pub enum ResolveSettingsError {
     Decode(#[source] serde_json::Error),
     #[error("the settings reader task did not finish")]
     Join(#[source] tokio::task::JoinError),
+    #[error("the user settings directory needs a home directory")]
+    HomeDirectory(#[source] crate::HomeDirectoryError),
 }
 
 fn source_label(source: &str) -> &'static str {
@@ -225,7 +227,7 @@ fn resolve_core<H: SettingsHost>(
         }
         let (path, settings) = match name {
             "userSettings" => {
-                let path = user_settings_path(host);
+                let path = user_settings_path(host).map_err(ResolveSettingsError::HomeDirectory)?;
                 let settings = read_settings_file(host, &path, dialect);
                 (Some(path), settings)
             }
