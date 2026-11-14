@@ -139,7 +139,7 @@ fn store_options(
 ) -> Result<SessionStoreOptions, Box<dyn StdError>> {
     let mut options = SessionStoreOptions::from(store);
     options.config_directory = Some(directory.to_path_buf());
-    options.project_key = Some(SessionProjectKey::new("fixture-project")?);
+    options.project_key = Some(SessionProjectKey::new("fixture-project"));
     options.limits.append_timeout = Timeout::new(Duration::from_secs(3));
     options.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(3)));
     Ok(options)
@@ -191,7 +191,7 @@ async fn each_result_waits_for_its_own_mirror_fence_and_controls_progress() -> T
     store.gates[1].add_permits(1);
     assert_eq!(receive_result(&mut client).await?, "mirror-two");
     let key = SessionKey::new(
-        SessionProjectKey::new("fixture-project")?,
+        SessionProjectKey::new("fixture-project"),
         SessionId::from("fixture-session"),
     );
     assert_eq!(store.load(&key).await?.map(|entries| entries.len()), Some(2));

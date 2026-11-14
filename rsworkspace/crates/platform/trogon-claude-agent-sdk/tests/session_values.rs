@@ -16,7 +16,7 @@ fn entry(text: &str) -> Result<SessionEntry, Box<dyn std::error::Error>> {
 
 fn key(session: &str) -> Result<SessionKey, Box<dyn std::error::Error>> {
     Ok(SessionKey::new(
-        SessionProjectKey::new("project")?,
+        SessionProjectKey::new("project"),
         SessionId::from(session),
     ))
 }
@@ -76,15 +76,15 @@ fn session_keys_take_any_identifier_as_upstream_does_and_checked_rejects_unsafe_
         "", ".", "..", "a/b", "a\\b", "a:b", "a<b", "a>b", "a\"b", "a|b", "a?b", "a*b", "a.", "a ", "a\nb", "con",
         "PRN", "Aux.log", "nul", "COM1", "com9.txt", "LPT1", "lpt9",
     ] {
-        let unchecked = SessionKey::new(SessionProjectKey::new("project")?, SessionId::from(value));
+        let unchecked = SessionKey::new(SessionProjectKey::new("project"), SessionId::from(value));
         assert_eq!(unchecked.session_id().as_str(), value);
-        let error = SessionKey::checked(SessionProjectKey::new("project")?, SessionId::from(value))
+        let error = SessionKey::checked(SessionProjectKey::new("project"), SessionId::from(value))
             .err()
             .ok_or("accepted an unsafe session id")?;
         assert!(matches!(error, SessionKeyError::UnsafeSessionId), "{value:?}");
         assert_eq!(error.to_string(), "session id is not a safe file component");
     }
-    let checked = SessionKey::checked(SessionProjectKey::new("project")?, SessionId::from("session-1"))?;
+    let checked = SessionKey::checked(SessionProjectKey::new("project"), SessionId::from("session-1"))?;
     assert_eq!(checked.session_id().as_str(), "session-1");
     Ok(())
 }

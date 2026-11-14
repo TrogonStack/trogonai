@@ -364,7 +364,7 @@ impl SessionStore for CountingStore {
 async fn t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror() -> TestResult {
     let directory = tempfile::tempdir()?;
     let resumed = SessionId::from("11111111-1111-4111-8111-111111111111");
-    let project = SessionProjectKey::new("scripted-project")?;
+    let project = SessionProjectKey::new("scripted-project");
     let store = Arc::new(CountingStore {
         inner: InMemorySessionStore::default(),
         loads: AtomicUsize::new(0),

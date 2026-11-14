@@ -871,7 +871,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Both paths are resolved against the working directory first, so relative paths work; two parts ending in .jsonl give a main key and four or more parts give a subpath key with .jsonl stripped. Nothing is validated."
+        "behavior": "Both paths are resolved against the working directory first, so relative paths work; two parts ending in .jsonl give a main key and four or more parts give a subpath key with .jsonl stripped. Nothing is validated. On Windows the paths compare case-insensitively with both separators, drives and UNC shares, and the project, session and subpath names keep the case of the transcript path; Python reads a part with a colon second, such as a:x, as a drive (ntpath.join restarts the path there and PureWindowsPath makes it the first part), so its keys differ from TypeScript's at those parts; SessionKey::from_transcript_path_with takes the SummaryDialect (TypeScript by default, also used by the mirror unless the store options say Python) and the Python dialect reproduces CPython 3.12.16, the oracle the crate follows. The goldens record where CPython 3.13 and later differ as python_since_3_13."
       },
       "decision": {
         "kind": "upstream"
@@ -879,10 +879,13 @@
       "contracts": [
         "session_key_upstream::transcript_path_keys_match_the_typescript_and_python_sdks",
         "session_key_upstream::relative_paths_resolve_against_the_working_directory_like_absolute_ones",
+        "session_key_windows::windows_transcript_path_keys_match_the_typescript_sdk",
+        "session_key_windows::windows_python_dialect_keys_match_the_python_sdk_and_differ_from_typescript_at_drive_like_parts",
         "session_failure_contracts::s25_transcript_paths_below_a_session_map_to_subpaths"
       ],
       "rust": [
-        "src/session_key.rs"
+        "src/session_key.rs",
+        "src/windows_path.rs"
       ]
     },
     {
@@ -1502,14 +1505,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Non-alphanumerics become '-'; keys over 200 chars are truncated and suffixed with a base36 hash."
+        "behavior": "Non-alphanumerics become '-'; keys over 200 chars are truncated and suffixed with a base36 hash. A project key is never validated upstream, so SessionProjectKey::new takes any name and SessionProjectKey::checked is the opt-in Rust-only check."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
         "session_failure_contracts::project_keys_use_native_paths_and_the_pinned_long_path_hash",
-        "session_project_key::project_key_matches_upstream_utf16_replacement"
+        "session_project_key::project_key_matches_upstream_utf16_replacement",
+        "session_project_key::explicit_project_keys_take_any_name_as_upstream_does_and_checked_rejects_unsafe_ones"
       ],
       "rust": [
         "src/session_project_key.rs"
@@ -2316,7 +2320,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "SessionKey::new and SessionSubpath::new accept any text, as upstream does. Upstream skips a non-UUID resume id and, with a warning, every listSubkeys subpath its own dialect rejects; Rust applies that dialect's rule at the resume site, and SessionKey::checked and SessionSubpath::checked are the opt-in Rust-only safety checks."
+        "behavior": "SessionKey::new, SessionProjectKey::new and SessionSubpath::new accept any text, as upstream does. Upstream skips a non-UUID resume id and, with a warning, every listSubkeys subpath its own dialect rejects; Rust applies that dialect's rule at the resume site, and SessionKey::checked, SessionProjectKey::checked and SessionSubpath::checked are the opt-in Rust-only safety checks. The Windows rules of both resume guards run on any host from a platform parameter and are pinned by goldens captured with Node path.win32 and Python ntpath; what Python's resolve() does on a real Windows file system (reserved device names) is not capturable off Windows. The Rust-only extras (empty components, reserved device names) live only in the opt-in SessionSubpath::checked, which reads a drive as the platform does (any character before a colon on Windows, a letter on POSIX; Python's own guard reads any character on every host, pinned by POSIX goldens). The project directory name folds to lowercase on Windows only, through one function both listings use, pinned by a golden captured with Node toLowerCase and Python lower."
       },
       "decision": {
         "kind": "upstream"
@@ -2329,12 +2333,17 @@
         "session_filesystem::s24_ts_a_dot_component_subpath_is_written_where_typescript_writes_it",
         "session_store::store_paths_reject_traversal_and_windows_aliases",
         "session_values::session_keys_take_any_identifier_as_upstream_does_and_checked_rejects_unsafe_ones",
-        "session_values::subpaths_take_any_text_and_checked_keeps_them_inside_the_session_directory"
+        "session_values::subpaths_take_any_text_and_checked_keeps_them_inside_the_session_directory",
+        "session_key_windows::windows_typescript_resume_guard_matches_the_sdk",
+        "session_key_windows::windows_python_resume_guard_matches_the_sdk_and_checked_only_adds_rust_rules",
+        "session_key_windows::checked_subpath_reads_drives_as_the_platform_does",
+        "session_key_windows::directory_names_fold_as_both_sdks_do_on_windows_only"
       ],
       "rust": [
         "src/session_key.rs",
         "src/session_subpath.rs",
-        "src/session_resume.rs"
+        "src/session_resume.rs",
+        "src/windows_path.rs"
       ]
     },
     {

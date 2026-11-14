@@ -61,7 +61,7 @@ fn store_error(check: u8) -> impl Fn(crate::SessionStoreError) -> ConformanceErr
 
 fn key(project: &str, session: &str) -> Result<SessionKey, ConformanceError> {
     Ok(SessionKey::new(
-        SessionProjectKey::new(project).map_err(|error| fail(0, error.to_string()))?,
+        SessionProjectKey::new(project),
         SessionId::from(session),
     ))
 }
@@ -71,7 +71,7 @@ fn sub(base: &SessionKey, subpath: &str) -> Result<SessionKey, ConformanceError>
 }
 
 fn project(name: &str) -> Result<SessionProjectKey, ConformanceError> {
-    SessionProjectKey::new(name).map_err(|error| fail(0, error.to_string()))
+    Ok(SessionProjectKey::new(name))
 }
 
 /// Builds an entry like upstream's `_e`: `type` is required and otherwise irrelevant to the contracts.

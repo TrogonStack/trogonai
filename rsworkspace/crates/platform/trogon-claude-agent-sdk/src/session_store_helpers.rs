@@ -570,7 +570,7 @@ async fn py_import_session_to_store(
         .and_then(Path::file_name)
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let project = SessionProjectKey::new(project_name)?;
+    let project = SessionProjectKey::new(project_name);
     let batch_size = if options.batch_size == 0 {
         DEFAULT_IMPORT_BATCH
     } else {

@@ -222,14 +222,7 @@ impl SessionFiles {
                 .unwrap_or_default();
         }
 
-        let case_insensitive = cfg!(windows);
-        let fold = |name: &str| {
-            if case_insensitive {
-                name.to_lowercase()
-            } else {
-                name.to_owned()
-            }
-        };
+        let fold = |name: &str| crate::session_project_key::fold_directory_name(name, cfg!(windows));
         let mut indexed: Vec<(String, String)> = worktrees
             .into_iter()
             .map(|path| {

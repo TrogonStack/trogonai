@@ -30,7 +30,7 @@ fn memory_mirror_root() -> PathBuf {
 
 fn key(project: &str, session: &str) -> Result<SessionKey, Box<dyn Error>> {
     Ok(SessionKey::new(
-        SessionProjectKey::new(project)?,
+        SessionProjectKey::new(project),
         SessionId::from(session),
     ))
 }
@@ -42,7 +42,7 @@ fn entry(kind: &str, value: usize) -> Result<SessionEntry, Box<dyn Error>> {
 fn options(store: Arc<dyn SessionStore>, root: &Path) -> Result<SessionStoreOptions, Box<dyn Error>> {
     let mut options = SessionStoreOptions::from(store);
     options.config_directory = Some(root.to_path_buf());
-    options.project_key = Some(SessionProjectKey::new("project")?);
+    options.project_key = Some(SessionProjectKey::new("project"));
     Ok(options)
 }
 
@@ -139,11 +139,14 @@ fn store_paths_reject_traversal_and_windows_aliases() -> TestResult {
         }
     }
     for value in ["..", "../project", "NUL", "project.", "project ", "C:project"] {
-        assert!(SessionProjectKey::new(value).is_err(), "accepted unsafe project key");
+        assert!(
+            SessionProjectKey::checked(value).is_err(),
+            "accepted unsafe project key"
+        );
     }
     for value in ["NUL", "session.", "session ", "../session", "C:session"] {
         assert!(
-            SessionKey::checked(SessionProjectKey::new("project")?, SessionId::from(value)).is_err(),
+            SessionKey::checked(SessionProjectKey::new("project"), SessionId::from(value)).is_err(),
             "accepted unsafe session key"
         );
     }

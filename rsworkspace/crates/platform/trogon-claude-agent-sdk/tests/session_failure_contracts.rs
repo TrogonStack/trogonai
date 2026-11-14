@@ -42,7 +42,7 @@ const SESSION: &str = "123e4567-e89b-42d3-a456-426614174000";
 
 fn key() -> Result<SessionKey, Box<dyn StdError>> {
     Ok(SessionKey::new(
-        SessionProjectKey::new("project")?,
+        SessionProjectKey::new("project"),
         SessionId::from(SESSION),
     ))
 }
@@ -122,7 +122,7 @@ fn session_keys_preserve_identity_and_reject_unrecognized_or_non_unicode_paths()
     assert_eq!(main.session_id().to_string(), SESSION);
     for unsafe_id in ["", "line\nbreak"] {
         assert!(matches!(
-            SessionKey::checked(SessionProjectKey::new("project")?, SessionId::from(unsafe_id)),
+            SessionKey::checked(SessionProjectKey::new("project"), SessionId::from(unsafe_id)),
             Err(SessionKeyError::UnsafeSessionId)
         ));
     }
@@ -435,7 +435,7 @@ async fn memory_store_reports_clock_exhaustion_and_poisoning_as_non_retryable() 
 fn resume_options(store: Arc<dyn SessionStore>, config: &Path) -> Result<SessionStoreOptions, Box<dyn StdError>> {
     let mut options = SessionStoreOptions::from(store);
     options.config_directory = Some(config.to_path_buf());
-    options.project_key = Some(SessionProjectKey::new("project")?);
+    options.project_key = Some(SessionProjectKey::new("project"));
     Ok(options)
 }
 
@@ -614,7 +614,7 @@ async fn latest_resume_limits_the_candidate_listing_before_materialization() -> 
     let store = Arc::new(InMemorySessionStore::new());
     store.append(&key()?, &[entry()?]).await?;
     let other = SessionKey::new(
-        SessionProjectKey::new("project")?,
+        SessionProjectKey::new("project"),
         SessionId::from(uuid::Uuid::nil().to_string()),
     );
     store.append(&other, &[entry()?]).await?;

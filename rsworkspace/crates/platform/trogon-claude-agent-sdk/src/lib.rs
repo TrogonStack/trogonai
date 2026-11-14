@@ -242,6 +242,7 @@ mod validation_choices;
 mod version_check;
 mod websocket_error;
 mod websocket_transport;
+mod windows_path;
 mod wire;
 mod workspace_trust;
 
