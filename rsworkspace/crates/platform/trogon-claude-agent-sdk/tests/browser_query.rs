@@ -327,8 +327,10 @@ async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {
         }
         buffer.extend_from_slice(chunk.get(..read)?);
     };
-    let head = String::from_utf8_lossy(buffer.get(..end)?).to_lowercase();
-    let method = head.split_whitespace().next()?.to_owned();
+    let raw = String::from_utf8_lossy(buffer.get(..end)?);
+    // The method is case-sensitive; only the header names are matched without case.
+    let method = raw.split_whitespace().next()?.to_owned();
+    let head = raw.to_lowercase();
     let length = head
         .lines()
         .find_map(|line| line.strip_prefix("content-length:"))
