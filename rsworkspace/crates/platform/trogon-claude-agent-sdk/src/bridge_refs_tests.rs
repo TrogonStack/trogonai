@@ -71,34 +71,6 @@ async fn guesses_the_default_branch_like_the_upstream_bridge() -> io::Result<()>
 }
 
 #[test]
-fn folds_paths_the_way_the_path_module_does() {
-    assert_eq!(resolve(Path::new("/a/b"), "../c"), Path::new("/a/c"));
-    assert_eq!(resolve(Path::new("/a"), "/x/./y"), Path::new("/x/y"));
-    assert_eq!(resolve(Path::new("/a/b"), ".."), Path::new("/a"));
-    assert_eq!(components_of("/a/./b/../c//d"), ["a", "c", "d"]);
-    assert!(components_of("/").is_empty());
-}
-
-#[test]
-fn refuses_network_and_special_locations() {
-    assert!(special_location("/Network/x", false));
-    assert!(special_location("/.VOL/1", false));
-    assert!(special_location("/net", true));
-    assert!(!special_location("/net/x", true));
-    assert!(!special_location("/net", false));
-    assert!(!special_location("relative/x", true));
-    assert!(!special_location("/", true));
-    assert!(dot_special(".File"));
-    assert!(!dot_special("file"));
-    assert!(text_unsafe("//host/share", Path::new("/tmp")));
-    assert!(text_unsafe("\\\\host", Path::new("/tmp")));
-    assert!(text_unsafe("\\??\\C:", Path::new("/tmp")));
-    assert!(text_unsafe("../../Network/x", Path::new("/home/a")));
-    assert!(!text_unsafe("ok/relative", Path::new("/tmp")));
-    assert_eq!(reach(Path::new("/tmp"), "//host"), None);
-}
-
-#[test]
 fn validates_reference_names_and_object_ids() {
     for name in ["main", "a/b", "release/1.0", "a_b+c@d-e"] {
         assert!(valid_ref_name(name), "{name}");
@@ -170,7 +142,9 @@ fn refuses_a_directory_that_loops_through_links() -> io::Result<()> {
     let root = temp.path().canonicalize()?;
     std::os::unix::fs::symlink(root.join("b"), root.join("a"))?;
     std::os::unix::fs::symlink(root.join("a"), root.join("b"))?;
-    assert!(!walk_safe(&root.join("a").join("x"), LINK_DEPTH));
-    assert!(!walk_safe(&root, 0));
+    let guard = PathGuard::host();
+    let looped = root.join("a").join("x");
+    assert!(!guard.walks(as_str(&looped), as_str(&root)));
+    assert_eq!(find_git_dir(&guard, &looped), None);
     Ok(())
 }

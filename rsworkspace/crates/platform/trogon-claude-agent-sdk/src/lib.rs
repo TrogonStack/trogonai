@@ -16,6 +16,8 @@ mod bridge_git;
 mod bridge_gitcmd;
 mod bridge_js;
 mod bridge_packed;
+mod bridge_paths;
+mod bridge_platform;
 mod bridge_refs;
 mod bridge_types;
 mod bridge_unicode;
@@ -186,6 +188,8 @@ pub use auth_token::{
 pub use bridge_client::BridgeClient;
 pub use bridge_git::{BranchDropLogDedup, CodeSessionGitContext, DefaultGitProbe, GitContextProbe, GitRepository};
 pub use bridge_gitcmd::GitProbeContext;
+pub use bridge_paths::PathGuard;
+pub use bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe, ProbeError};
 pub use bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
     DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,

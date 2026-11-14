@@ -14,8 +14,10 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
+use crate::bridge_paths::PathGuard;
 use crate::bridge_refs::{common_dir, find_git_dir};
 
 /// The leading flags every upstream Git call carries.
@@ -61,6 +63,8 @@ pub struct GitProbeContext {
     pub git_program: PathBuf,
     /// How long a call may take before the child is killed.
     pub timeout: Duration,
+    /// The path checks and the host they ask.
+    pub paths: Arc<PathGuard>,
 }
 
 impl GitProbeContext {
@@ -73,7 +77,15 @@ impl GitProbeContext {
             environment: std::env::vars_os().collect(),
             git_program: PathBuf::from("git"),
             timeout: RUN_LIMIT,
+            paths: PathGuard::host(),
         }
+    }
+
+    /// The same context with other path checks.
+    #[must_use]
+    pub fn with_paths(mut self, paths: Arc<PathGuard>) -> Self {
+        self.paths = paths;
+        self
     }
 
     /// The same context for a session that works in `directory`.
@@ -142,9 +154,9 @@ impl GitProbeContext {
         if self.blocked {
             return None;
         }
-        let common = common_dir(repository).unwrap_or_else(|| repository.to_path_buf());
-        let session_git = find_git_dir(self.session_cwd.as_deref()?)?;
-        let session_common = common_dir(&session_git).unwrap_or(session_git);
+        let common = common_dir(&self.paths, repository).unwrap_or_else(|| repository.to_path_buf());
+        let session_git = find_git_dir(&self.paths, self.session_cwd.as_deref()?)?;
+        let session_common = common_dir(&self.paths, &session_git).unwrap_or(session_git);
         let (git_dir, common_real, session_real) = tokio::join!(real(repository), real(&common), real(&session_common));
         let (git_dir, common_real, session_real) = (git_dir?, common_real?, session_real?);
         if git_dir != common_real && git_dir.parent() != Some(common_real.join("worktrees").as_path()) {

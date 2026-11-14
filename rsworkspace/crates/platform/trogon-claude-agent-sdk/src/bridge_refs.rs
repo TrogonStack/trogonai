@@ -2,7 +2,7 @@
 //! default branch, read straight from the repository files without running Git.
 //!
 //! The upstream reader refuses paths that reach a network share and follows symbolic links only when each target
-//! passes the same checks; the checks below are the POSIX ones.
+//! passes the same checks; those checks live in the path guard.
 //!
 //! The upstream reader caches its answer per host and watches the repository files to refresh it. The cache only
 //! saves work and never changes an answer, so this port reads the files on every call.
@@ -10,27 +10,27 @@
 use std::fs;
 use std::future::Future;
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use crate::bridge_gitcmd::GitProbeContext;
 use crate::bridge_js::js_trim;
-use crate::bridge_unicode::js_lowercase;
+use crate::bridge_paths::{PathGuard, dirname, resolve};
+use crate::bridge_platform::EntryKind;
 
 const FALLBACK: &str = "main";
 const COMMON_FALLBACKS: [&str; 2] = ["main", "master"];
 const READ_LIMIT: u64 = 65536;
-const LINK_DEPTH: u32 = 40;
 const REF_DEPTH: u32 = 5;
 const ORIGIN: &str = "refs/remotes/origin/";
 const REFTABLE_MARKER: &str = "refs/heads/.invalid";
 
 /// The default branch of the repository around `directory`; `main` when nothing says otherwise, never empty.
 pub(crate) async fn guess_default_branch(context: &GitProbeContext, directory: &Path) -> String {
-    let Some(git_dir) = find_git_dir(directory) else {
+    let Some(git_dir) = find_git_dir(&context.paths, directory) else {
         return FALLBACK.to_owned();
     };
-    let repository = common_dir(&git_dir).unwrap_or(git_dir);
+    let repository = common_dir(&context.paths, &git_dir).unwrap_or(git_dir);
     if let Some(name) = origin_head(context, &repository).await
         && resolves(context, &repository, &format!("{ORIGIN}{name}"), REF_DEPTH).await
     {
@@ -42,124 +42,6 @@ pub(crate) async fn guess_default_branch(context: &GitProbeContext, directory: &
         }
     }
     FALLBACK.to_owned()
-}
-
-/// `path.resolve(base, relative)`: an absolute `relative` wins, `.` and `..` are folded out.
-fn resolve(base: &Path, relative: &str) -> PathBuf {
-    let mut resolved = PathBuf::new();
-    for component in base.join(relative).components() {
-        match component {
-            Component::ParentDir => {
-                resolved.pop();
-            }
-            Component::CurDir => {}
-            other => resolved.push(other),
-        }
-    }
-    resolved
-}
-
-fn components_of(path: &str) -> Vec<String> {
-    let mut parts: Vec<String> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            other => parts.push(other.to_owned()),
-        }
-    }
-    parts
-}
-
-fn dot_special(first: &str) -> bool {
-    matches!(
-        js_lowercase(first).as_str(),
-        ".vol" | ".file" | ".nofollow" | ".resolve"
-    )
-}
-
-/// An absolute path on a network share or one of the special mount roots.
-fn special_location(path: &str, exactly_net: bool) -> bool {
-    if !path.starts_with('/') {
-        return false;
-    }
-    let parts = components_of(path);
-    let Some(first) = parts.first() else {
-        return false;
-    };
-    js_lowercase(first) == "network"
-        || dot_special(first)
-        || (exactly_net && parts.len() == 1 && js_lowercase(first) == "net")
-}
-
-/// Whether text that names a path (a link target, a `gitdir:` value) is refused, relative to `base`.
-fn text_unsafe(text: &str, base: &Path) -> bool {
-    let resolved = resolve(base, text);
-    [text, resolved.to_str().unwrap_or_default()].iter().any(|candidate| {
-        candidate.starts_with("//")
-            || candidate.starts_with("\\\\")
-            || candidate.starts_with("\\??\\")
-            || special_location(candidate, true)
-    })
-}
-
-/// Where `text` leads from `base`, when neither the text nor any step of the way is refused.
-fn reach(base: &Path, text: &str) -> Option<PathBuf> {
-    if text_unsafe(text, base) {
-        return None;
-    }
-    let joined = base.join(text);
-    let resolved = resolve(base, text);
-    (walk_safe(&joined, LINK_DEPTH) && (resolved == joined || walk_safe(&resolved, LINK_DEPTH))).then_some(resolved)
-}
-
-/// Follows `path` one component at a time the way the upstream reader does, and says whether every step is allowed.
-fn walk_safe(path: &Path, depth: u32) -> bool {
-    if depth == 0 {
-        return false;
-    }
-    let parts: Vec<Component<'_>> = path.components().collect();
-    let mut current = PathBuf::new();
-    for (index, component) in parts.iter().enumerate() {
-        match component {
-            Component::ParentDir => {
-                current.pop();
-                continue;
-            }
-            Component::CurDir => continue,
-            other => current.push(other),
-        }
-        if special_location(current.to_str().unwrap_or_default(), false) {
-            return false;
-        }
-        let kind = match fs::symlink_metadata(&current) {
-            Ok(meta) => meta.file_type(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => return false,
-        };
-        if kind.is_symlink() {
-            let Some(target) = fs::read_link(&current)
-                .ok()
-                .and_then(|target| target.to_str().map(str::to_owned))
-                .filter(|target| !target.contains('\0'))
-            else {
-                return false;
-            };
-            let parent = current.parent().unwrap_or(&current).to_path_buf();
-            if text_unsafe(&target, &parent) {
-                return false;
-            }
-            let mut next = resolve(&parent, &target);
-            next.extend(parts[index + 1..].iter().map(|part| part.as_os_str()));
-            return walk_safe(&next, depth - 1);
-        }
-        if !kind.is_dir() && !kind.is_file() {
-            return false;
-        }
-    }
-    true
 }
 
 fn read_text(path: &Path) -> Option<String> {
@@ -181,42 +63,63 @@ fn read_limited(path: &Path) -> Option<String> {
         .then(|| String::from_utf8_lossy(&bytes).into_owned())
 }
 
+fn as_str(path: &Path) -> &str {
+    path.to_str().unwrap_or_default()
+}
+
+/// The directory of the nearest repository around `directory`, skipping automount map roots.
+pub(crate) fn find_root(paths: &PathGuard, directory: &Path) -> Option<String> {
+    let mut current = resolve(as_str(directory), ".");
+    loop {
+        if current == "/" {
+            return paths.has_repository_marker("/").then_some(current);
+        }
+        if !paths.autofs_root(&current) && paths.has_repository_marker(&current) {
+            return Some(current);
+        }
+        let parent = dirname(&current);
+        if parent == current {
+            return None;
+        }
+        current = parent;
+    }
+}
+
 /// The `.git` directory of the nearest repository around `directory`, following a `gitdir:` file.
-pub(crate) fn find_git_dir(directory: &Path) -> Option<PathBuf> {
-    let start = resolve(directory, ".");
-    let root = start
-        .ancestors()
-        .find(|candidate| fs::symlink_metadata(candidate.join(".git")).is_ok())?;
-    let dot_git = root.join(".git");
-    if !fs::metadata(&dot_git).ok()?.is_file() {
-        return Some(dot_git);
+pub(crate) fn find_git_dir(paths: &PathGuard, directory: &Path) -> Option<PathBuf> {
+    let root = find_root(paths, directory)?;
+    let dot_git = Path::new(&root).join(".git");
+    match paths.followed_kind(as_str(&dot_git)) {
+        EntryKind::File => {}
+        EntryKind::Absent | EntryKind::Other => return None,
+        _ => return Some(dot_git),
     }
     let content = read_limited(&dot_git)?;
     let Some(target) = js_trim(&content).strip_prefix("gitdir:").map(js_trim) else {
         return Some(dot_git);
     };
-    reach(root, target)
+    paths.reach(&root, target).map(PathBuf::from)
 }
 
 /// The directory a linked worktree shares its references with, when it names one.
-pub(crate) fn common_dir(git_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn common_dir(paths: &PathGuard, git_dir: &Path) -> Option<PathBuf> {
     let file = git_dir.join("commondir");
-    if !walk_safe(&file, LINK_DEPTH) {
-        return None;
-    }
-    if let Ok(meta) = fs::symlink_metadata(&file)
-        && !(meta.is_file() || meta.is_dir())
+    if !paths.walks(as_str(&file), as_str(git_dir))
+        || matches!(
+            paths.entry_kind(as_str(&file)),
+            EntryKind::Symlink | EntryKind::Special | EntryKind::Other
+        )
     {
         return None;
     }
     let content = read_limited(&file)?;
-    reach(git_dir, js_trim(&content))
+    paths.reach(as_str(git_dir), js_trim(&content)).map(PathBuf::from)
 }
 
 /// Whether the repository stores its references in the table format, which is read by asking Git.
-fn is_reftable(repository: &Path) -> bool {
+fn is_reftable(paths: &PathGuard, repository: &Path) -> bool {
     let head = repository.join("HEAD");
-    walk_safe(&head, LINK_DEPTH)
+    paths.walks(as_str(&head), as_str(repository))
         && read_text(&head)
             .is_some_and(|text| js_trim(&text).strip_prefix("ref:").map(js_trim) == Some(REFTABLE_MARKER))
 }
@@ -238,7 +141,7 @@ fn is_object_id(text: &str) -> bool {
 
 /// The branch `refs/remotes/origin/HEAD` points at.
 async fn origin_head(context: &GitProbeContext, repository: &Path) -> Option<String> {
-    if is_reftable(repository) {
+    if is_reftable(&context.paths, repository) {
         let name = format!("{ORIGIN}HEAD");
         let output = context
             .run(
@@ -251,7 +154,7 @@ async fn origin_head(context: &GitProbeContext, repository: &Path) -> Option<Str
         return valid_ref_name(name).then(|| name.to_owned());
     }
     let path = repository.join(format!("{ORIGIN}HEAD"));
-    if !walk_safe(&path, LINK_DEPTH) {
+    if !context.paths.walks(as_str(&path), as_str(repository)) {
         return None;
     }
     let text = read_text(&path)?;
@@ -269,7 +172,7 @@ fn resolves<'a>(context: &'a GitProbeContext, repository: &'a Path, name: &'a st
         if depth == 0 {
             return false;
         }
-        if is_reftable(repository) {
+        if is_reftable(&context.paths, repository) {
             if name != "HEAD" && !(name.starts_with("refs/") && valid_ref_name(name)) {
                 return false;
             }
@@ -284,7 +187,7 @@ fn resolves<'a>(context: &'a GitProbeContext, repository: &'a Path, name: &'a st
         if read_ref(context, repository, name, depth).await {
             return true;
         }
-        match common_dir(repository).filter(|common| common != repository) {
+        match common_dir(&context.paths, repository).filter(|common| common != repository) {
             Some(common) => read_ref(context, &common, name, depth).await,
             None => false,
         }
@@ -293,18 +196,18 @@ fn resolves<'a>(context: &'a GitProbeContext, repository: &'a Path, name: &'a st
 
 async fn read_ref(context: &GitProbeContext, directory: &Path, name: &str, depth: u32) -> bool {
     let path = directory.join(name);
-    if !walk_safe(&path, LINK_DEPTH) {
+    if !context.paths.walks(as_str(&path), as_str(directory)) {
         return false;
     }
-    if let Some(text) = read_text(&path) {
-        let text = js_trim(&text);
+    if let Some(body) = read_text(&path) {
+        let text = js_trim(&body);
         return match text.strip_prefix("ref:").map(js_trim) {
             Some(target) => valid_ref_name(target) && resolves(context, directory, target, depth - 1).await,
             None => is_object_id(text),
         };
     }
     let packed = directory.join("packed-refs");
-    walk_safe(&packed, LINK_DEPTH) && packed_ref(&packed, name)
+    context.paths.walks(as_str(&packed), as_str(directory)) && packed_ref(&packed, name)
 }
 
 /// Whether the packed references list `name` with an object id.
