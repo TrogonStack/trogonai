@@ -101,7 +101,9 @@ vitest_bin.vitest_test(
         ":sources",
         "//tsworkspace:node_modules/vitest",
     ],
-    env = {"VITE_PRESERVE_SYMLINKS": "1"},
+    # No VITE_PRESERVE_SYMLINKS here: Node loads the dependencies vitest keeps
+    # external from their real paths, so Vite resolving the same packages
+    # through runfiles symlinks loaded React and testing-library twice.
 )
 
 oxlint_bin.oxlint_test(

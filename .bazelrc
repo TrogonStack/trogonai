@@ -16,5 +16,7 @@ common:ci --show_progress_rate_limit=60
 common:ci --ui_event_filters=-info
 build:ci --show_result=0
 test:ci --test_summary=terse
+# Print the logs of failing tests, which CI shows instead of the local testlogs.
+test:ci --test_output=errors
 
 try-import %workspace%/.bazelrc.local
