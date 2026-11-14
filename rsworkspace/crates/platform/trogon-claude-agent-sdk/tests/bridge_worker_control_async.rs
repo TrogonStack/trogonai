@@ -276,9 +276,14 @@ async fn host_promises_are_answered_as_the_recorded_session_answered() -> TestRe
                 frame.shift_remove("uuid");
             }
         }
+        // The recorder keeps only the `control_response` and `system` payloads the session posted.
+        let posted: Vec<Value> = snapshot(&written)
+            .into_iter()
+            .filter(|frame| frame["type"] == "control_response" || frame["type"] == "system")
+            .collect();
         assert_eq!(
             serde_json::to_string(&expected)?,
-            serde_json::to_string(&snapshot(&written))?,
+            serde_json::to_string(&posted)?,
             "{name}"
         );
         let mut calls = snapshot(&host.calls);
