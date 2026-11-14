@@ -70,7 +70,13 @@ impl RemapHost {
     fn remap(&self, path: &Path) -> PathBuf {
         for prefix in VIRTUAL {
             if let Ok(rest) = path.strip_prefix(prefix) {
-                return self.root.join(prefix.trim_start_matches('/')).join(rest);
+                let moved = self.root.join(prefix.trim_start_matches('/'));
+                // Joining an empty rest appends a separator, and `/proc/version/` is no file.
+                return if rest.as_os_str().is_empty() {
+                    moved
+                } else {
+                    moved.join(rest)
+                };
             }
         }
         path.to_path_buf()
