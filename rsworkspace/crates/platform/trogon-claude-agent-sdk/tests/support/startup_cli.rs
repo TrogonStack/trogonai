@@ -99,9 +99,10 @@ impl HookGate {
         tokio::task::spawn_blocking(move || {
             let (count, noted) = &*gate.0;
             let count = count.lock().map_err(|_| io::Error::other("hook gate poisoned"))?;
-            let (_, waited) = noted
+            let (count, waited) = noted
                 .wait_timeout_while(count, WAIT, |count| *count < frames)
                 .map_err(|_| io::Error::other("hook gate poisoned"))?;
+            drop(count);
             if waited.timed_out() {
                 return Err(io::Error::other("the SDK did not note the hook frame"));
             }
