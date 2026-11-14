@@ -87,6 +87,9 @@ const requiresAction = evaluate(between('function F5(', 'var gHe='), ['F5']).F5;
 const metadataTable = evaluate(between('function p4e(', 'async function eC('), ['p4e']).p4e;
 const streamTable = evaluate(`${between('function fl(', 'class ml{')};var ${between('W4e=1000,j4e=30000,', ',E9=new DOMException').replace(',K4e=60000', '')};var ${between('S9=3,X4e=', ',y9=25')};var b9=2000,t$e=new Set([401,403,404]);`, ['fl', 'W4e', 'j4e', 'V4e', 'bC', 'z4e', 'S9', 'X4e', 'b9', 't$e']);
 const frameParser = evaluate(`${between('var T4e={stream:!0};', 'var e9=30000')}`, ['dC']).dC;
+// `Kt`, the text cleaner every control_response error goes through, read from the bundle (its two regular
+// expressions are set up lazily inside the bundle, so they are lifted here by their literal text).
+const sanitizer = evaluate(`${between('function Dn(e,t){', 'function Pq(e){')}function Pq(e){return Buffer.from(e,"utf16le").toString("utf16le")}${between('function Hq(e){', 'var Bq,$q,')}var Bq=${between('Bq=/', ';$q=').slice(3)},$q=${between('$q=/', '})').slice(3)},mk=1024;`, ['Kt']).Kt;
 const statuses = [undefined, 0, 200, 399, 400, 404, 499, 500, 599];
 
 const sessionUrl = evaluate(`const GX=/^[a-zA-Z0-9_-]+$/;${between('function sd(', 'function UD(')}${between('function TC(', 'async function R9(')}`, ['TC']).TC;
@@ -296,6 +299,11 @@ const pure = {
       return { chunks: chunks.map((chunk) => (typeof chunk === 'string' ? chunk : { bytes: [...chunk] })), frames, pending: parser.buffered() };
     }),
   },
+  sanitize: [
+    'plain', '', 'a\u0000b', 'tab\there', 'line\nbreak', 'a\u200bb', 'a\u00a0b', 'a\u2028b', 'a\u2800b', 'a\ufe0fb', 'a\u{e0001}b', 'a\u3000b', 'a  b',
+    'caf\u00e9', '\u{1f600}', 'x'.repeat(1024), 'x'.repeat(1025), `${'x'.repeat(1023)}\u{1f600}`, `${'x'.repeat(1022)}\u{1f600}tail`, 'y'.repeat(4096), `${'y'.repeat(4095)}\u{1f600}`,
+    `${'\u200b'.repeat(4000)}${'z'.repeat(2000)}`, 'a\u061cb', 'a\u0600b', 'a\u00adb', 'a\u00b6b', 'e\u0301',
+  ].map((input) => ({ input, output: sanitizer(input) })),
   metadata: [
     { model: 'm' },
     {},
@@ -310,7 +318,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -591,6 +599,102 @@ slept('a_check_inside_the_tolerance_waits_for_the_backoff', { late_wall: 9500, l
 slept('a_silent_stream_that_did_not_sleep_waits_for_the_backoff', { late_wall: 0, late_mono: 0 }, [2000]);
 slept('a_sleep_reopen_does_not_count_as_a_failed_attempt', { late_wall: 20000, late_mono: 20000 }, [0, 1000], [refused(500)]);
 
+// The control dispatch behind a client `control_request` (`t$`), driven through the real session. The attach path wires
+// only some callbacks (`onInterrupt`, `onSetModel`, `onSetMaxThinkingTokens`, `onSetPermissionMode`, `onRenameSession`,
+// and the asynchronous `onStopTask`, `onBackgroundTasks`, `onSideQuestion`) and the version string, so those are the only
+// ones a case can register. Each case sends one request and keeps the control_response frames the session posted.
+const request = (subtype, extra = {}) => ({ type: 'control_request', request_id: 'r1', request: { subtype, ...extra } });
+const controlCase = (name, payload, spec = {}) => add('control', name, { epoch: 6, stream: [connection([clientEvent(1, 'e1', payload)], 'hold', { gapMs: 60, startMs: spec.startMs ?? 0 })], waitFor: [['=/worker/events', spec.posts ?? 1]], settleMs: 400, ...spec });
+const returns = (value) => ({ returns: value });
+controlCase('interrupt_calls_the_host_and_succeeds', request('interrupt'), { callbacks: { onInterrupt: {} } });
+controlCase('interrupt_without_a_host_callback_still_succeeds', request('interrupt'));
+controlCase('get_usage_is_unsupported', request('get_usage'));
+controlCase('mcp_status_lists_no_servers', request('mcp_status'));
+controlCase('mcp_status_with_a_live_reply_flag_is_still_plain', request('mcp_status', { liveReply: true }));
+for (const subtype of ['set_color', 'file_suggestions', 'read_file', 'get_workspace_diff', 'get_context_usage', 'mcp_authenticate', 'mcp_oauth_callback_url', 'mcp_reconnect', 'cancel_async_message']) {
+  controlCase(`${subtype}_is_unsupported_without_a_callback`, request(subtype, subtype === 'cancel_async_message' ? { message_uuid: 'm1' } : {}));
+}
+controlCase('cancel_async_message_needs_a_string_uuid', request('cancel_async_message', { message_uuid: 5 }));
+controlCase('an_unknown_subtype_is_unsupported', request('no_such_subtype'));
+controlCase('an_unknown_subtype_is_cleaned_in_the_error', request('bad\u0007​sub\ttype'));
+controlCase('a_long_unknown_subtype_is_cut_in_the_error', request('s'.repeat(5000)));
+controlCase('a_non_string_subtype_is_unsupported', request(7));
+for (const [name, subtype] of [['null', null], ['an_array', [1, null, 'a']], ['an_object', {}], ['true', true], ['a_float', 1.5]]) controlCase(`a_subtype_that_is_${name}_is_unsupported`, request(subtype));
+controlCase('a_request_without_a_subtype_is_unsupported', { type: 'control_request', request_id: 'r1', request: {} });
+controlCase('a_request_that_is_a_string_is_unsupported', { type: 'control_request', request_id: 'r1', request: 'text' });
+controlCase('a_request_that_is_a_number_is_unsupported', { type: 'control_request', request_id: 'r1', request: 5 });
+controlCase('a_request_id_that_is_a_number_is_answered_as_it_is', { type: 'control_request', request_id: 12, request: { subtype: 'get_usage' } });
+controlCase('fork_conversation_is_not_supported_without_a_callback', request('fork_conversation', { message_uuid: 'x' }));
+controlCase('rename_session_needs_a_string_title', request('rename_session', { title: 5 }), { callbacks: { onRenameSession: returns({ ok: true }) } });
+controlCase('rename_session_without_a_callback_is_unsupported', request('rename_session', { title: 'T' }));
+controlCase('rename_session_succeeds', request('rename_session', { title: 'T' }), { callbacks: { onRenameSession: returns({ ok: true }) } });
+controlCase('rename_session_that_fails_reports_the_cleaned_error', request('rename_session', { title: 'T' }), { callbacks: { onRenameSession: returns({ ok: false, error: 'no​ way\n' }) } });
+controlCase('rename_session_that_fails_without_text_reports_an_empty_error', request('rename_session', { title: 'T' }), { callbacks: { onRenameSession: returns({ ok: false }) } });
+controlCase('rename_session_returning_nothing_is_unsupported', request('rename_session', { title: 'T' }), { callbacks: { onRenameSession: {} } });
+controlCase('set_permission_mode_accepts_a_known_mode', request('set_permission_mode', { mode: 'plan' }), { callbacks: { onSetPermissionMode: returns({ ok: true }) } });
+controlCase('set_permission_mode_maps_manual_to_default', request('set_permission_mode', { mode: 'manual' }), { callbacks: { onSetPermissionMode: returns({ ok: true }) } });
+controlCase('set_permission_mode_refuses_an_unknown_mode', request('set_permission_mode', { mode: 'chaos' }), { callbacks: { onSetPermissionMode: returns({ ok: true }) } });
+controlCase('set_permission_mode_refuses_a_non_string_mode', request('set_permission_mode', { mode: 3 }), { callbacks: { onSetPermissionMode: returns({ ok: true }) } });
+controlCase('set_permission_mode_without_a_callback_is_unsupported', request('set_permission_mode', { mode: 'plan' }));
+controlCase('set_permission_mode_returning_nothing_is_unsupported', request('set_permission_mode', { mode: 'plan' }), { callbacks: { onSetPermissionMode: {} } });
+controlCase('set_permission_mode_failure_carries_the_code', request('set_permission_mode', { mode: 'auto' }), { callbacks: { onSetPermissionMode: returns({ ok: false, error: 'blocked', code: 'policy' }) } });
+controlCase('set_permission_mode_failure_without_a_code_has_none', request('set_permission_mode', { mode: 'auto' }), { callbacks: { onSetPermissionMode: returns({ ok: false, error: 'blocked' }) } });
+for (const mode of ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk']) {
+  controlCase(`set_permission_mode_passes_${mode}_through`, request('set_permission_mode', { mode }), { callbacks: { onSetPermissionMode: returns({ ok: true }) } });
+}
+controlCase('set_model_with_a_model_succeeds', request('set_model', { model: 'm1' }), { callbacks: { onSetModel: returns({ ok: true }) } });
+controlCase('set_model_without_a_model_passes_nothing', request('set_model'), { callbacks: { onSetModel: returns({ ok: true }) } });
+controlCase('set_model_with_a_null_model_passes_nothing', request('set_model', { model: null }), { callbacks: { onSetModel: returns({ ok: true }) } });
+controlCase('set_model_without_a_callback_succeeds', request('set_model', { model: 'm1' }));
+controlCase('set_model_returning_nothing_succeeds', request('set_model', { model: 'm1' }), { callbacks: { onSetModel: {} } });
+controlCase('set_model_refuses_a_non_string_model', request('set_model', { model: 4 }), { callbacks: { onSetModel: returns({ ok: true }) } });
+controlCase('set_model_refuses_a_conditional_switch', request('set_model', { model: 'm1', only_if_model_is_current: true }), { callbacks: { onSetModel: returns({ ok: true }) } });
+controlCase('set_model_refuses_a_null_condition', request('set_model', { model: 'm1', only_if_model_is_current: null }), { callbacks: { onSetModel: returns({ ok: true }) } });
+controlCase('set_model_accepts_a_false_condition', request('set_model', { model: 'm1', only_if_model_is_current: false }), { callbacks: { onSetModel: returns({ ok: true }) } });
+controlCase('set_model_failure_reports_the_cleaned_error', request('set_model', { model: 'm1' }), { callbacks: { onSetModel: returns({ ok: false, error: 'bad\tmodel' }) } });
+controlCase('set_model_failure_without_text_reports_an_empty_error', request('set_model', { model: 'm1' }), { callbacks: { onSetModel: returns({ ok: false }) } });
+const thinkingRequest = (extra) => request('set_max_thinking_tokens', extra);
+for (const [name, extra] of [
+  ['an_integer', { max_thinking_tokens: 2000 }], ['null', { max_thinking_tokens: null }], ['nothing', {}], ['a_negative_integer', { max_thinking_tokens: -5 }],
+  ['a_whole_float', { max_thinking_tokens: 3.0 }], ['a_huge_whole_number', { max_thinking_tokens: 1e21 }], ['a_fraction', { max_thinking_tokens: 1.5 }], ['a_string', { max_thinking_tokens: '5' }],
+  ['a_display', { max_thinking_tokens: 5, thinking_display: 'omitted' }], ['a_null_display', { thinking_display: null }], ['highlights', { thinking_display: 'highlights' }],
+  ['summarized', { thinking_display: 'summarized' }], ['an_unknown_display', { thinking_display: 'loud' }], ['a_numeric_display', { thinking_display: 1 }],
+]) controlCase(`set_max_thinking_tokens_with_${name}`, thinkingRequest(extra), { callbacks: { onSetMaxThinkingTokens: returns({ ok: true }) } });
+controlCase('set_max_thinking_tokens_without_a_callback_succeeds', thinkingRequest({ max_thinking_tokens: 5 }));
+controlCase('set_max_thinking_tokens_returning_nothing_succeeds', thinkingRequest({ max_thinking_tokens: 5 }), { callbacks: { onSetMaxThinkingTokens: {} } });
+controlCase('set_max_thinking_tokens_failure_reports_the_cleaned_error', thinkingRequest({ max_thinking_tokens: 5 }), { callbacks: { onSetMaxThinkingTokens: returns({ ok: false, error: 'no​pe' }) } });
+controlCase('set_max_thinking_tokens_failure_without_text_reports_an_empty_error', thinkingRequest({ max_thinking_tokens: 5 }), { callbacks: { onSetMaxThinkingTokens: returns({ ok: false }) } });
+controlCase('mcp_set_servers_with_a_hint_and_no_servers_is_acknowledged', request('mcp_set_servers', { hint: 'x' }));
+controlCase('mcp_set_servers_with_a_hint_and_servers_is_unsupported', request('mcp_set_servers', { hint: 'x', servers: {} }));
+controlCase('mcp_set_servers_with_a_non_object_is_refused', request('mcp_set_servers', { servers: [] }));
+controlCase('mcp_set_servers_with_a_null_is_refused', request('mcp_set_servers', { servers: null }));
+controlCase('mcp_set_servers_without_a_callback_is_unsupported', request('mcp_set_servers', { servers: {} }));
+controlCase('mcp_set_servers_with_a_non_string_hint_is_refused', request('mcp_set_servers', { hint: 5 }));
+controlCase('stop_task_needs_a_string_id', request('stop_task', { task_id: 5 }), { callbacks: { onStopTask: {} } });
+controlCase('stop_task_without_a_callback_is_unsupported', request('stop_task', { task_id: 't1' }));
+controlCase('background_tasks_needs_a_string_tool_use_id', request('background_tasks', { tool_use_id: 5 }), { callbacks: { onBackgroundTasks: {} } });
+controlCase('background_tasks_without_a_callback_is_unsupported', request('background_tasks'));
+controlCase('background_tasks_without_a_callback_and_a_tool_use_id_is_unsupported', request('background_tasks', { tool_use_id: 'tu1' }));
+controlCase('side_question_needs_a_question', request('side_question', {}), { callbacks: { onSideQuestion: {} } });
+controlCase('side_question_needs_a_string_question', request('side_question', { question: 5 }), { callbacks: { onSideQuestion: {} } });
+controlCase('side_question_history_must_be_pairs', request('side_question', { question: 'q', history: [{ question: 'a' }] }), { callbacks: { onSideQuestion: {} } });
+controlCase('side_question_history_must_be_an_array', request('side_question', { question: 'q', history: 'x' }), { callbacks: { onSideQuestion: {} } });
+controlCase('side_question_without_a_callback_is_unsupported', request('side_question', { question: 'q' }));
+controlCase('side_question_with_an_invalid_fallback_notice_is_refused', request('side_question', { question: 'q', history: [{ question: 'a', response: 'b', fallback_notice: 3 }] }));
+controlCase('initialize_lists_the_defaults', request('initialize'));
+controlCase('initialize_names_the_client_version', request('initialize'), { version: '9.9.9' });
+controlCase('initialize_ignores_dialog_kinds_it_cannot_use', request('initialize', { supportedDialogKinds: ['a', 5] }));
+add('control', 'initialize_lists_the_prompts_still_waiting', {
+  epoch: 6,
+  stream: [connection([clientEvent(1, 'e1', request('initialize'))], 'hold', { gapMs: 60, startMs: 1500 })],
+  steps: [{ op: 'events', expect: 2, writes: [
+    control('sendControlRequest', { type: 'control_request', request_id: 'p1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'tu1' } }),
+    control('sendControlRequest', { type: 'control_request', request_id: 'p2', request: { subtype: 'request_user_dialog', dialog_kind: 'k', payload: {} } }),
+    control('sendControlRequest', { type: 'control_request', request_id: 'p3', request: { subtype: 'interrupt' } }),
+  ] }],
+  waitFor: [['=/worker/events', 3]], settleMs: 400,
+});
+
 // The attestation filter (`_$`) never drops an event: its policy is the default one, `enforce: false`, because nothing
 // in the bundle assigns `filterPolicy`. Frames that carry every kind of `device_attestation_status` are delivered.
 const attestationStatuses = ['VERIFIED', 'ABSENT', 'INVALID', 'UNCHECKED', 'UNSPECIFIED', 'TRANSITIVELY_VOUCHED', 'SERVICE_VOUCHED', 'SERVER_AUTHORED', 'server_replayed', 'DEVICE_ATTESTATION_STATUS_INVALID', 3, 99, null, 'junk'];
@@ -678,6 +782,15 @@ async function run(spec) {
   const logStart = fs.existsSync(debugLog) ? fs.statSync(debugLog).size : 0;
   const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: spec.stream === undefined, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code), onInboundMessage: (message) => inbound.push(JSON.parse(JSON.stringify(message))), onPermissionResponse: (message) => { permissions.push(JSON.parse(JSON.stringify(message))); return true; } };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
+  // Host callbacks the control dispatch is handed (`spec.callbacks`): each records its arguments and returns what the
+  // case says (`returns`), or nothing when the case names none. `undefined` arguments are written as "<undefined>".
+  const calls = [];
+  const callback = (name, behaviour) => (...args) => {
+    calls.push([name, ...args.map((arg) => (arg === undefined ? '<undefined>' : arg))]);
+    return 'returns' in behaviour ? JSON.parse(JSON.stringify(behaviour.returns)) : undefined;
+  };
+  for (const [key, behaviour] of Object.entries(spec.callbacks ?? {})) options[key] = callback(key, behaviour);
+  if (spec.version !== undefined) options.claudeCodeVersion = spec.version;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
   const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), ...(spec.stream !== undefined && { stream: spec.stream }), ...(spec.clock !== undefined && { clock: spec.clock }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
@@ -746,7 +859,7 @@ async function run(spec) {
       else await sleep(150);
     }
     if (spec.waitFor !== undefined) {
-      const reached = () => spec.waitFor.every(([suffix, wanted]) => requests.filter((r) => r.path.includes(suffix)).length >= wanted);
+      const reached = () => spec.waitFor.every(([suffix, wanted]) => requests.filter((r) => (suffix.startsWith('=') ? r.path.endsWith(suffix.slice(1)) : r.path.includes(suffix))).length >= wanted);
       await until(reached, spec.waitMs ?? 12000);
       if (!reached()) throw new Error(`${spec.name}: the awaited requests did not arrive`);
       await sleep(spec.settleMs ?? 400);
@@ -762,6 +875,7 @@ async function run(spec) {
     }
     if (spec.handleKeys) result.handle_keys = Object.keys(handle).sort();
     if (spec.stream !== undefined) { result.inbound = inbound; result.permission_responses = permissions; result.last_sequence = handle.getSequenceNum(); }
+    if (spec.callbacks !== undefined) result.calls = calls;
     result.connected = handle.isConnected();
     result.epoch = handle.getEpoch();
   }
@@ -909,9 +1023,20 @@ if (only !== undefined) {
   process.exit(0);
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], network: [], fetch_failures: [] };
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], network: [], fetch_failures: [] };
 for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'delivery', 'served', 'stream']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
+}
+// A control case keeps the request, what the host callbacks saw and the control_response frames the session posted
+// (the posted uuid is replaced by `<uuid>` already; the process id is replaced by 0).
+for (const spec of cases.control) {
+  const result = await run(spec);
+  const frames = result.requests.filter((r) => r.method === 'POST' && r.path === '/worker/events')
+    .flatMap((r) => JSON.parse(r.body).events.map((event) => event.payload)).filter((payload) => payload.type === 'control_response');
+  for (const frame of frames) if (typeof frame.response?.response?.pid === 'number') frame.response.response.pid = 0;
+  const first = spec.stream[0].chunks.length > 0 ? JSON.parse(spec.stream[0].chunks[0].split('data: ')[1]).payload : null;
+  const prompts = (spec.steps ?? []).flatMap((step) => step.writes ?? []).map((write) => write.payload);
+  goldens.control.push({ name: spec.name, request: first, version: spec.version ?? null, callbacks: spec.callbacks ?? {}, prompts, calls: result.calls ?? [], frames });
 }
 for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
 for (const mode of ['destroy', 'truncated', 'hang']) goldens.fetch_failures.push(await fetchFailureCase(mode));

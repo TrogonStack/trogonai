@@ -87,3 +87,26 @@ fn drops_messages_with_hidden_or_unassigned_characters() {
         assert_eq!(plain_detail(text), None, "{text:?}");
     }
 }
+
+#[test]
+fn cleans_reply_text_like_the_upstream_cleaner() {
+    assert_eq!(clean_reply_text("plain text"), "plain text");
+    assert_eq!(
+        clean_reply_text("a\u{0}b\tc\nd\u{200b}e\u{a0}f\u{2800}g\u{3000}h"),
+        "abcdefgh"
+    );
+    assert_eq!(clean_reply_text("a  b"), "a  b");
+    assert_eq!(clean_reply_text(&"x".repeat(1025)), "x".repeat(1024));
+    assert_eq!(
+        clean_reply_text(&format!("{}\u{1f600}", "x".repeat(1023))),
+        "x".repeat(1023)
+    );
+    assert_eq!(
+        clean_reply_text(&format!("{}\u{1f600}", "x".repeat(1022))),
+        format!("{}\u{1f600}", "x".repeat(1022))
+    );
+    assert_eq!(
+        clean_reply_text(&format!("{}{}", "\u{200b}".repeat(4000), "z".repeat(2000))),
+        "z".repeat(96)
+    );
+}

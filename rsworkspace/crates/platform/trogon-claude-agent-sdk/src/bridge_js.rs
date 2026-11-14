@@ -99,6 +99,41 @@ pub(crate) fn plain_detail(message: &str) -> Option<String> {
     (cleaned.encode_utf16().count() <= DETAIL_LIMIT && cleaned == message.replace('`', "'")).then(|| message.to_owned())
 }
 
+/// `Kt(text)`: the text of a control reply error as the upstream cleaner leaves it: cut to 4,096 UTF-16 units (a pair
+/// the cut would split goes whole), stripped of control, format, line and paragraph separator, default-ignorable and
+/// braille blank characters and of every space separator but the plain space, then cut to 1,024 units the same way.
+/// Unpaired surrogates, which the upstream cleaner also removes, cannot be held in a Rust string.
+pub(crate) fn clean_reply_text(text: &str) -> String {
+    let kept: String = prefix_within_units(text, 4096)
+        .chars()
+        .filter(|c| !is_stripped(*c))
+        .collect();
+    prefix_within_units(&kept, DETAIL_LIMIT).to_owned()
+}
+
+fn prefix_within_units(text: &str, limit: usize) -> &str {
+    let mut units = 0;
+    for (index, c) in text.char_indices() {
+        units += c.len_utf16();
+        if units > limit {
+            return text.get(..index).unwrap_or(text);
+        }
+    }
+    text
+}
+
+fn is_stripped(c: char) -> bool {
+    matches!(
+        get_general_category(c),
+        GeneralCategory::Control
+            | GeneralCategory::Format
+            | GeneralCategory::LineSeparator
+            | GeneralCategory::ParagraphSeparator
+    ) || (c != ' ' && get_general_category(c) == GeneralCategory::SpaceSeparator)
+        || c == '\u{2800}'
+        || is_default_ignorable(c)
+}
+
 fn collapse_spaces(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {

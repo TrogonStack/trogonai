@@ -16,6 +16,7 @@ mod bridge_git;
 mod bridge_js;
 mod bridge_types;
 mod bridge_worker;
+mod bridge_worker_control;
 mod bridge_worker_delivery;
 mod bridge_worker_events;
 mod bridge_worker_inbound;
@@ -197,6 +198,10 @@ pub use bridge_worker::{
     InvalidSessionId, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
     WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, refusal_source,
     retry_after_ms, session_url, token_expiry,
+};
+pub use bridge_worker_control::{
+    CallbackResult, ControlCallbacks, ControlReply, ControlSession, DeferredControl, ModelCallback, TextCallback,
+    ThinkingTokensCallback, answer_control_request, clean_control_text, is_pending_prompt,
 };
 pub use bridge_worker_delivery::{
     DeliveryAck, DeliveryNext, DeliveryQueue, DeliveryStatus, MAX_BATCH_ACKS, MAX_QUEUE_ACKS, delivery_body,
