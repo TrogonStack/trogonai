@@ -168,7 +168,8 @@ pub fn next_response(queue: &[Value], taken: &mut usize) -> Value {
 }
 
 /// Serves the worker endpoints of a case: each queue answers in order and then repeats its last answer. The read
-/// stream is not served, the tests feed it to the session themselves.
+/// stream is not served, the tests feed it to the session themselves. The stored state read (`GET /worker`) is
+/// answered with the case's `record`, or an empty record, and left out of the log, as the recorder did.
 pub async fn serve(case: &Value) -> Result<(String, Log), std::io::Error> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
@@ -179,6 +180,11 @@ pub async fn serve(case: &Value) -> Result<(String, Log), std::io::Error> {
         .filter(|response| !response.is_null())
         .cloned()
         .unwrap_or_else(|| json!({"status": 200, "headers": [], "body": "{\"worker_epoch\":5}"}));
+    let record = case
+        .get("record")
+        .filter(|response| !response.is_null())
+        .cloned()
+        .unwrap_or_else(|| json!({"status": 200, "headers": [], "body": "{}"}));
     let (puts, beats, events, deliveries) = (
         queue(case, "puts"),
         queue(case, "beat"),
@@ -198,6 +204,10 @@ pub async fn serve(case: &Value) -> Result<(String, Log), std::io::Error> {
                 .to_owned();
             let route = format!("{} {}", request.method, request.path);
             let response = match route.as_str() {
+                "GET /worker" => {
+                    let _ = write_response(&mut stream, &record).await;
+                    continue;
+                }
                 "POST /worker/register" => register.clone(),
                 "PUT /worker" => next_response(&puts, &mut put_count),
                 "POST /worker/heartbeat" => next_response(&beats, &mut beat_count),
