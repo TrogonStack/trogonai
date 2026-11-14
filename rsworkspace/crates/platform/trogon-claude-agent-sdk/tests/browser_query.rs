@@ -217,7 +217,7 @@ async fn every_recorded_query_sends_the_recorded_initialize_request() -> TestRes
         );
         assert!(seen.try_recv().is_err(), "{name}");
         assert_eq!(case["frames"].as_array().map(Vec::len), Some(1), "{name}");
-        query.close().await?;
+        query.close();
     }
     Ok(())
 }
@@ -285,7 +285,7 @@ async fn a_websocket_query_has_no_sse_state() -> TestResult {
     assert_eq!(get_ccr_event(&query, &message), None);
     assert!(!suspend_sse_stream(&query));
     assert!(!resume_sse_stream(&query));
-    query.close().await?;
+    query.close();
     Ok(())
 }
 
@@ -479,7 +479,7 @@ async fn an_sse_query_exposes_the_transport_state_through_the_accessors() -> Tes
     assert!(!suspend_sse_stream(&query));
     assert!(resume_sse_stream(&query));
     assert!(!resume_sse_stream(&query));
-    query.close().await?;
+    query.close();
     Ok(())
 }
 
@@ -541,7 +541,7 @@ async fn envelopes_and_the_delivered_number_follow_the_consumer_not_the_reads() 
                 .collect();
             assert_eq!(Value::Array(envelopes), step["ccr"], "{name} {}", step["at"]);
         }
-        query.close().await?;
+        query.close();
     }
     Ok(())
 }
