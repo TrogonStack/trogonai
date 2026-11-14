@@ -2503,10 +2503,15 @@ where
             return Err(Error::NotReadyForWriting);
         }
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
+        // The driver took this frame before it saw any close, so the caller handed it over first. `sdk.mjs` writes
+        // such a frame to stdin at once and `close()` only ends the stream behind it, so the write is polled first
+        // and goes out when the transport takes it right away. Only a write that has to wait gives way to the close
+        // or the abort, as a JavaScript write still awaiting its transport does.
         tokio::select! {
-            _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
-            () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
+            biased;
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
+            () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
+            _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
         }
     }
 }

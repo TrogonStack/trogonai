@@ -16,6 +16,8 @@ struct ScriptedTransport {
     written: mpsc::UnboundedSender<String>,
     incoming: mpsc::UnboundedReceiver<JsonObject>,
     ready: bool,
+    /// How long each write takes before the document arrives, as a busy pipe or a remote transport would.
+    write_delay: Option<Duration>,
 }
 
 impl Transport for ScriptedTransport {
@@ -24,6 +26,9 @@ impl Transport for ScriptedTransport {
     }
 
     async fn write(&mut self, data: &str) -> Result<(), Error> {
+        if let Some(delay) = self.write_delay {
+            sleep(delay).await;
+        }
         self.written.send(data.to_owned()).map_err(|_| Error::DriverStopped)
     }
 
@@ -77,6 +82,7 @@ impl DriverFixture {
                 written: written_tx,
                 incoming,
                 ready: true,
+                write_delay: None,
             },
             input_ended: false,
             commands: command_rx,
@@ -266,6 +272,58 @@ async fn a_shutdown_already_requested_wins_before_more_input_is_read() -> Result
     let shutdown = std::mem::replace(&mut fixture.shutdown, replacement);
     shutdown.send(()).map_err(|_| Error::DriverStopped)?;
     fixture.driver.event_loop().await?;
+    fixture.finish().await
+}
+
+/// A fixture whose close was already requested before the driver writes, with writes that take `delay`.
+fn closed_before_a_write(delay: Option<Duration>) -> Result<DriverFixture, Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.transport.write_delay = delay;
+    let (replacement, _receiver) = oneshot::channel();
+    let shutdown = std::mem::replace(&mut fixture.shutdown, replacement);
+    shutdown.send(()).map_err(|_| Error::DriverStopped)?;
+    Ok(fixture)
+}
+
+fn prompt_command(text: &str) -> (Command, oneshot::Receiver<Result<(), Error>>) {
+    let (response, receiver) = oneshot::channel();
+    let command = Command::Prompt {
+        input: crate::Prompt::from(text).into(),
+        response,
+    };
+    (command, receiver)
+}
+
+/// The close lands after the driver took the prompt, as when `WarmQuery.query` returns and the caller disconnects at
+/// once. A random choice between the close and a transport that is ready drops the prompt half the time, so every
+/// round must write it.
+#[tokio::test(start_paused = true)]
+async fn a_prompt_taken_before_the_close_is_written() -> Result<(), Box<dyn std::error::Error>> {
+    for round in 0..64 {
+        let mut fixture = closed_before_a_write(None)?;
+        let (command, receiver) = prompt_command("taken before the close");
+        fixture.driver.command(command).await?;
+        assert!(matches!(receiver.await?, Ok(())), "round {round}");
+        let written = fixture.harness.written.try_recv()?;
+        assert!(written.contains("taken before the close"), "round {round}: {written}");
+        // The close still ends the run before anything else is read.
+        fixture.driver.event_loop().await?;
+        assert!(fixture.driver.shutdown_seen, "round {round}");
+        fixture.finish().await?;
+    }
+    Ok(())
+}
+
+/// A transport that cannot take the frame now loses to the close, so a CLI that stopped reading cannot hold it.
+#[tokio::test(start_paused = true)]
+async fn a_write_that_has_to_wait_gives_way_to_the_close() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
+    let (command, _receiver) = prompt_command("never drained");
+    let started = Instant::now();
+    let outcome = fixture.driver.command(command).await;
+    assert!(matches!(outcome, Err(Error::ShutdownRequested)), "{outcome:?}");
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(fixture.driver.shutdown_seen);
     fixture.finish().await
 }
 
