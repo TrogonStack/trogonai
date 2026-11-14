@@ -138,13 +138,14 @@ pub async fn read_request(stream: &mut TcpStream) -> Option<Captured> {
     })
 }
 
-pub async fn write_response(stream: &mut TcpStream, response: &Value) -> TestResult {
+/// Writes `response`, with `{base}` in its header values replaced by the server origin as the recorder did.
+pub async fn write_response(stream: &mut TcpStream, response: &Value, base: &str) -> TestResult {
     let status = field(response, "status").as_u64().unwrap_or(200);
     let body = field(response, "body").as_str().unwrap_or("");
     let mut head = format!("HTTP/1.1 {status} Status\r\n");
     for pair in field(response, "headers").as_array().into_iter().flatten() {
         if let (Some(name), Some(value)) = (pair[0].as_str(), pair[1].as_str()) {
-            head.push_str(&format!("{name}: {value}\r\n"));
+            head.push_str(&format!("{name}: {}\r\n", value.replace("{base}", base)));
         }
     }
     head.push_str(&format!("content-length: {}\r\nconnection: close\r\n\r\n", body.len()));
@@ -185,14 +186,16 @@ pub async fn serve(case: &Value) -> Result<(String, Log), std::io::Error> {
         .filter(|response| !response.is_null())
         .cloned()
         .unwrap_or_else(|| json!({"status": 200, "headers": [], "body": "{}"}));
-    let (puts, beats, events, deliveries) = (
+    let (puts, landings, beats, events, deliveries) = (
         queue(case, "puts"),
+        queue(case, "landing"),
         queue(case, "beat"),
         queue(case, "events"),
         queue(case, "deliveries"),
     );
+    let origin = base.clone();
     tokio::spawn(async move {
-        let (mut put_count, mut beat_count, mut event_count, mut delivery_count) = (0, 0, 0, 0);
+        let (mut put_count, mut landing_count, mut beat_count, mut event_count, mut delivery_count) = (0, 0, 0, 0, 0);
         while let Ok((mut stream, _)) = listener.accept().await {
             let Some(mut request) = read_request(&mut stream).await else {
                 continue;
@@ -205,11 +208,13 @@ pub async fn serve(case: &Value) -> Result<(String, Log), std::io::Error> {
             let route = format!("{} {}", request.method, request.path);
             let response = match route.as_str() {
                 "GET /worker" => {
-                    let _ = write_response(&mut stream, &record).await;
+                    let _ = write_response(&mut stream, &record, &origin).await;
                     continue;
                 }
                 "POST /worker/register" => register.clone(),
                 "PUT /worker" => next_response(&puts, &mut put_count),
+                // Where a redirect may point, answered from the case's `landing` queue as the recorder did.
+                "PUT /worker/landing" => next_response(&landings, &mut landing_count),
                 "POST /worker/heartbeat" => next_response(&beats, &mut beat_count),
                 "POST /worker/events" => next_response(&events, &mut event_count),
                 "POST /worker/events/delivery" => next_response(&deliveries, &mut delivery_count),
@@ -218,7 +223,7 @@ pub async fn serve(case: &Value) -> Result<(String, Log), std::io::Error> {
             if let Ok(mut captured) = shared.lock() {
                 captured.push(request);
             }
-            let _ = write_response(&mut stream, &response).await;
+            let _ = write_response(&mut stream, &response, &origin).await;
         }
     });
     Ok((base, log))
