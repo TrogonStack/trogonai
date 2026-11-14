@@ -11,6 +11,27 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod auth_token;
+mod bridge_client;
+mod bridge_git;
+mod bridge_js;
+mod bridge_session;
+mod bridge_session_core;
+mod bridge_session_handle;
+mod bridge_session_runtime;
+mod bridge_session_stream_events;
+mod bridge_types;
+mod bridge_worker;
+mod bridge_worker_control;
+mod bridge_worker_control_async;
+mod bridge_worker_delivery;
+mod bridge_worker_events;
+mod bridge_worker_heartbeat;
+mod bridge_worker_inbound;
+mod bridge_worker_queue;
+mod bridge_worker_stream;
+mod bridge_worker_stream_driver;
+mod bridge_worker_stream_http;
+mod bridge_worker_types;
 mod browser_query;
 mod builtin_tool_name;
 mod bundled_cli;
@@ -216,6 +237,62 @@ pub use agent_name::AgentName;
 pub use auth_token::{
     HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
     OAuthTokenFuture, OAuthTokenHandler, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
+};
+pub use bridge_client::BridgeClient;
+pub use bridge_git::{BranchDropLogDedup, CodeSessionGitContext, DefaultGitProbe, GitContextProbe, GitRepository};
+pub use bridge_session::{
+    AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, CloseCallback,
+    EnvironmentLookup, InboundMessageCallback, PermissionResponseCallback, attach_bridge_session,
+};
+pub use bridge_session_handle::{ReconnectError, ReconnectOptions};
+pub use bridge_types::{
+    CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
+    DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,
+    RemoteMcpConfig, SessionState,
+};
+pub use bridge_worker::{
+    AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
+    HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
+    InvalidSessionId, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
+    WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, refusal_source,
+    retry_after_ms, session_url, token_expiry,
+};
+pub use bridge_worker_control::{
+    CallbackResult, ControlCallbacks, ControlReply, ControlSession, DeferredControl, HostError, HostFuture,
+    ModelCallback, ModelVerdict, PendingControl, PendingModelCallback, PendingThinkingTokensCallback, TextCallback,
+    ThinkingTokensCallback, answer_control_request, clean_control_text, is_pending_prompt,
+};
+pub use bridge_worker_control_async::{
+    AsyncControl, AsyncControlCallbacks, BackgroundTasksCallback, BackgroundTasksSwitch, ControlTask, FrameWriter,
+    SIDE_QUESTION_DEADLINE, SideQuestionCallback, SideQuestionContext, StopTaskCallback, UuidSource,
+    background_tasks_disabled,
+};
+pub use bridge_worker_delivery::{
+    DeliveryAck, DeliveryNext, DeliveryQueue, DeliveryStatus, MAX_BATCH_ACKS, MAX_QUEUE_ACKS, delivery_body,
+};
+pub use bridge_worker_events::{
+    Attempt, Batch, ClientEvent, EventNext, EventQueue, MAX_BATCH_BYTES, MAX_BATCH_EVENTS, MAX_QUEUE_EVENTS,
+    POST_TIMEOUT_CEILING_MS, POST_TIMEOUT_FLOOR_MS, SHRINK_FROM_BYTES, lane_for_path, refused_for_good,
+    retry_delay as event_retry_delay, upload_body, upload_timeout,
+};
+pub use bridge_worker_heartbeat::{HeartbeatDriver, PROBE_BEAT_SPACING, heartbeat_delay};
+pub use bridge_worker_inbound::{INBOUND_DEDUP_CAPACITY, Inbound, InboundRouter, NOTIFICATION_ORIGIN, UuidSet};
+pub use bridge_worker_queue::{
+    Next, Patch, PatchQueue, Requeue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches,
+    without_status,
+};
+pub use bridge_worker_stream::{
+    FrameParser, KEEPALIVE_SECONDS, LIVENESS_GRACE_MS, PERMANENT_STREAM_STATUSES, RECONNECT_BASE_MS, RECONNECT_CAP_MS,
+    RECONNECT_JITTER_RATIO, Reopen, SLEEP_LATENESS_MS, SseFrame, StreamEffect, StreamOpen, StreamRequest,
+    StreamSession, liveness_timeout, reconnect_delay,
+};
+pub use bridge_worker_stream_driver::{
+    CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector, StreamFailure,
+    StreamResponse, run_stream,
+};
+pub use bridge_worker_stream_http::{HttpStreamBody, HttpStreamConnector};
+pub use bridge_worker_types::{
+    InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
 };
 pub use browser_query::{
     BrowserPrompt, BrowserQueryOptions, BrowserTransport, browser_query, get_ccr_event, get_sse_drop_counts,
