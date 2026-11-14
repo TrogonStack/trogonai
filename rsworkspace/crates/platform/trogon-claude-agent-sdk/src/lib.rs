@@ -87,7 +87,14 @@ mod raw_json_id;
 #[cfg(unix)]
 mod run_as;
 mod runtime_options;
+mod schema_pointer;
+mod sdk_mcp_choices;
+mod sdk_mcp_js;
+mod sdk_mcp_regexp;
 mod sdk_mcp_server;
+mod sdk_mcp_zod;
+mod sdk_mcp_zod_issue;
+mod sdk_mcp_zod_run;
 mod sdk_tool;
 mod sdk_tools;
 mod sensitive_string;
@@ -165,6 +172,7 @@ mod transcript_mirror;
 mod transport;
 mod usd_budget;
 mod user_input;
+mod validation_choices;
 mod version_check;
 mod websocket_error;
 mod websocket_transport;
@@ -269,6 +277,11 @@ pub use runtime_options::{
     DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
     ThinkingDisplay,
 };
+pub use schema_pointer::{SchemaPointer, SchemaPointerError};
+pub use sdk_mcp_choices::{
+    LengthChoice, NullabilityChoice, NumberFormatChoice, RefineFailure, Refinement, SchemaCallback,
+    SchemaCallbackOptions, SchemaChoice, StringCheckKind, StringFormatChoice, Transformation, UnionChoice,
+};
 pub use sdk_mcp_server::{
     LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, SdkMcpServer, SdkMcpSession,
 };
@@ -343,6 +356,7 @@ pub use upstream::settings_resolution::{
 };
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
+pub use validation_choices::{ValidationChoices, ValidationChoicesError, ValidationChoicesOptions};
 pub use version_check::{parse_version, unreported_version_warning};
 pub use websocket_error::WebSocketError;
 pub use websocket_transport::{AuthMessage, HeaderDelivery, OAuthCredential, WebSocketOptions, WebSocketTransport};

@@ -3,7 +3,9 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{CallbackError, CancellationToken, JsonObject, McpToolInputSchema, McpToolName, ToolResultStatus};
+use crate::{
+    CallbackError, CancellationToken, JsonObject, McpToolInputSchema, McpToolName, ToolResultStatus, ValidationChoices,
+};
 
 #[derive(Clone, Debug)]
 pub struct McpToolRequest {
@@ -16,9 +18,23 @@ pub struct McpToolOutput {
     pub content: Vec<JsonObject>,
     pub structured_content: Option<JsonObject>,
     pub status: ToolResultStatus,
+    /// The result exactly as the handler produced it, when it is not one of the typed fields above.
+    pub(crate) result: Option<Value>,
 }
 
 impl McpToolOutput {
+    /// A handler result passed through untouched: any `_meta`, task fields and unknown keys survive in
+    /// their order, and a value that is not a valid `CallToolResult` is reported the way the MCP SDK
+    /// reports it. The typed fields stay empty.
+    pub fn from_result(result: Value) -> Self {
+        Self {
+            content: Vec::new(),
+            structured_content: None,
+            status: ToolResultStatus::NotReported,
+            result: Some(result),
+        }
+    }
+
     pub fn text(text: impl Into<String>) -> Self {
         let mut content = JsonObject::new();
         content.insert("type".into(), "text".into());
@@ -27,10 +43,14 @@ impl McpToolOutput {
             content: vec![content],
             structured_content: None,
             status: ToolResultStatus::Success,
+            result: None,
         }
     }
 
     pub(crate) fn to_wire_json(&self) -> Result<Value, serde_json::Error> {
+        if let Some(result) = &self.result {
+            return Ok(result.clone());
+        }
         serde_json::to_value(ToolOutputWire {
             content: &self.content,
             structured_content: self.structured_content.as_ref(),
@@ -91,6 +111,7 @@ pub struct SdkTool {
     annotations: Option<JsonObject>,
     search_hint: Option<String>,
     always_load: bool,
+    validation: ValidationChoices,
 }
 
 impl From<SdkToolOptions> for SdkTool {
@@ -112,6 +133,7 @@ impl From<SdkToolOptions> for SdkTool {
             annotations,
             search_hint,
             always_load,
+            validation: ValidationChoices::default(),
         }
     }
 }
@@ -119,6 +141,16 @@ impl From<SdkToolOptions> for SdkTool {
 impl SdkTool {
     pub fn name(&self) -> &McpToolName {
         &self.name
+    }
+
+    /// The choices and callbacks the TypeScript dialect validates the input with where the listed JSON Schema
+    /// leaves the zod schema ambiguous. They never reach `tools/list`.
+    pub fn with_validation(self, validation: ValidationChoices) -> Self {
+        Self { validation, ..self }
+    }
+
+    pub(crate) fn validation(&self) -> &ValidationChoices {
+        &self.validation
     }
 
     pub(crate) fn description(&self) -> &str {

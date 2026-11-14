@@ -187,7 +187,41 @@ Each client opens its own session. The built-in server supports initialize,
 initialized notification, cancellation, ping and tool listing/calls.
 `McpServerDialect::TypeScript`, the default, answers like `createSdkMcpServer`:
 it drops messages it cannot read, reports parameter errors as `-32603` and
-lists each schema with its draft-07 `$schema`. `McpServerDialect::Python`
+lists each schema with its draft-07 `$schema`. It validates tool arguments,
+handler results and the JSON-RPC envelope the way the bundled zod and MCP SDK
+do, with their issue paths, codes, messages and order. The zod schema is
+rebuilt from the listed JSON Schema, so what JSON Schema cannot tell apart
+follows the mapping zod's own `toJSONSchema` makes most likely, until the tool
+author chooses otherwise with `SdkTool::with_validation`. A
+`ValidationChoices` (built from `ValidationChoicesOptions`, with typed errors)
+keeps its choices beside the schema, keyed by the JSON Pointer of the node they
+apply to, so `tools/list` stays exactly what `createSdkMcpServer` sends. Each
+choice has a recorded answer from the real zod in
+`tests/fixtures/sdk_mcp/typescript_choices.json`:
+`UnionChoice` picks a plain union (every option's issues in one
+`invalid_union`) or a discriminated union (the option the discriminator names,
+or one `invalid_union` at the discriminator); `NullabilityChoice` picks
+`nullable` (the inner issues) or a union with `null` (an `invalid_union`);
+`LengthChoice` picks `length(n)` (one `exact` issue) or `min(n).max(n)`;
+`SchemaChoice::StringCheckOrder` lists the minimum, maximum and format checks
+of a string in the order they were declared, which is the order of its issues;
+`NumberFormatChoice` picks `int32`/`uint32` (the format names the integer type)
+or `number().int().min(..).max(..)` (`safeint`); `StringFormatChoice` picks
+`iso.time()` (format `time`) or a plain `regex` pattern; and
+`SchemaChoice::RegexFlags` gives the flags the listed `pattern` loses.
+`SchemaCallbackOptions` opts a schema node in to a `refine` and a `transform`
+callback, which run where zod runs them: the refinement after the node's checks
+unless one aborted them, as a `custom` issue with its path and message, and the
+transformation only when nothing failed, its result being what the handler
+receives. The embedded-server tests are
+`typescript_dialect_validates_each_exposed_choice_like_zod` and the unit tests
+in `sdk_mcp_choices_tests.rs`. Patterns run through an ECMAScript
+regular expression engine (lookaround, backreferences, named groups and the `u`
+and `v` flags), and a pattern that does not compile fails when the tool is
+registered. A handler result is passed to the client as the JSON value it
+returned once it passes `CallToolResult`.
+Schemas that use keywords zod cannot express (`allOf`, `oneOf`, `$ref` and the
+like) are also checked by the JSON Schema validator. `McpServerDialect::Python`
 answers like `create_sdk_mcp_server`: it reports unreadable messages as
 `McpServerError::Protocol`, refuses requests before `initialize` and answers a
 cancelled call with `-32800`. Both dialects validate `clientInfo.icons` and
@@ -254,6 +288,23 @@ reading of an error code and its smart-union choice between models. A message
 no model accepts is reported with the text of the `ValidationError` pydantic
 raises: the same header, locations, messages, truncated `input_value` repr and
 documentation link.
+
+Before the first `initialize` request, TypeScript style captures a manifest for
+each in-process server (`captureSdkMcpServerManifests`), so the CLI need not
+handshake them over the control channel. Each server gets an `initialize`
+request with id `sdk-manifest-capture:initialize` (protocol version
+`2025-11-25`, no capabilities, client `claude-code` `0.3.323`), then a
+`notifications/initialized`, then, when its capabilities include `tools`, a
+`tools/list` with id `sdk-manifest-capture:tools-list`. The manifest is
+`{initializeResult, toolsListResult}`, and `toolsListResult` is left out when
+the result has a `nextCursor`. A server that answers an error, throws or does
+not answer is left out and the CLI handshakes it. All servers run side by side
+under one 250 ms deadline, and a reply after it is dropped. The manifests go in
+`sdkMcpServerManifests` of the `initialize` request. Upstream turns the capture
+off with the `CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS` environment variable and
+has no query option for it; `ClaudeAgentOptions::capture_sdk_mcp_manifests` is
+this crate's own switch and `Some(false)` disables it. Python style has no
+capture.
 
 `set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
 servers before the request is sent and keeps the session of a server that stays

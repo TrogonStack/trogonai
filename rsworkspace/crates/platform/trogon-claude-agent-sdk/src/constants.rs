@@ -1215,3 +1215,12 @@ pub(crate) const PYDANTIC_REPR_HEAD_BYTES: usize = 25;
 
 /// The bytes pydantic-core keeps from the end of a `repr` it truncates.
 pub(crate) const PYDANTIC_REPR_TAIL_BYTES: usize = 24;
+
+/// `OE`: the prefix of every request id the manifest capture sends, which marks a late reply for dropping.
+pub(crate) const MCP_MANIFEST_CAPTURE_ID_PREFIX: &str = "sdk-manifest-capture:";
+
+/// `$8`: how long the manifest capture waits for every server before the CLI is left to handshake the rest.
+pub(crate) const MCP_MANIFEST_CAPTURE_DEADLINE: Duration = Duration::from_millis(250);
+
+/// `F8`: the protocol version the manifest capture's `initialize` asks for.
+pub(crate) const MCP_MANIFEST_CAPTURE_PROTOCOL_VERSION: &str = "2025-11-25";
