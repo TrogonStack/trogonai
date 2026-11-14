@@ -3,8 +3,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 workspace_crate(
     name = "a2a-gateway",
     binaries = {"a2a-gateway": {}},
-    # Cargo CI tests every feature at once; the default-features run is not mirrored.
-    crate_features = ["spicedb"],
+    # crate_universe resolves only default features, so it leaves out the optional
+    # crates spicedb turns on and Bazel builds the default-features gateway.
     dev_deps = ["//rsworkspace/crates/platform/trogonai-proto"],
     integration_tests = {
         # Runs the docker CLI against the repository's devops/ directory, which

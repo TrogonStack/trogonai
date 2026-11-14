@@ -2,7 +2,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     name = "a2a-nats",
-    crate_features = ["spicedb"],
+    # crate_universe resolves only default features, so it leaves out the optional
+    # crates spicedb turns on and Bazel builds the default-features library.
     deps = [
         "//rsworkspace/crates/a2a/a2a-identity-types",
         "//rsworkspace/crates/a2a/a2a-pack",

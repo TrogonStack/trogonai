@@ -102,6 +102,9 @@ vitest_bin.vitest_test(
     # the patches both loaders resolve to the same file, and because data is
     # copied to the output tree, that file is still a declared input.
     patch_node_fs = False,
+    # The Bazel job shares the runner with Rust compiles and the typecheck, so
+    # the suites take far longer than the 300 second default allows.
+    timeout = "long",
 )
 
 oxlint_bin.oxlint_test(
