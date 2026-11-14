@@ -15,6 +15,29 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+// The recorder reads the real clock. The bundle reads `Date.now`, `performance.now` and `setTimeout` through the
+// globals, which a case can bend (`spec.clock`): the first liveness timer of the run (45 s) fires after 300 ms instead,
+// and the clocks jump forward by what the silence would have been, as if the process had slept. The wall clock and the
+// monotonic clock jump separately, because the transport reads the longer of the two gaps.
+const realNow = Date.now.bind(Date);
+const realPerformanceNow = performance.now.bind(performance);
+const realSetTimeout = globalThis.setTimeout;
+const clock = { wall: 0, mono: 0, jump: null };
+Date.now = () => realNow() + clock.wall;
+performance.now = () => realPerformanceNow() + clock.mono;
+globalThis.setTimeout = (callback, delay, ...args) => {
+  if (clock.jump !== null && delay === 45000) {
+    const jump = clock.jump;
+    clock.jump = null;
+    return realSetTimeout(() => {
+      clock.wall += jump.wall;
+      clock.mono += jump.mono;
+      callback(...args);
+    }, 300);
+  }
+  return realSetTimeout(callback, delay, ...args);
+};
+
 const [bridgeArg, outArg, ...flags] = process.argv.slice(2);
 const bridgePath = bridgeArg ? path.resolve(bridgeArg) : bridgeArg;
 const out = outArg ? path.resolve(outArg) : outArg;
@@ -82,6 +105,93 @@ const refusalSource = (headers) => refusal.Us((name) => headers[name] ?? null);
 const tokenExpiry = evaluate(`const Zt=(e)=>JSON.parse(e);${between('function V1e(', 'ci();var PG=')}`, ['eA']).eA;
 const jwt = (claims) => `h.${Buffer.from(typeof claims === 'string' ? claims : JSON.stringify(claims)).toString('base64url')}.s`;
 
+// The inbound router `J4` (what `onInboundMessage`, `onPermissionResponse`, the control dispatch and the cancel hook
+// are fed from) read from the bundle with the logging and telemetry calls and the notification parser stubbed. The
+// notification parser needs the bundle's schema library, so the queued_notification success path is recorded through
+// the real session instead (stream section).
+const routerHarness = evaluate(`const Zt=(e)=>JSON.parse(e);const A=()=>{},we=()=>{},le=()=>{},ie=()=>{},X=(e)=>String(e);const XPe=()=>{};${between('function H4(', 'Ee();class $4')}${between('function Y4(', 'var Kb=')}${between('class If{', 'var YPe=')}${between('function X4(', 'var NPe=')}`, ['J4', 'If']);
+const plain = (value) => JSON.parse(JSON.stringify(value));
+const routed = (lines, { echo = [], buffer = false } = {}) => {
+  const { J4, If } = routerHarness;
+  const echoSet = new If(2000);
+  const delivered = new If(2000);
+  for (const uuid of echo) echoSet.add(uuid);
+  const out = [];
+  for (const line of lines) {
+    J4(line, echoSet, delivered, (m) => out.push(['user', plain(m)]), (m) => out.push(['control_response', plain(m)]), (m) => out.push(['control_request', plain(m)]), (id) => out.push(['control_cancel', id]), buffer ? (m) => out.push(['queued_notification', plain(m)]) : undefined);
+    out.push(['next']);
+  }
+  return { echo, buffer, lines, out };
+};
+const user = (uuid, extra = {}) => JSON.stringify({ type: 'user', ...(uuid === undefined ? {} : { uuid }), message: { role: 'user', content: 'hi' }, ...extra });
+const notice = { type: 'queued_notification', notification: { notification_id: 'n1', origin: 'mcp_send_message', content: 'c' } };
+const inboundCases = [
+  routed([JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: 'r1' } })]),
+  routed([JSON.stringify({ type: 'control_response', requestId: 'top', response: { subtype: 'success', requestId: 'r1' } })]),
+  routed([JSON.stringify({ type: 'control_response', response: { subtype: 'success', requestId: 'late-bind-1' } })]),
+  routed([JSON.stringify({ type: 'control_response', response: { subtype: 'success', requestId: 'LATE-BIND-x', request_id: 'keep' } })]),
+  routed([JSON.stringify({ type: 'control_response', response: { subtype: 'success', requestId: null } })]),
+  routed([JSON.stringify({ type: 'control_response', response: { subtype: 'success', requestId: 7 } })]),
+  routed([JSON.stringify({ type: 'control_response', response: null, uuid: 'c1' })]),
+  routed([JSON.stringify({ type: 'control_response', uuid: 'c2' })]),
+  routed([JSON.stringify({ type: 'control_response', response: 'text' })]),
+  routed([JSON.stringify({ type: 'control_response', response: [1] })]),
+  routed([JSON.stringify({ type: 'control_request', request_id: 'r1', request: { subtype: 'interrupt' } })]),
+  routed([JSON.stringify({ type: 'control_request', requestId: 'r2', request: { subtype: 'interrupt' } })]),
+  routed([JSON.stringify({ type: 'control_request', requestId: 'late-bind-9', request: { subtype: 'interrupt' } })]),
+  routed([JSON.stringify({ type: 'control_request', request_id: null, request: { subtype: 'x' } })]),
+  routed([JSON.stringify({ type: 'control_request', request_id: 'r3', request: null })]),
+  routed([JSON.stringify({ type: 'control_request', request_id: 'r3' })]),
+  routed([JSON.stringify({ type: 'control_request', request: { subtype: 'x' } })]),
+  routed([JSON.stringify({ type: 'control_cancel_request', request_id: 'r1' })]),
+  routed([JSON.stringify({ type: 'control_cancel_request', requestId: 'r9' })]),
+  routed([JSON.stringify({ type: 'control_cancel_request', request_id: 5 })]),
+  routed([JSON.stringify({ type: 'control_cancel_request' })]),
+  routed([JSON.stringify(notice)]),
+  routed([JSON.stringify(notice)], { buffer: true }),
+  routed([JSON.stringify({ type: 'queued_notification' })], { buffer: true }),
+  routed([JSON.stringify({ type: 'queued_notification', notification: null })]),
+  routed([user('u1')]),
+  routed([user('u1'), user('u1'), user('u2')]),
+  routed([user('u1')], { echo: ['u1'] }),
+  routed([user('u1'), user('u1')], { echo: ['u2'] }),
+  routed([user(undefined), user(undefined)]),
+  routed([user(''), user('')]),
+  routed([user(5), user(5)]),
+  routed([user('u1', { isReplay: true }), user('u1')]),
+  routed([user('u1', { isReplay: false }), user('u1')]),
+  routed([user('u1', { isReplay: 'true' })]),
+  routed([user('u1', { parent_tool_use_id: 'tool' }), user('u1')]),
+  routed([user('u1', { parent_tool_use_id: null }), user('u1')]),
+  routed([user('u1', { parent_tool_use_id: '' })]),
+  routed([user('u1', { historical: true, display_only: true }), user('u1')]),
+  routed([user('u1', { historical: true })]),
+  routed([user('u1', { display_only: true })]),
+  routed([user('u1', { historical: 'true', display_only: true })]),
+  routed([JSON.stringify({ type: 'assistant', uuid: 'a1', message: {} }), JSON.stringify({ type: 'assistant', uuid: 'a1', message: {} })]),
+  routed([JSON.stringify({ type: 'system', uuid: 'a1' })], { echo: ['a1'] }),
+  routed([JSON.stringify({ type: 'result' })]),
+  routed([JSON.stringify({ type: 5 })]),
+  routed([JSON.stringify({ type: null })]),
+  routed([JSON.stringify({})]),
+  routed(['null', '5', '"text"', 'true', '[]', '[{"type":"user"}]', '{', '', 'not json', '{"type":"user"']),
+  routed([user('u1'), JSON.stringify({ type: 'control_response', response: { subtype: 'success' } }), user('u1'), user('u3')]),
+];
+const uuidSetOps = (capacity, ops) => {
+  const set = new routerHarness.If(capacity);
+  const results = ops.map(([op, uuid]) => {
+    if (op === 'add') { set.add(uuid); return null; }
+    if (op === 'clear') { set.clear(); return null; }
+    return set.has(uuid);
+  });
+  return { capacity, ops, results };
+};
+const uuidSetCases = [
+  uuidSetOps(3, [['add', 'a'], ['add', 'b'], ['add', 'c'], ['has', 'a'], ['add', 'd'], ['has', 'a'], ['has', 'b'], ['add', 'b'], ['add', 'e'], ['has', 'b'], ['has', 'c'], ['has', 'd'], ['has', 'e'], ['clear', ''], ['has', 'e'], ['add', 'x'], ['has', 'x']]),
+  uuidSetOps(1, [['add', 'a'], ['add', 'a'], ['add', 'b'], ['has', 'a'], ['has', 'b']]),
+  uuidSetOps(2000, [...Array.from({ length: 2001 }, (_, i) => ['add', `u${i}`]), ['has', 'u0'], ['has', 'u1'], ['has', 'u2000'], ['add', 'u1'], ['add', 'late'], ['has', 'u1'], ['has', 'u2'], ['has', 'late']]),
+];
+
 const pure = {
   refusal_sources: [
     {}, { 'request-id': 'req_abc' }, { 'request-id': ' req_abc ' }, { 'request-id': 'req_' }, { 'request-id': 'req_' + 'a'.repeat(36) },
@@ -136,6 +246,8 @@ const pure = {
     { tool_name: 'Bash', display_tool_name: 'Run', action_description: 'a', raw_command: 'ls', request_id: 'r', tool_use_id: 't', extra: 1 },
     { tool_name: 'Bash', action_description: 'a', request_id: 'r', tool_use_id: 't' },
   ].map((input) => ({ input, output: JSON.parse(JSON.stringify(requiresAction(input))) })),
+  inbound: inboundCases,
+  uuid_set: uuidSetCases,
   stream: {
     reconnect_base_ms: streamTable.W4e,
     reconnect_cap_ms: streamTable.j4e,
@@ -445,15 +557,65 @@ streamed('a_forbidden_stream_from_the_edge_closes_the_session', [refused(403, [[
 streamed('a_missing_stream_closes_the_session', [refused(404)], { waitClose: true });
 streamed('a_stream_that_is_not_event_stream_is_still_read', [connection([clientEvent(1, 'e1', userPayload('u1'))], 'hold', { headers: [['content-type', 'text/plain']] })], { waitFor: [delivered(2)] });
 
+// The inbound router behind `onInboundMessage` (`J4`): every branch a client event can reach through the real session.
+const plainUser = (uuid, extra = {}) => ({ type: 'user', ...(uuid === undefined ? {} : { uuid }), message: { role: 'user', content: 'hi' }, ...extra });
+const routedStream = (name, payloads, spec = {}) => streamed(name, [connection(payloads.map((payload, i) => clientEvent(i + 1, `e${i + 1}`, payload)), 'hold', { gapMs: 60, startMs: spec.startMs ?? 0 })], { waitFor: [delivered(payloads.length * 2)], ...spec });
+routedStream('a_permission_response_is_handed_to_the_host', [{ type: 'control_response', response: { subtype: 'success', request_id: 'r1', response: { behavior: 'allow' } } }]);
+routedStream('a_camel_case_request_id_is_normalized', [{ type: 'control_response', requestId: 'top', response: { subtype: 'success', requestId: 'r1' } }, { type: 'control_response', response: { subtype: 'success', requestId: 'late-bind-1' } }]);
+routedStream('a_control_response_without_a_response_is_ignored', [{ type: 'control_response', uuid: 'c1' }, { type: 'control_response', response: null }, plainUser('u2')]);
+routedStream('a_control_request_with_an_unknown_subtype_is_refused_to_the_server', [{ type: 'control_request', request_id: 'r1', request: { subtype: 'no_such_subtype' } }], { settleMs: 2500 });
+routedStream('a_control_request_with_a_camel_case_id_is_answered_under_the_snake_case_id', [{ type: 'control_request', requestId: 'r2', request: { subtype: 'no_such_subtype' } }], { settleMs: 2500 });
+routedStream('a_control_request_with_a_late_bind_id_is_ignored', [{ type: 'control_request', requestId: 'late-bind-9', request: { subtype: 'no_such_subtype' } }, plainUser('u2')], { settleMs: 1500 });
+routedStream('a_control_cancel_for_an_unknown_request_does_nothing', [{ type: 'control_cancel_request', request_id: 'r1' }, { type: 'control_cancel_request', request_id: 5 }, plainUser('u2')]);
+routedStream('a_queued_notification_is_delivered_as_its_user_frame', [{ type: 'queued_notification', notification: { notification_id: 'n1', origin: 'mcp_send_message', content: 'c' } }, { type: 'queued_notification', notification: { notification_id: 'n1', origin: 'mcp_send_message', content: 'again' } }]);
+routedStream('a_queued_notification_that_does_not_parse_is_ignored', [{ type: 'queued_notification' }, { type: 'queued_notification', notification: null }, { type: 'queued_notification', notification: { notification_id: '', origin: 'mcp_send_message', content: 'c' } }, { type: 'queued_notification', notification: { notification_id: 'n1', origin: 'other', content: 'c' } }, { type: 'queued_notification', notification: { notification_id: 'n1', origin: 'mcp_send_message', content: 5 } }, plainUser('u2')]);
+routedStream('a_notification_id_that_was_delivered_is_dropped_as_a_user_message', [plainUser('n1'), { type: 'queued_notification', notification: { notification_id: 'n1', origin: 'mcp_send_message', content: 'c' } }]);
+routedStream('a_user_message_without_a_uuid_is_always_delivered', [plainUser(undefined), plainUser(undefined), plainUser('')]);
+routedStream('a_replay_a_parented_frame_and_a_fork_frame_are_not_delivered', [plainUser('u1', { isReplay: true }), plainUser('u2', { parent_tool_use_id: 'tool' }), plainUser('u3', { historical: true, display_only: true }), plainUser('u1'), plainUser('u2'), plainUser('u3')]);
+routedStream('a_user_frame_with_look_alike_flags_is_delivered', [plainUser('u1', { isReplay: false }), plainUser('u2', { parent_tool_use_id: null }), plainUser('u3', { historical: true }), plainUser('u4', { display_only: true }), plainUser('u5', { historical: 'true', display_only: true })]);
+routedStream('messages_that_are_not_user_messages_are_not_delivered', [{ type: 'assistant', uuid: 'a1', message: {} }, { type: 'system', uuid: 's1' }, { type: 'result' }, plainUser('u1')]);
+add('stream', 'a_message_the_host_wrote_is_not_delivered_back', { epoch: 6, stream: [connection([clientEvent(1, 'e1', plainUser('w1')), clientEvent(2, 'e2', plainUser('u2'))], 'hold', { gapMs: 60, startMs: 1200 })], steps: [{ op: 'write', frame: { type: 'user', uuid: 'w1', message: { role: 'user', content: 'out' } } }], waitFor: [delivered(4)] });
+add('stream', 'a_message_the_host_wrote_does_not_hide_another_uuid', { epoch: 6, stream: [connection([clientEvent(1, 'e1', plainUser('w2'))], 'hold', { gapMs: 60, startMs: 1200 })], steps: [{ op: 'write', frame: { type: 'user', uuid: 'w1', message: { role: 'user', content: 'out' } } }], waitFor: [delivered(2)] });
+
+// A silent stream is reopened with no backoff when the liveness check runs late (a paused or sleeping process). The
+// clocks are bent (see `clock` above): `late_wall` and `late_mono` say how far past the 45 s timeout each clock reads
+// when the timer fires, `null` for a clock that did not jump. A silent stream that is not reopened at once is a lost
+// stream counted twice (the liveness handler and the read loop that its abort ends both report it), so the first wait
+// is already the second step of the backoff.
+const slept = (name, clockSpec, bases, rest = []) => streamed(name, [connection([]), ...rest, connection([])], { clock: clockSpec, waitFor: [['/worker/events/stream', 2 + rest.length]], reconnectBases: bases, settleMs: 300 });
+slept('a_stream_that_slept_is_reopened_at_once', { late_wall: 20000, late_mono: 20000 }, [0]);
+slept('a_wall_clock_jump_alone_reopens_at_once', { late_wall: 20000, late_mono: null }, [0]);
+slept('a_monotonic_gap_alone_reopens_at_once', { late_wall: null, late_mono: 20000 }, [0]);
+slept('a_check_just_past_the_tolerance_reopens_at_once', { late_wall: 10500, late_mono: 10500 }, [0]);
+slept('a_check_inside_the_tolerance_waits_for_the_backoff', { late_wall: 9500, late_mono: 9500 }, [2000]);
+slept('a_silent_stream_that_did_not_sleep_waits_for_the_backoff', { late_wall: 0, late_mono: 0 }, [2000]);
+slept('a_sleep_reopen_does_not_count_as_a_failed_attempt', { late_wall: 20000, late_mono: 20000 }, [0, 1000], [refused(500)]);
+
+// The attestation filter (`_$`) never drops an event: its policy is the default one, `enforce: false`, because nothing
+// in the bundle assigns `filterPolicy`. Frames that carry every kind of `device_attestation_status` are delivered.
+const attestationStatuses = ['VERIFIED', 'ABSENT', 'INVALID', 'UNCHECKED', 'UNSPECIFIED', 'TRANSITIVELY_VOUCHED', 'SERVICE_VOUCHED', 'SERVER_AUTHORED', 'server_replayed', 'DEVICE_ATTESTATION_STATUS_INVALID', 3, 99, null, 'junk'];
+add('stream', 'frames_with_any_attestation_status_are_delivered', {
+  epoch: 6,
+  stream: [connection([
+    ...attestationStatuses.map((status, i) => clientEvent(i + 1, `u${i}`, plainUser(`a${i}`), { device_attestation_status: status })),
+    ...attestationStatuses.map((status, i) => clientEvent(attestationStatuses.length + i + 1, `c${i}`, { type: 'control_response', response: { subtype: 'success', request_id: `r${i}` } }, { device_attestation_status: status })),
+  ], 'hold', { gapMs: 20 })],
+  waitFor: [delivered(attestationStatuses.length * 4)],
+});
+
 // ---- runner ----
 const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'last-event-id', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq', 'x-ccr-upload-attempt']);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const until = async (predicate, ms) => {
-  const end = Date.now() + ms;
-  while (!predicate() && Date.now() < end) await sleep(5);
+  const end = realNow() + ms;
+  while (!predicate() && realNow() < end) await sleep(5);
 };
 
 async function run(spec) {
+  clock.wall = 0;
+  clock.mono = 0;
+  const lateness = spec.clock;
+  clock.jump = lateness === undefined ? null : { wall: lateness.late_wall === null ? 0 : 44700 + lateness.late_wall, mono: lateness.late_mono === null ? 0 : 44700 + lateness.late_mono };
   const requests = [];
   const gate = { on: spec.gated === true || (spec.steps ?? []).some((step) => step.op === 'beat'), pending: false, answer: null, current: null };
   const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], events: [...(spec.events ?? [])], deliveries: [...(spec.deliveries ?? [])], landing: [...(spec.landing ?? [])], stream: [...(spec.stream ?? [])] };
@@ -471,13 +633,14 @@ async function run(spec) {
       const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
       const isRead = req.method === 'GET' && route === '/worker';
       if (req.method === 'GET' && route.startsWith('/worker/events/stream')) {
-        requests.push({ method: req.method, path: req.url, headers, body: '', at: Date.now() });
+        requests.push({ method: req.method, path: req.url, headers, body: '', at: realNow() });
         const script = queues.stream.length > 1 ? queues.stream.shift() : (queues.stream[0] ?? { status: 200, chunks: [], then: 'hold' });
         res.statusCode = script.status;
         for (const [name, value] of script.headers ?? [['content-type', 'text/event-stream']]) res.setHeader(name, value);
         if (script.chunks.length === 0 && script.then === 'end') { res.end(script.body ?? ''); return; }
         res.flushHeaders();
         (async () => {
+          if (script.startMs) await sleep(script.startMs);
           for (const chunk of script.chunks) {
             res.write(chunk);
             await sleep(script.gapMs ?? 30);
@@ -488,7 +651,7 @@ async function run(spec) {
       }
       const gated = gate.on && route === '/worker/heartbeat';
       const background = gated && !gate.pending;
-      if (!isRead && !background) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: Date.now() });
+      if (!isRead && !background) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: realNow() });
       let response = json(200, {});
       if (req.method === 'GET' && route === '/worker') response = spec.record ?? response;
       else if (route === '/worker/landing') response = pick('landing');
@@ -511,11 +674,12 @@ async function run(spec) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const closes = [];
   const inbound = [];
+  const permissions = [];
   const logStart = fs.existsSync(debugLog) ? fs.statSync(debugLog).size : 0;
-  const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: spec.stream === undefined, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code), onInboundMessage: (message) => inbound.push({ type: message.type, uuid: message.uuid ?? null }) };
+  const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: spec.stream === undefined, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code), onInboundMessage: (message) => inbound.push(JSON.parse(JSON.stringify(message))), onPermissionResponse: (message) => { permissions.push(JSON.parse(JSON.stringify(message))); return true; } };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
-  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), ...(spec.stream !== undefined && { stream: spec.stream }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
+  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), ...(spec.stream !== undefined && { stream: spec.stream }), ...(spec.clock !== undefined && { clock: spec.clock }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
   if (spec.sessionToken !== undefined) process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = spec.sessionToken;
   try {
@@ -531,15 +695,20 @@ async function run(spec) {
       if (step.op === 'events') {
         const seen = () => requests.filter((r) => r.path.endsWith('/worker/events')).length;
         const start = seen();
-        const wroteAt = Date.now();
+        const wroteAt = realNow();
         for (const item of step.writes) {
           if (item.via === undefined) handle.write(item);
           else handle[item.via](item.via === 'sendControlCancelRequest' ? item.payload.request_id : item.payload);
         }
         await until(() => seen() >= start + step.expect, 12000);
-        if (spec.prompt && Date.now() - wroteAt > 600) throw new Error(`${spec.name}: a post was held for ${Date.now() - wroteAt} ms`);
+        if (spec.prompt && realNow() - wroteAt > 600) throw new Error(`${spec.name}: a post was held for ${realNow() - wroteAt} ms`);
         if (seen() < start + step.expect) throw new Error(`${spec.name}: expected ${step.expect} event posts`);
         await sleep(250);
+        continue;
+      }
+      if (step.op === 'write') {
+        handle.write(step.frame);
+        await sleep(150);
         continue;
       }
       if (step.op === 'delivery') {
@@ -592,7 +761,7 @@ async function run(spec) {
       if (result.quiet !== spec.quiet) throw new Error(`${spec.name}: expected quiet=${spec.quiet}`);
     }
     if (spec.handleKeys) result.handle_keys = Object.keys(handle).sort();
-    if (spec.stream !== undefined) { result.inbound = inbound; result.last_sequence = handle.getSequenceNum(); }
+    if (spec.stream !== undefined) { result.inbound = inbound; result.permission_responses = permissions; result.last_sequence = handle.getSequenceNum(); }
     result.connected = handle.isConnected();
     result.epoch = handle.getEpoch();
   }
@@ -734,7 +903,7 @@ if (only !== undefined) {
   if (!spec) throw new Error(`no case named ${only}`);
   for (let i = 0; i < times; i += 1) {
     const result = await run(spec);
-    process.stdout.write(`${JSON.stringify({ name: result.name, reason: result.reason, closes: result.closes, requests: result.requests.length })}\n`);
+    process.stdout.write(`${JSON.stringify(flags.includes("--dump") ? result : { name: result.name, reason: result.reason, closes: result.closes, requests: result.requests.length })}\n`);
   }
   fs.rmSync(work, { recursive: true, force: true });
   process.exit(0);

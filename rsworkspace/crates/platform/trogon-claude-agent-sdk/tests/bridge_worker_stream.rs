@@ -1,16 +1,16 @@
 //! Replays the recorded read stream cases (`stream` section of the goldens, written by
 //! `.config/mise/lib/claude-sdk-freshness/bridge_worker_goldens.mjs` against the real `attachBridgeSession`): the
 //! scripted connections go through [`StreamSession`] and what it asks for must match what the upstream client sent
-//! and reported.
+//! and reported. The lines it delivers go through [`InboundRouter`], so the user message de-duplication is the ported
+//! one.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use serde_json::Value;
 use trogon_claude_agent_sdk::{
-    FrameParser, KEEPALIVE_SECONDS, LIVENESS_GRACE_MS, PERMANENT_STREAM_STATUSES, RECONNECT_BASE_MS, RECONNECT_CAP_MS,
-    RECONNECT_JITTER_RATIO, SseFrame, StreamEffect, StreamOpen, StreamRequest, StreamSession, liveness_timeout,
-    reconnect_delay,
+    FrameParser, Inbound, InboundRouter, KEEPALIVE_SECONDS, LIVENESS_GRACE_MS, PERMANENT_STREAM_STATUSES,
+    RECONNECT_BASE_MS, RECONNECT_CAP_MS, RECONNECT_JITTER_RATIO, Reopen, SseFrame, StreamEffect, StreamOpen,
+    StreamRequest, StreamSession, liveness_timeout, reconnect_delay,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -147,31 +147,25 @@ struct Observed {
     delays: Vec<u64>,
     closes: Vec<u16>,
     acks: Vec<(String, String)>,
-    inbound: Vec<(String, Option<String>)>,
+    inbound: Vec<Value>,
+    permission_responses: Vec<Value>,
+    refused_requests: Vec<String>,
     probes: u64,
     last_sequence: i64,
-}
-
-/// What the router behind `onInboundMessage` hands on: a user message whose `uuid` came before is dropped. The router
-/// is not part of the transport, so the replay applies the rule here.
-fn route(line: &str, uuids: &mut HashSet<String>, inbound: &mut Vec<(String, Option<String>)>) -> TestResult {
-    let message: Value = serde_json::from_str(line)?;
-    let kind = text(&message, "type")?;
-    let uuid = optional(&message, "uuid");
-    if kind == "user"
-        && let Some(uuid) = &uuid
-        && !uuids.insert(uuid.clone())
-    {
-        return Ok(());
-    }
-    inbound.push((kind, uuid));
-    Ok(())
 }
 
 fn play(case: &Value) -> Result<Observed, Box<dyn std::error::Error>> {
     let mut session = StreamSession::default();
     let mut observed = Observed::default();
-    let mut uuids = HashSet::new();
+    let mut router = InboundRouter::default();
+    for step in case.get("steps").and_then(Value::as_array).into_iter().flatten() {
+        if text(step, "op")? == "write"
+            && let Some(uuid) = step["frame"].get("uuid").and_then(Value::as_str)
+        {
+            router.remember_echo(uuid);
+        }
+    }
+    let mut timed_out = false;
     for connection in list(case, "stream")? {
         observed.gets.push(session.request());
         let status = u16::try_from(number(connection, "status")?)?;
@@ -189,7 +183,16 @@ fn play(case: &Value) -> Result<Observed, Box<dyn std::error::Error>> {
         for chunk in list(connection, "chunks")? {
             for effect in session.push(&chunk_bytes(chunk)?) {
                 match effect {
-                    StreamEffect::Deliver(line) => route(&line, &mut uuids, &mut observed.inbound)?,
+                    StreamEffect::Deliver(line) => match router.route(&line) {
+                        Some(Inbound::User(message)) => observed.inbound.push(message),
+                        Some(Inbound::ControlResponse(message)) => observed.permission_responses.push(message),
+                        Some(Inbound::ControlRequest(request)) => {
+                            observed.refused_requests.push(text(&request, "request_id")?);
+                        }
+                        // A cancel for work that is not running changes nothing the server can see, and a session
+                        // that attaches has no notification buffer.
+                        Some(Inbound::ControlCancel(_) | Inbound::QueuedNotification(_)) | None => {}
+                    },
                     StreamEffect::Acknowledge { event_id } => {
                         observed.acks.push((event_id.clone(), "received".to_owned()));
                         observed.acks.push((event_id, "processed".to_owned()));
@@ -200,6 +203,17 @@ fn play(case: &Value) -> Result<Observed, Box<dyn std::error::Error>> {
         }
         if text(connection, "then")? == "end" {
             observed.delays.push(milliseconds(session.lost(0.5)));
+        } else if !timed_out && let Some(clock) = case.get("clock") {
+            timed_out = true;
+            // The recorder bent the clocks: the liveness timer fired after 300 ms of real time, and a clock that
+            // jumped reads 45 s plus its lateness, one that did not reads the 300 ms.
+            let silence = |late: &Value| late.as_u64().map_or(300, |late| 45_000 + late);
+            let wall = Duration::from_millis(silence(&clock["late_wall"]));
+            let monotonic = Duration::from_millis(silence(&clock["late_mono"]));
+            match session.liveness_expired(wall, monotonic, 0.5) {
+                Reopen::AtOnce { .. } => observed.delays.push(0),
+                Reopen::After(delay) => observed.delays.push(milliseconds(delay)),
+            }
         } else {
             break;
         }
@@ -229,6 +243,16 @@ fn recorded(case: &Value) -> Result<Observed, Box<dyn std::error::Error>> {
             for update in list(&body, "updates")? {
                 observed.acks.push((text(update, "event_id")?, text(update, "status")?));
             }
+        } else if method == "POST" && path == "/worker/events" {
+            let body: Value = serde_json::from_str(&text(request, "body")?)?;
+            for event in list(&body, "events")? {
+                let payload = &event["payload"];
+                if text(payload, "type")? == "control_response" {
+                    observed
+                        .refused_requests
+                        .push(text(&payload["response"], "request_id")?);
+                }
+            }
         }
     }
     observed.delays = case
@@ -241,10 +265,8 @@ fn recorded(case: &Value) -> Result<Observed, Box<dyn std::error::Error>> {
         .filter_map(Value::as_u64)
         .map(u16::try_from)
         .collect::<Result<_, _>>()?;
-    observed.inbound = list(case, "inbound")?
-        .iter()
-        .map(|message| Ok((text(message, "type")?, optional(message, "uuid"))))
-        .collect::<Result<_, String>>()?;
+    observed.inbound = list(case, "inbound")?.clone();
+    observed.permission_responses = list(case, "permission_responses")?.clone();
     observed.probes = number(case, "beats")?;
     observed.last_sequence = i64::try_from(number(case, "last_sequence")?)?;
     Ok(observed)
@@ -254,7 +276,7 @@ fn recorded(case: &Value) -> Result<Observed, Box<dyn std::error::Error>> {
 fn every_recorded_stream_case_is_reproduced() -> TestResult {
     let goldens = goldens()?;
     let cases = list(&goldens, "stream")?;
-    assert!(cases.len() >= 27, "only {} stream cases", cases.len());
+    assert!(cases.len() >= 51, "only {} stream cases", cases.len());
     for case in cases {
         let name = text(case, "name")?;
         assert_eq!(recorded(case)?, play(case)?, "{name}");

@@ -11,8 +11,8 @@
 //! `attachBridgeSession` never passes the options of the transport that would change this: `nonOrigin403` (the
 //! windowed refusal policy), `selfHealHeartbeats`, `causeTypedCloseCodes` (the 4093 and 4094 close codes),
 //! `longPollFallback`, `streamOpener`, `leavesPool`, the attestation filter and the held-for-renewal gate. None is
-//! ported. The inbound router behind `onInboundMessage` (it drops a user message whose `uuid` was seen) is not part
-//! of the transport and is not ported here either.
+//! ported. The lines [`StreamEffect::Deliver`] carries are routed by [`crate::InboundRouter`], which drops a user message
+//! whose `uuid` was seen.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -33,6 +33,8 @@ pub const PERMANENT_STREAM_STATUSES: [u16; 3] = [401, 403, 404];
 pub const KEEPALIVE_SECONDS: u64 = 15;
 /// The grace added to the silence before the stream is called dead (`V4e`).
 pub const LIVENESS_GRACE_MS: u64 = 30_000;
+/// How late the liveness check may run before the process is taken to have been paused or asleep (`s9`).
+pub const SLEEP_LATENESS_MS: u64 = 10_000;
 /// The `event_type` values only the service may send: a payload of such a type under another `event_type` is vetoed.
 const SERVER_ONLY_TYPES: [&str; 3] = ["workflow_launch", "queued_notification", "session_notice"];
 /// The most sequence numbers remembered for the duplicate log before the old ones are dropped.
@@ -211,10 +213,22 @@ pub struct StreamRequest {
     pub last_event_id: Option<String>,
 }
 
+/// What a stream that went silent is reopened with ([`StreamSession::liveness_expired`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reopen {
+    /// The check ran so late that the process was probably paused or asleep: the old connection is dropped and the
+    /// next one is opened at once, on a new socket, with no backoff and without counting a failed attempt. `late` is
+    /// how long past the liveness timeout the check ran.
+    AtOnce { late: Duration },
+    /// The stream was silent for the whole liveness timeout: wait this long, like any other lost stream.
+    After(Duration),
+}
+
 /// The state of one session's read stream: the sequence numbers seen, the reconnect attempts and the parser of the
 /// body being read.
 #[derive(Debug, Default)]
 pub struct StreamSession {
+    connected: bool,
     last_sequence: i64,
     seen: BTreeSet<i64>,
     attempts: u32,
@@ -246,6 +260,7 @@ impl StreamSession {
     /// status is retried. A stream that opens starts the reconnect delay over.
     pub fn opened(&mut self, status: u16) -> StreamOpen {
         if (200..300).contains(&status) {
+            self.connected = true;
             self.attempts = 0;
             self.parser = FrameParser::default();
             return StreamOpen::Read;
@@ -259,8 +274,28 @@ impl StreamSession {
     /// Takes a stream that ended, broke or never opened and says how long to wait before the next request, for a
     /// random draw in `[0, 1)`.
     pub fn lost(&mut self, random: f64) -> Duration {
+        self.connected = false;
         self.attempts += 1;
         reconnect_delay(self.attempts, random)
+    }
+
+    /// Takes the expiry of the liveness timer (`onLivenessTimeout`). The silence is measured the way the upstream
+    /// client measures it: the longer of the wall clock gap and the monotonic clock gap since the last connect or
+    /// frame (`silentForMs`), so a clock that stopped while the process slept and one that jumped both show. A check
+    /// that ran more than [`SLEEP_LATENESS_MS`] past [`liveness_timeout`] reopens the stream at once; any other
+    /// expiry is a lost stream, counted twice (see below). The sleep notice the upstream transport can subscribe to is not reachable from
+    /// `attachBridgeSession`, so this is the only way the reopen happens.
+    pub fn liveness_expired(&mut self, wall_silent: Duration, monotonic_silent: Duration, random: f64) -> Reopen {
+        let silent = wall_silent.max(monotonic_silent);
+        let late = silent.saturating_sub(liveness_timeout());
+        if self.connected && silent > liveness_timeout() + Duration::from_millis(SLEEP_LATENESS_MS) {
+            self.connected = false;
+            return Reopen::AtOnce { late };
+        }
+        // The liveness handler reports the lost stream, and the read loop its abort ends reports it again: two
+        // attempts are counted and the second delay is the one that stands.
+        self.lost(random);
+        Reopen::After(self.lost(random))
     }
 
     /// Takes a chunk of the body and says what the frames in it ask for.
