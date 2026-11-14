@@ -158,6 +158,12 @@ pub struct BridgeSession<H, P = TokioPacing> {
 }
 
 /// `attachBridgeSession`: registers the worker when no epoch is given, and starts it (`connect`).
+///
+/// A `reqwest::Client` reports a registration that never got an answer with the upstream error codes only when it
+/// resolves host names with [`crate::adapters::GetAddrInfoResolver`] (installed through
+/// `reqwest::ClientBuilder::dns_resolver`) or with a resolver that reports its failures as
+/// [`crate::adapters::NameLookupError`]; otherwise a host that cannot be found is reported as `ERR_NETWORK` instead of
+/// `ENOTFOUND`.
 pub async fn attach_bridge_session<H, P>(
     http: H,
     pacing: P,

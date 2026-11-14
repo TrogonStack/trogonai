@@ -2,12 +2,14 @@
 //! worker client sends the same requests and reaches the same result
 //! (`.config/mise/lib/claude-sdk-freshness/bridge_worker_goldens.mjs` writes the goldens).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use trogon_claude_agent_sdk::adapters::{GetAddrInfoResolver, NameLookupError};
 use trogon_claude_agent_sdk::{
     AUTH_FAILURES_BEFORE_EXIT, ClientEvent, DEFAULT_HEARTBEAT_INTERVAL_MS, DeliveryStatus,
     HEARTBEAT_INTERVAL_CEILING_MS, HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS,
@@ -280,11 +282,13 @@ fn config(base: &str, token: &str) -> WorkerConfig {
     }
 }
 
-/// The transport the bridge client builds: up to 21 redirects followed, and no `Referer` added on the way.
+/// The transport the bridge client builds: up to 21 redirects followed, no `Referer` added on the way, and host names
+/// looked up by the crate's resolver.
 fn http() -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(21))
         .referer(false)
+        .dns_resolver(Arc::new(GetAddrInfoResolver))
         .build()
 }
 
@@ -877,10 +881,29 @@ fn pure_rules_match_the_upstream_client() -> TestResult {
     Ok(())
 }
 
-/// Answers every lookup as a missing host, so a name fails the way it does without a network.
-struct NoSuchHost;
+/// Answers every lookup as a missing host, the way the crate's resolver reports it, so a name fails the way it does
+/// without a network. It counts the lookups it is asked for.
+#[derive(Default)]
+struct NoSuchHost {
+    lookups: Arc<AtomicUsize>,
+}
 
 impl reqwest::dns::Resolve for NoSuchHost {
+    fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            let missing: Box<dyn std::error::Error + Send + Sync> = Box::new(NameLookupError::new(
+                std::io::Error::new(std::io::ErrorKind::NotFound, "no such host"),
+            ));
+            Err(missing)
+        })
+    }
+}
+
+/// A caller's resolver that fails with a plain io error, without the crate's lookup error.
+struct PlainFailure;
+
+impl reqwest::dns::Resolve for PlainFailure {
     fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         Box::pin(async {
             let missing: Box<dyn std::error::Error + Send + Sync> =
@@ -888,6 +911,99 @@ impl reqwest::dns::Resolve for NoSuchHost {
             Err(missing)
         })
     }
+}
+
+/// A resolver that answers every lookup with no addresses at all.
+struct NoAddresses;
+
+impl reqwest::dns::Resolve for NoAddresses {
+    fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async {
+            let none: reqwest::dns::Addrs = Box::new(std::iter::empty());
+            Ok(none)
+        })
+    }
+}
+
+/// Registers through `http` against `base` and returns the failure it must end in.
+async fn register_failure(
+    http: reqwest::Client,
+    base: &str,
+) -> Result<RegisterFailureError, Box<dyn std::error::Error>> {
+    Ok(WorkerClient::new(http, Recorded::new(0.0), config(base, "tok"))?
+        .register_worker()
+        .await
+        .err()
+        .ok_or("expected a failure")?)
+}
+
+#[tokio::test]
+async fn a_host_the_crate_resolver_cannot_find_is_enotfound() -> TestResult {
+    let failure = register_failure(http()?, "http://nonexistent.invalid").await?;
+    assert_eq!(failure.message(), "getaddrinfo ENOTFOUND nonexistent.invalid");
+    assert_eq!(failure.code(), Some("ENOTFOUND"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_peer_that_closes_after_reading_is_a_socket_hang_up() -> TestResult {
+    let (base, _) = serve(Some(json!("destroy")), vec![], vec![]).await?;
+    let failure = register_failure(http()?, &base).await?;
+    assert_eq!(failure.message(), "socket hang up");
+    assert_eq!(failure.code(), Some("ECONNRESET"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_peer_that_resets_is_a_socket_hang_up() -> TestResult {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let base = format!("http://{}", listener.local_addr()?);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            // Reading the whole request first leaves the client waiting for the answer when the reset lands.
+            if read_request(&mut stream).await.is_some() && stream.set_zero_linger().is_ok() {
+                drop(stream);
+            }
+        }
+    });
+    let failure = register_failure(http()?, &base).await?;
+    assert_eq!(failure.message(), "socket hang up");
+    assert_eq!(failure.code(), Some("ECONNRESET"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_custom_resolver_failure_without_a_name_lookup_error_is_a_network_error() -> TestResult {
+    let http = reqwest::Client::builder()
+        .dns_resolver(Arc::new(PlainFailure))
+        .build()?;
+    let failure = register_failure(http, "http://nonexistent.invalid").await?;
+    assert_eq!(failure.message(), "Network Error");
+    assert_eq!(failure.code(), Some("ERR_NETWORK"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_empty_answer_set_is_a_network_error() -> TestResult {
+    let http = reqwest::Client::builder().dns_resolver(Arc::new(NoAddresses)).build()?;
+    let failure = register_failure(http, "http://nowhere.invalid").await?;
+    assert_eq!(failure.message(), "Network Error");
+    assert_eq!(failure.code(), Some("ERR_NETWORK"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_ip_literal_host_never_reaches_the_resolver() -> TestResult {
+    let resolver = NoSuchHost::default();
+    let lookups = resolver.lookups.clone();
+    let base = closed_port().await?;
+    let http = reqwest::Client::builder().dns_resolver(Arc::new(resolver)).build()?;
+    let failure = register_failure(http, &base).await?;
+    let port = base.rsplit(':').next().unwrap_or_default();
+    assert_eq!(failure.message(), format!("connect ECONNREFUSED 127.0.0.1:{port}"));
+    assert_eq!(failure.code(), Some("ECONNREFUSED"));
+    assert_eq!(lookups.load(Ordering::SeqCst), 0);
+    Ok(())
 }
 
 #[tokio::test]
@@ -925,7 +1041,9 @@ async fn register_failures_carry_the_node_error_text() -> TestResult {
             "localhost" => base = closed_port().await?.replace("127.0.0.1", "localhost"),
             "notfound" => {
                 let failure = WorkerClient::new(
-                    reqwest::Client::builder().dns_resolver(Arc::new(NoSuchHost)).build()?,
+                    reqwest::Client::builder()
+                        .dns_resolver(Arc::new(NoSuchHost::default()))
+                        .build()?,
                     Recorded::new(0.0),
                     config("http://nonexistent.invalid", "tok"),
                 )?
