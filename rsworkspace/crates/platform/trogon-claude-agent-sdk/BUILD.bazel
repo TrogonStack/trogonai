@@ -60,6 +60,12 @@ workspace_crate(
                 "tests/support/bridge_session_server.rs",
             ],
         },
+        "bridge_session_runtime": {
+            "compile_data": [
+                "tests/fixtures/bridge_worker/goldens.json",
+                "tests/support/bridge_session_server.rs",
+            ],
+        },
         "bridge_session_handle": {
             "compile_data": [
                 "tests/fixtures/bridge_worker/goldens.json",

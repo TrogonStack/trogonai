@@ -16,6 +16,7 @@ mod bridge_git;
 mod bridge_js;
 mod bridge_session;
 mod bridge_session_handle;
+mod bridge_session_runtime;
 mod bridge_types;
 mod bridge_worker;
 mod bridge_worker_control;

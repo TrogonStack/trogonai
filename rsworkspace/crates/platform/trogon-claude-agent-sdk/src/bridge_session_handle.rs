@@ -3,13 +3,14 @@
 //! at once and upload in the background, which is the same thing seen from the caller.
 //!
 
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
 use crate::SensitiveString;
 use crate::adapters::HttpExecute;
 use crate::bridge_session::{BridgeSession, request_key};
+use crate::bridge_session_runtime::wind_down;
 use crate::bridge_types::SessionState;
 use crate::bridge_worker::{InvalidSessionId, NonOrigin403, WorkerClient, WorkerConfig, WorkerPacing, session_url};
 use crate::bridge_worker_delivery::DeliveryStatus;
@@ -161,6 +162,7 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
     pub fn report_state(&mut self, state: SessionState) {
         if !self.is_closed() {
             self.worker.submit_state(state, None);
+            self.uploads.wake();
         }
     }
 
@@ -168,6 +170,7 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
     pub fn report_metadata(&mut self, metadata: &Map<String, Value>) {
         if !self.is_closed() {
             self.worker.submit_metadata(metadata);
+            self.uploads.wake();
         }
     }
 
@@ -178,6 +181,7 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
         }
         let reported = self.worker.report_delivery(event_id, status).await;
         self.settle(reported);
+        self.uploads.wake();
     }
 
     /// `flush`: sends the events the session holds. The reports and acknowledgements are not part of it.
@@ -232,7 +236,7 @@ where
         let url = session_url(&options.api_base_url, &self.session_id)?;
         if url::Url::parse(&url).is_err() {
             let _dropped = self.worker.take_undelivered_events();
-            self.closed.store(true, Ordering::SeqCst);
+            self.lifecycle.mark_closed();
             return Err(ReconnectError::InvalidUrl);
         }
         self.api_base_url = options.api_base_url;
@@ -249,18 +253,17 @@ where
                 non_origin_403: NonOrigin403::Counted,
             },
         )?;
-        let mut previous = std::mem::replace(&mut self.worker, rebuilt);
+        let previous = std::mem::replace(&mut self.worker, Arc::new(rebuilt));
+        self.worker_tx.send_replace(Arc::clone(&self.worker));
         if closed_meanwhile {
             self.mark_closed();
-            self.worker.close_queue();
-            self.worker.close_events(false);
-            self.worker.close_deliveries();
-            self.connected = false;
+            wind_down(self.worker.as_ref());
+            self.lifecycle.set_connected(false);
+            self.uploads.wake();
             return Ok(());
         }
         self.stream = StreamSession::seeded(Some(sequence));
-        self.ended = false;
-        self.connected = false;
+        self.lifecycle.revive();
         self.connect(epoch).await;
         let carried: Vec<ClientEvent> = previous
             .take_undelivered_events()
