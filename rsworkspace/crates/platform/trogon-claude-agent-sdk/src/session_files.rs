@@ -21,6 +21,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     JsonObject, SdkSessionInfo, SessionId, SummaryDialect,
+    home_directory::{HomeDirectoryError, Platform, python_home, python_join},
     session_project_key::{canonicalize_lenient, platform_nfc, sanitize_path},
     session_prompt::{PromptMode, entry_first_prompt_with, iso_to_epoch_ms},
     session_transcript::MessagePage,
@@ -64,27 +65,37 @@ pub struct SessionFiles {
 }
 
 impl SessionFiles {
-    /// Resolves the directory like the CLI: `CLAUDE_CONFIG_DIR`, else `~/.claude`, NFC normalized. `None` when
-    /// neither the variable nor a home directory is set.
-    pub fn from_environment() -> Option<Self> {
+    /// Resolves the directory like Python's `_get_claude_config_home_dir`: a non-empty `CLAUDE_CONFIG_DIR`, else
+    /// `Path.home() / ".claude"`, NFC normalized. Python raises `RuntimeError("Could not determine home directory.")`
+    /// when no home directory can be determined; this returns that error.
+    ///
+    /// # Errors
+    ///
+    /// [`HomeDirectoryError`] when neither `HOME` nor the passwd database names a home directory.
+    pub fn from_environment() -> Result<Self, HomeDirectoryError> {
         Self::from_environment_with(&SystemEnvironment)
     }
 
     /// [`SessionFiles::from_environment`] over an explicit environment source.
-    pub fn from_environment_with<E: EnvironmentVariable>(environment: &E) -> Option<Self> {
+    ///
+    /// # Errors
+    ///
+    /// [`HomeDirectoryError`] when no home directory can be determined.
+    pub fn from_environment_with<E: EnvironmentVariable>(environment: &E) -> Result<Self, HomeDirectoryError> {
         let configured = environment
             .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
             .filter(|value| !value.is_empty());
         let config = match configured {
             Some(value) => PathBuf::from(value),
-            None => {
-                let home = environment.var_os(OsStr::new(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))?;
-                PathBuf::from(home).join(".claude")
-            }
+            None => python_join(
+                Platform::host(),
+                &python_home(environment, Platform::host())?,
+                ".claude",
+            ),
         };
         let mut files = Self::with_config_dir(config);
         files.precompact_skip = !crate::session_precompact::skip_disabled(environment);
-        Some(files)
+        Ok(files)
     }
 
     /// Whether transcripts above 5 MiB skip everything before the last compact boundary. On by default;
@@ -633,3 +644,6 @@ pub(crate) fn collect_agent_files(base: &Path) -> Vec<(String, PathBuf)> {
     walk(base, &mut files);
     files
 }
+
+#[cfg(test)]
+mod tests;

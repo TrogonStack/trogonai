@@ -2,16 +2,16 @@
 //! first connection of the process picks `<config dir>/debug/sdk-<uuid>.txt`, announces it on stderr, creates the
 //! directory and passes it to the CLI as `--debug-file`. Every later connection reuses the same path.
 
-use std::{
-    ffi::OsStr,
-    io::Write,
-    path::{Path, PathBuf},
-    sync::OnceLock,
-};
+use std::{ffi::OsStr, io::Write, path::PathBuf, sync::OnceLock};
 
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{constants::SDK_DEBUG_ENV, environment_plan::Inherited};
+use crate::{
+    adapters::EnvironmentVariable,
+    constants::SDK_DEBUG_ENV,
+    environment_plan::Inherited,
+    home_directory::{HomeDirectoryError, Platform, node_homedir, node_join},
+};
 
 static DERIVED: OnceLock<Option<PathBuf>> = OnceLock::new();
 
@@ -25,40 +25,58 @@ fn truthy(value: Option<&std::ffi::OsString>) -> bool {
     })
 }
 
-/// The configuration directory, `Wt()`: `CLAUDE_CONFIG_DIR` when set (even empty), otherwise `~/.claude`,
-/// normalized to NFC.
-fn config_dir(inherited: &Inherited) -> Option<PathBuf> {
+/// The configuration directory, `Wt()`: `CLAUDE_CONFIG_DIR` when set (even empty), otherwise
+/// `path.join(os.homedir(), ".claude")`, normalized to NFC. `os.homedir()` reads the process environment, so the
+/// home comes from `environment`, and a missing home is an error exactly where Node throws.
+fn config_dir<E: EnvironmentVariable>(environment: &E, inherited: &Inherited) -> Result<PathBuf, HomeDirectoryError> {
+    let platform = Platform::host();
     let directory = match inherited.get(OsStr::new("CLAUDE_CONFIG_DIR")) {
         Some(directory) => PathBuf::from(directory),
-        None => {
-            let home = inherited.get(OsStr::new(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))?;
-            Path::new(home).join(".claude")
-        }
+        None => node_join(platform, &node_homedir(environment, platform)?, ".claude"),
     };
-    Some(PathBuf::from(directory.to_string_lossy().nfc().collect::<String>()))
+    Ok(PathBuf::from(directory.to_string_lossy().nfc().collect::<String>()))
 }
 
 /// The path for one session id, or `None` when the debug variable is not truthy.
-pub(crate) fn path_for(inherited: &Inherited, id: uuid::Uuid) -> Option<PathBuf> {
+pub(crate) fn path_for<E: EnvironmentVariable>(
+    environment: &E,
+    inherited: &Inherited,
+    id: uuid::Uuid,
+) -> Result<Option<PathBuf>, HomeDirectoryError> {
     if !truthy(inherited.get(OsStr::new(SDK_DEBUG_ENV))) {
-        return None;
+        return Ok(None);
     }
-    Some(config_dir(inherited)?.join("debug").join(format!("sdk-{id}.txt")))
+    let platform = Platform::host();
+    let directory = node_join(platform, config_dir(environment, inherited)?.as_os_str(), "debug");
+    Ok(Some(node_join(
+        platform,
+        directory.as_os_str(),
+        &format!("sdk-{id}.txt"),
+    )))
 }
 
-/// The process-wide default debug file. The first call decides; the notice and the directory creation happen
-/// once, and a failure to create the directory is ignored, as upstream does.
-pub(crate) fn process_debug_file(inherited: &Inherited) -> Option<PathBuf> {
-    DERIVED
+/// The process-wide default debug file. The first successful call decides; the notice and the directory creation
+/// happen once, and a failure to create the directory is ignored, as upstream does. A missing home directory is an
+/// error and decides nothing, as the throw in the upstream constructor does.
+pub(crate) fn process_debug_file<E: EnvironmentVariable>(
+    environment: &E,
+    inherited: &Inherited,
+) -> Result<Option<PathBuf>, HomeDirectoryError> {
+    if let Some(decided) = DERIVED.get() {
+        return Ok(decided.clone());
+    }
+    let path = path_for(environment, inherited, uuid::Uuid::new_v4())?;
+    Ok(DERIVED
         .get_or_init(|| {
-            let path = path_for(inherited, uuid::Uuid::new_v4())?;
-            let _ = writeln!(std::io::stderr(), "SDK debug logs: {}", path.display());
-            if let Some(directory) = path.parent() {
-                let _ = std::fs::create_dir_all(directory);
+            if let Some(path) = &path {
+                let _ = writeln!(std::io::stderr(), "SDK debug logs: {}", path.display());
+                if let Some(directory) = path.parent() {
+                    let _ = std::fs::create_dir_all(directory);
+                }
             }
-            Some(path)
+            path
         })
-        .clone()
+        .clone())
 }
 
 #[cfg(test)]

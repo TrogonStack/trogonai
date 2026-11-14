@@ -30,6 +30,7 @@ workspace_crate(
         "tests/fixtures/usd_budget/goldens.json",
     ] + glob([
         "tests/fixtures/fork_ts/*.jsonl",
+        "tests/fixtures/home_directory/*.json",
         "tests/fixtures/oracle_ts/*.json",
         "tests/fixtures/initialize_options.json",
         "tests/fixtures/probe_ts/*.jsonl",
@@ -106,6 +107,7 @@ workspace_crate(
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
+        "home_directory": {"compile_data": glob(["tests/support/*.rs"])},
         "in_memory_session_store": {},
         "initialize_options": {
             "compile_data": glob([
@@ -179,6 +181,7 @@ workspace_crate(
         },
         "sdk_tools": {},
         "session_clock": {},
+        "session_environment_helpers": {},
         "session_failure_contracts": {"compile_data": glob(["tests/support/*.rs"])},
         "session_filesystem": {
             "compile_data": glob([

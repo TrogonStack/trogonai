@@ -124,6 +124,9 @@ pub enum Error {
     CliPath(#[from] crate::CliPathError),
     #[error(transparent)]
     CliNotFound(#[from] crate::CliNotFoundError),
+    /// Node `os.homedir()` or Python `Path.home()` found no home directory where the dialect needs one.
+    #[error(transparent)]
+    HomeDirectory(#[from] crate::HomeDirectoryError),
     #[error(transparent)]
     Session(#[from] crate::SessionError),
     /// Python `CLIConnectionError("Failed to start Claude Code: ...")` for any spawn failure other than the two below.

@@ -19,6 +19,41 @@ impl EnvironmentVariable for FixedEnvironment {
     fn vars_os(&self) -> Vec<(OsString, OsString)> {
         self.variables.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
+
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
+
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
+}
+
+/// Wraps an environment and answers the two passwd lookups with fixed entries, so a test decides what the
+/// passwd database holds for the effective and the real user.
+#[derive(Clone, Debug)]
+pub struct WithPasswd<E> {
+    pub environment: E,
+    pub effective: Option<OsString>,
+    pub real: Option<OsString>,
+}
+
+impl<E: EnvironmentVariable> EnvironmentVariable for WithPasswd<E> {
+    fn var_os(&self, key: &OsStr) -> Option<OsString> {
+        self.environment.var_os(key)
+    }
+
+    fn vars_os(&self) -> Vec<(OsString, OsString)> {
+        self.environment.vars_os()
+    }
+
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        self.effective.clone()
+    }
+
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        self.real.clone()
+    }
 }
 
 impl CurrentDirectory for FixedEnvironment {
