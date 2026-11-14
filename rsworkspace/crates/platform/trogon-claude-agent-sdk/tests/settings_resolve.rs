@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
@@ -6,6 +6,8 @@ use trogon_claude_agent_sdk::{
     filter_escalating_default_mode, js_stringify, python_json_dumps, resolve_python_settings_with,
     resolve_settings_in_dialect_with, resolve_settings_with,
 };
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[path = "support/fake_settings_host.rs"]
 mod fake_settings_host;
@@ -436,7 +438,7 @@ fn the_python_dialect_keeps_integer_tokens_exact() {
 }
 
 #[test]
-fn the_python_resolve_keeps_every_number_as_json_loads_reads_it() {
+fn the_python_resolve_keeps_every_number_as_json_loads_reads_it() -> TestResult {
     let host = FakeHost::linux()
         .file(
             "/home/fixture/.claude/settings.json",
@@ -448,7 +450,7 @@ fn the_python_resolve_keeps_every_number_as_json_loads_reads_it() {
         );
     let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
     let PythonJsonValue::Object(resolved) = resolved else {
-        panic!("the resolved settings are not an object");
+        return Err("the resolved settings are not an object".into());
     };
     assert_eq!(
         python_json_dumps(resolved.get("effective").expect("effective")),
@@ -462,10 +464,11 @@ fn the_python_resolve_keeps_every_number_as_json_loads_reads_it() {
         approximate.to_string(),
         r#"{"custom":{"big":[1.2345678901234568e+29,1.0,null,null],"w":2.0}}"#
     );
+    Ok(())
 }
 
 #[test]
-fn the_python_resolve_unions_arrays_by_the_number_javascript_reads() {
+fn the_python_resolve_unions_arrays_by_the_number_javascript_reads() -> TestResult {
     let host = FakeHost::linux()
         .file("/home/fixture/.claude/settings.json", r#"{"custom":{"l":[1,0]}}"#)
         .file(
@@ -474,12 +477,13 @@ fn the_python_resolve_unions_arrays_by_the_number_javascript_reads() {
         );
     let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
     let PythonJsonValue::Object(resolved) = resolved else {
-        panic!("the resolved settings are not an object");
+        return Err("the resolved settings are not an object".into());
     };
     assert_eq!(
         python_json_dumps(resolved.get("effective").expect("effective")),
         r#"{"custom": {"l": [1, 0, 2, 9.223372036854776e+18]}}"#
     );
+    Ok(())
 }
 
 #[test]
