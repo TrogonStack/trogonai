@@ -212,7 +212,7 @@ impl From<LocalMcpServerOptions> for LocalMcpServer {
                     // One line on purpose: with the `log` feature of `tracing` enabled by another workspace
                     // member, the macro repeats each field expression for the log fallback, and the
                     // fallback copy on a line of its own is never executed, which reads as uncovered.
-                    tracing::warn!(server = %name.as_str(), "{line}");
+                    tracing::warn!(server = %name.as_str(), warning = %line, "MCP tool name warning");
                 }
             }
             if dialect == McpServerDialect::Python {

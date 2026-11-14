@@ -206,7 +206,7 @@ struct MessageVisitor(Option<String>);
 
 impl tracing::field::Visit for MessageVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
+        if field.name() == "warning" {
             self.0 = Some(format!("{value:?}"));
         }
     }

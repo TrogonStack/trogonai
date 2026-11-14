@@ -97,8 +97,8 @@ async fn the_requested_delays_are_the_recorded_ones() -> TestResult {
         golden()?["requested_delays"],
         json!(["interval:50000", "timeout:15000"])
     );
-    assert_eq!(CONNECT_TIMEOUT.as_millis(), 15_000);
-    assert_eq!(KEEP_ALIVE_INTERVAL.as_millis(), 50_000);
+    assert_eq!(WEBSOCKET_CONNECT_TIMEOUT.as_millis(), 15_000);
+    assert_eq!(WEBSOCKET_KEEP_ALIVE_INTERVAL.as_millis(), 50_000);
     assert_eq!(
         WebSocketError::ConnectTimeout.to_string(),
         "WebSocket connection timeout after 15000ms"
@@ -168,7 +168,7 @@ async fn a_session_matches_the_recorded_browser_transport() -> TestResult {
         received.as_slice(),
         recorded.iter().take(3).map(text_of).collect::<Result<Vec<_>, _>>()?
     );
-    assert_eq!(text_of(&recorded[3])?, KEEP_ALIVE_LINE);
+    assert_eq!(text_of(&recorded[3])?, WEBSOCKET_KEEP_ALIVE_LINE);
     Ok(())
 }
 
@@ -398,8 +398,8 @@ async fn the_keep_alive_is_sent_on_its_interval_while_reading() -> TestResult {
     let (first_at, first) = within(seen_rx.recv()).await?.ok_or("no first keep-alive")?;
     let (second_at, second) = within(seen_rx.recv()).await?.ok_or("no second keep-alive")?;
     reading.abort();
-    assert_eq!(first, KEEP_ALIVE_LINE);
-    assert_eq!(second, KEEP_ALIVE_LINE);
+    assert_eq!(first, WEBSOCKET_KEEP_ALIVE_LINE);
+    assert_eq!(second, WEBSOCKET_KEEP_ALIVE_LINE);
     assert!(first_at - started >= interval, "{:?}", first_at - started);
     assert!(second_at - first_at >= interval / 2, "{:?}", second_at - first_at);
     Ok(())
