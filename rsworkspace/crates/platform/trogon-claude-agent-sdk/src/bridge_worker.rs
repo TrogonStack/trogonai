@@ -307,6 +307,11 @@ fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailur
         }
         if let Some(io) = current.downcast_ref::<std::io::Error>() {
             match io.kind() {
+                std::io::ErrorKind::ConnectionRefused if host.eq_ignore_ascii_case("localhost") => {
+                    // `localhost` names both loopback addresses, and when every one refuses node raises an
+                    // `AggregateError`, which has no message of its own.
+                    return named(String::new(), "ECONNREFUSED");
+                }
                 std::io::ErrorKind::ConnectionRefused => {
                     return named(format!("connect ECONNREFUSED {host}:{port}"), "ECONNREFUSED");
                 }

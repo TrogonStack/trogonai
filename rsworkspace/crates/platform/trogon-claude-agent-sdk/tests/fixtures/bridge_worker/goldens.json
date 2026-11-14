@@ -97,6 +97,8 @@
 ],
 "network": [
 {"name":"refused","mode":"refused","message":"connect ECONNREFUSED 127.0.0.1:<port>","code":"ECONNREFUSED"},
+{"name":"localhost","mode":"localhost","message":"","code":"ECONNREFUSED"},
+{"name":"notfound","mode":"notfound","message":"getaddrinfo ENOTFOUND nonexistent.invalid","code":"ENOTFOUND"},
 {"name":"invalid","mode":"invalid","message":"Invalid URL","code":"ERR_INVALID_URL"},
 {"name":"ftp","mode":"ftp","message":"Unsupported protocol ftp:","code":"ERR_BAD_REQUEST"},
 {"name":"destroy","mode":"destroy","message":"socket hang up","code":"ECONNRESET"},

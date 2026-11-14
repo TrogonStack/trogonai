@@ -344,12 +344,14 @@ async function networkCase(mode) {
   let server;
   let port = null;
   let base = '';
-  if (mode === 'refused') {
+  if (mode === 'refused' || mode === 'localhost') {
     server = await listen(() => {});
     port = portOf(server);
     await stop(server);
     server = undefined;
-    base = `http://127.0.0.1:${port}`;
+    base = `http://${mode === 'localhost' ? 'localhost' : '127.0.0.1'}:${port}`;
+  } else if (mode === 'notfound') {
+    base = 'http://nonexistent.invalid';
   } else if (mode === 'ftp') {
     base = 'ftp://h';
   } else if (mode === 'destroy') {
@@ -406,7 +408,7 @@ const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: 
 for (const section of ['register', 'init', 'state', 'heartbeat', 'auth']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
-for (const mode of ['refused', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
+for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
 for (const mode of ['destroy', 'truncated', 'hang']) goldens.fetch_failures.push(await fetchFailureCase(mode));
 fs.rmSync(work, { recursive: true, force: true });
 
