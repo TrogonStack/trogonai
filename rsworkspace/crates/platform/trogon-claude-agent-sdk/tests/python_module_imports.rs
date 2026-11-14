@@ -1,11 +1,11 @@
 //! Each Python module of 0.2.181 imports first-party names from its siblings. The tables below pair every such
-//! name with the item of this crate that answers it. A `pub use` fails to compile when the item is not reachable
+//! name with the item of this crate that answers it. A `use` fails to compile when the item is not reachable
 //! from the crate root, and the table is checked against what the tables must cover.
 
 macro_rules! reachable {
     ($module:ident { $($python:literal => $rust:ident),* $(,)? }) => {
         mod $module {
-            $(pub use trogon_claude_agent_sdk::$rust;)*
+            $(#[allow(unused_imports)] use trogon_claude_agent_sdk::$rust as _;)*
             pub const PAIRS: &[(&str, &str)] = &[$(($python, stringify!($rust))),*];
         }
     };

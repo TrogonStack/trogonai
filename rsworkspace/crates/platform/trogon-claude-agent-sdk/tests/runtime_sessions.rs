@@ -29,7 +29,7 @@ fn options(mode: &str) -> Result<ClaudeAgentOptions, Box<dyn StdError>> {
     // profile at exit, which leaves a corrupt profile. The fixture runs no crate code, so its
     // profile is discarded.
     options.env.insert("LLVM_PROFILE_FILE".into(), "/dev/null".into());
-    options.limits.run_end_timeout = Timeout::new(Duration::from_secs(2));
+    options.limits.run_end_timeout = RunEndTimeout::Fixed(Timeout::new(Duration::from_secs(2)));
     Ok(options)
 }
 
@@ -47,7 +47,13 @@ async fn receive_result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn 
 
 #[tokio::test]
 async fn coalesced_input_count_ends_the_run_after_one_result() -> TestResult {
-    let mut client = ClaudeSdkClient::connect(options("queued-coalesce")?).await?;
+    // A permission callback is a bidirectional need, so the run waits for the result and idle state instead of
+    // closing stdin as soon as the input is written.
+    let mut configured = options("queued-coalesce")?;
+    configured.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        PermissionDecision::allow()
+    }));
+    let mut client = ClaudeSdkClient::connect(configured).await?;
     let handle = client.handle();
     let input = [
         UserInput::from(Prompt::from("one")),
@@ -133,7 +139,7 @@ fn store_options(
 ) -> Result<SessionStoreOptions, Box<dyn StdError>> {
     let mut options = SessionStoreOptions::from(store);
     options.config_directory = Some(directory.to_path_buf());
-    options.project_key = Some(SessionProjectKey::new("fixture-project")?);
+    options.project_key = Some(SessionProjectKey::new("fixture-project"));
     options.limits.append_timeout = Timeout::new(Duration::from_secs(3));
     options.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(3)));
     Ok(options)
@@ -185,7 +191,7 @@ async fn each_result_waits_for_its_own_mirror_fence_and_controls_progress() -> T
     store.gates[1].add_permits(1);
     assert_eq!(receive_result(&mut client).await?, "mirror-two");
     let key = SessionKey::new(
-        SessionProjectKey::new("fixture-project")?,
+        SessionProjectKey::new("fixture-project"),
         SessionId::from("fixture-session"),
     );
     assert_eq!(store.load(&key).await?.map(|entries| entries.len()), Some(2));

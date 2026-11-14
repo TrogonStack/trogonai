@@ -10,7 +10,7 @@ use crate::{
     settings_numbers::{PythonNumbers, approximate_numbers, exact_numbers, infinities_to_null, normalize_numbers},
     settings_resolve_connector::skips_repository_settings,
     settings_resolve_platform::asks_organization,
-    settings_resolve_policy::{PolicyResolution, resolve_policy},
+    settings_resolve_policy::{PolicyKeyOrder, PolicyResolution, resolve_policy},
     settings_resolve_sources::{
         local_settings_path, project_settings_path, read_settings_file, resolve_cwd, user_settings_path,
     },
@@ -31,6 +31,8 @@ pub enum ResolveSettingsError {
     Decode(#[source] serde_json::Error),
     #[error("the settings reader task did not finish")]
     Join(#[source] tokio::task::JoinError),
+    #[error("the user settings directory needs a home directory")]
+    HomeDirectory(#[source] crate::HomeDirectoryError),
 }
 
 fn source_label(source: &str) -> &'static str {
@@ -204,10 +206,10 @@ fn resolve_core<H: SettingsHost>(
     let PolicyResolution {
         settings: policy_settings,
         origin,
+        key_order,
         mdm_did_not_load,
         file_did_not_load,
-        ..
-    } = resolve_policy(host, kind, parent.as_ref(), remote.as_ref(), evaluation);
+    } = resolve_policy(host, state, kind, parent.as_ref(), remote.as_ref(), evaluation);
     let policy_settings = policy_settings.map(|mut settings| {
         for entry in settings.values_mut() {
             normalize_numbers(entry, dialect);
@@ -225,7 +227,7 @@ fn resolve_core<H: SettingsHost>(
         }
         let (path, settings) = match name {
             "userSettings" => {
-                let path = user_settings_path(host);
+                let path = user_settings_path(host).map_err(ResolveSettingsError::HomeDirectory)?;
                 let settings = read_settings_file(host, &path, dialect);
                 (Some(path), settings)
             }
@@ -250,7 +252,7 @@ fn resolve_core<H: SettingsHost>(
             "policySettings" => (None, policy_settings.clone()),
             _ => (None, None),
         };
-        let parsed_by_schema = name != "policySettings" || origin != Some("parent");
+        let parsed_by_schema = name != "policySettings" || key_order == PolicyKeyOrder::Schema;
         let settings = settings.map(|settings| {
             if parsed_by_schema {
                 in_schema_order(&settings)
@@ -328,7 +330,7 @@ fn resolve_core<H: SettingsHost>(
     Ok(Value::Object(result))
 }
 
-static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::new);
+static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::for_process);
 
 /// `resolveSettings` upstream: reads the real host once and merges every enabled source.
 pub async fn resolve_settings(options: &ResolveSettingsOptions) -> Result<ResolvedSettings, ResolveSettingsError> {

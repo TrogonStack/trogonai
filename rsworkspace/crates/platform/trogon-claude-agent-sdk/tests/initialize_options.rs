@@ -13,12 +13,14 @@
 //! The fixture holds the request bytes each SDK wrote. TypeScript writes compact JSON; Python writes its own
 //! separators, so its requests are stored re-serialized from the parsed value with the key order kept.
 
-use serde_json::Value;
+use serde_json::{Number, Value};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
-    AgentDefinition, ArgvStyle, CallbackError, ClaudeAgentOptions, ClaudeSdkClient, CustomPrompt, DialogKind,
-    PresetPrompt, Prompt, Skills, SystemPrompt, UserDialogRequest, VerbatimPrompts, WorkspaceTrust,
+    AgentDefinition, AgentEffort, AgentExecution, AgentMcpServerSpec, ArgvStyle, CallbackError, ClaudeAgentOptions,
+    ClaudeSdkClient, CustomPrompt, DialogKind, EffortLevel, McpRemoteServerOptions, McpServerOptions,
+    McpStdioServerOptions, PermissionMode, PresetPrompt, Prompt, SettingSource, Skills, SystemPrompt,
+    UserDialogRequest, VerbatimPrompts, WorkspaceTrust,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -127,6 +129,85 @@ fn trust(accepted: Option<bool>, directory: Option<&str>) -> Option<WorkspaceTru
     })
 }
 
+fn stdio(command: &str, args: Option<Vec<&str>>) -> McpServerOptions {
+    McpServerOptions::Stdio(McpStdioServerOptions {
+        command: command.into(),
+        args: args.map(|args| args.into_iter().map(Into::into).collect()),
+        ..McpStdioServerOptions::default()
+    })
+}
+
+/// Every agent field, TypeScript-only ones included: Python drops those and sends its dataclass order.
+fn every_agent_field(options: &mut ClaudeAgentOptions) {
+    let mut agent = AgentDefinition::new("d", Prompt::from("p"));
+    agent.tools = Some(vec!["Read".into(), "mcp__x__*".into()]);
+    agent.disallowed_tools = Some(vec!["Bash".into()]);
+    agent.model = Some("sonnet".into());
+    agent.mcp_servers = Some(vec![
+        AgentMcpServerSpec::Named("named".into()),
+        AgentMcpServerSpec::Inline(
+            [(
+                "inline".into(),
+                McpServerOptions::Sse(McpRemoteServerOptions::new("https://example.com/events")),
+            )]
+            .into_iter()
+            .collect(),
+        ),
+        AgentMcpServerSpec::Inline([("bare".into(), stdio("c", None))].into_iter().collect()),
+    ]);
+    agent.critical_system_reminder_experimental = Some("crit".into());
+    agent.skills = Some(vec!["s".into()]);
+    agent.initial_prompt = Some(Prompt::from("go"));
+    agent.max_turns = Some(0.into());
+    agent.auto_compact_window = Some(1000.into());
+    agent.execution = Some(AgentExecution::Background);
+    agent.omit_claude_md = Some(true);
+    agent.memory = Some(SettingSource::Project);
+    agent.effort = Some(Number::from(3).into());
+    agent.permission_mode = Some(PermissionMode::Plan);
+    agent.observer = Some("obs".into());
+    agent.observer_message = Some("om".into());
+    agent.extra.insert("zz".into(), 1.into());
+    options.agents.insert("rev".into(), agent);
+    options
+        .agents
+        .insert("alpha".into(), AgentDefinition::new("a", Prompt::from("q")));
+}
+
+/// Values neither SDK checks: a non-object MCP entry, a negative turn limit and a fractional effort.
+fn raw_agent_values(options: &mut ClaudeAgentOptions) {
+    let mut agent = AgentDefinition::new("d", Prompt::from("p"));
+    agent.tools = Some(Vec::new());
+    agent.mcp_servers = Some(vec![
+        AgentMcpServerSpec::Raw(7.into()),
+        AgentMcpServerSpec::Inline(
+            [
+                ("s".into(), stdio("c", Some(vec!["a"]))),
+                (
+                    "t".into(),
+                    McpServerOptions::Http(McpRemoteServerOptions::new("https://example.com/mcp")),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+    ]);
+    agent.max_turns = Some((-1).into());
+    agent.execution = Some(AgentExecution::Foreground);
+    agent.effort = Number::from_f64(2.5).map(AgentEffort::Number);
+    options.agents.insert("rev".into(), agent);
+}
+
+fn named_agent_effort(options: &mut ClaudeAgentOptions) {
+    let mut first = AgentDefinition::new("d", Prompt::from("p"));
+    first.effort = Some(EffortLevel::XHigh.into());
+    first.permission_mode = Some(PermissionMode::Unknown("custom".into()));
+    let mut second = AgentDefinition::new("d2", Prompt::from("p2"));
+    second.memory = Some(SettingSource::Local);
+    options.agents.insert("z".into(), first);
+    options.agents.insert("b".into(), second);
+}
+
 fn misc_typescript(options: &mut ClaudeAgentOptions, flag: bool) {
     options.prompt_suggestions = Some(flag);
     options.agent_progress_summaries = Some(flag);
@@ -202,6 +283,9 @@ fn case(name: &str, style: ArgvStyle) -> ClaudeAgentOptions {
                 o.tool_aliases = Some(vec![("A".into(), "B".into())]);
             }
         }
+        "agent_every_field" => every_agent_field(&mut o),
+        "agent_raw_values" => raw_agent_values(&mut o),
+        "agent_named_effort" => named_agent_effort(&mut o),
         "verbatim" => o.verbatim_prompts = VerbatimPrompts::Enabled,
         "verbatim_off" => o.verbatim_prompts = VerbatimPrompts::Disabled,
         _ => {}

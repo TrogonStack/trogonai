@@ -41,6 +41,8 @@ pub(crate) struct SettingsSchema {
     roots: HashMap<String, Arc<Node>>,
     read: ReadSpec,
     merge: MergeSpec,
+    #[cfg(test)]
+    policy: policy::PolicySpec,
 }
 
 #[derive(Debug)]
@@ -167,6 +169,8 @@ impl SettingsSchema {
             read: ReadSpec::from_json(read).map_err(SettingsSchemaError::Malformed)?,
             merge: MergeSpec::from_json(document.get("merge").ok_or_else(|| malformed("merge"))?)
                 .map_err(SettingsSchemaError::Malformed)?,
+            #[cfg(test)]
+            policy: policy::PolicySpec::from_json(read).map_err(SettingsSchemaError::Malformed)?,
         })
     }
 
@@ -188,7 +192,7 @@ impl SettingsSchema {
         self.root_output(name, Some(value))?
     }
 
-    fn root_output(&self, name: &str, value: Option<&Value>) -> Option<Option<Value>> {
+    pub(crate) fn root_output(&self, name: &str, value: Option<&Value>) -> Option<Option<Value>> {
         self.roots.get(name)?.validate(value).ok()
     }
 
@@ -697,6 +701,10 @@ impl Node {
 fn number_of(value: &Value) -> Option<f64> {
     value.as_number().and_then(js_value)
 }
+
+#[cfg(test)]
+#[path = "settings_schema_policy.rs"]
+mod policy;
 
 #[cfg(test)]
 #[path = "settings_schema_tests.rs"]

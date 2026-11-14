@@ -1156,6 +1156,9 @@ pub enum MessagesError {
     /// `compactMetadata.preservedMessages.uuids` is not an array.
     #[error("E.uuids.some is not a function")]
     UuidsSome,
+    /// The Python-dialect module helpers found no home directory for the config directory.
+    #[error(transparent)]
+    HomeDirectory(#[from] crate::HomeDirectoryError),
 }
 
 /// `xz` without paging: the visible messages of a transcript.

@@ -52,6 +52,7 @@ fn control_timeout_diagnostics_identify_each_wire_operation() {
         (ControlOperation::ReloadSkills, "reload_skills"),
         (ControlOperation::ReloadOutputStyles, "reload_output_styles"),
         (ControlOperation::SeedReadState, "seed_read_state"),
+        (ControlOperation::RemoteControl, "remote_control"),
     ] {
         let error = Error::ControlTimeout { operation };
         assert_eq!(error.to_string(), format!("Control request timeout: {name}"));

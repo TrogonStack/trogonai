@@ -116,6 +116,10 @@ function pathFunctionProbes() {
       { cwd: 'C:\\w', args: ['D:x'], env: { '=D:': 'E:\\elsewhere' } },
       { cwd: 'C:\\w', args: ['D:'], env: { '=D:': 'D:\\d\\' } },
       { cwd: 'C:\\w', args: ['c:x'] },
+      { cwd: 'C:\\w', args: ['C:x'], env: { '=C:': 'C:\\other' } },
+      { cwd: 'C:\\w', args: ['C:x'], env: { '=c:': 'C:\\other' } },
+      { cwd: 'C:\\w', args: ['C:x'], env: { '=C:': '' } },
+      { cwd: 'C:\\w', args: ['c:x'], env: { '=C:': 'c:\\lower' } },
       { cwd: 'C:\\w', args: ['C:\\a', 'D:b'] },
       { cwd: 'C:\\w', args: ['\\\\srv\\sh', 'x'] },
       { cwd: 'C:\\w', args: ['\\\\srv\\sh\\', '..'] },
@@ -488,6 +492,60 @@ function vetProbes() {
   return probes;
 }
 
+// Where the managed settings write check finds a path really is (`Lx`): every vet host again, plus what
+// `realpathSync.native` can answer once the walk is done.
+function locateProbes() {
+  const probes = vetProbes().map((probe) => ({ ...probe, name: probe.name.replace(/^vet /, 'locate '), kind: 'locate' }));
+  const add = (name, probe) => probes.push({ name: `locate ${name}`, kind: 'locate', platform: 'linux', cwd: '/w', ...probe });
+  const tree = folders('/w/a/b', '/real/a');
+
+  add('realpath moves', { fs: tree, realpath: { '/w/a': { path: '/real/a' } }, paths: ['/w/a', '/w/a/b'] });
+  add('realpath errors', { fs: tree, realpath: { '/w/a': { errno: 'EACCES' }, '/w/a/b': { errno: 'ENOENT' } }, paths: ['/w/a', '/w/a/b'] });
+  add('realpath not a folder', { fs: tree, realpath: { '/w/a/b': { errno: 'ENOTDIR' } }, paths: ['/w/a/b'] });
+  add('realpath on win32', {
+    platform: 'win32',
+    cwd: 'C:\\w',
+    fs: folders('C:\\w\\a', 'D:\\real'),
+    realpath: { 'C:\\w\\a': { path: '\\\\?\\D:\\real' }, 'c:\\w': { path: '\\\\?\\UNC\\srv\\sh' } },
+    paths: ['C:\\w\\a', 'c:/w', 'C:\\w\\missing'],
+  });
+  add('realpath follows a link', {
+    fs: { ...folders('/w', '/real/a/b'), '/w/a': link('/real/a') },
+    paths: ['/w/a', '/w/a/b', '/w/a/b/../b'],
+  });
+  add('realpath follows a relative chain', {
+    fs: { ...folders('/w', '/real/a'), '/w/l1': link('l2'), '/w/l2': link('../real/a') },
+    paths: ['/w/l1'],
+  });
+  add('realpath of a dangling link', { fs: { ...folders('/w'), '/w/gone': link('/nowhere') }, paths: ['/w/gone'] });
+  add('realpath of a link loop', { fs: { ...folders('/w'), '/w/x': link('y'), '/w/y': link('x') }, paths: ['/w/x'] });
+  add('realpath through a link to a file', {
+    fs: { ...folders('/w', '/real'), '/real/f': file('x'), '/w/f': link('/real/f') },
+    paths: ['/w/f', '/w/f/below'],
+  });
+  add('realpath climbs out of a link', {
+    fs: { ...folders('/w', '/real/a/b'), '/w/a': link('/real/a/b') },
+    paths: ['/w/a/..', '/w/a/../b'],
+  });
+  add('realpath follows a link on darwin', {
+    platform: 'darwin',
+    fs: { ...folders('/w', '/real/a'), '/w/a': link('/real/a') },
+    paths: ['/w/a'],
+  });
+  add('network spellings', {
+    platform: 'darwin',
+    fs: tree,
+    paths: ['/Volumes/x', '/net/host/share', '/home/u', '//srv/sh/x', '/??/x', '/w/??/x'],
+  });
+  add('wsl shares on win32', {
+    platform: 'win32',
+    cwd: 'C:\\w',
+    fs: { ...folders('C:\\w'), '\\\\wsl$\\Ubuntu\\home': { kind: 'dir' } },
+    paths: ['\\\\wsl$\\Ubuntu\\home', '\\\\srv\\sh\\x'],
+  });
+  return probes;
+}
+
 // Whether a folder named connector-downloads is marked ignored, directly (`n7e`) and from any path (`nE`).
 function connectorProbes() {
   const probes = [];
@@ -540,5 +598,5 @@ function connectorProbes() {
 }
 
 export function corpus() {
-  return [...pathFunctionProbes(), ...nameProbes(), ...callProbes(), ...vetProbes(), ...connectorProbes()];
+  return [...pathFunctionProbes(), ...nameProbes(), ...callProbes(), ...vetProbes(), ...locateProbes(), ...connectorProbes()];
 }

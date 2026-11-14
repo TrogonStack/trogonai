@@ -1,0 +1,572 @@
+{
+ "source": "sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 answering each request from a scripted CLI; the TypeScript canUseTool echoes options.suggestions as updatedPermissions and the Python can_use_tool echoes context.suggestions",
+ "cases": [
+  {
+   "name": "extra_keys",
+   "request_id": "p11",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "setMode",
+      "mode": "plan",
+      "destination": "session",
+      "extra": 1
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p11\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"setMode\",\"mode\":\"plan\",\"destination\":\"session\",\"extra\":1}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p11\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": [{\"type\": \"setMode\", \"destination\": \"session\", \"mode\": \"plan\"}]}}}"
+  },
+  {
+   "name": "missing_input",
+   "request_id": "p31",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "permission_suggestions": [
+     {
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p31\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p31\", \"error\": \"'input'\"}}"
+  },
+  {
+   "name": "missing_tool_name",
+   "request_id": "p29",
+   "request": {
+    "subtype": "can_use_tool",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p29\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p29\", \"error\": \"'type'\"}}"
+  },
+  {
+   "name": "missing_tool_name_only",
+   "request_id": "p30",
+   "request": {
+    "subtype": "can_use_tool",
+    "input": {
+     "command": "ls"
+    }
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p30\",\"response\":{\"behavior\":\"allow\"}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p30\", \"error\": \"'tool_name'\"}}"
+  },
+  {
+   "name": "missing_type",
+   "request_id": "p0",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p0\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p0\", \"error\": \"'type'\"}}"
+  },
+  {
+   "name": "mode_absent",
+   "request_id": "p10",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "setMode",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p10\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"setMode\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p10\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": [{\"type\": \"setMode\", \"destination\": \"session\"}]}}}"
+  },
+  {
+   "name": "rule_list",
+   "request_id": "p7",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "rules": [
+       [
+        1
+       ]
+      ],
+      "behavior": "allow",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p7\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"rules\":[[1]],\"behavior\":\"allow\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p7\", \"error\": \"list indices must be integers or slices, not str\"}}"
+  },
+  {
+   "name": "rule_missing_tool",
+   "request_id": "p4",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "rules": [
+       {
+        "ruleContent": "x"
+       }
+      ],
+      "behavior": "allow",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p4\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"rules\":[{\"ruleContent\":\"x\"}],\"behavior\":\"allow\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p4\", \"error\": \"'toolName'\"}}"
+  },
+  {
+   "name": "rule_null",
+   "request_id": "p6",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "rules": [
+       null
+      ],
+      "behavior": "allow",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p6\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"rules\":[null],\"behavior\":\"allow\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p6\", \"error\": \"'NoneType' object is not subscriptable\"}}"
+  },
+  {
+   "name": "rule_number",
+   "request_id": "p8",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "rules": [
+       7
+      ],
+      "behavior": "allow",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p8\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"rules\":[7],\"behavior\":\"allow\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p8\", \"error\": \"'int' object is not subscriptable\"}}"
+  },
+  {
+   "name": "rule_string",
+   "request_id": "p5",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "rules": [
+       "Bash"
+      ],
+      "behavior": "allow",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p5\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"rules\":[\"Bash\"],\"behavior\":\"allow\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p5\", \"error\": \"string indices must be integers, not 'str'\"}}"
+  },
+  {
+   "name": "rules_absent",
+   "request_id": "p9",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p9\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p9\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": [{\"type\": \"addRules\", \"destination\": \"session\"}]}}}"
+  },
+  {
+   "name": "rules_empty_object",
+   "request_id": "p2",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "rules": {},
+      "behavior": "allow",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p2\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"rules\":{},\"behavior\":\"allow\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p2\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": [{\"type\": \"addRules\", \"destination\": \"session\", \"rules\": [], \"behavior\": \"allow\"}]}}}"
+  },
+  {
+   "name": "rules_number",
+   "request_id": "p3",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "rules": 5,
+      "behavior": "allow",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p3\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"rules\":5,\"behavior\":\"allow\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p3\", \"error\": \"'int' object is not iterable\"}}"
+  },
+  {
+   "name": "rules_object",
+   "request_id": "p1",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addRules",
+      "rules": {
+       "a": 1
+      },
+      "behavior": "allow",
+      "destination": "session"
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p1\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addRules\",\"rules\":{\"a\":1},\"behavior\":\"allow\",\"destination\":\"session\"}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p1\", \"error\": \"string indices must be integers, not 'str'\"}}"
+  },
+  {
+   "name": "suggestion_bool",
+   "request_id": "p16",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     true
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p16\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[true]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p16\", \"error\": \"'bool' object has no attribute 'get'\"}}"
+  },
+  {
+   "name": "suggestion_float",
+   "request_id": "p17",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     1.5
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p17\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[1.5]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p17\", \"error\": \"'float' object has no attribute 'get'\"}}"
+  },
+  {
+   "name": "suggestion_list",
+   "request_id": "p18",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     []
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p18\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[[]]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p18\", \"error\": \"'list' object has no attribute 'get'\"}}"
+  },
+  {
+   "name": "suggestion_null",
+   "request_id": "p15",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     null
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p15\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[null]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p15\", \"error\": \"'NoneType' object has no attribute 'get'\"}}"
+  },
+  {
+   "name": "suggestion_number",
+   "request_id": "p14",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     5
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p14\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[5]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p14\", \"error\": \"'int' object has no attribute 'get'\"}}"
+  },
+  {
+   "name": "suggestion_string",
+   "request_id": "p13",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     "setMode"
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p13\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[\"setMode\"]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p13\", \"error\": \"'str' object has no attribute 'get'\"}}"
+  },
+  {
+   "name": "suggestions_empty_object",
+   "request_id": "p26",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": {}
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p26\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":{}}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p26\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": []}}}"
+  },
+  {
+   "name": "suggestions_empty_string",
+   "request_id": "p20",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": ""
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p20\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":\"\"}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p20\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": []}}}"
+  },
+  {
+   "name": "suggestions_false",
+   "request_id": "p24",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": false
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p24\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":false}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p24\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": []}}}"
+  },
+  {
+   "name": "suggestions_null",
+   "request_id": "p27",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": null
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p27\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":null}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p27\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": []}}}"
+  },
+  {
+   "name": "suggestions_number",
+   "request_id": "p21",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": 5
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p21\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":5}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p21\", \"error\": \"'int' object is not iterable\"}}"
+  },
+  {
+   "name": "suggestions_object",
+   "request_id": "p25",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": {
+     "type": "setMode"
+    }
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p25\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":{\"type\":\"setMode\"}}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p25\", \"error\": \"'str' object has no attribute 'get'\"}}"
+  },
+  {
+   "name": "suggestions_string",
+   "request_id": "p19",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": "ab"
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p19\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":\"ab\"}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p19\", \"error\": \"'str' object has no attribute 'get'\"}}"
+  },
+  {
+   "name": "suggestions_true",
+   "request_id": "p23",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": true
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p23\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":true}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p23\", \"error\": \"'bool' object is not iterable\"}}"
+  },
+  {
+   "name": "suggestions_zero",
+   "request_id": "p22",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": 0
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p22\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":0}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p22\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": []}}}"
+  },
+  {
+   "name": "type_number",
+   "request_id": "p28",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": 5
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p28\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":5}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p28\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": [{\"type\": 5}]}}}"
+  },
+  {
+   "name": "wrong_value_types",
+   "request_id": "p12",
+   "request": {
+    "subtype": "can_use_tool",
+    "tool_name": "Bash",
+    "input": {
+     "command": "ls"
+    },
+    "permission_suggestions": [
+     {
+      "type": "addDirectories",
+      "directories": "x",
+      "destination": 7
+     }
+    ]
+   },
+   "typescript": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"p12\",\"response\":{\"behavior\":\"allow\",\"updatedPermissions\":[{\"type\":\"addDirectories\",\"directories\":\"x\",\"destination\":7}]}}}",
+   "python": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"p12\", \"response\": {\"behavior\": \"allow\", \"updatedInput\": {\"command\": \"ls\"}, \"updatedPermissions\": [{\"type\": \"addDirectories\", \"destination\": 7, \"directories\": \"x\"}]}}}"
+  }
+ ]
+}

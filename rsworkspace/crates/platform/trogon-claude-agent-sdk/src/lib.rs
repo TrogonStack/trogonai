@@ -11,6 +11,40 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod auth_token;
+mod backgrounded;
+mod bridge_client;
+#[cfg(test)]
+mod bridge_fake_probe;
+mod bridge_flavor;
+mod bridge_git;
+mod bridge_gitcmd;
+mod bridge_js;
+mod bridge_packed;
+mod bridge_paths;
+mod bridge_platform;
+mod bridge_refs;
+mod bridge_session;
+mod bridge_session_core;
+mod bridge_session_handle;
+mod bridge_session_runtime;
+mod bridge_session_stream_events;
+mod bridge_types;
+mod bridge_unicode;
+mod bridge_unicode_tables;
+mod bridge_url;
+mod bridge_worker;
+mod bridge_worker_control;
+mod bridge_worker_control_async;
+mod bridge_worker_delivery;
+mod bridge_worker_events;
+mod bridge_worker_heartbeat;
+mod bridge_worker_inbound;
+mod bridge_worker_queue;
+mod bridge_worker_stream;
+mod bridge_worker_stream_driver;
+mod bridge_worker_stream_http;
+mod bridge_worker_types;
+mod browser_query;
 mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
@@ -33,13 +67,18 @@ mod effort_level;
 mod environment;
 mod environment_plan;
 mod error;
+mod extract_from_bunfs;
 mod float_digits;
 mod framing;
+mod home_directory;
 mod hooks;
 mod js_json;
 mod js_object_order;
+mod js_regex;
 mod js_runtime;
+mod js_text;
 mod json_scan;
+mod jsonrpc_message;
 mod managed_settings_delivery;
 mod mcp_config;
 mod mcp_read_resource_response;
@@ -66,24 +105,41 @@ mod model_name;
     )
 )]
 mod node_path;
+mod node_path_join;
 mod option_error;
 mod options;
 mod output_schema;
 mod permission;
 mod permission_mode;
+mod permission_suggestions;
 mod permission_update;
 mod plugin;
+mod prewarm;
 mod process_options;
 mod process_transport;
 mod prompt;
+mod pydantic_int_string;
+mod pydantic_validation_error;
 mod python_json;
 mod python_json_value;
+mod python_text;
+mod python_value_repr;
 mod queue_capacity;
 mod raw_json_id;
+mod remote_control;
 #[cfg(unix)]
 mod run_as;
+mod run_end;
+mod run_end_ceiling;
 mod runtime_options;
+mod schema_pointer;
+mod sdk_mcp_choices;
+mod sdk_mcp_js;
+mod sdk_mcp_regexp;
 mod sdk_mcp_server;
+mod sdk_mcp_zod;
+mod sdk_mcp_zod_issue;
+mod sdk_mcp_zod_run;
 mod sdk_tool;
 mod sdk_tools;
 mod sensitive_string;
@@ -136,9 +192,9 @@ mod settings_resolve_sources;
 mod settings_resolve_state;
 mod settings_resolve_tier;
 mod settings_resolve_values;
-mod settings_resolve_vetting;
 mod settings_resolve_writable;
 mod settings_sandbox;
+mod settings_sandbox_schema;
 mod settings_schema;
 mod settings_schema_builtins;
 mod settings_schema_hosts;
@@ -148,6 +204,25 @@ mod settings_schema_ports;
 mod settings_schema_regexp;
 mod shadow_warning;
 mod skills;
+mod sse_ccr_event;
+mod sse_delivery_update;
+mod sse_drop_category;
+mod sse_drop_log;
+mod sse_error;
+mod sse_frame;
+mod sse_frame_filter;
+mod sse_http_error;
+mod sse_log_record;
+mod sse_options;
+mod sse_parser;
+mod sse_prepared_write;
+mod sse_request_id_set;
+mod sse_retry;
+mod sse_transport;
+mod sse_utf8_decoder;
+mod sse_worker_markers;
+mod startup_timeout;
+mod stderr_redaction;
 mod stderr_tail;
 mod summary_dialect;
 mod system_prompt;
@@ -157,21 +232,89 @@ mod tool_config;
 mod tool_name;
 mod tool_rule;
 mod tool_use_id;
+mod tool_view;
 mod transcript_mirror;
 mod transport;
+mod ui_host;
 mod usd_budget;
 mod user_input;
+mod validation_choices;
 mod version_check;
 mod websocket_error;
 mod websocket_transport;
+mod windows_path;
 mod wire;
 mod workspace_trust;
 
-pub use agent_definition::{AgentDefinition, AgentExecution, AgentMcpServerSpec};
+pub use agent_definition::{AgentDefinition, AgentEffort, AgentExecution, AgentMcpServerSpec};
 pub use agent_name::AgentName;
 pub use auth_token::{
     HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
     OAuthTokenFuture, OAuthTokenHandler, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
+};
+pub use backgrounded::{Backgrounded, BackgroundedError};
+pub use bridge_client::BridgeClient;
+pub use bridge_git::{BranchDropLogDedup, CodeSessionGitContext, DefaultGitProbe, GitContextProbe, GitRepository};
+pub use bridge_gitcmd::GitProbeContext;
+pub use bridge_paths::PathGuard;
+pub use bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe, ProbeError};
+pub use bridge_session::{
+    AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, CloseCallback,
+    EnvironmentLookup, InboundMessageCallback, PermissionResponseCallback, attach_bridge_session,
+};
+pub use bridge_session_handle::{ReconnectError, ReconnectOptions};
+pub use bridge_types::{
+    CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
+    DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,
+    RemoteMcpConfig, SessionState,
+};
+pub use bridge_worker::{
+    AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
+    HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
+    InvalidSessionId, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
+    WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, refusal_source,
+    retry_after_ms, session_url, token_expiry,
+};
+pub use bridge_worker_control::{
+    CallbackResult, ControlCallbacks, ControlReply, ControlSession, DeferredControl, HostError, HostFuture,
+    ModelCallback, ModelVerdict, PendingControl, PendingModelCallback, PendingThinkingTokensCallback, TextCallback,
+    ThinkingTokensCallback, answer_control_request, clean_control_text, is_pending_prompt,
+};
+pub use bridge_worker_control_async::{
+    AsyncControl, AsyncControlCallbacks, BackgroundTasksCallback, BackgroundTasksSwitch, ControlTask, FrameWriter,
+    SIDE_QUESTION_DEADLINE, SideQuestionCallback, SideQuestionContext, StopTaskCallback, UuidSource,
+    background_tasks_disabled,
+};
+pub use bridge_worker_delivery::{
+    DeliveryAck, DeliveryNext, DeliveryQueue, DeliveryStatus, MAX_BATCH_ACKS, MAX_QUEUE_ACKS, delivery_body,
+};
+pub use bridge_worker_events::{
+    Attempt, Batch, ClientEvent, EventNext, EventQueue, MAX_BATCH_BYTES, MAX_BATCH_EVENTS, MAX_QUEUE_EVENTS,
+    POST_TIMEOUT_CEILING_MS, POST_TIMEOUT_FLOOR_MS, SHRINK_FROM_BYTES, lane_for_path, refused_for_good,
+    retry_delay as event_retry_delay, upload_body, upload_timeout,
+};
+pub use bridge_worker_heartbeat::{HeartbeatDriver, PROBE_BEAT_SPACING, heartbeat_delay};
+pub use bridge_worker_inbound::{INBOUND_DEDUP_CAPACITY, Inbound, InboundRouter, NOTIFICATION_ORIGIN, UuidSet};
+pub use bridge_worker_queue::{
+    Next, Patch, PatchQueue, Requeue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches,
+    without_status,
+};
+pub use bridge_worker_stream::{
+    FrameParser, KEEPALIVE_SECONDS, LIVENESS_GRACE_MS, PERMANENT_STREAM_STATUSES, RECONNECT_BASE_MS, RECONNECT_CAP_MS,
+    RECONNECT_JITTER_RATIO, Reopen, SLEEP_LATENESS_MS, SseFrame, StreamEffect, StreamOpen, StreamRequest,
+    StreamSession, liveness_timeout, reconnect_delay,
+};
+pub use bridge_worker_stream_driver::{
+    CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector, StreamFailure,
+    StreamResponse, run_stream,
+};
+pub use bridge_worker_stream_http::{HttpStreamBody, HttpStreamConnector};
+pub use bridge_worker_types::{
+    InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
+};
+pub use browser_query::{
+    BrowserPrompt, BrowserQueryOptions, BrowserTransport, browser_query, get_ccr_event, get_sse_drop_counts,
+    get_sse_last_sequence_num, resume_sse_stream, suspend_sse_stream,
 };
 pub use builtin_tool_name::BuiltinToolName;
 pub use bundled_cli::{
@@ -181,8 +324,9 @@ pub use bundled_cli::{
 pub use cli_discovery::CliNotFoundError;
 pub use cli_path::{CliPathError, WindowsBatchCli};
 pub use client::{
-    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_turn_with_transport,
-    query_with_adapters, query_with_transport,
+    ClaudeSdkClient, ClientConnector, ClientHandle, ConnectPrompt, CustomTransport, NativeCli, Query,
+    UnconnectedClient, query, query_turn, query_turn_with_adapters, query_turn_with_transport, query_with_adapters,
+    query_with_transport,
 };
 pub use client_app::{format_client_app, normalize_client_app};
 pub use client_app_derivation::{BundledCli, ClientAppDerivation};
@@ -204,9 +348,12 @@ pub use effort_level::EffortLevel;
 pub use environment::Environment;
 pub use environment_plan::EnvironmentPlan;
 pub use error::{
-    AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, JsonDecodeSourceError,
-    MessageParseError, ProtocolError, ResultError, python_cli_not_found_text, python_process_error_text,
+    AbortError, ControlOperation, ControlRejectionError, Error, InitializeTimeoutError, JsonDecodeError,
+    JsonDecodeSourceError, MessageParseError, ProtocolError, ResultError, python_cli_not_found_text,
+    python_process_error_text,
 };
+pub use extract_from_bunfs::{extract_from_bunfs, extract_from_bunfs_with};
+pub use home_directory::HomeDirectoryError;
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,
@@ -225,9 +372,9 @@ pub use mcp_url::{McpUrl, McpUrlError};
 pub use mcp_wire_ids::{McpWireIds, McpWireScan};
 pub use message::{
     AssistantMessage, Content, ContentBlock, ConversationResetMessage, DeferredToolUse, HookEventMessage, Message,
-    MessageDecoding, MirrorErrorMessage, RateLimitEvent, RateLimitInfo, ResultMessage, ResultStatus, StreamEvent,
-    SystemEvent, SystemMessage, TaskNotificationMessage, TaskProgressMessage, TaskStartedMessage, TaskUpdatedMessage,
-    ToolResultStatus, UserMessage,
+    MessageDecoding, MirrorErrorMessage, PermissionDenial, RateLimitEvent, RateLimitInfo, ResultMessage, ResultStatus,
+    StreamEvent, SystemEvent, SystemMessage, TaskNotificationMessage, TaskProgressMessage, TaskStartedMessage,
+    TaskUpdatedMessage, ToolResultStatus, UserMessage,
 };
 pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
@@ -235,10 +382,10 @@ pub use model_name::ModelName;
 pub use node_path::NodePathDialect;
 pub use option_error::OptionError;
 pub use options::{
-    ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
-    InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, McpServers, MessageBuffer, PartialMessages,
-    RequestIdExhaustion, SdkMcpServers, SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet,
-    VerbatimPrompts,
+    ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, EndWithoutResult,
+    FileCheckpointing, InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, McpServers, MessageBuffer,
+    PartialMessages, RequestIdExhaustion, RunEndTimeout, SdkMcpServers, SessionFork, SessionPersistence, Shutdown,
+    SystemPrompt, ToolSet, VerbatimPrompts,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{
@@ -250,9 +397,13 @@ pub use permission_update::{
     PermissionBehavior, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError,
 };
 pub use plugin::{LocalPlugin, PluginDelivery};
+pub use prewarm::{
+    ClaimError, ClaimInfo, ClaimOptions, SpareProcess, StartupOptions, WarmQuery, prewarm, prewarm_with_adapters,
+    startup, startup_with_adapters,
+};
 pub use process_options::{
-    ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrDelivery, StderrHandler,
-    TraceContext,
+    ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, OnProcessSpawned, ProcessSpawnInfo, ScriptRuntime,
+    SpawnClaudeCodeProcess, SpawnOptions, StderrDelivery, StderrHandler, TraceContext,
 };
 pub use prompt::Prompt;
 pub use python_json_value::{
@@ -261,9 +412,15 @@ pub use python_json_value::{
 };
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use raw_json_id::{RawJsonId, RawJsonIdError};
+pub use remote_control::{RemoteControlOptions, WorkSecretFuture, WorkSecretRefreshRequest, WorkSecretRefresher};
 pub use runtime_options::{
-    DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
-    ThinkingDisplay,
+    DangerousPermissionSkip, DebugOutput, EmptyCollection, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget,
+    ThinkingConfig, ThinkingDisplay,
+};
+pub use schema_pointer::{SchemaPointer, SchemaPointerError};
+pub use sdk_mcp_choices::{
+    LengthChoice, NullabilityChoice, NumberFormatChoice, RefineFailure, Refinement, SchemaCallback,
+    SchemaCallbackOptions, SchemaChoice, StringCheckKind, StringFormatChoice, Transformation, UnionChoice,
 };
 pub use sdk_mcp_server::{
     LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, SdkMcpServer, SdkMcpSession,
@@ -319,6 +476,20 @@ pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
+pub use settings_sandbox_schema::{SandboxConfigRejected, SandboxConfigSchema};
+pub use sse_ccr_event::SseCcrEvent;
+pub use sse_delivery_update::SseDeliveryUpdate;
+pub use sse_drop_category::SseDropCategory;
+pub use sse_error::SseError;
+pub use sse_frame::SseFrame;
+pub use sse_frame_filter::{SseEvent, SseFrameFilter};
+pub use sse_http_error::{SseHttpError, http_error_reason};
+pub use sse_log_record::{SseLogLevel, SseLogRecord};
+pub use sse_options::{CatchUpTruncatedHandler, DeliveryUpdateHandler, SseOptions};
+pub use sse_parser::SseParser;
+pub use sse_prepared_write::SsePreparedWrite;
+pub use sse_transport::{G4_TEXT_ENVELOPE_ARM_PORTED, SseHandle, SseTransport};
+pub use startup_timeout::StartupHooksRunning;
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
 pub use system_prompt::{CustomPrompt, PresetPrompt};
@@ -331,6 +502,7 @@ pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use transport::Transport;
+pub use ui_host::{UiFuture, UiHandler, UiHost, UiRequest};
 pub use upstream::hooks::{EXIT_REASONS, ExitReason, HOOK_EVENTS, HookInput, HookJSONOutput};
 pub use upstream::settings::Settings;
 pub use upstream::settings_resolution::{
@@ -339,6 +511,7 @@ pub use upstream::settings_resolution::{
 };
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
+pub use validation_choices::{ValidationChoices, ValidationChoicesError, ValidationChoicesOptions};
 pub use version_check::{parse_version, unreported_version_warning};
 pub use websocket_error::WebSocketError;
 pub use websocket_transport::{AuthMessage, HeaderDelivery, OAuthCredential, WebSocketOptions, WebSocketTransport};

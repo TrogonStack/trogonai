@@ -54,6 +54,12 @@ information.
 
 For interactive use, create a `ClaudeSdkClient`, send a prompt and receive
 through `Message::Result`. The next prompt reuses the process.
+`receive_response()` is Python's `receive_response()`: a `Stream` that yields
+messages through the next `Message::Result` and then ends, leaving later
+messages queued. `receive_messages()` streams on without stopping. `Query` and
+`ClaudeSdkClient` are themselves `futures_util::Stream`s of
+`Result<Message, Error>`, TypeScript's `for await`, ending where `next_message`
+returns `None`.
 `send_input(UserInput)` accepts structured content and message identity.
 `InputBlock` is a transparent JSON-object wrapper forwarded verbatim, with a
 `text` convenience constructor; the CLI and the Messages API validate block shapes.
@@ -63,10 +69,59 @@ queued input or `stream_input`, and receive on the owner concurrently. Call
 `finish_input()` when no more user messages will be sent. Reported queue counts
 handle CLIs that coalesce queued sends into a turn.
 
-Call `disconnect().await` to wait for shutdown and receive cleanup errors. Dropping
-the owner requests shutdown even when a handle survives, but does not call or
-await `disconnect()`. Cleanup needs a running Tokio runtime; the child also has a
-`kill_on_drop` fallback.
+`stream_input` follows TypeScript's `Query.streamInput()` by default: an abort
+ends it quietly, a write after close fails with `Error::NotReadyForWriting`, and
+stdin closes once the stream ends. When a callback needs the CLI and the call
+wrote a prompt, stdin stays open until the run ends; both SDKs count the
+prompts of each call, so a call that wrote nothing closes stdin at once even
+while an earlier call's run is open. `try_stream_input` takes a fallible stream;
+under TypeScript its error is returned and stdin stays open. Under
+`ArgvStyle::Python` both log a failure, close stdin and return `Ok`, like
+Python's `stream_input`.
+
+`close()` on a `Query`, the client or any `ClientHandle` is TypeScript's
+`Query.close()`: it takes `&self`, so it can be called while the stream is being
+read, shuts the process down without waiting and is idempotent. Messages already
+received stay readable before `next_message` returns `None`, and a control
+request still waiting fails with `Error::QueryClosed` ("Query closed before
+response received"); under `ArgvStyle::Python` it runs out its timeout instead,
+as Python's `close()` leaves it. Call `disconnect().await` on the query or the
+client to close and wait for shutdown and cleanup errors. A TypeScript
+`for await` that breaks, the iterator's `return()` and `Symbol.asyncDispose`
+are `disconnect().await`, which discards messages not read yet; `throw(error)`
+is `disconnect().await` followed by returning the caller's own error, or
+`abort()` to stop the process at once. Dropping the owner closes even when a
+handle survives, but does not await cleanup. Cleanup needs a running Tokio runtime; the
+child also has a `kill_on_drop` fallback.
+
+## Pre-warming with startup
+
+`startup(StartupOptions)` follows TypeScript `startup()`: it starts the CLI, completes the initialize handshake and
+returns a `WarmQuery`. `WarmQuery::query(prompt)` writes the prompt to that process and returns a `Query`;
+`close()` discards the process without a prompt, and `dispose()` closes it and waits for the cleanup. Python
+0.2.181 has no pre-warming. `query` takes `self`, so a second call cannot compile where TypeScript throws.
+
+`initialize_timeout` of `None` waits 60000 ms and does not count the time in which Claude Code reports a
+SessionStart or Setup hook running, for at most 10 minutes; a value you pass counts throughout. A timeout is
+`Error::InitializeTimeout` with the upstream text, the `initialize_timeout` error class, the last startup mark
+(or `none`) and its age. The process gets `CLAUDE_CODE_SDK_READS_STARTUP_MARKS=1` unless the environment has that
+key in any letter case. An error result exit carries `ResultError::startup_failure_reason`.
+
+## Spare processes with prewarm
+
+`prewarm(StartupOptions)` follows TypeScript `prewarm()`: it starts the CLI with `--await-claim`, completes the
+initialize handshake and returns a `SpareProcess` that is not tied to a session yet.
+`SpareProcess::claim(prompt, ClaimOptions)` writes one `claim_session` request (working directory, permission mode,
+environment, extra directories, system prompt addition, title, agents, accepted workspace trust and the SDK MCP server
+names), applies the model, thinking budget and settings around it and then sends the prompt, returning a `Query`.
+`claimed()` yields the `ClaimInfo`, `exited()` resolves when the process ends, and `close()` or `dispose()`
+discard the spare. A claim fails with `ClaimError` carrying the upstream text: `settings_not_applied` closes the
+process and sends no prompt, `option_not_applied` sends the prompt and says which options were skipped. A spare
+started without a directory parks under `spares/spare-XXXXXX` (mode 0700) in the config home until it is claimed.
+Settings that register hooks cannot be applied by a claim and are refused before anything is written.
+The claim answer's `initialize` replaces the initialization result as `sdk.mjs` merges it: the applied flags it
+omits or sends as `null` keep their first values, and a first result that was missing or `null`, or an `initialize`
+of `null`, fails the initialization result with `Error::TypeError` while `claimed()` still succeeds.
 
 ## Messages and controls
 
@@ -83,9 +138,14 @@ message missing a key. Goldens from both pinned SDKs pin the two modes; see
 compact when another dependency enables `serde_json`'s `preserve_order` feature.
 Pattern matching exposes the same fields through the box.
 
-`connect().await` completes the CLI initialization handshake before returning.
-`connection_info()` borrows the cached `ConnectionInfo` from that handshake,
-including support flags and additional metadata. Reading it is non-fallible and
+Under the default TypeScript dialect `connect().await` and `query()` return as soon as the initialize
+request is queued, the way `sdk.mjs` hands back its `Query`; anything sent next is written right behind
+the initialize bytes. Under `ArgvStyle::Python`, `connect()` and `query()` wait for the initialize
+response, as `claude_agent_sdk` does. `ClientHandle::initialization_result().await` returns the
+`ConnectionInfo` of the first initialize response, including support flags and additional metadata, and
+waits for it when it has not arrived. A failed initialize rejects it with `Error::InitializationFailed`,
+which prints the underlying error; the run ends with that error too when a blocking hook or managed
+settings made the prompt wait for the confirmation, and otherwise it carries on, as `sdk.mjs` does. It
 sends no protocol messages; `ConnectionInfo::as_json()` retains the original
 response, including omitted or explicitly null fields, or `None` when the reply
 has no `response` field, where TypeScript `initializationResult()` resolves to
@@ -116,7 +176,11 @@ a shape check, or `None` when the reply has none, where TypeScript returns
 (`read_file` is `None` on any failure, `background_tasks` is `true` when the CLI
 omits `backgrounded`), and a rejected request keeps a well-formed TypeScript
 `error_code`.
-`supported_commands()` follows the latest `commands_changed` system message.
+`supported_commands()` follows the latest `commands_changed` system message,
+after reading the initialization result as `sdk.mjs` does. When initialize
+answered without a `response` or with `null`, `supported_commands`,
+`supported_models`, `supported_agents` and `account_info` fail with
+`Error::TypeError`, the engine text `ClaudeAgentOptions.js_runtime` selects.
 Legacy interrupt replies remain distinct from reported empty queues. Newer
 controls depend on installed CLI support.
 
@@ -150,6 +214,40 @@ and a cancellation signal. As in `sdk.mjs`, every elicitation mode and dialog
 kind reaches the handler and `supported_dialog_kinds` is only advertised to the
 CLI. Without a handler an elicitation is declined and a dialog is left for
 another client to answer.
+
+Under the default TypeScript dialect, `ClientHandle::set_ui_host` takes a
+`UiHost` whose methods answer the CLI's six `ui_*` requests; a missing method
+falls through to the unsupported subtype error. Under `ArgvStyle::Python` every
+`ui_*` request gets that error.
+
+`ClientHandle::enable_remote_control` takes `RemoteControlOptions` and, under
+the default TypeScript dialect, answers `remote_control_work_secret` for the
+session it attached, matched as `sdk.mjs` does. It returns the `response` as
+sent: `None` is `undefined` and `Some(null)` is `null`. Enabling with either one
+fails with `Error::Protocol` while it is still the latest call, as `sdk.mjs`
+throws reading `bridge_session_id`. `sdk.mjs` can call `enableRemoteControl`
+before `initialize` resolves, which writes it right behind the initialize
+request. The TypeScript dialect's `connect` returns at that point, so a call
+made on the returned client lands at the same place on the wire. Under
+`ArgvStyle::Python` a work secret request gets the unsupported subtype error.
+
+The run ends as `hasBidirectionalNeeds` decides. When nothing needs the CLI to keep
+asking (no embedded MCP server, hook or permission handler, and under TypeScript
+no elicitation or dialog handler, auth callback or work secret answerer), a streamed
+input closes stdin as soon as it is written. Otherwise stdin closes when the run
+ends, and only the frames decide that, per dialect (`src/run_end.rs`). Under
+TypeScript a result ends the run when the session reported no state or is idle, and
+otherwise `idle` does, or the ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, read
+and parsed as `limits.run_end_timeout` selects, 600000 ms by default and
+disabled by 0) when no `idle` follows; reported tasks
+and queued turns play no part. `query()` with a prompt is `sdk.mjs`'s single user turn,
+which closes stdin the moment its run ends. With a session store, a result reaches that machine only after its transcript flush, as in both
+readers; the ceiling and a finished input do not wait for a flush. Under `ArgvStyle::Python` the prompt waits
+the same way, but a tracked `local_agent` or `local_workflow` task still in flight keeps
+the run open at a result, at `idle` and at the ceiling. `query()` and the client keep
+yielding what the CLI sends after the result until the CLI exits; only `query_turn()`
+stops at the first result. A CLI that never sends a result still gets its stdin closed
+after the last prompt when nothing needs it.
 
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the
@@ -187,7 +285,41 @@ Each client opens its own session. The built-in server supports initialize,
 initialized notification, cancellation, ping and tool listing/calls.
 `McpServerDialect::TypeScript`, the default, answers like `createSdkMcpServer`:
 it drops messages it cannot read, reports parameter errors as `-32603` and
-lists each schema with its draft-07 `$schema`. `McpServerDialect::Python`
+lists each schema with its draft-07 `$schema`. It validates tool arguments,
+handler results and the JSON-RPC envelope the way the bundled zod and MCP SDK
+do, with their issue paths, codes, messages and order. The zod schema is
+rebuilt from the listed JSON Schema, so what JSON Schema cannot tell apart
+follows the mapping zod's own `toJSONSchema` makes most likely, until the tool
+author chooses otherwise with `SdkTool::with_validation`. A
+`ValidationChoices` (built from `ValidationChoicesOptions`, with typed errors)
+keeps its choices beside the schema, keyed by the JSON Pointer of the node they
+apply to, so `tools/list` stays exactly what `createSdkMcpServer` sends. Each
+choice has a recorded answer from the real zod in
+`tests/fixtures/sdk_mcp/typescript_choices.json`:
+`UnionChoice` picks a plain union (every option's issues in one
+`invalid_union`) or a discriminated union (the option the discriminator names,
+or one `invalid_union` at the discriminator); `NullabilityChoice` picks
+`nullable` (the inner issues) or a union with `null` (an `invalid_union`);
+`LengthChoice` picks `length(n)` (one `exact` issue) or `min(n).max(n)`;
+`SchemaChoice::StringCheckOrder` lists the minimum, maximum and format checks
+of a string in the order they were declared, which is the order of its issues;
+`NumberFormatChoice` picks `int32`/`uint32` (the format names the integer type)
+or `number().int().min(..).max(..)` (`safeint`); `StringFormatChoice` picks
+`iso.time()` (format `time`) or a plain `regex` pattern; and
+`SchemaChoice::RegexFlags` gives the flags the listed `pattern` loses.
+`SchemaCallbackOptions` opts a schema node in to a `refine` and a `transform`
+callback, which run where zod runs them: the refinement after the node's checks
+unless one aborted them, as a `custom` issue with its path and message, and the
+transformation only when nothing failed, its result being what the handler
+receives. The embedded-server tests are
+`typescript_dialect_validates_each_exposed_choice_like_zod` and the unit tests
+in `sdk_mcp_choices_tests.rs`. Patterns run through an ECMAScript
+regular expression engine (lookaround, backreferences, named groups and the `u`
+and `v` flags), and a pattern that does not compile fails when the tool is
+registered. A handler result is passed to the client as the JSON value it
+returned once it passes `CallToolResult`.
+Schemas that use keywords zod cannot express (`allOf`, `oneOf`, `$ref` and the
+like) are also checked by the JSON Schema validator. `McpServerDialect::Python`
 answers like `create_sdk_mcp_server`: it reports unreadable messages as
 `McpServerError::Protocol`, refuses requests before `initialize` and answers a
 cancelled call with `-32800`. Both dialects validate `clientInfo.icons` and
@@ -247,6 +379,30 @@ manifest. Closing writes nothing for the requests still waiting. Python fails th
 request when the server name or message is missing, and answers an unknown
 server or an undeliverable message with a JSON-RPC error under the message's
 id.
+
+The Python dialect reads every message with the `mcp` package's JSON-RPC union
+(request, notification, response, error response), including pydantic's lax
+reading of an error code and its smart-union choice between models. A message
+no model accepts is reported with the text of the `ValidationError` pydantic
+raises: the same header, locations, messages, truncated `input_value` repr and
+documentation link.
+
+Before the first `initialize` request, TypeScript style captures a manifest for
+each in-process server (`captureSdkMcpServerManifests`), so the CLI need not
+handshake them over the control channel. Each server gets an `initialize`
+request with id `sdk-manifest-capture:initialize` (protocol version
+`2025-11-25`, no capabilities, client `claude-code` `0.3.323`), then a
+`notifications/initialized`, then, when its capabilities include `tools`, a
+`tools/list` with id `sdk-manifest-capture:tools-list`. The manifest is
+`{initializeResult, toolsListResult}`, and `toolsListResult` is left out when
+the result has a `nextCursor`. A server that answers an error, throws or does
+not answer is left out and the CLI handshakes it. All servers run side by side
+under one 250 ms deadline, and a reply after it is dropped. The manifests go in
+`sdkMcpServerManifests` of the `initialize` request. Upstream turns the capture
+off with the `CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS` environment variable and
+has no query option for it; `ClaudeAgentOptions::capture_sdk_mcp_manifests` is
+this crate's own switch and `Some(false)` disables it. Python style has no
+capture.
 
 `set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
 servers before the request is sent and keeps the session of a server that stays
@@ -317,7 +473,9 @@ upstream SDKs).
   when a tool permission handler exists. `HookRegistration::on_failure` is an
   `Option` and the wire field is omitted when unset.
 - `ClaudeSdkClient::connect` discovers the CLI in Python's order when `cli_path` is
-  omitted (no bundled binary exists in this crate); a miss is `CliNotFoundError`
+  omitted, starting with `<root>/_bundled/claude[.exe]` when `bundled_cli_root`
+  names Python's package directory (off by default, because this crate ships no
+  binary and TypeScript has no bundled lookup); a miss is `CliNotFoundError`
   with Python's hint text. `connect_with_adapters` never discovers, matching
   Python's custom transport and TypeScript's `spawnClaudeCodeProcess`: its
   spawner receives `claude` when `cli_path` is omitted.
@@ -332,8 +490,28 @@ upstream SDKs).
   argument list and no store-backed resume materialization, while the session
   store mirror still runs, as in Python. `read_message` must be cancel safe, and
   an `Err` from any method ends the run as `Error::Transport` surfaces it.
-- Bundled executables are caller-driven lookups, not part of `connect`.
-  `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check.
+- `extract_from_bunfs` ports the TypeScript `extract` entrypoint. A path with
+  neither `$bunfs` nor `~BUN` comes back unchanged; any other is read, hashed
+  (first 16 hex digits of SHA-256) and copied to
+  `{tmpdir}/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/<name>` (root
+  `claude-agent-sdk` on Windows, tmpdir from `CLAUDE_CODE_TMPDIR`, `/tmp` on macOS
+  or the OS temp dir). An existing copy is reused only when it is a plain,
+  singly linked file with the same bytes. Failures are `tracing` warnings with the
+  upstream text and the input path is returned. `extract_from_bunfs_with` takes an
+  `ExtractHost` for tests. Warning texts name errnos from a fixed table, and
+  hard link counts and file ids are only read on Unix.
+- `spawn_claude_code_process` is TypeScript's `spawnClaudeCodeProcess`: the SDK
+  builds the command and hands `SpawnOptions` (command, arguments, working
+  directory, the whole child environment, a forwarded abort signal and, on Unix,
+  the uid from `user` or `run_as_uid`) to the callback, which returns a tokio
+  `Child` with piped stdin and stdout, so a container or remote shell can host the
+  CLI. The forwarded signal is cancelled only when the client closes after its
+  abort controller was cancelled, past the close grace. As in TypeScript, a
+  custom spawn gets no default debug file. `on_process_spawned` is TypeScript's
+  undeclared `onProcessSpawned`: after the SDK's own spawn it receives the pid
+  and `spawn_sync_ms`, and a panic in it is logged and ignored.
+- `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check, which
+  `connect` runs only through `bundled_cli_root`.
   `bundled_cli_derives_client_app` and `meets_derived_client_app_minimum` port
   Python's version gate for deriving an app label (the pinned CLI version and the
   `claude.version` record beside the bundled binary must both be `999.0.0` or
@@ -343,8 +521,9 @@ upstream SDKs).
   (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, musl before glibc on musl
   Linux, `-android` packages, `.exe` on win32) over a `ResolveNodeModule`
   adapter; `NodeModuleLookup` is the default and searches Node's `node_modules`,
-  `NODE_PATH`, home and prefix directories. Musl comes from the compile target
-  (`NativePackageTarget::host`) because a Rust process has no Node process report.
+  `NODE_PATH`, home and prefix directories. `NativePackageTarget::host` prefers
+  musl on Linux unless the process reports a glibc runtime version
+  (`gnu_get_libc_version`), as the Node process report does.
 - Failures follow upstream. A missing executable is `Error::CliNotFoundAt`, a missing
   `cwd` is `Error::WorkingDirectoryMissing`, any other spawn failure is
   `Error::Spawn` ("Failed to start Claude Code: ..."). `Error::Process` displays
@@ -353,9 +532,12 @@ upstream SDKs).
   unsuccessfully after an `is_error` result, the error is `Error::Result`
   (`ResultError`): Python's text always, TypeScript's text when it is non-empty.
   `abort()` stops the process and ends the run with `Error::Aborted`
-  (`AbortError`). Closing follows `limits.shutdown`: TypeScript's ladder by
-  default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later without
-  waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
+  (`AbortError`, "Claude Code process aborted by user"). It cancels
+  `abort_controller`, TypeScript's `abortController`: a caller's token cancelled
+  from anywhere does the same, a token already cancelled fails `connect` with
+  that error, and `close()` leaves it untouched. Closing follows `limits.shutdown`: TypeScript's ladder by
+  default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later if the
+  process is still running, without waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
   `Error::ShutdownTimeout` and `Error::StderrDrainTimeout`.
 - Writes fail with distinct errors in upstream's order: `Error::NotReadyForWriting`
   after stdin is closed (and, in the TypeScript style, after the process exited,
@@ -441,8 +623,18 @@ upstream SDKs).
   the browser class it ignores `headers`; `HeaderDelivery::Handshake` sends them
   on the upgrade request instead. Cancelling the token given to `with_abort`
   closes the socket and fails the read with `WebSocketError::Aborted`.
-- Deferred to other tracks: the remote SSE transport, flag settings and
-  `updateSettings`.
+- `SseTransport` is the browser SDK's SSE transport as a `Transport`, for
+  `connect_with_transport`: `SseOptions::new(stream_url, send_url, session_id)`
+  plus `headers`, `from_sequence_num`, `on_catch_up_truncated` and
+  `on_delivery_update`. It streams with `Last-Event-ID`, treats 401, 403 and 404
+  as permanent, reconnects other failures with a doubling backoff for five
+  attempts in a row, gives the stream 15000 ms to answer and 45000 ms of
+  silence, and POSTs writes in order with a 30000 ms timeout, honouring
+  `Retry-After` and dropping a line after three failures. `SseTransport::handle`
+  returns an `SseHandle` with `suspend`, `resume`, `expect_control_response`,
+  `drop_counts`, `last_sequence_num`, `ccr_event` and `mark_delivered`. Cancelling the token
+  given to `with_abort` fails the read with `SseError::Aborted`.
+- Deferred to other tracks: flag settings and `updateSettings`.
 
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;
@@ -452,13 +644,24 @@ environment values and HTTP or SSE header values follow the same rule.
 `ModelName` keeps the model out of debug output, so options debug output shows
 every other setting without listing fields by hand.
 A Windows `.bat` or `.cmd` CLI path starts, as in TypeScript;
-`WindowsBatchCli::Refuse` selects Python's refusal at process start.
+`WindowsBatchCli::Refuse` selects Python's refusal at process start, which
+fires only on Windows, as in Python.
 Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
 and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
-on an existing client. Rust intentionally uses an async factory for `connect`
-and consumes the client in `disconnect(self)` to observe cleanup errors. Published
-[TypeScript `0.3.319`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/0.3.319)
-uses `Query` and `WarmQuery` with `close()` instead.
+on an existing client; Rust's `connect` is the async factory that returns the
+connected client, and `disconnect(self)` consumes it, so a second disconnect
+cannot be written rather than being a no-op. TypeScript's `Query.close()` is
+`close()` on the query, the client or a handle. Python's `get_server_info()` is
+`ClientHandle::initialization_result()`.
+`ClaudeSdkClient::new(options)` keeps Python's construct-then-connect shape: the
+`UnconnectedClient` it returns takes a transport or adapters and then
+`connect(prompt)` with no prompt, a string, or a stream that a background task
+writes, through the same factories. `scope(body)` is `async with`: it connects,
+runs the body and always disconnects, returning `Error::Cleanup` when both fail.
+`query` writes a string prompt in Python's `"default"` session under
+`ArgvStyle::Python` and in the empty session `sdk.mjs` writes otherwise;
+`query_in_session` names the session, and `query_stream_in_session` sets it only
+on inputs that name none.
 
 Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.
@@ -480,12 +683,17 @@ customizations when supported.
 `Limits::default()` matches the TypeScript SDK: no stdout line cap, the last
 2048 UTF-16 units of stderr kept for process errors, unbounded queues, no
 control, write or callback timeout, and an initialize deadline of 660 seconds
-only when a hook is set to block on failure. `Limits::python()` selects the
+only when a hook is set to block on failure, and a run-end wait read from
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` the way TypeScript reads it (600 seconds
+when unset, zero for no limit). `Limits::python()` selects the
 Python SDK's values: a 1 MiB line cap, a 60 second control wait, a 100 message
-buffer that stops reading stdout while full, and its initialize wait and
-shutdown ladder. Every other bound (pending controls, inbound callbacks, tracked
+buffer that stops reading stdout while full, and its initialize wait, shutdown
+ladder and `int()` parse of that variable. `RunEndTimeout::Fixed` opts into a
+fixed run-end wait. Every other bound (pending controls, inbound callbacks, tracked
 tasks, queued inputs, a failing message queue, command queue room) is opt-in and
-keeps its typed error. Stderr debug output omits its contents. `QueueCapacity`
+keeps its typed error. A CLI that exits with status 0 before a result ends the
+messages quietly, as both SDKs do; `EndWithoutResult::Fail` reports it as
+`Error::UnexpectedEof` instead. Stderr debug output omits its contents. `QueueCapacity`
 validates Tokio's range; `Timeout::checked` rejects zero and values past 24
 hours.
 
@@ -506,7 +714,10 @@ parent process). The result carries per-key provenance and `machinePolicy.didNot
 `resolve_settings_with` runs it against any `SettingsHost`, so tests inject files, variables and
 command output. A `ResolverState` holds what upstream keeps between calls;
 `ResolverState::with_rereads(PolicyRereads::Inline)` runs machine policy re-reads on the calling
-thread, so the host's clock alone decides when one has ended. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+thread, so the host's clock alone decides when one has ended. Upstream reads the launch directory
+when the SDK module is imported; nothing here runs at load time, so `resolve_settings` reads it on
+its first call unless the binary calls `adapters::capture_launch_directory()` at the top of `main`,
+which gives the upstream timing. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
 byte for byte. Numbers read as `JSON.parse` reads them: integers above 2^53 round, and a number
 past the double range reads as `Infinity`. A typed setting refuses `Infinity`, an `env` value spells
@@ -555,14 +766,27 @@ backend or use `InMemorySessionStore`. Entries are keyed by project/session and
 optional subagent path; the in-memory backend deduplicates stable UUIDs.
 [The store example](examples/session_store.rs) needs no Claude or network.
 
-As upstream, `SessionKey::new` and `SessionSubpath::new` take any text, and
-`SessionKey::from_transcript_path` resolves a relative path or projects
-directory against the working directory and validates nothing in the path
-beyond its shape. Upstream checks a subpath only where resume turns it into a
-file, and each SDK checks it its own way, so resume applies the rule of the
-selected dialect. `SessionKey::checked` and `SessionSubpath::checked` are the
-opt-in constructors that reject an id or subpath that is not a safe file name
-component, with typed errors.
+As upstream, `SessionKey::new`, `SessionProjectKey::new` and
+`SessionSubpath::new` take any text, and `SessionKey::from_transcript_path`
+resolves a relative path or projects directory against the working directory
+and validates nothing in the path beyond its shape. On Windows the transcript
+path compares case-insensitively, accepts both separators, drives and UNC
+shares, and keeps the case of the names it returns. Upstream checks a subpath
+only where resume turns it into a file, and each SDK checks it its own way, so
+resume applies the rule of the selected dialect. `SessionKey::checked`,
+`SessionProjectKey::checked` and `SessionSubpath::checked` are the opt-in
+constructors that reject an id, project key or subpath that is not a safe file
+name component, with typed errors; `SessionSubpath::checked` reads a drive
+prefix as the platform does (any character before a colon on Windows, a letter
+on POSIX) and only on Windows also rejects empty components and reserved device
+names. On Windows Python reads a part such as `a:x` as a drive, so
+`SessionKey::from_transcript_path_with` and the mirror give a Python-dialect
+store the key CPython 3.12 derives; TypeScript is the default.
+`SessionStoreOptions::project_key` is an opt-in override that defaults to `None`,
+which derives the key from the working directory exactly as upstream does
+(TypeScript's `CLAUDE_CODE_PROJECT_DIR_NAME` is its only upstream analogue). A
+key you set is joined to the projects directory as given, so build it with
+`SessionProjectKey::checked` when it does not come from trusted code.
 
 Mirroring follows CLI local writes. Each result waits for its own store barrier
 while controls remain serviceable. Failures appear as `mirror_error` messages

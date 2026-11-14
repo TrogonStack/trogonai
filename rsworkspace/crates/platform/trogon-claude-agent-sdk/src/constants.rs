@@ -947,6 +947,126 @@ pub(crate) const VETTING_HOME_MOUNT: &str = "/home";
 /// Folder whose device `/home` is compared with (`TI.homeIsOwnMount` upstream).
 pub(crate) const VETTING_USERS_MOUNT: &str = "/Users";
 
+/// libuv's `uv_translate_sys_error` as node runs it on Windows: the `code` each Windows system error takes, in the
+/// order of its `switch`. A code missing here is `UNKNOWN`.
+pub(crate) const LIBUV_WINDOWS_ERRORS: [(i32, &str); 100] = [
+    (10013, "EACCES"),
+    (740, "EACCES"),
+    (1920, "EACCES"),
+    (1227, "EADDRINUSE"),
+    (10048, "EADDRINUSE"),
+    (10049, "EADDRNOTAVAIL"),
+    (10047, "EAFNOSUPPORT"),
+    (10035, "EAGAIN"),
+    (232, "EAGAIN"),
+    (10037, "EALREADY"),
+    (1004, "EBADF"),
+    (6, "EBADF"),
+    (33, "EBUSY"),
+    (231, "EBUSY"),
+    (32, "EBUSY"),
+    (995, "ECANCELED"),
+    (10004, "ECANCELED"),
+    (1113, "ECHARSET"),
+    (1236, "ECONNABORTED"),
+    (10053, "ECONNABORTED"),
+    (1225, "ECONNREFUSED"),
+    (10061, "ECONNREFUSED"),
+    (64, "ECONNRESET"),
+    (10054, "ECONNRESET"),
+    (183, "EEXIST"),
+    (80, "EEXIST"),
+    (998, "EFAULT"),
+    (10014, "EFAULT"),
+    (1232, "EHOSTUNREACH"),
+    (10065, "EHOSTUNREACH"),
+    (122, "EINVAL"),
+    (13, "EINVAL"),
+    (87, "EINVAL"),
+    (1464, "EINVAL"),
+    (10022, "EINVAL"),
+    (10046, "EINVAL"),
+    (1102, "EIO"),
+    (1111, "EIO"),
+    (23, "EIO"),
+    (1166, "EIO"),
+    (1165, "EIO"),
+    (1393, "EIO"),
+    (1129, "EIO"),
+    (1101, "EIO"),
+    (31, "EIO"),
+    (1106, "EIO"),
+    (1117, "EIO"),
+    (1104, "EIO"),
+    (205, "EIO"),
+    (110, "EIO"),
+    (1103, "EIO"),
+    (156, "EIO"),
+    (10056, "EISCONN"),
+    (1921, "ELOOP"),
+    (4, "EMFILE"),
+    (10024, "EMFILE"),
+    (10040, "EMSGSIZE"),
+    (111, "ENAMETOOLONG"),
+    (206, "ENAMETOOLONG"),
+    (1231, "ENETUNREACH"),
+    (10051, "ENETUNREACH"),
+    (10055, "ENOBUFS"),
+    (161, "ENOENT"),
+    (267, "ENOENT"),
+    (203, "ENOENT"),
+    (2, "ENOENT"),
+    (123, "ENOENT"),
+    (15, "ENOENT"),
+    (4392, "ENOENT"),
+    (126, "ENOENT"),
+    (3, "ENOENT"),
+    (11001, "ENOENT"),
+    (11004, "ENOENT"),
+    (8, "ENOMEM"),
+    (14, "ENOMEM"),
+    (82, "ENOSPC"),
+    (112, "ENOSPC"),
+    (277, "ENOSPC"),
+    (1100, "ENOSPC"),
+    (39, "ENOSPC"),
+    (2250, "ENOTCONN"),
+    (10057, "ENOTCONN"),
+    (145, "ENOTEMPTY"),
+    (10038, "ENOTSOCK"),
+    (50, "ENOTSUP"),
+    (109, "EOF"),
+    (5, "EPERM"),
+    (1314, "EPERM"),
+    (230, "EPIPE"),
+    (233, "EPIPE"),
+    (10058, "EPIPE"),
+    (10043, "EPROTONOSUPPORT"),
+    (19, "EROFS"),
+    (121, "ETIMEDOUT"),
+    (10060, "ETIMEDOUT"),
+    (17, "EXDEV"),
+    (1, "EISDIR"),
+    (208, "E2BIG"),
+    (10044, "ESOCKTNOSUPPORT"),
+    (193, "EFTYPE"),
+];
+
+/// `ERROR_INVALID_HANDLE`, which libuv's Windows `realpath` raises for a final path it cannot shorten.
+pub(crate) const WINDOWS_ERROR_INVALID_HANDLE: i32 = 6;
+
+/// The prefix `GetFinalPathNameByHandleW` puts on a network path, which libuv's `realpath` turns into `\\`.
+pub(crate) const LIBUV_UNC_PATH_PREFIX: &str = "\\\\?\\UNC\\";
+
+/// The prefix `GetFinalPathNameByHandleW` puts on a local path, which libuv's `realpath` drops.
+pub(crate) const LIBUV_LONG_PATH_PREFIX: &str = "\\\\?\\";
+
+/// The UTF-16 units node reads for each byte of the WTF-8 spelling of a lone surrogate: one U+FFFD apiece.
+pub(crate) const LIBUV_LONE_SURROGATE_TEXT: [u16; 3] = [0xFFFD; 3];
+
+/// The `code` libuv gives a Windows system error its table does not name.
+pub(crate) const LIBUV_UNKNOWN_ERROR: &str = "UNKNOWN";
+
 /// The macOS automounter map that says whether `/home` is automounted (`TI.readAutoMaster` upstream).
 pub(crate) const VETTING_AUTO_MASTER: &str = "/etc/auto_master";
 
@@ -972,14 +1092,6 @@ pub(crate) const VETTING_FIRMLINKED_FOLDERS: [&str; 16] = [
     "private",
     "sw",
 ];
-
-/// `ENAMETOOLONG` as the host reports it.
-#[cfg(target_os = "macos")]
-pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 63;
-
-/// `ENAMETOOLONG` as the host reports it.
-#[cfg(not(target_os = "macos"))]
-pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 36;
 
 /// Milliseconds the machine policy reading stays in force when the last read answered (`ret` upstream).
 pub(crate) const MDM_REREAD_IDLE_MS: i128 = 1_800_000;
@@ -1178,3 +1290,93 @@ pub(crate) const RAW_JSON_MAX_DEPTH: usize = 200;
 
 /// The prefix of the placeholder text a request id that a `Value` cannot hold stands for until it is written.
 pub(crate) const PYTHON_ID_MARKER_PREFIX: &str = "\u{0}pyid:";
+
+/// TypeScript `oA`: how long the WebSocket transport's connection may take to open.
+pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_millis(15_000);
+
+/// TypeScript `g4`: the delay between the WebSocket transport's keep-alive frames.
+pub(crate) const WEBSOCKET_KEEP_ALIVE_INTERVAL: Duration = Duration::from_millis(50_000);
+
+/// The line the WebSocket transport sends as a keep-alive frame.
+pub(crate) const WEBSOCKET_KEEP_ALIVE_LINE: &str = "{\"type\":\"keep_alive\"}\n";
+
+/// The reason the WebSocket transport gives when it closes the connection.
+pub(crate) const WEBSOCKET_CLOSE_REASON: &str = "Normal closure";
+
+/// The code a browser reports for a close frame without a status.
+pub(crate) const WEBSOCKET_NO_STATUS_CODE: u16 = 1005;
+
+/// The code a browser reports when the connection drops without a close frame.
+pub(crate) const WEBSOCKET_ABNORMAL_CODE: u16 = 1006;
+
+/// The pydantic model union a JSON-RPC message is validated against, as pydantic titles its `ValidationError`.
+pub(crate) const PYDANTIC_JSONRPC_MESSAGE_TITLE: &str =
+    "union[JSONRPCRequest,JSONRPCNotification,JSONRPCResponse,JSONRPCError]";
+
+/// pydantic refuses to convert a string of more than this many significant digits to an integer.
+pub(crate) const PYDANTIC_MAX_INT_DIGITS: usize = 4300;
+
+/// The pydantic minor version that documents each error type.
+pub(crate) const PYDANTIC_DOCUMENTATION_VERSION: &str = "2.14";
+
+/// pydantic-core shows at most this many bytes of an input's `repr`.
+pub(crate) const PYDANTIC_MAX_REPR_BYTES: usize = 50;
+
+/// The bytes pydantic-core keeps from the start of a `repr` it truncates.
+pub(crate) const PYDANTIC_REPR_HEAD_BYTES: usize = 25;
+
+/// The bytes pydantic-core keeps from the end of a `repr` it truncates.
+pub(crate) const PYDANTIC_REPR_TAIL_BYTES: usize = 24;
+
+/// `OE`: the prefix of every request id the manifest capture sends, which marks a late reply for dropping.
+pub(crate) const MCP_MANIFEST_CAPTURE_ID_PREFIX: &str = "sdk-manifest-capture:";
+
+/// `$8`: how long the manifest capture waits for every server before the CLI is left to handshake the rest.
+pub(crate) const MCP_MANIFEST_CAPTURE_DEADLINE: Duration = Duration::from_millis(250);
+
+/// `F8`: the protocol version the manifest capture's `initialize` asks for.
+pub(crate) const MCP_MANIFEST_CAPTURE_PROTOCOL_VERSION: &str = "2025-11-25";
+
+/// Python's precision in `invalid literal for int() with base 10: %.200R`.
+pub(crate) const PYTHON_INT_LITERAL_REPR_CHARS: usize = 200;
+
+/// Python's floor and default for the initialize wait, in seconds: `max(int(...) / 1000.0, 60.0)`.
+pub(crate) const PYTHON_INITIALIZE_TIMEOUT_SECONDS: f64 = 60.0;
+
+/// The `uiHost` subtypes the driver routes to `UiHost`.
+pub(crate) const UI_SUBTYPES: [&str; 6] = [
+    "ui_copy",
+    "ui_prompt_read",
+    "ui_prompt_fill",
+    "ui_prompt_paint",
+    "ui_prompt_suggest",
+    "ui_read_selection",
+];
+
+/// `AE`: the startup initialize limit when the caller passes none.
+pub(crate) const STARTUP_DEFAULT_LIMIT: Duration = Duration::from_millis(60_000);
+/// `w8`: how long hook time stays uncounted, only when the caller passed no limit.
+pub(crate) const STARTUP_UNCOUNTED_BUDGET: Duration = Duration::from_millis(600_000);
+/// `itt`: how many hook ids are followed one by one; later ones are only counted.
+pub(crate) const STARTUP_FOLLOWED_LIMIT: usize = 64;
+/// The hook events whose running time `startup()` leaves uncounted.
+pub(crate) const STARTUP_HOOK_EVENTS: [&str; 2] = ["SessionStart", "Setup"];
+
+/// The keys of `ClaimOptions.settings` that govern hooks. A claim cannot apply them.
+pub(crate) const CLAIM_HOOK_SETTINGS: [&str; 5] = [
+    "hooks",
+    "disableAllHooks",
+    "allowManagedHooksOnly",
+    "allowedHttpHookUrls",
+    "httpHookAllowedEnvVars",
+];
+
+/// The settings keys that follow the claim, in the order `claim()` sends them.
+pub(crate) const CLAIM_FOLLOWING_SETTINGS: [&str; 6] = [
+    "model",
+    "agent",
+    "fastMode",
+    "permissions",
+    "availableModels",
+    "disableAutoMode",
+];

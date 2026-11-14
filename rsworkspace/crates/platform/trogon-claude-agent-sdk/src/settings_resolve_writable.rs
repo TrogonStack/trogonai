@@ -12,12 +12,14 @@ use std::os::unix::fs::MetadataExt;
 
 use crate::{
     adapters::{DirectoryEntryKind, SettingsHost},
+    connector_vetting::Located,
     constants::{
         MODE_GROUP_WRITABLE, MODE_OTHER_WRITABLE, WRITABLE_WALK_LINK_LIMIT, WSL_MANAGED_DIRECTORY, WSL_REGISTRY_TOOL,
     },
+    settings_resolve_connector::locate_document,
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_sources::resolve_path,
-    settings_resolve_vetting::{Vetting, vet},
+    settings_resolve_state::ResolverState,
 };
 
 /// The owner, group and mode bits a `stat` reports (`fileOwner` upstream).
@@ -154,24 +156,8 @@ enum Linkage {
     Unverified,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Settled {
-    Gone,
-    Unverified,
-    Found,
-}
-
-/// `Lx` upstream: whether `path` can be followed to where it really is.
-fn settle<H: SettingsHost>(host: &H, path: &Path) -> Settled {
-    match vet(host, path) {
-        Ok(Vetting::Resolved) => Settled::Found,
-        Ok(Vetting::Absent) => Settled::Gone,
-        Err(_) => Settled::Unverified,
-    }
-}
-
 /// `E4` upstream.
-fn linkage<H: SettingsHost>(host: &H, probe: &DocumentProbe<'_>) -> Linkage {
+fn linkage<H: SettingsHost>(host: &H, state: &ResolverState, probe: &DocumentProbe<'_>) -> Linkage {
     let root = resolve_path(Path::new("/"), probe.root);
     let Ok(root_linked) = is_link(host, &root) else {
         return Linkage::Direct;
@@ -198,12 +184,11 @@ fn linkage<H: SettingsHost>(host: &H, probe: &DocumentProbe<'_>) -> Linkage {
     if !linked {
         return Linkage::Direct;
     }
-    let document = settle(host, &probe.path());
-    let folder = settle(host, probe.root);
-    if document == Settled::Gone || folder == Settled::Gone {
+    let (document, folder) = locate_document(host, state, probe.root, &probe.components);
+    if document == Located::Gone || folder == Located::Gone {
         return Linkage::Direct;
     }
-    if document == Settled::Unverified || folder == Settled::Unverified {
+    if matches!(folder, Located::Unverified | Located::Network(_)) || document == Located::Unverified {
         return Linkage::Unverified;
     }
     Linkage::Linked
@@ -371,6 +356,7 @@ fn owners_or_folders_allow<H: SettingsHost>(
 /// folders the walk already judged, for the rest of the resolution.
 pub(crate) fn user_can_write<H: SettingsHost>(
     host: &H,
+    state: &ResolverState,
     kind: PlatformKind,
     wsl_organization: bool,
     probe: &DocumentProbe<'_>,
@@ -381,7 +367,7 @@ pub(crate) fn user_can_write<H: SettingsHost>(
         ByIds::Settled(answer) => return answer,
         ByIds::AskOwners(euid, uid) => (euid, uid),
     };
-    let linkage = linkage(host, probe);
+    let linkage = linkage(host, state, probe);
     let identity = identity(host, euid, uid);
     let file = if probe.opened { stat_owner(host, &path) } else { None };
     let folder = if linkage == Linkage::Direct {

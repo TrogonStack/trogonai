@@ -43,6 +43,7 @@ fn request() -> ToolPermissionRequest {
         computer_folder: None,
         matched_ask_rule: None,
         additional_fields: JsonObject::new(),
+        raw_request: JsonObject::new(),
     }
 }
 

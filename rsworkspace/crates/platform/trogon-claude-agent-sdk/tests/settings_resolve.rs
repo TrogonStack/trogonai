@@ -553,3 +553,22 @@ fn a_managed_file_with_an_infinite_number_still_loads() {
     );
     assert_eq!(result["machinePolicy"]["didNotLoad"], json!(false));
 }
+
+/// `os.homedir()` throws when `HOME` is unset and the passwd database has no entry, and the throw reaches the caller.
+#[cfg(unix)]
+#[test]
+fn a_user_source_without_any_home_directory_is_an_error() {
+    let mut host = FakeHost::linux();
+    host.env.clear();
+    let error = resolve_settings_with(&host, &options(json!({}))).expect_err("no home directory");
+    assert!(matches!(
+        error,
+        trogon_claude_agent_sdk::ResolveSettingsError::HomeDirectory(_)
+    ));
+    assert!(std::error::Error::source(&error).is_some());
+    let skipped = resolve_settings_with(&host, &options(json!({"settingSources": ["project"]})));
+    assert!(skipped.is_ok());
+    host.env
+        .insert("CLAUDE_CONFIG_DIR".to_owned(), "/configured".to_owned());
+    assert!(resolve_settings_with(&host, &options(json!({}))).is_ok());
+}

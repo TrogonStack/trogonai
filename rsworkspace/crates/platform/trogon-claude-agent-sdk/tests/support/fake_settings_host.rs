@@ -13,10 +13,10 @@ use std::{
 };
 
 use trogon_claude_agent_sdk::adapters::{
-    CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind, EffectiveGroupId,
-    EffectiveUserId, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, ExecuteFileStatus,
-    HomeDirectory, HostIdentity, LinkMetadata, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId, ReadDirectory,
-    ReadFile, ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
+    CanonicalizePath, CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, DirectoryEntryKind,
+    EffectiveGroupId, EffectiveUserId, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest,
+    ExecuteFileStatus, HomeDirectory, HostIdentity, LinkMetadata, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId,
+    ReadDirectory, ReadFile, ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
     SupplementaryGroupIds, WallClock,
 };
 
@@ -269,6 +269,14 @@ impl ReadMetadata for FakeHost {
     }
 }
 
+impl CanonicalizePath for FakeHost {
+    type Error = io::Error;
+
+    fn canonicalize(&self, _path: &Path) -> Result<PathBuf, io::Error> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+}
+
 impl CheckWritable for FakeHost {
     type Error = io::Error;
 
@@ -364,6 +372,14 @@ impl HostIdentity for FakeHost {
 impl EnvironmentVariable for FakeHost {
     fn var_os(&self, key: &OsStr) -> Option<OsString> {
         self.env.get(key.to_str()?).map(OsString::from)
+    }
+
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
+
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        None
     }
 }
 

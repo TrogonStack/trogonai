@@ -29,6 +29,8 @@ pub enum ControlOperation {
     ReloadSkills,
     ReloadOutputStyles,
     SeedReadState,
+    RemoteControl,
+    ClaimSession,
 }
 
 impl std::fmt::Display for ControlOperation {
@@ -57,6 +59,8 @@ impl std::fmt::Display for ControlOperation {
             Self::ReloadSkills => "reload_skills",
             Self::ReloadOutputStyles => "reload_output_styles",
             Self::SeedReadState => "seed_read_state",
+            Self::RemoteControl => "remote_control",
+            Self::ClaimSession => "claim_session",
         })
     }
 }
@@ -124,6 +128,9 @@ pub enum Error {
     CliPath(#[from] crate::CliPathError),
     #[error(transparent)]
     CliNotFound(#[from] crate::CliNotFoundError),
+    /// Node `os.homedir()` or Python `Path.home()` found no home directory where the dialect needs one.
+    #[error(transparent)]
+    HomeDirectory(#[from] crate::HomeDirectoryError),
     #[error(transparent)]
     Session(#[from] crate::SessionError),
     /// Python `CLIConnectionError("Failed to start Claude Code: ...")` for any spawn failure other than the two below.
@@ -245,6 +252,14 @@ pub enum Error {
     /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` that is not an integer.
     #[error("invalid literal for int() with base 10: {literal}")]
     InvalidStreamCloseTimeout { literal: String },
+    /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` with more digits than its default limit.
+    #[error(
+        "Exceeds the limit (4300 digits) for integer string conversion: value has {digits} digits; use sys.set_int_max_str_digits() to increase the limit"
+    )]
+    StreamCloseTimeoutDigits { digits: usize },
+    /// Python's error when `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` is too large for the float it is divided as.
+    #[error("int too large to convert to float")]
+    StreamCloseTimeoutOverflow,
     #[error("the {operation} control request was rejected")]
     ControlRejected {
         operation: ControlOperation,
@@ -267,14 +282,28 @@ pub enum Error {
     },
     #[error("the SDK driver has stopped; receive remaining messages for its terminal error")]
     DriverStopped,
+    /// TypeScript's rejection of a control request still waiting for its answer when the query is closed.
+    #[error("Query closed before response received")]
+    QueryClosed,
     #[error("the client is not initialized")]
     NotInitialized,
+    /// The first initialize failed. TypeScript rejects `initializationResult()` with the same error that ended
+    /// the run, so the text is the inner error's.
+    #[error(transparent)]
+    InitializationFailed(std::sync::Arc<Error>),
+    /// A `TypeError` the TypeScript SDK leaves to its JavaScript engine, worded as the engine chosen with
+    /// [`crate::JsRuntime`] words it.
+    #[error("{0}")]
+    TypeError(String),
     #[error("control request counter exhausted")]
     RequestIdExhausted,
     #[error("SDK driver task failed")]
     DriverTask(#[source] tokio::task::JoinError),
     #[error("permission callback task failed")]
     CallbackTask(#[source] tokio::task::JoinError),
+    /// TypeScript's `initialize_timeout` error: the CLI did not answer initialize within the startup limit.
+    #[error(transparent)]
+    InitializeTimeout(#[from] InitializeTimeoutError),
     #[doc(hidden)]
     #[error("the subprocess owner requested shutdown")]
     ShutdownRequested,
@@ -324,6 +353,7 @@ impl Error {
     /// `Claude Code process terminated by signal SIG<NAME>`, with the stderr tail appended when it is not blank.
     pub fn typescript_message(&self) -> Option<String> {
         match self {
+            Self::InitializationFailed(inner) => return inner.typescript_message(),
             Self::WriteToTerminatedProcess { .. } => return Some("Cannot write to terminated process".to_owned()),
             Self::BlockingHooksUnsupported => {
                 return Some(
@@ -337,13 +367,25 @@ impl Error {
                         .to_owned(),
                 );
             }
+            Self::Spawn(source) => {
+                return Some(
+                    match source.get_ref().and_then(|inner| inner.downcast_ref::<SpawnFailure>()) {
+                        Some(failure) => launch_message(&failure.path),
+                        None => format!(
+                            "Failed to spawn Claude Code process: {}",
+                            crate::stderr_redaction::redact(&source.to_string())
+                        ),
+                    },
+                );
+            }
+            Self::CliNotFoundAt(path) => return Some(launch_message(path)),
             _ => {}
         }
         let Self::Process { status, stderr } = self else {
             return None;
         };
         let tail = String::from_utf8_lossy(stderr.as_bytes());
-        let tail = tail.trim();
+        let tail = tail.trim_matches(crate::js_regex::is_whitespace);
         let tail = if tail.is_empty() {
             String::new()
         } else {
@@ -365,6 +407,74 @@ impl Error {
     }
 }
 
+/// A spawn error that carries the path it tried to start, so TypeScript's launch-failure text can name it.
+#[derive(Debug)]
+pub(crate) struct SpawnFailure {
+    path: std::path::PathBuf,
+    source: io::Error,
+}
+
+impl std::fmt::Display for SpawnFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.source, formatter)
+    }
+}
+
+impl std::error::Error for SpawnFailure {}
+
+/// Whether TypeScript words a spawn failure as a failed launch of the executable: the errors a missing or
+/// unusable path produces.
+fn is_launch_failure(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied) || has_launch_errno(error)
+}
+
+#[cfg(unix)]
+fn has_launch_errno(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::ENOTDIR | libc::ELOOP | libc::ENAMETOOLONG | libc::EROFS)
+    )
+}
+
+#[cfg(not(unix))]
+fn has_launch_errno(_error: &io::Error) -> bool {
+    false
+}
+
+/// Keeps the kind and text of a spawn error and, for a launch failure, the path that was started.
+pub(crate) fn launch_failure(path: &std::path::Path, error: io::Error) -> io::Error {
+    if is_launch_failure(&error) {
+        io::Error::new(
+            error.kind(),
+            SpawnFailure {
+                path: path.to_path_buf(),
+                source: error,
+            },
+        )
+    } else {
+        error
+    }
+}
+
+/// TypeScript's text for a path that could not be started, which depends on whether it names a native binary and
+/// whether it exists.
+fn launch_message(path: &std::path::Path) -> String {
+    let native = !crate::process_transport::is_script(path, crate::ArgvStyle::TypeScript);
+    let shown = crate::stderr_redaction::redact(&path.to_string_lossy());
+    match (native, path.exists()) {
+        (true, true) => format!(
+            "Claude Code native binary at {shown} exists but failed to launch. This usually means the binary does not match this system's libc \u{2014} e.g. spawning a musl-linked binary on a glibc Linux host fails because the musl dynamic loader (/lib/ld-musl-*) is missing. Specify a matching binary with options.pathToClaudeCodeExecutable."
+        ),
+        (false, true) => format!("Claude Code executable at {shown} exists but failed to launch."),
+        (true, false) => format!(
+            "Claude Code native binary not found at {shown}. Please ensure Claude Code is installed via native installer or specify a valid path with options.pathToClaudeCodeExecutable."
+        ),
+        (false, false) => {
+            format!("Claude Code executable not found at {shown}. Is options.pathToClaudeCodeExecutable set?")
+        }
+    }
+}
+
 #[cfg(unix)]
 fn signal_name(signal: i32) -> &'static str {
     match signal {
@@ -377,6 +487,65 @@ fn signal_name(signal: i32) -> &'static str {
         14 => "SIGALRM",
         15 => "SIGTERM",
         _ => "unknown",
+    }
+}
+
+/// TypeScript's `errorClass: "initialize_timeout"` error of `startup()` and `prewarm()`.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct InitializeTimeoutError {
+    message: String,
+    hooks_open: usize,
+    startup_mark: Option<String>,
+    startup_mark_age_ms: Option<u64>,
+}
+
+impl InitializeTimeoutError {
+    pub(crate) fn new(message: String, hooks_open: usize) -> Self {
+        Self {
+            message,
+            hooks_open,
+            startup_mark: None,
+            startup_mark_age_ms: None,
+        }
+    }
+
+    /// Records the last startup mark the CLI reported, `none` when it reported no mark.
+    pub(crate) fn with_mark(mut self, mark: Option<(String, u64)>) -> Self {
+        match mark {
+            Some((mark, age)) => {
+                self.startup_mark = Some(mark);
+                self.startup_mark_age_ms = Some(age);
+            }
+            None => self.startup_mark = Some("none".to_owned()),
+        }
+        self
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// TypeScript's `telemetryMessage`: the first sentence of the message, without its period.
+    pub fn telemetry_message(&self) -> &str {
+        self.message
+            .split_once(". ")
+            .map_or(self.message.as_str(), |(head, _)| head)
+    }
+
+    /// TypeScript's `startupHooksOpen`: the SessionStart or Setup hooks still running when the wait ran out.
+    pub fn startup_hooks_open(&self) -> usize {
+        self.hooks_open
+    }
+
+    /// TypeScript's `startupMark`: the last mark the CLI reported, or `none`.
+    pub fn startup_mark(&self) -> Option<&str> {
+        self.startup_mark.as_deref()
+    }
+
+    /// TypeScript's `startupMarkAgeMs`: how long before the timeout that mark arrived.
+    pub fn startup_mark_age_ms(&self) -> Option<u64> {
+        self.startup_mark_age_ms
     }
 }
 
@@ -554,6 +723,15 @@ impl ResultError {
 
     pub fn session_id(&self) -> Option<&str> {
         self.data.get("session_id").and_then(serde_json::Value::as_str)
+    }
+
+    /// TypeScript's `startupFailureReason`: the error result's `startup_failure_reason` when it is a string.
+    pub fn startup_failure_reason(&self) -> Option<crate::upstream::messages::SDKStartupFailureReason> {
+        let reason = self.data.get("startup_failure_reason")?;
+        if !reason.is_string() {
+            return None;
+        }
+        serde_json::from_value(reason.clone()).ok()
     }
 }
 

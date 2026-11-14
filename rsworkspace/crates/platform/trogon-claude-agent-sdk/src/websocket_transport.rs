@@ -21,18 +21,13 @@ use tokio_tungstenite::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{AbortError, Error, JsonObject, SensitiveString, Transport, WebSocketError};
-
-/// TypeScript `oA`: how long the connection may take to open.
-const CONNECT_TIMEOUT: Duration = Duration::from_millis(15_000);
-/// TypeScript `g4`: the delay between keep-alive frames.
-const KEEP_ALIVE_INTERVAL: Duration = Duration::from_millis(50_000);
-const KEEP_ALIVE_LINE: &str = "{\"type\":\"keep_alive\"}\n";
-const CLOSE_REASON: &str = "Normal closure";
-/// The code a browser reports for a close frame without a status.
-const NO_STATUS_CODE: u16 = 1005;
-/// The code a browser reports when the connection drops without a close frame.
-const ABNORMAL_CODE: u16 = 1006;
+use crate::{
+    AbortError, Error, JsonObject, SensitiveString, Transport, WebSocketError,
+    constants::{
+        WEBSOCKET_ABNORMAL_CODE, WEBSOCKET_CLOSE_REASON, WEBSOCKET_CONNECT_TIMEOUT, WEBSOCKET_KEEP_ALIVE_INTERVAL,
+        WEBSOCKET_KEEP_ALIVE_LINE, WEBSOCKET_NO_STATUS_CODE,
+    },
+};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -151,6 +146,7 @@ pub struct WebSocketTransport {
     partial_line: String,
     exit_error: Option<WebSocketError>,
     ended: bool,
+    keep_alive_interval: Duration,
 }
 
 impl WebSocketTransport {
@@ -165,6 +161,7 @@ impl WebSocketTransport {
             partial_line: String::new(),
             exit_error: None,
             ended: false,
+            keep_alive_interval: WEBSOCKET_KEEP_ALIVE_INTERVAL,
         }
     }
 
@@ -195,14 +192,14 @@ impl WebSocketTransport {
     /// TypeScript `close()`: a close frame with code 1000 when the socket is open, without waiting for the peer.
     fn close_socket(&mut self) {
         self.ready = false;
-        if let Some(mut connection) = self.connection.take() {
-            if !self.peer_closed {
-                let close = Message::Close(Some(CloseFrame {
-                    code: CloseCode::Normal,
-                    reason: CLOSE_REASON.into(),
-                }));
-                let _ = connection.socket.send(close).now_or_never();
-            }
+        if let Some(mut connection) = self.connection.take()
+            && !self.peer_closed
+        {
+            let close = Message::Close(Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: WEBSOCKET_CLOSE_REASON.into(),
+            }));
+            let _ = connection.socket.send(close).now_or_never();
         }
     }
 
@@ -229,7 +226,7 @@ impl WebSocketTransport {
     }
 
     fn peer_close(&mut self, frame: Option<CloseFrame>) {
-        let (code, reason) = frame.map_or((NO_STATUS_CODE, String::new()), |frame| {
+        let (code, reason) = frame.map_or((WEBSOCKET_NO_STATUS_CODE, String::new()), |frame| {
             (u16::from(frame.code), frame.reason.to_string())
         });
         self.peer_closed = true;
@@ -246,7 +243,7 @@ impl WebSocketTransport {
             Some(Ok(_)) => {}
             None | Some(Err(SocketError::Protocol(ProtocolError::ResetWithoutClosingHandshake))) => {
                 let dropped = (!self.peer_closed).then(|| WebSocketError::ClosedAbnormally {
-                    code: ABNORMAL_CODE,
+                    code: WEBSOCKET_ABNORMAL_CODE,
                     reason: String::new(),
                 });
                 self.end(dropped);
@@ -273,7 +270,7 @@ impl WebSocketTransport {
                 self.end(None);
             }
             Event::KeepAlive => {
-                let _ = connection.socket.send(Message::text(KEEP_ALIVE_LINE)).await;
+                let _ = connection.socket.send(Message::text(WEBSOCKET_KEEP_ALIVE_LINE)).await;
             }
             Event::Frame(frame) => self.frame(frame),
         }
@@ -300,7 +297,7 @@ impl Transport for WebSocketTransport {
         let opened = tokio::select! {
             biased;
             () = cancelled(self.abort.as_ref()) => return Err(WebSocketError::Aborted.into()),
-            opened = timeout(CONNECT_TIMEOUT, connect_async(request)) => opened,
+            opened = timeout(WEBSOCKET_CONNECT_TIMEOUT, connect_async(request)) => opened,
         };
         let (mut socket, _response) = opened
             .map_err(|_| WebSocketError::ConnectTimeout)?
@@ -309,7 +306,7 @@ impl Transport for WebSocketTransport {
         if let Some(auth) = &self.options.auth_message {
             let _ = socket.send(Message::text(auth.line())).await;
         }
-        let mut keep_alive = interval_at(Instant::now() + KEEP_ALIVE_INTERVAL, KEEP_ALIVE_INTERVAL);
+        let mut keep_alive = interval_at(Instant::now() + self.keep_alive_interval, self.keep_alive_interval);
         keep_alive.set_missed_tick_behavior(MissedTickBehavior::Delay);
         self.connection = Some(Connection { socket, keep_alive });
         Ok(())

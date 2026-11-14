@@ -12,8 +12,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     Environment, EnvironmentMode, JsonObject, SessionEntry, SessionError, SessionId, SessionKey, SessionProjectKey,
-    SessionProjectKeyError, SessionStoreOperation, SessionStoreOptions, SessionSubpath, SummaryDialect,
-    TranscriptMirror,
+    SessionProjectKeyError, SessionStoreFuture, SessionStoreOperation, SessionStoreOptions, SessionSubpath,
+    SummaryDialect, TranscriptMirror,
     adapters::{
         EnvironmentVariable, NativeFileSystem, SessionFileSystem, SpawnProcess, SystemEnvironment, TemporaryDirectory,
         TokioProcessSpawner,
@@ -22,6 +22,7 @@ use crate::{
         APPROVED_OAUTH_ENDPOINTS_TS, CLEANUP_ATTEMPTS, CLEANUP_DELAY, KEYCHAIN_FALLBACK_ACCOUNT, KEYCHAIN_SERVICE_NAME,
         KEYCHAIN_TIMEOUT, OAUTH_FILE_SUFFIXES_TS, RESUME_SETTINGS_STRIPPED_KEYS, RESUME_SETTINGS_STRIPPED_KEYS_TS,
     },
+    home_directory::{HomeDirectoryError, Platform, node_homedir, node_join, python_home, python_join},
     js_object_order::js_ordered,
     session_project_key::lexical_resolve,
     settings_json::js_stringify,
@@ -169,7 +170,7 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
         let caller_config_dir = caller_config_dir(options, environment, ts)?;
         let source_config_dir = match &caller_config_dir {
             Some(directory) => directory.clone(),
-            None => home_dir(environment, options.require_absolute_config_paths)?.join(".claude"),
+            None => home_join(environment, ts, options.require_absolute_config_paths, ".claude")?,
         };
         let project = match (&options.project_key, ts) {
             (Some(key), _) => key.clone(),
@@ -253,15 +254,13 @@ async fn load_candidate(
     id: SessionId,
 ) -> Result<Option<(SessionId, Vec<SessionEntry>)>, SessionError> {
     let key = SessionKey::new(project.clone(), id.clone());
-    let entries = timeout(options.limits.load_timeout.as_duration(), options.store.load(&key))
-        .await
-        .map_err(|_| {
-            load_timeout(
-                options,
-                format!("SessionStore.load() timed out after {{ms}}ms for session {id}"),
-                format!("SessionStore.load() for session {id}"),
-            )
-        })??;
+    let entries = store_call(
+        options,
+        options.store.load(&key),
+        format!("SessionStore.load() timed out after {{ms}}ms for session {id}"),
+        format!("SessionStore.load() for session {id}"),
+    )
+    .await?;
     Ok(entries
         .filter(|entries| !entries.is_empty())
         .map(|entries| (id, entries)))
@@ -271,18 +270,13 @@ async fn latest_candidate(
     options: &SessionStoreOptions,
     project: &SessionProjectKey,
 ) -> Result<Option<(SessionId, Vec<SessionEntry>)>, SessionError> {
-    let mut sessions = timeout(
-        options.limits.load_timeout.as_duration(),
+    let mut sessions = store_call(
+        options,
         options.store.list_sessions(project),
+        "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
+        "SessionStore.list_sessions()".to_owned(),
     )
-    .await
-    .map_err(|_| {
-        load_timeout(
-            options,
-            "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
-            "SessionStore.list_sessions()".to_owned(),
-        )
-    })??;
+    .await?;
     if entry_limit_exceeded(options, sessions.len()) {
         return Err(SessionError::EntryLimit);
     }
@@ -311,18 +305,13 @@ async fn latest_candidate_ts(
     if !options.store.supports(SessionStoreOperation::List) {
         return Err(SessionError::ContinueRequiresList);
     }
-    let mut sessions = timeout(
-        options.limits.load_timeout.as_duration(),
+    let mut sessions = store_call(
+        options,
         options.store.list_sessions(project),
+        "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
+        "SessionStore.list_sessions()".to_owned(),
     )
-    .await
-    .map_err(|_| {
-        load_timeout(
-            options,
-            "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
-            "SessionStore.list_sessions()".to_owned(),
-        )
-    })??;
+    .await?;
     if entry_limit_exceeded(options, sessions.len()) {
         return Err(SessionError::EntryLimit);
     }
@@ -334,6 +323,27 @@ async fn latest_candidate_ts(
         return Ok(None);
     }
     load_candidate(options, project, first.session_id).await
+}
+
+/// One store call within the load timeout. TypeScript lets a store failure through unchanged; Python's
+/// `_with_timeout` wraps it as `<call> failed during resume materialization: <error>`.
+async fn store_call<T>(
+    options: &SessionStoreOptions,
+    call: SessionStoreFuture<'_, T>,
+    typescript_timeout: String,
+    python_call: String,
+) -> Result<T, SessionError> {
+    match timeout(options.limits.load_timeout.as_duration(), call).await {
+        Err(_) => Err(load_timeout(options, typescript_timeout, python_call)),
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(source)) => Err(match options.dialect {
+            SummaryDialect::TypeScript => SessionError::Store(source),
+            SummaryDialect::Python => SessionError::ResumeStore {
+                call: python_call,
+                source,
+            },
+        }),
+    }
 }
 
 /// The timeout error with the dialect's text; `{ms}` stands for the configured limit in milliseconds.
@@ -435,18 +445,36 @@ fn project_key_ts<F: SessionFileSystem, E: EnvironmentVariable>(
     )
 }
 
-/// Both SDKs join a relative home directory as given; `require_absolute` is the opt-in
+/// The home directory joined with one segment, the way each upstream does it: TypeScript `path.join(os.homedir(),
+/// segment)` and Python `Path.home() / segment`. Neither fails for a missing or empty `HOME`; only a home that
+/// neither the environment nor the passwd database provides does. `require_absolute` is the opt-in
 /// [`SessionStoreOptions::require_absolute_config_paths`] check.
-fn home_dir<E: EnvironmentVariable>(environment: &E, require_absolute: bool) -> Result<PathBuf, SessionError> {
-    let home = environment
-        .var_os(OsStr::new(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .ok_or(SessionError::MissingConfigDirectory)?;
-    if require_absolute && !home.is_absolute() {
+fn home_join<E: EnvironmentVariable>(
+    environment: &E,
+    ts: bool,
+    require_absolute: bool,
+    segment: &str,
+) -> Result<PathBuf, SessionError> {
+    let platform = Platform::host();
+    let home = if ts {
+        node_homedir(environment, platform).map_err(home_unavailable)?
+    } else {
+        python_home(environment, platform)
+            .map_err(home_unavailable)?
+            .into_os_string()
+    };
+    if require_absolute && !Path::new(&home).is_absolute() {
         return Err(SessionError::UnsafeConfigPath);
     }
-    Ok(home)
+    Ok(if ts {
+        node_join(platform, &home, segment)
+    } else {
+        python_join(platform, Path::new(&home), segment)
+    })
+}
+
+fn home_unavailable(_: HomeDirectoryError) -> SessionError {
+    SessionError::MissingConfigDirectory
 }
 
 /// Upstream TypeScript points a child resumed from a store at the caller's secure storage on Windows, because the
@@ -524,21 +552,16 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
     async fn materialize_subkeys(&mut self, project_dir: &Path) -> Result<(), SessionError> {
         let options = self.store_options;
         let key = SessionKey::new(self.project.clone(), self.id.clone());
-        let subpaths = timeout(
-            options.limits.load_timeout.as_duration(),
+        let subpaths = store_call(
+            options,
             options.store.list_subkeys(&key),
+            format!(
+                "SessionStore.listSubkeys() timed out after {{ms}}ms for session {}",
+                self.id
+            ),
+            format!("SessionStore.list_subkeys() for session {}", self.id),
         )
-        .await
-        .map_err(|_| {
-            load_timeout(
-                options,
-                format!(
-                    "SessionStore.listSubkeys() timed out after {{ms}}ms for session {}",
-                    self.id
-                ),
-                format!("SessionStore.list_subkeys() for session {}", self.id),
-            )
-        })??;
+        .await?;
         if options
             .limits
             .max_subkeys
@@ -548,35 +571,27 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
         }
         let session_dir = project_dir.join(self.id.as_str());
         for subpath in subpaths {
-            if self.ts && unsafe_subpath_ts(&subpath, &session_dir) {
+            if self.ts && unsafe_subpath_ts(&subpath, &session_dir, cfg!(windows)) {
                 tracing::warn!(%subpath, "skipping unsafe subpath from list_subkeys");
                 continue;
             }
-            let subpath = if self.ts {
-                // `Jtt` writes every subpath its check above lets through, `./agent` and `C:agent` included.
-                SessionSubpath::new(subpath)
-            } else {
-                match SessionSubpath::checked(subpath) {
-                    Ok(subpath) => subpath,
-                    Err(error) => {
-                        tracing::warn!(%error, "skipping unsafe subpath from list_subkeys");
-                        continue;
-                    }
-                }
-            };
+            if !self.ts && !crate::session_subpath::python_accepts(&subpath) {
+                tracing::warn!(%subpath, "skipping unsafe subpath from list_subkeys");
+                continue;
+            }
+            // `Jtt` writes every subpath its check above lets through, `./agent` and `C:agent` included.
+            let subpath = SessionSubpath::new(subpath);
             let subkey = key.clone().with_subpath(subpath.clone());
-            let entries = timeout(options.limits.load_timeout.as_duration(), options.store.load(&subkey))
-                .await
-                .map_err(|_| {
-                    load_timeout(
-                        options,
-                        format!(
-                            "SessionStore.load() timed out after {{ms}}ms for session {} subpath {subpath}",
-                            self.id
-                        ),
-                        format!("SessionStore.load() for session {} subpath {subpath}", self.id),
-                    )
-                })??;
+            let entries = store_call(
+                options,
+                options.store.load(&subkey),
+                format!(
+                    "SessionStore.load() timed out after {{ms}}ms for session {} subpath {subpath}",
+                    self.id
+                ),
+                format!("SessionStore.load() for session {} subpath {subpath}", self.id),
+            )
+            .await?;
             let Some(entries) = entries.filter(|entries| !entries.is_empty()) else {
                 continue;
             };
@@ -665,15 +680,22 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
     }
 }
 
-/// Upstream TypeScript `Jtt` safety check: a subpath must be non-empty, not absolute on the host (so a leading
+/// Upstream TypeScript `Jtt` safety check: a subpath must be non-empty, not absolute on the platform (so a leading
 /// backslash is an ordinary character on POSIX), free of `..` segments and resolve inside the session directory.
-fn unsafe_subpath_ts(subpath: &str, session_dir: &Path) -> bool {
-    if subpath.is_empty()
-        || Path::new(subpath).is_absolute()
-        || (cfg!(windows) && subpath.starts_with(['/', '\\']))
-        || subpath.split(['/', '\\']).any(|segment| segment == "..")
-    {
+/// `windows` selects the `path.win32` rules, which run on any host.
+pub(crate) fn unsafe_subpath_ts(subpath: &str, session_dir: &Path, windows: bool) -> bool {
+    let absolute = if windows {
+        crate::windows_path::is_absolute(subpath)
+    } else {
+        Path::new(subpath).is_absolute()
+    };
+    if subpath.is_empty() || absolute || subpath.split(['/', '\\']).any(|segment| segment == "..") {
         return true;
+    }
+    if windows {
+        let directory = session_dir.to_string_lossy();
+        let resolved = crate::windows_path::resolve_to_string(&directory, &format!("{subpath}.jsonl"));
+        return !resolved.starts_with(&format!("{directory}\\"));
     }
     let resolved = lexical_resolve(&session_dir.join(format!("{subpath}.jsonl")));
     let mut prefix = session_dir.as_os_str().to_os_string();
@@ -751,7 +773,7 @@ where
     }
     let claude_json = match caller_config_dir {
         Some(directory) => directory.join(".claude.json"),
-        None => home_dir(environment, false)?.join(".claude.json"),
+        None => home_join(environment, false, false, ".claude.json")?,
     };
     copy_if_present(
         filesystem,
@@ -885,13 +907,14 @@ where
             redact_refresh_token_ts(credentials).as_bytes(),
         )?;
     }
+    let platform = Platform::host();
     let base = match configured_directory {
-        Some(directory) => directory.to_path_buf(),
-        None => home_dir(environment, false)?,
+        Some(directory) => directory.as_os_str().to_owned(),
+        None => node_homedir(environment, platform).map_err(home_unavailable)?,
     };
     copy_if_present(
         filesystem,
-        &base.join(".claude.json"),
+        &node_join(platform, &base, ".claude.json"),
         &config_dir.join(".claude.json"),
         CopyMode::SourceMode,
     );
@@ -905,7 +928,7 @@ where
         let name = format!(".claude{suffix}.json");
         copy_if_present(
             filesystem,
-            &base.join(&name),
+            &node_join(platform, &base, &name),
             &config_dir.join(&name),
             CopyMode::SourceMode,
         );

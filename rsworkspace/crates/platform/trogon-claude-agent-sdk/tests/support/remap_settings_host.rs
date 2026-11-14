@@ -9,11 +9,11 @@ use std::{
 };
 
 use trogon_claude_agent_sdk::adapters::{
-    CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, EffectiveGroupId, EffectiveUserId,
-    EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, HomeDirectory, HostIdentity,
-    LinkMetadata, NativeHost, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId, ReadDirectory, ReadFile,
-    ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId, SupplementaryGroupIds,
-    WallClock,
+    CanonicalizePath, CheckReadable, CheckWritable, CurrentDirectory, DirectoryEntry, EffectiveGroupId,
+    EffectiveUserId, EnvironmentVariable, ExecuteFile, ExecuteFileOutcome, ExecuteFileRequest, HomeDirectory,
+    HostIdentity, LinkMetadata, NativeHost, OpenDirectoryNoFollow, OperatingSystem, ReadDeviceId, ReadDirectory,
+    ReadFile, ReadFileHead, ReadLink, ReadMetadata, ReadSymlinkMetadata, RealGroupId, RealUserId,
+    SupplementaryGroupIds, WallClock,
 };
 
 /// Machine-wide locations the resolver reads, which the host moves under a sandbox root.
@@ -70,7 +70,13 @@ impl RemapHost {
     fn remap(&self, path: &Path) -> PathBuf {
         for prefix in VIRTUAL {
             if let Ok(rest) = path.strip_prefix(prefix) {
-                return self.root.join(prefix.trim_start_matches('/')).join(rest);
+                let moved = self.root.join(prefix.trim_start_matches('/'));
+                // Joining an empty rest appends a separator, and `/proc/version/` is no file.
+                return if rest.as_os_str().is_empty() {
+                    moved
+                } else {
+                    moved.join(rest)
+                };
             }
         }
         path.to_path_buf()
@@ -122,6 +128,14 @@ impl ReadMetadata for RemapHost {
 
     fn metadata(&self, path: &Path) -> Result<std::fs::Metadata, io::Error> {
         NativeHost.metadata(&self.remap(path))
+    }
+}
+
+impl CanonicalizePath for RemapHost {
+    type Error = io::Error;
+
+    fn canonicalize(&self, path: &Path) -> Result<PathBuf, io::Error> {
+        NativeHost.canonicalize(&self.remap(path))
     }
 }
 

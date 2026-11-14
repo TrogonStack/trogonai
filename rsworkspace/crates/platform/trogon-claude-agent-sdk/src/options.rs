@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, num::NonZeroUsize, path::PathBuf, sync::Arc};
+use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
 
 use crate::{
     AgentDefinition, AgentName, BuiltinToolName, DialogKind, EffortLevel, ElicitationHandler, Environment,
@@ -121,6 +121,38 @@ pub enum InitializeTimeout {
     Fixed(Timeout),
 }
 
+/// How long after the last result a run with no idle state waits before it ends quietly.
+///
+/// Both upstream SDKs read `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, with a default of 600 seconds, zero for no limit,
+/// and a clamp to 2^31 - 1 milliseconds; they disagree on what the variable may spell and where it is read.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RunEndTimeout {
+    /// TypeScript: the variable in the child environment this SDK builds, so `ClaudeAgentOptions::env` when it
+    /// replaces the inherited environment and the process environment otherwise. Whole numbers in exponent form
+    /// such as `1e3`, a thousands separator as in `1,000` or `1_000`, and the leading digits of `12abc` all count.
+    #[default]
+    TypeScript,
+    /// Python: `ClaudeAgentOptions::env` first, then the process environment, parsed with `int()`: whitespace
+    /// around the number, Unicode decimal digits, and single underscores between digits. Text `int()` refuses and
+    /// negative numbers are the default.
+    Python,
+    /// Opt-in: this wait, whatever the environment says. Zero ends the run at once.
+    Fixed(Timeout),
+}
+
+impl RunEndTimeout {
+    /// The ceiling this selection applies for the variable's value, with `None` for no limit. Anything that does
+    /// not parse is the 600 second default, as is an unset variable.
+    #[must_use]
+    pub fn for_variable(self, value: Option<&str>) -> Option<std::time::Duration> {
+        match self {
+            Self::TypeScript => crate::run_end_ceiling::typescript(value),
+            Self::Python => crate::run_end_ceiling::python(value),
+            Self::Fixed(timeout) => Some(timeout.as_duration()),
+        }
+    }
+}
+
 /// How the process is stopped once stdin is closed.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Shutdown {
@@ -167,6 +199,16 @@ pub enum InputAfterFinish {
     Reject,
 }
 
+/// Output that ends in the middle of a turn: the CLI closed stdout before the result, and exits cleanly.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EndWithoutResult {
+    /// Upstream: the messages end quietly, as TypeScript and Python do when the CLI exits with status 0.
+    #[default]
+    End,
+    /// Opt-in: the messages end with [`crate::Error::UnexpectedEof`].
+    Fail,
+}
+
 /// Waits and bounds on the runtime. The default is TypeScript's: no control or write timeout and no bounded queue.
 /// [`Limits::python`] selects Python's values. Every other bound is opt-in.
 #[derive(Clone, Debug)]
@@ -203,11 +245,12 @@ pub struct Limits {
     pub write_timeout: Option<Timeout>,
     pub shutdown: Shutdown,
     /// `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` in both upstream SDKs: with no idle state after the last result, the
-    /// run ends this long after it.
-    pub run_end_timeout: Timeout,
+    /// run ends this long after it. Read from the environment by default, as each upstream SDK does.
+    pub run_end_timeout: RunEndTimeout,
     pub duplicate_control_requests: DuplicateControlRequests,
     pub request_id_exhaustion: RequestIdExhaustion,
     pub input_after_finish: InputAfterFinish,
+    pub end_without_result: EndWithoutResult,
 }
 
 impl Limits {
@@ -217,7 +260,8 @@ impl Limits {
     pub const PYTHON_MAX_BUFFER_SIZE: usize = 1024 * 1024;
 
     /// Python's values: a 60-second control wait, a 1 MiB line cap, a 100-message buffer with backpressure, its
-    /// initialize wait and shutdown ladder, no stderr tail, and duplicate control requests that all run.
+    /// initialize wait, shutdown ladder and run-end ceiling parse, no stderr tail, and duplicate control requests
+    /// that all run.
     pub fn python() -> Self {
         Self {
             max_buffer_size: Some(Self::PYTHON_MAX_BUFFER_SIZE),
@@ -226,6 +270,7 @@ impl Limits {
             control_timeout: Some(Timeout::default()),
             initialize_timeout: InitializeTimeout::Python,
             shutdown: Shutdown::Python,
+            run_end_timeout: RunEndTimeout::Python,
             duplicate_control_requests: DuplicateControlRequests::RunBoth,
             ..Self::default()
         }
@@ -265,10 +310,11 @@ impl Default for Limits {
             callback_timeout: None,
             write_timeout: None,
             shutdown: Shutdown::TypeScript,
-            run_end_timeout: Timeout::new(std::time::Duration::from_millis(600_000)),
+            run_end_timeout: RunEndTimeout::TypeScript,
             duplicate_control_requests: DuplicateControlRequests::Skip,
             request_id_exhaustion: RequestIdExhaustion::Wrap,
             input_after_finish: InputAfterFinish::Write,
+            end_without_result: EndWithoutResult::End,
         }
     }
 }
@@ -276,6 +322,10 @@ impl Default for Limits {
 #[derive(Clone, Debug, Default)]
 pub struct ClaudeAgentOptions {
     pub cli_path: Option<PathBuf>,
+    /// Python `_find_bundled_cli`: the directory that holds `_bundled`, Python's package directory. When `connect`
+    /// discovers the CLI it takes `<root>/_bundled/claude` (`claude.exe` on Windows) before anything else, as long
+    /// as it is a file. `None`, the default, has no bundled lookup, as in TypeScript.
+    pub bundled_cli_root: Option<PathBuf>,
     pub cwd: Option<PathBuf>,
     pub model: Option<ModelName>,
     pub max_turns: Option<NonZeroUsize>,
@@ -294,7 +344,10 @@ pub struct ClaudeAgentOptions {
     pub limits: Limits,
     pub permission_handler: Option<Arc<dyn ToolPermissionHandler>>,
     pub hooks: Vec<HookRegistration>,
-    pub agents: BTreeMap<AgentName, AgentDefinition>,
+    /// TypeScript `hooks: {}`: with [`crate::EmptyCollection::Sent`] an empty `hooks` reaches `initialize` as `{}`.
+    pub hooks_when_empty: crate::EmptyCollection,
+    /// Agents in insertion order, like the object either SDK sends.
+    pub agents: indexmap::IndexMap<AgentName, AgentDefinition>,
     pub agent: Option<AgentName>,
     /// Servers the CLI connects to itself, sent in insertion order like a TypeScript object.
     pub mcp_servers: McpServers,
@@ -319,6 +372,9 @@ pub struct ClaudeAgentOptions {
     pub elicitation_handler: Option<Arc<dyn ElicitationHandler>>,
     pub user_dialog_handler: Option<Arc<dyn UserDialogHandler>>,
     pub supported_dialog_kinds: Vec<DialogKind>,
+    /// TypeScript `supportedDialogKinds: []`: with [`crate::EmptyCollection::Sent`] an empty list reaches
+    /// `initialize` as `[]`.
+    pub supported_dialog_kinds_when_empty: crate::EmptyCollection,
     /// TypeScript `getOAuthToken`. Setting it also sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH=1`. Without a handler a
     /// token request is answered with `getOAuthToken callback is not provided.`.
     pub oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
@@ -347,6 +403,14 @@ pub struct ClaudeAgentOptions {
     pub client_app_derivation: crate::ClientAppDerivation,
     pub trace_context: Option<TraceContext>,
     pub stderr_handler: Option<StderrHandler>,
+    /// TypeScript `abortController`. Cancelling it stops the process and ends the run with
+    /// `AbortError("Claude Code process aborted by user")`; a token already cancelled makes `connect` fail with that
+    /// error. `None` uses a fresh token, which `abort()` cancels. Closing the client does not cancel it.
+    pub abort_controller: Option<crate::CancellationToken>,
+    /// TypeScript `spawnClaudeCodeProcess`: start the CLI with this instead of the SDK's own spawn.
+    pub spawn_claude_code_process: Option<crate::SpawnClaudeCodeProcess>,
+    /// TypeScript `onProcessSpawned`: told the process id when the SDK starts the CLI itself.
+    pub on_process_spawned: Option<crate::OnProcessSpawned>,
     pub extra_args: Vec<ExtraArgument>,
     pub script_runtime: ScriptRuntime,
     /// Python's `user`: the CLI runs as this account (Unix only). The name is looked up in `/etc/passwd`; only the

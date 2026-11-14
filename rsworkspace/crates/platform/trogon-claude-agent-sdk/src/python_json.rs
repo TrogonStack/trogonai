@@ -2,7 +2,6 @@
 //! `\uXXXX`, and floats spelled as Python's `repr`.
 
 use std::io::{self, Write};
-use unicode_general_category::{GeneralCategory, get_general_category};
 
 use crate::float_digits::shortest_digits;
 
@@ -95,46 +94,7 @@ pub(crate) fn float_repr(value: f64) -> String {
 
 /// Python `repr(str)`.
 pub(crate) fn python_repr(text: &str) -> String {
-    let quote = if text.contains('\'') && !text.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut out = String::from(quote);
-    for c in text.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push_str("\\t"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            c if c == quote => {
-                out.push('\\');
-                out.push(c);
-            }
-            ' ' => out.push(' '),
-            c if is_python_printable(c) => out.push(c),
-            c if (c as u32) < 0x100 => out.push_str(&format!("\\x{:02x}", c as u32)),
-            c if (c as u32) < 0x10000 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push_str(&format!("\\U{:08x}", c as u32)),
-        }
-    }
-    out.push(quote);
-    out
-}
-
-/// Python `str.isprintable` for one character: not in `Other` or `Separator`, except the space.
-fn is_python_printable(c: char) -> bool {
-    !matches!(
-        get_general_category(c),
-        GeneralCategory::Control
-            | GeneralCategory::Format
-            | GeneralCategory::Surrogate
-            | GeneralCategory::PrivateUse
-            | GeneralCategory::Unassigned
-            | GeneralCategory::LineSeparator
-            | GeneralCategory::ParagraphSeparator
-            | GeneralCategory::SpaceSeparator
-    )
+    crate::python_text::repr(&crate::python_text::from_str(text))
 }
 
 /// Python truthiness of the value `json.loads` reads from this JSON.

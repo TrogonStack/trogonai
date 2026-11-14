@@ -307,7 +307,7 @@ fn token_callbacks_announce_themselves_in_every_typescript_mode() {
     let handler: std::sync::Arc<dyn crate::OAuthTokenHandler> =
         std::sync::Arc::new(|_request: crate::OAuthTokenRequest| async { Ok(crate::OAuthTokenResponse::default()) });
     let host: std::sync::Arc<dyn crate::HostAuthTokenHandler> =
-        std::sync::Arc::new(|_request: crate::HostAuthTokenRequest| async { Ok(None) });
+        std::sync::Arc::new(|_request: crate::HostAuthTokenRequest| async { Ok(crate::HostAuthToken::Null) });
     for mode in [
         EnvironmentMode::TypeScript,
         EnvironmentMode::Overlay,
@@ -326,7 +326,7 @@ fn token_callbacks_announce_themselves_in_every_typescript_mode() {
             Some("1")
         );
         both.argv_style = crate::ArgvStyle::Python;
-        let python = plan(&both, &inherited(&[]));
+        let python = super::plan(&both, &inherited(&[]));
         assert_eq!(set(&python, "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH"), None);
         assert_eq!(set(&python, "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH"), None);
     }

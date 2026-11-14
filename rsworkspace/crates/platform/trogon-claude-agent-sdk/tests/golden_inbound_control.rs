@@ -23,26 +23,52 @@ use tokio::{
     sync::oneshot,
 };
 use trogon_claude_agent_sdk::{
-    ArgvStyle, CallbackError, ClaudeAgentOptions, ClaudeSdkClient, ComputerFolder, DenialDisposition, DialogKind,
-    DuplicateControlRequests, ElicitationMode, ElicitationRequest, ElicitationResponse, FeatureSupport,
-    HostAuthTokenRequest, JsonObject, MatchedAskRule, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
-    PermissionDecision, PermissionDecisionClassification, PermissionMode, PermissionUpdate,
-    PermissionUpdateDestination, ToolPermissionRequest, ToolUseId, UserDialogRequest, UserDialogResponse,
+    ArgvStyle, CallbackError, ClaudeAgentOptions, ClaudeSdkClient, ClientHandle, ComputerFolder, DenialDisposition,
+    DialogKind, DuplicateControlRequests, ElicitationMode, ElicitationRequest, ElicitationResponse, FeatureSupport,
+    HostAuthToken, HostAuthTokenRequest, JsonObject, MatchedAskRule, OAuthTokenRequest, OAuthTokenResponse,
+    OAuthTokenState, PermissionDecision, PermissionDecisionClassification, PermissionMode, PermissionUpdate,
+    PermissionUpdateDestination, RemoteControlOptions, ToolPermissionRequest, ToolUseId, UiHost, UiRequest,
+    UserDialogRequest, UserDialogResponse, WorkSecretRefreshRequest,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
 
+#[path = "support/captured.rs"]
+mod captured;
 #[path = "support/scripted_process.rs"]
 mod scripted_process;
 
+use captured::Captured;
 use scripted_process::{ScriptedProcessHarness, ScriptedProcessSpawner};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+const REMOTE: &str = include_str!("fixtures/auth_callbacks/remote_control.json");
+const UI: &str = include_str!("fixtures/auth_callbacks/ui_host.json");
 
 /// One thing the scripted CLI does after `initialize` is answered.
 enum Step {
     Send(Value),
     Wait(u64),
+    /// Holds the steps after it until the scripted CLI answers a control request after `initialize`, so a test can
+    /// finish its handle calls before the CLI sends anything.
+    Hold,
+}
+
+/// Plays `steps`, or sets the ones after a [`Step::Hold`] aside in `held`.
+async fn play(stdout: &mut DuplexStream, steps: Vec<Step>, held: &mut Option<Vec<Step>>) -> Result<(), std::io::Error> {
+    let mut steps = steps.into_iter();
+    while let Some(step) = steps.next() {
+        match step {
+            Step::Send(frame) => write(stdout, &frame).await?,
+            Step::Wait(millis) => tokio::time::sleep(Duration::from_millis(millis)).await,
+            Step::Hold => {
+                *held = Some(steps.collect());
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn write(stdout: &mut DuplexStream, frame: &Value) -> Result<(), std::io::Error> {
@@ -65,6 +91,7 @@ async fn serve(
     let stderr = process.stderr;
     let mut responses = Vec::new();
     let mut steps = Some(steps);
+    let mut held = None;
     let mut report = Some(report);
     loop {
         let grace = match (&steps, responses.len() >= expected) {
@@ -84,20 +111,26 @@ async fn serve(
         let Some(line) = line else { break };
         let frame: Value = serde_json::from_str(&line)?;
         if frame["type"] == "control_request" {
+            // A `remote_control` answer reports the request's `name` as the bridge session it attached.
+            let response = if frame["request"]["subtype"] == "remote_control" {
+                json!({"bridge_session_id": frame["request"]["name"]})
+            } else {
+                json!({})
+            };
             write(
                 &mut stdout,
-                &json!({"type":"control_response","response":{"subtype":"success","request_id":frame["request_id"],"response":{}}}),
+                &json!({"type":"control_response","response":{"subtype":"success","request_id":frame["request_id"],"response":response}}),
             )
             .await?;
             if frame["request"]["subtype"] == "initialize"
                 && let Some(steps) = steps.take()
             {
-                for step in steps {
-                    match step {
-                        Step::Send(frame) => write(&mut stdout, &frame).await?,
-                        Step::Wait(millis) => tokio::time::sleep(Duration::from_millis(millis)).await,
-                    }
-                }
+                play(&mut stdout, steps, &mut held).await?;
+            }
+            if frame["request"]["subtype"] != "initialize"
+                && let Some(steps) = held.take()
+            {
+                play(&mut stdout, steps, &mut held).await?;
             }
         } else if frame["type"] == "control_response" && report.is_some() {
             responses.push(line);
@@ -114,10 +147,23 @@ async fn serve(
 
 /// Connects a client with `options`, plays `steps` and returns the response lines the SDK wrote.
 async fn run(
-    mut options: ClaudeAgentOptions,
+    options: ClaudeAgentOptions,
     steps: Vec<Step>,
     expected: usize,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    run_with(options, steps, expected, |_: ClientHandle| async { Ok(()) }).await
+}
+
+/// [`run`] with `act` called on the connected client's handle before the response lines are collected.
+async fn run_with<Fut>(
+    mut options: ClaudeAgentOptions,
+    steps: Vec<Step>,
+    expected: usize,
+    act: impl FnOnce(ClientHandle) -> Fut,
+) -> Result<Vec<String>, Box<dyn std::error::Error>>
+where
+    Fut: std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>,
+{
     let (process, harness) = ScriptedProcessSpawner::new();
     let (report, reported) = oneshot::channel();
     let server = tokio::spawn(serve(harness, steps, expected, report));
@@ -134,6 +180,7 @@ async fn run(
         },
     )
     .await?;
+    act(client.handle()).await?;
     let responses = reported.await?;
     client.disconnect().await?;
     server.await??;
@@ -467,7 +514,7 @@ async fn python_answers_token_refreshes_as_unsupported_even_with_handlers() -> T
         if let Ok(mut calls) = host_calls.lock() {
             calls.push("host");
         }
-        async { Ok::<_, CallbackError>(Some("h".to_owned())) }
+        async { Ok::<_, CallbackError>(HostAuthToken::Token("h".to_owned())) }
     }));
     let steps = vec![
         request("a8", json!({"subtype":"oauth_token_refresh"})),
@@ -709,5 +756,304 @@ async fn every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing(
             ("d3".to_owned(), "silent".to_owned()),
         ]
     );
+    Ok(())
+}
+
+fn work_secret_options(refreshed: &Arc<Mutex<Vec<String>>>) -> RemoteControlOptions {
+    let observed = Arc::clone(refreshed);
+    RemoteControlOptions {
+        work_secret: Some("opaque".into()),
+        refresh_work_secret: Some(Arc::new(move |request: WorkSecretRefreshRequest| {
+            let secret = match observed.lock() {
+                Ok(mut seen) => {
+                    seen.push(request.session_id);
+                    if seen.len() == 1 { "fresh" } else { "" }
+                }
+                Err(_) => "",
+            };
+            async move { Ok::<_, CallbackError>(Some(secret.to_owned())) }
+        })),
+        reattach_session_id: Some("cse_abcd1234".into()),
+        keep_session_on_exit: None,
+    }
+}
+
+#[tokio::test]
+async fn remote_control_work_secret_is_answered_for_the_attached_session() -> TestResult {
+    let refreshed = Arc::new(Mutex::new(Vec::new()));
+    let remote = work_secret_options(&refreshed);
+    let responses = run_with(
+        options(ArgvStyle::TypeScript),
+        vec![
+            Step::Hold,
+            request(
+                "w1",
+                json!({"subtype":"remote_control_work_secret","session_id":"cse_abcd1234"}),
+            ),
+            Step::Wait(100),
+            request(
+                "w2",
+                json!({"subtype":"remote_control_work_secret","session_id":"other_abcd1234"}),
+            ),
+            Step::Wait(100),
+            request(
+                "w3",
+                json!({"subtype":"remote_control_work_secret","session_id":"cse_zzzzzzzz"}),
+            ),
+            request("w4", json!({"subtype":"remote_control_work_secret"})),
+            request("w5", json!({"subtype":"remote_control_work_secret","session_id":null})),
+            request("w6", json!({"subtype":"remote_control_work_secret","session_id":5})),
+            request(
+                "w7",
+                json!({"subtype":"remote_control_work_secret","session_id":["cse_abcd1234"]}),
+            ),
+        ],
+        7,
+        |handle: ClientHandle| async move {
+            let reply = handle
+                .enable_remote_control(true, Some("cse_abcd1234"), Some(remote))
+                .await?;
+            assert_eq!(reply, Some(json!({"bridge_session_id":"cse_abcd1234"})));
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(responses, Captured::parse(REMOTE)?.strings("work_secret", "responses")?);
+    assert_eq!(
+        *refreshed.lock().map_err(|_| "lock poisoned")?,
+        ["cse_abcd1234", "cse_abcd1234"]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_attach_that_names_another_session_removes_the_work_secret_answerer() -> TestResult {
+    let refreshed = Arc::new(Mutex::new(Vec::new()));
+    let remote = work_secret_options(&refreshed);
+    let responses = run_with(
+        options(ArgvStyle::TypeScript),
+        vec![
+            Step::Hold,
+            request(
+                "w1",
+                json!({"subtype":"remote_control_work_secret","session_id":"cse_abcd1234"}),
+            ),
+        ],
+        1,
+        |handle: ClientHandle| async move {
+            handle
+                .enable_remote_control(true, Some("cse_9999"), Some(remote))
+                .await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(
+        responses,
+        Captured::parse(REMOTE)?.strings("work_secret_other_session", "responses")?
+    );
+    assert!(refreshed.lock().map_err(|_| "lock poisoned")?.is_empty());
+    Ok(())
+}
+
+/// A `uiHost` whose `copy`, `promptRead` and `readSelection` answer and whose `promptPaint` fails; `promptFill` and
+/// `promptSuggest` are absent.
+fn ui_host(seen: &Arc<Mutex<Vec<(Value, bool)>>>) -> UiHost {
+    let handler = |seen: &Arc<Mutex<Vec<(Value, bool)>>>, answer: Result<Option<Value>, &'static str>| {
+        let seen = Arc::clone(seen);
+        let handler: Arc<dyn trogon_claude_agent_sdk::UiHandler> = Arc::new(move |request: UiRequest| {
+            if let Ok(mut seen) = seen.lock() {
+                seen.push((Value::Object(request.payload), request.signal.is_cancelled()));
+            }
+            let answer = answer.clone();
+            async move { answer.map_err(|message| CallbackError::Failed(message.into())) }
+        });
+        handler
+    };
+    UiHost {
+        copy: Some(handler(seen, Ok(Some(json!({"copied":true}))))),
+        prompt_read: Some(handler(seen, Ok(None))),
+        read_selection: Some(handler(seen, Ok(Some(Value::Null)))),
+        prompt_paint: Some(handler(seen, Err("paint failed"))),
+        ..UiHost::default()
+    }
+}
+
+#[tokio::test]
+async fn ui_requests_reach_the_matching_host_method() -> TestResult {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let host = ui_host(&seen);
+    let responses = run_with(
+        options(ArgvStyle::TypeScript),
+        vec![
+            Step::Hold,
+            request("u1", json!({"subtype":"ui_copy","text":"hi"})),
+            Step::Wait(100),
+            request("u2", json!({"subtype":"ui_prompt_read"})),
+            Step::Wait(100),
+            request("u3", json!({"subtype":"ui_prompt_fill","text":"x"})),
+            request("u4", json!({"subtype":"ui_prompt_suggest"})),
+            Step::Wait(100),
+            request("u5", json!({"subtype":"ui_read_selection"})),
+            Step::Wait(100),
+            request("u6", json!({"subtype":"ui_prompt_paint","rows":[1]})),
+        ],
+        6,
+        |handle: ClientHandle| async move {
+            handle.set_ui_host(Some(host));
+            handle.set_max_thinking_tokens(None).await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(responses, Captured::parse(UI)?.strings("ui", "responses")?);
+    assert_eq!(
+        *seen.lock().map_err(|_| "lock poisoned")?,
+        [
+            (json!({"text":"hi"}), false),
+            (json!({}), false),
+            (json!({}), false),
+            (json!({"rows":[1]}), false),
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_answers_ui_requests_as_unsupported_even_with_a_host_set() -> TestResult {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let host = ui_host(&seen);
+    let responses = run_with(
+        options(ArgvStyle::Python),
+        vec![Step::Hold, request("p4", json!({"subtype":"ui_copy","text":"hi"}))],
+        1,
+        |handle: ClientHandle| async move {
+            handle.set_ui_host(Some(host));
+            handle.set_max_thinking_tokens(None).await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(
+        responses,
+        Captured::parse(UI)?.strings("python_unsupported_ui", "responses")?
+    );
+    assert!(seen.lock().map_err(|_| "lock poisoned")?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_answers_work_secret_requests_as_unsupported_even_with_an_answerer_set() -> TestResult {
+    let refreshed = Arc::new(Mutex::new(Vec::new()));
+    let remote = work_secret_options(&refreshed);
+    let responses = run_with(
+        options(ArgvStyle::Python),
+        vec![
+            Step::Hold,
+            request(
+                "p3",
+                json!({"subtype":"remote_control_work_secret","session_id":"cse_abcd1234"}),
+            ),
+        ],
+        1,
+        |handle: ClientHandle| async move {
+            handle
+                .enable_remote_control(true, Some("cse_abcd1234"), Some(remote))
+                .await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        },
+    )
+    .await?;
+    assert_eq!(
+        responses,
+        Captured::parse(REMOTE)?.strings("python_unsupported_work_secret", "responses")?
+    );
+    assert!(refreshed.lock().map_err(|_| "lock poisoned")?.is_empty());
+    Ok(())
+}
+
+/// One `can_use_tool` request per broken or odd `permission_suggestions` shape, with the line `sdk.mjs` and
+/// `claude_agent_sdk` each answered it with. Both callbacks echo the suggestions they were given.
+const SUGGESTION_GOLDENS: &str = include_str!("fixtures/permission_suggestions/goldens.json");
+
+/// What a typed decision can echo of the suggestions `sdk.mjs` hands over as sent: absent ones, or an array of
+/// objects, each kept verbatim.
+fn typescript_echo(raw: &JsonObject) -> Option<Option<Vec<PermissionUpdate>>> {
+    match raw.get("permission_suggestions") {
+        None => Some(None),
+        Some(Value::Array(entries)) => entries
+            .iter()
+            .map(|entry| entry.as_object().cloned().map(PermissionUpdate::Unknown))
+            .collect::<Option<Vec<_>>>()
+            .map(Some),
+        Some(_) => None,
+    }
+}
+
+#[tokio::test]
+async fn permission_suggestions_reach_each_dialect_like_its_sdk() -> TestResult {
+    let goldens: Value = serde_json::from_str(SUGGESTION_GOLDENS)?;
+    let cases = goldens["cases"].as_array().ok_or("the goldens have no cases")?;
+    for style in [ArgvStyle::TypeScript, ArgvStyle::Python] {
+        let typescript = style == ArgvStyle::TypeScript;
+        let seen = Arc::new(Mutex::new(BTreeMap::new()));
+        let recorded = Arc::clone(&seen);
+        let mut configured = options(style);
+        configured.permission_handler = Some(Arc::new(move |request: ToolPermissionRequest| {
+            let echo = if typescript {
+                typescript_echo(&request.raw_request).flatten()
+            } else {
+                Some(request.suggestions.clone())
+            };
+            if let Ok(mut recorded) = recorded.lock() {
+                recorded.insert(
+                    request.request_id.as_str().to_owned(),
+                    Value::Object(request.raw_request.clone()),
+                );
+            }
+            async move {
+                PermissionDecision::Allow {
+                    updated_input: None,
+                    updated_permissions: echo,
+                    decision_classification: None,
+                }
+            }
+        }));
+        let steps = cases
+            .iter()
+            .map(|case| request(case["request_id"].as_str().unwrap_or_default(), case["request"].clone()))
+            .collect();
+        let mut answered = BTreeMap::new();
+        for line in run(configured, steps, cases.len()).await? {
+            let frame: Value = serde_json::from_str(&line)?;
+            let id = frame["response"]["request_id"]
+                .as_str()
+                .ok_or("a response without an id")?;
+            answered.insert(id.to_owned(), line);
+        }
+        assert_eq!(answered.len(), cases.len());
+        let seen = seen.lock().map_err(|_| "lock poisoned")?.clone();
+        for case in cases {
+            let name = &case["name"];
+            let id = case["request_id"].as_str().ok_or("a case without an id")?;
+            let line = answered.get(id).ok_or("a request was not answered")?;
+            if !typescript {
+                assert_eq!(Some(line.as_str()), case["python"].as_str(), "{name}");
+                continue;
+            }
+            let mut sent = case["request"].clone();
+            let sent_fields = sent.as_object_mut().ok_or("a request that is not an object")?;
+            sent_fields.remove("subtype");
+            assert_eq!(seen.get(id), Some(&sent), "{name}");
+            let mut expected: Value = serde_json::from_str(case["typescript"].as_str().ok_or("no TypeScript line")?)?;
+            if typescript_echo(sent.as_object().ok_or("a request that is not an object")?).is_none() {
+                // The callback returned the raw value; a typed decision leaves it out instead.
+                if let Some(response) = expected["response"]["response"].as_object_mut() {
+                    response.remove("updatedPermissions");
+                }
+            }
+            assert_eq!(serde_json::from_str::<Value>(line)?, expected, "{name}");
+        }
+    }
     Ok(())
 }

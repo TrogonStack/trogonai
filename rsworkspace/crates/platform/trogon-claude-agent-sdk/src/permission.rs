@@ -1,16 +1,26 @@
 use std::{future::Future, pin::Pin};
 
-use crate::{CancellationToken, ControlRequestId, FeatureSupport, JsonObject, PermissionUpdate, ToolName, ToolUseId};
+use crate::{
+    CancellationToken, ControlRequestId, FeatureSupport, JsonObject, PermissionUpdate, ToolName, ToolUseId,
+    upstream::tool_inputs::ToolInputSchemas,
+};
 
 #[derive(Clone, Debug)]
 pub struct ToolPermissionRequest {
+    /// Empty when the wire carries no string `tool_name`; [`Self::raw_request`] has what was sent.
     pub tool_name: ToolName,
+    /// Empty when the wire `input` is missing or not an object; [`Self::raw_request`] has what was sent.
     pub input: JsonObject,
     pub tool_use_id: Option<ToolUseId>,
     pub blocked_path: Option<String>,
     pub decision_reason: Option<String>,
     pub request_id: ControlRequestId,
     pub signal: CancellationToken,
+    /// Under [`crate::ArgvStyle::TypeScript`], every object in the wire `permission_suggestions` array: a
+    /// well-formed update decoded, anything else as [`PermissionUpdate::Unknown`]. Under
+    /// [`crate::ArgvStyle::Python`], the updates `claude_agent_sdk` rebuilds with `PermissionUpdate.from_dict`,
+    /// holding only the fields its `to_dict` writes back; suggestions it cannot rebuild answer the request
+    /// with the error it raises, before the handler runs.
     pub suggestions: Vec<PermissionUpdate>,
     pub agent_id: Option<String>,
     pub mcp_server: Option<McpServerProvenance>,
@@ -37,6 +47,18 @@ pub struct ToolPermissionRequest {
     /// Wire keys the handler context does not name, and named keys whose value had a type the upstream SDK
     /// does not pass on, untouched and in wire order.
     pub additional_fields: JsonObject,
+    /// Every field of the request exactly as the CLI sent it. `sdk.mjs` hands `tool_name`, `input` and
+    /// `permission_suggestions` to `canUseTool` without checking them, so a missing tool name, an input that
+    /// is not an object or suggestions that are not well-formed updates are read from here.
+    pub raw_request: JsonObject,
+}
+
+impl ToolPermissionRequest {
+    /// `input` as the `sdk-tools` input type of the tool `tool_name` names (see [`ToolInputSchemas::for_tool`]).
+    /// `input` stays as written.
+    pub fn typed_input(&self) -> ToolInputSchemas {
+        ToolInputSchemas::for_tool(self.tool_name.as_str(), &serde_json::Value::Object(self.input.clone()))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -112,6 +134,19 @@ impl PermissionDecision {
             updated_permissions: None,
             decision_classification: None,
         }
+    }
+
+    /// Allows the call with `input` as `updatedInput`, encoded exactly as the typed value encodes. `None` when
+    /// `input` does not encode to a JSON object, which is all `updatedInput` carries.
+    pub fn allow_with_input(input: &ToolInputSchemas) -> Option<Self> {
+        let serde_json::Value::Object(updated_input) = serde_json::to_value(input).ok()? else {
+            return None;
+        };
+        Some(Self::Allow {
+            updated_input: Some(updated_input),
+            updated_permissions: None,
+            decision_classification: None,
+        })
     }
 
     pub fn deny(message: impl Into<String>) -> Self {

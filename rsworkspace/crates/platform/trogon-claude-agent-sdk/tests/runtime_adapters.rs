@@ -207,11 +207,16 @@ async fn injected_process_runs_protocol_and_closes_input_on_disconnect() -> Resu
     };
     let client = ClaudeSdkClient::connect_with_adapters(options, adapters).await?;
     assert_eq!(
-        client.connection_info().claude_code_version.as_deref(),
+        client
+            .handle()
+            .initialization_result()
+            .await?
+            .claude_code_version
+            .as_deref(),
         Some("scripted-cli")
     );
     let status = client.handle().mcp_status().await?.decode()?;
-    assert_eq!(status.mcp_servers[0]["name"], "scripted");
+    assert_eq!(status.mcp_servers[0].name, "scripted");
     client.disconnect().await?;
     assert_eq!(server.await??, ["initialize", "mcp_status"]);
     let commands = observer.commands()?;
@@ -411,8 +416,12 @@ async fn cancelling_connect_after_initialization_request_closes_input() -> TestR
     let (process, harness) = ScriptedProcessSpawner::new();
     let observer = process.observer();
     let mut lines = BufReader::new(harness.stdin).lines();
+    // Only Python's `connect` waits for the response, so only there is a connect left to cancel.
     let connection = tokio::spawn(ClaudeSdkClient::connect_with_adapters(
-        ClaudeAgentOptions::default(),
+        ClaudeAgentOptions {
+            argv_style: trogon_claude_agent_sdk::ArgvStyle::Python,
+            ..ClaudeAgentOptions::default()
+        },
         process_adapters(process),
     ));
     let request = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
@@ -527,6 +536,14 @@ impl EnvironmentVariable for TrackedEnvironment {
     fn var_os(&self, key: &OsStr) -> Option<OsString> {
         self.record(EnvironmentAccess::Variable(key.to_owned())).ok()?;
         self.variables.get(key).cloned()
+    }
+
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
+
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        None
     }
 }
 

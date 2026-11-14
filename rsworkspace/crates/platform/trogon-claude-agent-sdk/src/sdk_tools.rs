@@ -1,11 +1,18 @@
 use std::{collections::HashSet, sync::Arc};
 
-use crate::{McpToolName, SdkTool};
+use crate::{McpToolName, SchemaPointer, SdkTool};
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum SdkToolsError {
     #[error("Tool {name} is already registered")]
     DuplicateTool { name: McpToolName },
+    /// A `pattern` the JavaScript `RegExp` constructor rejects, which throws in the TypeScript SDK before the
+    /// tool exists. `message` is the `SyntaxError` text.
+    #[error("Tool {name} has a pattern that is not a regular expression: {message}")]
+    InvalidPattern { name: McpToolName, message: String },
+    /// A validation choice or callback whose pointer names no object of the tool's input schema.
+    #[error("Tool {name} has a validation choice at {pointer}, which is not an object of its input schema")]
+    UnknownChoicePointer { name: McpToolName, pointer: SchemaPointer },
 }
 
 /// The tools of one in-process MCP server, in registration order.
@@ -15,13 +22,27 @@ pub struct SdkTools {
 }
 
 impl SdkTools {
-    /// Rejects a repeated name like the TypeScript `McpServer.registerTool`.
+    /// Rejects a repeated name like the TypeScript `McpServer.registerTool`, and a pattern the `RegExp` constructor
+    /// rejects.
     pub fn new(tools: impl IntoIterator<Item = SdkTool>) -> Result<Self, SdkToolsError> {
         let mut registered: Vec<SdkTool> = Vec::new();
         for tool in tools {
             if registered.iter().any(|existing| existing.name() == tool.name()) {
                 return Err(SdkToolsError::DuplicateTool {
                     name: tool.name().clone(),
+                });
+            }
+            let prepared = tool
+                .validation()
+                .prepare(tool.input_schema().as_json())
+                .map_err(|pointer| SdkToolsError::UnknownChoicePointer {
+                    name: tool.name().clone(),
+                    pointer,
+                })?;
+            if let Some(message) = crate::sdk_mcp_zod::pattern_error(&prepared.schema) {
+                return Err(SdkToolsError::InvalidPattern {
+                    name: tool.name().clone(),
+                    message,
                 });
             }
             registered.push(tool);

@@ -243,7 +243,7 @@ async fn q01_query_with_a_transport_writes_the_prompt_after_initialize_and_ends_
     assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
     drop(peer.incoming);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(peer.calls.count("connect"), 1);
     assert_eq!(peer.calls.count("end_input"), 1);
     assert_eq!(peer.calls.count("close"), 1);
@@ -260,7 +260,7 @@ async fn q01_a_one_turn_query_stops_after_the_first_result() -> TestResult {
     peer.send(result("first"))?;
     assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(peer.calls.count("close"), 1);
     Ok(())
 }
@@ -364,7 +364,7 @@ impl SessionStore for CountingStore {
 async fn t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror() -> TestResult {
     let directory = tempfile::tempdir()?;
     let resumed = SessionId::from("11111111-1111-4111-8111-111111111111");
-    let project = SessionProjectKey::new("scripted-project")?;
+    let project = SessionProjectKey::new("scripted-project");
     let store = Arc::new(CountingStore {
         inner: InMemorySessionStore::default(),
         loads: AtomicUsize::new(0),

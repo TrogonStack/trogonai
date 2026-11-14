@@ -70,7 +70,12 @@ function sample(node, variant) {
     return sample(property(declarations.get(owner), node.indexType.literal.text), variant);
   }
   if (ts.isTypeReferenceNode(node)) {
-    const name = node.typeName.getText(sourceFile);
+    // `coreTypes` re-exports declarations of the same file, so `coreTypes.X` is `X`.
+    const name = ts.isQualifiedName(node.typeName) && node.typeName.left.getText(sourceFile) === 'coreTypes'
+      ? node.typeName.right.text
+      : node.typeName.getText(sourceFile);
+    // `Partial<T>` only makes keys optional, and the samples set every key.
+    if (name === 'Partial') return sample(node.typeArguments[0], variant);
     if (name === 'Record') return { key: sample(node.typeArguments[1], variant) };
     if (foreign.has(name)) return FOREIGN[foreign.get(name)]();
     return declared(name, variant);
@@ -102,6 +107,7 @@ function property(declaration, name) {
 
 function declared(name, variant, top, keep) {
   const node = declarations.get(name);
+  if (!node) throw new Error(`Undeclared type ${name}`);
   return ts.isInterfaceDeclaration(node) ? object(node.members, variant, top, keep) : sample(node.type, variant);
 }
 

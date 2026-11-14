@@ -348,7 +348,7 @@ async fn import_replays_the_transcript_subagents_and_sidecars() -> TestResult {
     )
     .await?;
 
-    let main = SessionKey::new(SessionProjectKey::new("-proj")?, SessionId::from(SESSION));
+    let main = SessionKey::new(SessionProjectKey::new("-proj"), SessionId::from(SESSION));
     assert_eq!(store.load(&main).await?.map_or(0, |entries| entries.len()), 2);
     let sub_key = main.with_subpath(SessionSubpath::new("subagents/agent-abc"));
     let loaded = store.load(&sub_key).await?.ok_or("no subagent")?;

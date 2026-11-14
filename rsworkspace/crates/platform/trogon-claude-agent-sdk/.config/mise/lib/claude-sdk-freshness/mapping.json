@@ -20,10 +20,29 @@
       },
       "rust_api": [
         "ClaudeAgentOptions",
+        "ClaudeAgentOptions.hooks_when_empty",
+        "ClaudeAgentOptions.supported_dialog_kinds_when_empty",
+        "EmptyCollection",
         "adapters::EnvironmentVariable",
         "adapters::CurrentDirectory"
       ],
       "tests": [
+        {
+          "path": "tests/native_options_golden.rs",
+          "name": "every_typescript_option_matches_the_upstream_wire_form"
+        },
+        {
+          "path": "tests/native_options_golden.rs",
+          "name": "every_python_option_matches_the_upstream_wire_form"
+        },
+        {
+          "path": "tests/native_options_golden.rs",
+          "name": "python_debug_stderr_is_accepted_without_changing_the_wire"
+        },
+        {
+          "path": "tests/native_options_golden.rs",
+          "name": "every_upstream_option_has_a_golden_case"
+        },
         {
           "path": "tests/runtime_features.rs",
           "name": "structured_input_and_declarative_configuration_reach_the_cli"
@@ -37,8 +56,8 @@
           "name": "missing_config_variable_falls_back_to_injected_home_in_order"
         }
       ],
-      "status": "partial",
-      "rationale": "Native options are explicitly selected. Aggregate mapping does not claim every option exists; unmapped option behavior remains review work."
+      "status": "supported",
+      "rationale": "Every TypeScript Options key and Python ClaudeAgentOptions field has a golden case recorded from the pinned upstream packages, comparing argv, environment, working directory and the initialize request byte for byte in both dialects; callback and transport options are pinned by the behavior tests listed in the fixture."
     },
     {
       "id": "configuration-preservation",
@@ -65,6 +84,7 @@
       },
       "rust_api": [
         "ClaudeAgentOptions.cli_path",
+        "ClaudeAgentOptions.bundled_cli_root",
         "ClaudeAgentOptions.cwd",
         "ClaudeAgentOptions.model",
         "find_bundled_cli",
@@ -103,10 +123,26 @@
         {
           "name": "the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
           "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "host_target_prefers_musl_on_linux_unless_the_process_runs_against_glibc",
+          "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "the_bundled_directory_comes_first_like_python_and_only_when_named",
+          "path": "src/cli_discovery/tests.rs"
+        },
+        {
+          "name": "connect_spawns_the_bundled_cli_under_the_configured_root",
+          "path": "tests/subprocess.rs"
+        },
+        {
+          "name": "an_unset_home_resolves_to_the_passwd_home_in_both_dialects",
+          "path": "tests/home_directory.rs"
         }
       ],
       "status": "supported",
-      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. The bundled executable lookups (Python _bundled directory, TypeScript platform packages with musl and Windows or arm variants) are caller-driven helpers in find_bundled_cli and find_native_cli; they are not part of connect's discovery. Python's bundled-CLI version gate (999.0.0 minimum, claude.version record) and its derived client app trigger are the same kind of helper, meets_derived_client_app_minimum and bundled_cli_derives_client_app; connect asks them only through the Python-dialect client_app_derivation option, so TypeScript, which has neither, stays connect's default."
+      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs), with the home install locations built from Path.home() only after the PATH lookup misses, so an unset HOME falls back to the passwd entry instead of failing; Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. Python's _bundled lookup runs first in connect's discovery when bundled_cli_root names the directory that holds _bundled, matching goldens recorded from claude_agent_sdk 0.2.181 _find_cli; it is off by default because TypeScript has no bundled directory. TypeScript's platform packages (musl and Windows or arm variants) are resolved by find_native_cli, and NativePackageTarget::host prefers musl on Linux unless the process reports a glibc runtime version, as the Node process report does. Python's bundled-CLI version gate (999.0.0 minimum, claude.version record) and its derived client app trigger are the same kind of helper, meets_derived_client_app_minimum and bundled_cli_derives_client_app; connect asks them only through the Python-dialect client_app_derivation option, so TypeScript, which has neither, stays connect's default."
     },
     {
       "id": "process-errors-and-shutdown",
@@ -131,7 +167,8 @@
       "rust_api": [
         "Error",
         "AbortError",
-        "ResultError"
+        "ResultError",
+        "ClaudeAgentOptions.abort_controller"
       ],
       "tests": [
         {
@@ -181,10 +218,62 @@
         {
           "path": "tests/shutdown_errors.rs",
           "name": "t14_a_write_after_the_cli_exited_with_an_error_reports_the_upstream_state"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "every_golden_stderr_case_matches_the_bundle_byte_for_byte"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "every_golden_spawn_case_matches_the_bundle_byte_for_byte"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "all_eighteen_patterns_are_compiled"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "another_spawn_error_is_worded_and_redacted_like_the_bundle"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "a_launch_failure_keeps_its_kind_and_text_and_adds_the_path"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "the_errno_values_of_an_unusable_path_are_launch_failures"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "any_other_spawn_error_is_left_as_it_was"
+        },
+        {
+          "path": "src/framing/tests.rs",
+          "name": "a_secret_is_removed_from_the_tail_only_when_redacting"
+        },
+        {
+          "path": "src/framing/tests.rs",
+          "name": "a_secret_is_removed_before_the_tail_is_cut"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "process_failure_message_redacts_secrets_from_the_stderr_tail"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "cancelling_the_abort_controller_stops_the_process_like_typescript"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "an_abort_controller_cancelled_before_connect_fails_the_connection"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "abort_cancels_the_supplied_controller"
         }
       ],
       "status": "supported",
-      "rationale": "Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data."
+      "rationale": "TypeScript error text that comes from stderr or a failed spawn is redacted with the bundle's eighteen secret patterns, run on a matcher with JavaScript semantics because the patterns need lookahead and lookbehind (goldens from the real sdk.mjs 0.3.323 in tests/fixtures/stderr_redaction); Python redacts nothing. Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data. abort_controller is TypeScript's abortController: cancelling it stops the process and ends the run with Claude Code process aborted by user, a controller cancelled before connect fails the connection, later writes fail with Operation aborted, and abort() cancels the supplied controller; without one a fresh token is used. Python has no abort controller."
     },
     {
       "id": "permission-modes",
@@ -199,6 +288,7 @@
         "typescript": {
           "symbols": [
             "PermissionMode",
+            "sdk.coreTypes.PermissionMode",
             "Options.permissionMode",
             "core.PermissionMode",
             "core.Options.permissionMode"
@@ -244,6 +334,7 @@
         "typescript": {
           "symbols": [
             "SettingSource",
+            "sdk.coreTypes.SettingSource",
             "Options.settingSources",
             "core.SettingSource",
             "core.Options.settingSources"
@@ -300,26 +391,92 @@
       },
       "rust_api": [
         "ClaudeSdkClient.connect",
-        "ClaudeSdkClient.disconnect"
+        "ClaudeSdkClient.new",
+        "UnconnectedClient.with_transport",
+        "UnconnectedClient.with_adapters",
+        "UnconnectedClient.connect",
+        "UnconnectedClient.scope",
+        "ConnectPrompt",
+        "ClientConnector",
+        "NativeCli",
+        "CustomTransport",
+        "ClaudeSdkClient.close",
+        "ClientHandle.close",
+        "Query.close",
+        "ClaudeSdkClient.disconnect",
+        "Query.disconnect",
+        "Error.QueryClosed",
+        "Error.Cleanup"
       ],
       "tests": [
         {
           "path": "tests/public_api.rs",
-          "name": "connect_waits_for_initialization_and_disconnect_closes_input"
+          "name": "python_connect_waits_for_initialization_and_disconnect_closes_input"
         },
         {
           "path": "tests/runtime_adapters.rs",
           "name": "injected_process_runs_protocol_and_closes_input_on_disconnect"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "close_rejects_a_waiting_control_like_typescript_and_ends_the_run_cleanly"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "close_leaves_a_waiting_control_to_its_timeout_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "close_while_iterating_keeps_received_messages_and_ends_the_stream_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "breaking_out_and_return_map_to_disconnect_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_without_a_prompt_writes_nothing_after_initialize"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_text_writes_it_in_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_verbatim_text_stamps_it"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_text_under_typescript_uses_the_empty_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_a_stream_streams_it_in_the_background"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_connects_runs_the_body_and_disconnects"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_returns_the_body_error_after_disconnecting"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_reports_a_failed_disconnect_beside_the_body_error"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust follows Python lifecycle names with an async connect factory and consuming async disconnect(self), rather than methods on an existing Python client. TypeScript Query.close is the cleanup counterpart. Memory-process fixtures require initialization before returning an owner and verify the child input is closed on disconnect; named references alone do not prove test execution or native conformance."
+      "status": "supported",
+      "rationale": "connect is an async factory: under the TypeScript style it returns once the initialize request is queued, as the Query constructor does, and the initialize outcome is read through the async metadata getters; under the Python style it returns only after initialization is answered, as Python's connect does. close(&self) on a Query, the client or any handle is TypeScript Query.close: idempotent and callable while the stream is read, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) on the query or the client is Python's awaitable disconnect and what the TypeScript iterator's return(), Symbol.asyncDispose and a for await that breaks await: it closes, waits for the process to stop and discards messages not read yet; consuming the owner makes a second disconnect or a read after it unrepresentable instead of a no-op. ClaudeSdkClient::new(options) is Python's ClaudeSDKClient(options), with with_transport and with_adapters for its transport argument; the UnconnectedClient it returns has no methods but connect and scope, so Python's \"Not connected\" error is unrepresentable. UnconnectedClient::connect(prompt) goes through the same factory as ClaudeSdkClient::connect and then writes a ConnectPrompt::Text as query does, or streams a ConnectPrompt::Stream from a background task, as Python's connect(str | AsyncIterable) does; when writing the prompt fails it disconnects and returns the error. sdk.mjs has no separate connect: its query({prompt}) writes a string prompt and streams an AsyncIterable the same way, aborting the query when streaming fails, which the TypeScript style follows, while the Python style drops the failure and leaves the client running, where Python's stream_input logs it and carries on. UnconnectedClient::scope is Python's async with: it connects with no prompt, runs the body and always disconnects; when both fail it returns Error::Cleanup with the body's error as primary and the disconnect's as cleanup, the pair Python chains as the disconnect exception's __context__."
     },
     {
       "id": "interactive-client",
       "upstream": {
         "python": {
-          "symbols": [],
+          "symbols": [
+            "ClaudeSDKClient.receive_messages",
+            "ClaudeSDKClient.receive_response"
+          ],
           "prefixes": [
             "ClaudeSDKClient"
           ]
@@ -334,16 +491,56 @@
       },
       "rust_api": [
         "ClaudeSdkClient",
-        "ClientHandle"
+        "ClientHandle",
+        "ClaudeSdkClient.receive_messages",
+        "ClaudeSdkClient.receive_response",
+        "ClaudeSdkClient.next_message",
+        "Query.next_message",
+        "ClaudeSdkClient.query",
+        "ClaudeSdkClient.query_in_session",
+        "ClaudeSdkClient.query_stream",
+        "ClaudeSdkClient.query_stream_in_session"
       ],
       "tests": [
         {
           "path": "tests/subprocess.rs",
           "name": "interactive_client_reuses_one_process_for_multiple_turns"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "receive_response_stops_after_the_result_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "receive_response_ends_with_the_stream_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "the_query_ends_with_the_stream_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "the_opt_in_limit_fails_a_clean_exit_without_a_result"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_writes_in_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_in_session_writes_in_that_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_stream_fills_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_stream_in_session_keeps_named_sessions"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Only explicitly mapped operations have focused evidence."
+      "status": "supported",
+      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Query and ClaudeSdkClient are futures_util Streams of Result<Message, Error>, the TypeScript async iterator, ending where next_message returns None; receive_messages() and receive_response() are Python's, the latter yielding through the next result and leaving later messages queued. Python's get_server_info() is ClientHandle::initialization_result, mapped under initialization. Every other ClaudeSDKClient and Query method is mapped by its own row. Python __init__, __aenter__ and __aexit__ are ClaudeSdkClient::new, UnconnectedClient::connect and scope under client-lifecycle. query(prompt, session_id) is query_in_session; query writes in Python's \"default\" session under the Python style and in the empty session sdk.mjs writes under the TypeScript style. query_stream and query_stream_in_session fill the session only on inputs that name none and leave stdin open, as Python's query(AsyncIterable) does. A CLI that exits with status 0 in the middle of a turn ends the messages quietly in both styles, as sdk.mjs and Python do; Limits::end_without_result set to EndWithoutResult::Fail keeps Error::UnexpectedEof as an opt-in."
     },
     {
       "id": "full-run-query",
@@ -404,18 +601,69 @@
         }
       },
       "rust_api": [
+        "ClaudeSdkClient.stream_input",
+        "ClaudeSdkClient.try_stream_input",
         "ClientHandle.stream_input",
+        "ClientHandle.try_stream_input",
         "ClientHandle.send_input",
         "ClientHandle.finish_input"
       ],
       "tests": [
         {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_ends_the_input_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_stops_at_an_abort"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_rejects_a_write_after_close"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_rejects_with_a_failing_stream_and_leaves_stdin_open"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_waits_behind_the_prompt_hold"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_ends_the_input_like_claude_agent_sdk"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_stops_at_a_close"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_closes_stdin_after_a_failing_stream"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "the_infallible_stream_input_streams_like_query_stream_input"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "stream_input_counts_the_prompts_of_its_own_call"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_closes_stdin_at_once_for_a_stream_that_writes_nothing"
+        },
+        {
           "path": "tests/runtime_sessions.rs",
           "name": "coalesced_input_count_ends_the_run_after_one_result"
         }
       ],
-      "status": "partial",
-      "rationale": "Streaming and queued structured sends are exposed through a cloneable handle. Completion semantics use reported queue/session state and have older-CLI limits."
+      "status": "supported",
+      "rationale": "stream_input follows Query.streamInput by default: it stops at an abort, writes behind a pending prompt hold and leaves stdin open when the hold fails, rejects with ProcessTransport is not ready for writing once the transport closed, and closes stdin when the stream ends, waiting for the run to end only when it wrote something and something needs the CLI. Under the Python style it follows the Python stream_input: it stops once the query closed, logs a failing stream or write and closes stdin anyway, and never fails. try_stream_input takes a fallible stream so a TypeScript caller sees the stream's own error with stdin left open, as a rejecting iterable does upstream. send_input and finish_input remain the queued building blocks; the goldens were recorded from sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 against a stub CLI."
     },
     {
       "id": "interrupt-receipts",
@@ -820,7 +1068,6 @@
         }
       },
       "rust_api": [
-        "ClaudeSdkClient.connection_info",
         "ConnectionInfo",
         "ConnectionInfo.from_json",
         "ConnectionInfo.as_json",
@@ -890,10 +1137,14 @@
         {
           "path": "tests/golden_controls.rs",
           "name": "supported_commands_follow_commands_changed"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "the_getters_throw_the_engine_type_error_on_a_missing_or_null_initialize_response"
         }
       ],
       "status": "supported",
-      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands prefers the latest commands_changed list; reinitialize sends a non-first initialize and replaces the cache."
+      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands reads the cached response first and then prefers the latest commands_changed list; when initialize answered without a response or with null the getters fail with Error::TypeError carrying the engine text JsRuntime selects; reinitialize sends a non-first initialize and replaces the cache. With the TypeScript dialect connect and query return once the initialize request is queued, as sdk.mjs does, and the metadata getters (initialization_result, supported_commands, supported_models, supported_agents, account_info) are async and wait for the response; a failed initialize is raised by them and by the message stream as InitializationFailed carrying the same error. Prompts, interrupts, and settings-bearing controls written before initialize resolves are held behind it when blocking hooks or managed settings are set, as sdk.mjs holds them, and are released in order on success or answered as closed on failure. The Python dialect waits for the initialize response inside connect, as claude_agent_sdk 0.2.181 does."
     },
     {
       "id": "budget",
@@ -1061,12 +1312,14 @@
           "symbols": [],
           "prefixes": [
             "AgentDefinition",
+            "sdk.coreTypes.AgentDefinition",
             "core.AgentDefinition"
           ]
         }
       },
       "rust_api": [
         "AgentDefinition",
+        "AgentEffort",
         "AgentExecution",
         "AgentMcpServerSpec"
       ],
@@ -1074,10 +1327,22 @@
         {
           "path": "src/agent_definition_tests.rs",
           "name": "agent_uses_initialize_field_names"
+        },
+        {
+          "path": "tests/agent_definition.rs",
+          "name": "every_optional_field_reaches_the_wire_form"
+        },
+        {
+          "path": "tests/value_contracts.rs",
+          "name": "agent_definitions_preserve_inline_and_named_mcp_scopes"
+        },
+        {
+          "path": "tests/initialize_options.rs",
+          "name": "every_case_matches_the_captured_initialize_bytes_in_both_dialects"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust represents background execution and names with enums/value objects. Core agent initialization is tested; aggregate declaration equality is not assumed."
+      "status": "supported",
+      "rationale": "Every TypeScript field, numeric effort and unchecked turn limits, MCP entries and extra keys reach the initialize request as given, in insertion order. The Python dialect sends the dataclass fields in dataclass order and drops the TypeScript-only ones. Pinned against captured initialize requests from both SDKs."
     },
     {
       "id": "permission-callback",
@@ -1102,7 +1367,9 @@
       "rust_api": [
         "ToolPermissionHandler",
         "ToolPermissionRequest",
-        "PermissionDecision"
+        "PermissionDecision",
+        "ToolPermissionRequest.typed_input",
+        "PermissionDecision.allow_with_input"
       ],
       "tests": [
         {
@@ -1136,10 +1403,14 @@
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "python_answers_requests_without_a_handler_like_claude_agent_sdk"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "permission_requests_expose_a_typed_input_that_allows_with_an_updated_input"
         }
       ],
       "status": "supported",
-      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification, writes nothing for AnsweredOutOfBand, still writes a cancelled handler's answer and skips a redelivered in-flight request id; Python echoes the original input on allow, rejects a null result with its TypeError text, drops a cancelled handler without a response and runs a redelivered id twice (DuplicateControlRequests::RunBoth, opt-in). A missing handler is answered with each SDK's own error text. CLI rules can authorize before consulting the host."
+      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification, writes nothing for AnsweredOutOfBand, still writes a cancelled handler's answer and skips a redelivered in-flight request id; Python echoes the original input on allow, rejects a null result with its TypeError text, drops a cancelled handler without a response and runs a redelivered id twice (DuplicateControlRequests::RunBoth, opt-in). A missing handler is answered with each SDK's own error text. CLI rules can authorize before consulting the host. ToolPermissionRequest.typed_input views input as the sdk-tools input type of tool_name, and PermissionDecision::allow_with_input sends a typed input back as updatedInput exactly as it encodes."
     },
     {
       "id": "permission-types",
@@ -1158,9 +1429,13 @@
           "symbols": [],
           "prefixes": [
             "PermissionResult",
+            "sdk.coreTypes.PermissionResult",
             "PermissionUpdate",
+            "sdk.coreTypes.PermissionUpdate",
             "PermissionRuleValue",
+            "sdk.coreTypes.PermissionRuleValue",
             "McpServerProvenance",
+            "sdk.coreTypes.McpServerProvenance",
             "core.PermissionResult",
             "core.PermissionUpdate",
             "core.PermissionRuleValue",
@@ -1179,7 +1454,9 @@
         "ToolPermissionRequest",
         "McpServerProvenance",
         "ComputerFolder",
-        "MatchedAskRule"
+        "MatchedAskRule",
+        "ToolPermissionRequest.typed_input",
+        "PermissionDecision.allow_with_input"
       ],
       "tests": [
         {
@@ -1201,6 +1478,10 @@
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "python_permission_answers_echo_the_original_input"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "permission_requests_expose_a_typed_input_that_allows_with_an_updated_input"
         }
       ],
       "status": "supported",
@@ -1226,7 +1507,9 @@
             "Options.hooks",
             "HookCallback",
             "HookInput",
+            "sdk.coreTypes.HookInput",
             "HookJSONOutput",
+            "sdk.coreTypes.HookJSONOutput",
             "core.Options.hooks",
             "core.HookCallback",
             "core.HookInput",
@@ -1234,7 +1517,9 @@
           ],
           "prefixes": [
             "HookCallbackMatcher",
-            "core.HookCallbackMatcher"
+            "core.HookCallbackMatcher",
+            "sdk.SDKHookCallbackMatcher",
+            "sdk.SDKHookCallbackRequest"
           ]
         }
       },
@@ -1246,7 +1531,9 @@
         "HookOutput.Json",
         "HookFailureMode",
         "HookInput",
-        "HookJSONOutput"
+        "HookJSONOutput",
+        "HookRequest.typed_tool_input",
+        "HookRequest.typed_tool_response"
       ],
       "tests": [
         {
@@ -1284,10 +1571,18 @@
         {
           "path": "tests/upstream_hooks.rs",
           "name": "an_output_no_member_declares_is_sent_unchanged"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "hook_requests_expose_typed_tool_inputs_and_responses"
+        },
+        {
+          "path": "tests/golden_initialize.rs",
+          "name": "typescript_initialize_matches_sdk_mjs_bytes"
         }
       ],
       "status": "supported",
-      "rationale": "Hook routing, cancellation (HookContext.signal is HookRequest.signal) and fail-closed blocking registration match upstream. HookRequest.typed_input decodes every input into the upstream HookInput union, and HookOutput.Json sends any upstream HookJSONOutput, sync or async, exactly as given, so no event-specific field is narrowed or dropped."
+      "rationale": "Hook routing, cancellation (HookContext.signal is HookRequest.signal) and fail-closed blocking registration match upstream. HookRequest.typed_input decodes every input into the upstream HookInput union, and HookOutput.Json sends any upstream HookJSONOutput, sync or async, exactly as given, so no event-specific field is narrowed or dropped. typed_tool_input and typed_tool_response view a tool event's tool_input and tool_response as the sdk-tools types of its tool_name; the input object is untouched, which is the dict and Any Python passes."
     },
     {
       "id": "hook-events",
@@ -1301,10 +1596,14 @@
         "typescript": {
           "symbols": [
             "HookEvent",
+            "sdk.coreTypes.HookEvent",
             "core.HookEvent",
             "HOOK_EVENTS",
+            "sdk.coreTypes.HOOK_EVENTS",
             "EXIT_REASONS",
+            "sdk.coreTypes.EXIT_REASONS",
             "ExitReason",
+            "sdk.coreTypes.ExitReason",
             "core.HOOK_EVENTS",
             "core.EXIT_REASONS",
             "core.ExitReason"
@@ -1675,7 +1974,13 @@
         "UserDialogHandler",
         "UserDialogRequest",
         "UserDialogResponse",
-        "DialogKind"
+        "DialogKind",
+        "WorkSecretRefresher",
+        "WorkSecretRefreshRequest",
+        "ClientHandle.set_ui_host",
+        "UiHost",
+        "UiHandler",
+        "UiRequest"
       ],
       "tests": [
         {
@@ -1697,10 +2002,86 @@
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "remote_control_work_secret_is_answered_for_the_attached_session"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "an_attach_that_names_another_session_removes_the_work_secret_answerer"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "ui_requests_reach_the_matching_host_method"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_blocking_hook_holds_the_prompt_and_an_interrupt_behind_initialize_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "managed_settings_hold_every_request_behind_initialize_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_failed_initialize_writes_no_prompt_and_rejects_what_waited_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_failed_initialize_with_managed_settings_writes_nothing_after_it_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "the_captured_timer_matches_the_duration_and_messages_the_driver_uses"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_single_turn_ends_at_its_result_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_single_prompt_keeps_yielding_after_its_result_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_streamed_input_keeps_yielding_after_its_result_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_closes_stdin_once_the_prompt_is_written_and_keeps_yielding"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "without_a_result_stdin_closes_when_the_input_is_written_unless_something_needs_the_cli"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_without_a_result_closes_stdin_once_the_prompt_is_written_unless_something_needs_the_cli"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "typescript_closes_stdin_at_idle_or_the_ceiling_whatever_tasks_and_continuations_are_reported"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_closes_stdin_at_idle_or_the_ceiling_unless_a_tracked_task_is_in_flight"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "python_answers_ui_requests_as_unsupported_even_with_a_host_set"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "python_answers_work_secret_requests_as_unsupported_even_with_an_answerer_set"
         }
       ],
       "status": "supported",
-      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect."
+      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect. It also routes the TypeScript-only uiHost subtypes (ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_paint, ui_prompt_suggest, ui_read_selection) to the matching method installed through ClientHandle.set_ui_host, and a subtype whose method is absent falls through to the unsupported request error; claude_agent_sdk 0.2.181 has no uiHost and answers each with its unsupported-subtype error, host set or not. It answers the TypeScript-only refreshWorkSecret (remote_control_work_secret) only for the session enableRemoteControl attached; claude_agent_sdk 0.2.181 answers it with its unsupported-subtype error, answerer set or not. The run ends as hasBidirectionalNeeds decides: a streamed input closes stdin as soon as it is written when nothing needs the CLI, and query() with a prompt follows sdk.mjs's single user turn, ending at its result when nothing needs the CLI and otherwise at session idle. The Python dialect knows only SDK MCP servers, hooks and the permission handler as needs and closes stdin once the prompt was written when there are none, as claude_agent_sdk 0.2.181 does. The moment stdin closes is that dialect's run-end machine in src/run_end.rs and nothing else: sdk.mjs runEnded with resultReceived, session_state_changed and the ceiling armed by CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS (read and parsed as limits.run_end_timeout selects, 0 disabling it), where reported tasks and queued turns play no part, and Python's run-ended event with its tracked local_agent and local_workflow tasks, its turn-in-progress guard and the same ceiling. Both readers keep yielding what the CLI sends after the result until it exits, and so do query() and the client here; query_turn is the Rust-only call that stops at the first result."
     },
     {
       "id": "embedded-mcp",
@@ -1745,7 +2126,24 @@
         "McpWireIds",
         "McpWireScan",
         "RawJsonId",
-        "RawJsonIdError"
+        "RawJsonIdError",
+        "ValidationChoices",
+        "ValidationChoicesOptions",
+        "ValidationChoicesError",
+        "SchemaPointer",
+        "SchemaPointerError",
+        "SchemaChoice",
+        "UnionChoice",
+        "NullabilityChoice",
+        "LengthChoice",
+        "StringCheckKind",
+        "NumberFormatChoice",
+        "StringFormatChoice",
+        "SchemaCallback",
+        "SchemaCallbackOptions",
+        "RefineFailure",
+        "Refinement",
+        "Transformation"
       ],
       "tests": [
         {
@@ -1817,6 +2215,14 @@
           "name": "mcp_message_routing_replays_the_typescript_golden"
         },
         {
+          "path": "tests/runtime_failure_contracts.rs",
+          "name": "manifest_capture_follows_the_option"
+        },
+        {
+          "path": "src/mcp_routing_tests.rs",
+          "name": "manifests_follow_the_server_configs_like_build_initialize_request"
+        },
+        {
           "path": "src/control_request_id_tests.rs",
           "name": "random_uuid_ids_are_version_4_uuids"
         },
@@ -1831,6 +2237,62 @@
         {
           "path": "tests/runtime_failure_contracts.rs",
           "name": "mcp_message_reports_a_non_object_message_like_bun"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "typescript_dialect_validates_like_the_bundled_zod_and_mcp_sdk"
+        },
+        {
+          "path": "src/sdk_mcp_zod_tests.rs",
+          "name": "embedded_call_tool_result_schema_builds_the_bundled_zod_checks"
+        },
+        {
+          "path": "src/sdk_mcp_regexp_tests.rs",
+          "name": "compile_errors_read_like_the_node_regexp_constructor"
+        },
+        {
+          "path": "src/sdk_mcp_regexp_tests.rs",
+          "name": "matches_follow_ecmascript_lookaround_backreferences_named_groups_and_unicode_flags"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "typescript_dialect_validates_each_exposed_choice_like_zod"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "pointers_follow_rfc_6901"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "duplicate_choices_callbacks_and_incomplete_orders_are_typed_errors"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "preparing_writes_the_choices_into_a_copy_and_leaves_the_listed_schema_alone"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "a_pointer_outside_the_schema_is_returned"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "a_default_choice_leaves_the_schema_as_listed"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "the_exact_length_choice_reports_one_exact_issue_and_min_max_reports_a_bound"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "the_check_order_choice_orders_the_issues"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "refinements_and_transformations_run_at_the_node_with_zods_issue_shape"
+        },
+        {
+          "path": "src/sdk_mcp_choices_tests.rs",
+          "name": "the_discriminated_union_choice_names_a_missing_discriminator"
         },
         {
           "path": "src/sdk_mcp_server_tests.rs",
@@ -1925,6 +2387,54 @@
           "name": "python_dialect_reports_messages_it_cannot_read_and_typescript_drops_them"
         },
         {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "python_dialect_reads_every_jsonrpc_shape_like_the_mcp_package"
+        },
+        {
+          "path": "src/jsonrpc_message_tests.rs",
+          "name": "reads_each_shape_as_the_union_does"
+        },
+        {
+          "path": "src/jsonrpc_message_tests.rs",
+          "name": "an_empty_message_fails_every_model"
+        },
+        {
+          "path": "src/jsonrpc_message_tests.rs",
+          "name": "params_that_are_not_a_dictionary_are_named_per_model"
+        },
+        {
+          "path": "src/pydantic_int_string_tests.rs",
+          "name": "accepts_what_pydantic_reads_as_an_integer"
+        },
+        {
+          "path": "src/pydantic_int_string_tests.rs",
+          "name": "rejects_what_pydantic_cannot_read"
+        },
+        {
+          "path": "src/pydantic_int_string_tests.rs",
+          "name": "separates_too_many_digits_from_a_bad_number"
+        },
+        {
+          "path": "src/pydantic_validation_error_tests.rs",
+          "name": "renders_the_header_block_and_link"
+        },
+        {
+          "path": "src/pydantic_validation_error_tests.rs",
+          "name": "cuts_a_long_input_around_an_ellipsis_on_character_boundaries"
+        },
+        {
+          "path": "src/pydantic_validation_error_tests.rs",
+          "name": "shows_the_failing_value_when_the_error_has_its_own_input"
+        },
+        {
+          "path": "src/python_value_repr_tests.rs",
+          "name": "repr_spells_values_as_python_does"
+        },
+        {
+          "path": "src/python_value_repr_tests.rs",
+          "name": "type_name_is_the_python_class_name"
+        },
+        {
           "path": "tests/sdk_tools.rs",
           "name": "python_collections_keep_repeated_names"
         },
@@ -1971,6 +2481,7 @@
             "Options.mcpServers",
             "McpServerConfig",
             "McpServerConfigForProcessTransport",
+            "sdk.coreTypes.McpServerConfigForProcessTransport",
             "core.Options.mcpServers",
             "core.McpServerConfig",
             "core.McpServerConfigForProcessTransport"
@@ -2068,6 +2579,7 @@
         "InMemorySessionStore",
         "SessionKey",
         "SessionKey::checked",
+        "SessionProjectKey::checked",
         "SessionSubpath::checked",
         "SessionEntry",
         "InMemorySessionStore::with_clock",
@@ -2131,6 +2643,38 @@
         {
           "path": "tests/session_values.rs",
           "name": "session_keys_take_any_identifier_as_upstream_does_and_checked_rejects_unsafe_ones"
+        },
+        {
+          "path": "tests/session_project_key.rs",
+          "name": "explicit_project_keys_take_any_name_as_upstream_does_and_checked_rejects_unsafe_ones"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_transcript_path_keys_match_the_typescript_sdk"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_python_dialect_keys_match_the_python_sdk_and_differ_from_typescript_at_drive_like_parts"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_typescript_resume_guard_matches_the_sdk"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_python_resume_guard_matches_the_sdk_and_checked_only_adds_rust_rules"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_transcript_paths_outside_the_projects_or_misshapen_report_typed_errors"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "checked_subpath_reads_drives_as_the_platform_does"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "directory_names_fold_as_both_sdks_do_on_windows_only"
         },
         {
           "path": "tests/session_values.rs",
@@ -2273,6 +2817,7 @@
         "typescript": {
           "symbols": [
             "SDKUserMessage",
+            "sdk.coreTypes.SDKUserMessage",
             "core.SDKUserMessage"
           ],
           "prefixes": []
@@ -2307,9 +2852,13 @@
           "symbols": [],
           "prefixes": [
             "SDKAssistantMessage",
+            "sdk.coreTypes.SDKAssistantMessage",
             "SDKResultMessage",
+            "sdk.coreTypes.SDKResultMessage",
             "SDKResultSuccess",
+            "sdk.coreTypes.SDKResultSuccess",
             "SDKResultError",
+            "sdk.coreTypes.SDKResultError",
             "core.SDKAssistantMessage",
             "core.SDKResultMessage",
             "core.SDKResultSuccess",
@@ -2325,7 +2874,9 @@
         "AssistantMessage.to_sdk_message",
         "ResultMessage.to_sdk_message",
         "upstream::messages::SDKAssistantMessage",
-        "upstream::messages::SDKResultMessage"
+        "upstream::messages::SDKResultMessage",
+        "PermissionDenial",
+        "ResultMessage.typed_permission_denials"
       ],
       "tests": [
         {
@@ -2339,10 +2890,14 @@
         {
           "path": "tests/message_decoding.rs",
           "name": "python_decoding_yields_what_the_pinned_python_query_yields"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "permission_denials_keep_every_entry_with_raw_and_typed_access"
         }
       ],
       "status": "supported",
-      "rationale": "Every message keeps its exact wire object in raw, and to_sdk_message returns the generated upstream::messages type for it, so identity, origin, stop, terminal, model usage, permission denial and nested usage fields are typed as sdk.d.ts declares them. The corpus goldens from the pinned TypeScript and Python query() pin both views."
+      "rationale": "Every message keeps its exact wire object in raw, and to_sdk_message returns the generated upstream::messages type for it, so identity, origin, stop, terminal, model usage, permission denial and nested usage fields are typed as sdk.d.ts declares them. The corpus goldens from the pinned TypeScript and Python query() pin both views. typed_permission_denials wraps each permission_denials entry, as written, in a PermissionDenial whose raw value stays intact beside its tool_name, tool_use_id, tool_input, typed_input and SDKPermissionDenial views; Python keeps the same entries as list[Any]."
     },
     {
       "id": "future-messages",
@@ -2358,13 +2913,19 @@
         "typescript": {
           "symbols": [
             "SDKMessage",
+            "sdk.coreTypes.SDKMessage",
             "SDKSystemMessage",
+            "sdk.coreTypes.SDKSystemMessage",
             "SDKPartialAssistantMessage",
+            "sdk.coreTypes.SDKPartialAssistantMessage",
             "core.SDKMessage",
             "core.SDKSystemMessage",
-            "core.SDKPartialAssistantMessage"
+            "core.SDKPartialAssistantMessage",
+            "sdk.StdoutMessage"
           ],
-          "prefixes": []
+          "prefixes": [
+            "sdk.SDKKeepAliveMessage"
+          ]
         }
       },
       "rust_api": [
@@ -2395,6 +2956,10 @@
         {
           "path": "tests/message_decoding.rs",
           "name": "python_decoding_yields_what_the_pinned_python_query_yields"
+        },
+        {
+          "path": "src/message_decode/tests.rs",
+          "name": "typescript_consumes_keep_alive_and_python_counts_it_without_yielding_it"
         }
       ],
       "status": "supported",
@@ -2577,7 +3142,10 @@
             "sdk.coreTypes.SlashCommand",
             "TerminalReason",
             "core.TerminalReason",
-            "sdk.coreTypes.TerminalReason"
+            "sdk.coreTypes.TerminalReason",
+            "SDKUserMessage",
+            "core.SDKUserMessage",
+            "sdk.coreTypes.SDKUserMessage"
           ]
         }
       },
@@ -2586,7 +3154,8 @@
         "upstream::messages::SDKMessage",
         "upstream::messages::SDKActiveGoalMessage",
         "Message.to_sdk_message",
-        "Message.to_active_goal_message"
+        "Message.to_active_goal_message",
+        "ContentBlock.typed_input"
       ],
       "tests": [
         {
@@ -2616,6 +3185,10 @@
         {
           "path": "tests/upstream_messages.rs",
           "name": "only_an_active_goal_message_types_as_one"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "tool_use_blocks_expose_a_typed_input_and_keep_the_raw_one"
         }
       ],
       "status": "supported",
@@ -3175,8 +3748,12 @@
         "ClientHandle.reload_output_styles",
         "ClientHandle.seed_read_state",
         "ClientHandle.background_tasks",
+        "Backgrounded",
+        "BackgroundedError",
         "ControlReply",
-        "ControlRejectionError"
+        "ControlRejectionError",
+        "ClientHandle.enable_remote_control",
+        "RemoteControlOptions"
       ],
       "tests": [
         {
@@ -3202,10 +3779,22 @@
         {
           "path": "tests/error_contracts.rs",
           "name": "control_timeout_diagnostics_identify_each_wire_operation"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "enable_remote_control_writes_the_typescript_request_bytes"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "connect_returns_before_initialize_is_answered_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "an_undefined_remote_control_response_follows_sdk_mjs"
         }
       ],
       "status": "supported",
-      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods."
+      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks hands back backgrounded as sent through Backgrounded, true when it is null or absent, with the opt-in Backgrounded::into_bool refusing a non-boolean. A rejection keeps its error_code when it matches the TypeScript pattern. Python 0.2.181 has none of these methods. enableRemoteControl writes the remote_control request with the optional name, reattach_session_id, keep_session_on_exit and work_secret fields in the TypeScript order, returns the response as sdk.mjs does, and while it is still the latest call, enabling with an absent or null response fails as sdk.mjs does reading bridge_session_id. It installs the work secret answerer only for the attached session, cleared by a failed or superseded call; connect returns once the initialize request is queued for the TypeScript dialect, so a call made right after connect is written right behind the initialize request and before its response, as sdk.mjs writes it. enableRemoteControl is not published in the upstream declaration files."
     },
     {
       "id": "custom-transport",
@@ -3221,13 +3810,24 @@
             "Options.spawnClaudeCodeProcess",
             "core.Options.spawnClaudeCodeProcess"
           ],
-          "prefixes": []
+          "prefixes": [
+            "SpawnOptions",
+            "core.SpawnOptions",
+            "SpawnedProcess",
+            "core.SpawnedProcess"
+          ]
         }
       },
       "rust_api": [
         "adapters::RuntimeAdapters",
         "adapters::SpawnProcess",
         "adapters::TokioProcessSpawner",
+        "ClaudeAgentOptions.spawn_claude_code_process",
+        "SpawnClaudeCodeProcess",
+        "SpawnOptions",
+        "ClaudeAgentOptions.on_process_spawned",
+        "OnProcessSpawned",
+        "ProcessSpawnInfo",
         "Transport",
         "ClaudeSdkClient::connect_with_adapters",
         "ClaudeSdkClient::connect_with_transport",
@@ -3293,10 +3893,30 @@
         {
           "path": "tests/transport.rs",
           "name": "t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_failing_custom_spawner_is_a_spawn_error"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "the_forwarded_signal_is_cancelled_only_once_an_aborted_client_has_closed"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "on_process_spawned_reports_the_pid_of_the_sdk_spawn"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_panicking_on_process_spawned_does_not_stop_the_query"
         }
       ],
       "status": "supported",
-      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default and the SpawnProcess adapter stays TypeScript's spawnClaudeCodeProcess. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
+      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default. ClaudeAgentOptions.spawn_claude_code_process is TypeScript's spawnClaudeCodeProcess: it gets SpawnOptions with the command, arguments, working directory, the whole child environment and the forwarded abort signal, which is cancelled only when the client closes after its abort controller was cancelled, past the close grace. It returns a tokio Child in place of SpawnedProcess (stdin and stdout piped, stderr read when piped), so it runs anything a local command reaches, such as a container or remote shell; a peer that is not a process uses the Transport trait. As upstream, a custom spawn derives no default debug file and gets no onProcessSpawned call. ClaudeAgentOptions.on_process_spawned is TypeScript's onProcessSpawned, a runtime option its declarations omit: it gets the pid and spawnSyncMs of the SDK's own spawn, and a panic in it is logged and ignored as TypeScript ignores a throw. SpawnOptions.uid carries Python's user or run_as_uid for a spawner on Unix. The SpawnProcess adapter remains the injection seam for tests and hosts. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
     },
     {
       "id": "browser-websocket-transport",
@@ -3368,7 +3988,7 @@
         },
         {
           "path": "src/websocket_transport_tests.rs",
-          "name": "the_keep_alive_is_sent_every_fifty_seconds_while_reading"
+          "name": "the_keep_alive_is_sent_on_its_interval_while_reading"
         },
         {
           "path": "src/websocket_transport_tests.rs",
@@ -3392,7 +4012,107 @@
         }
       ],
       "status": "supported",
-      "rationale": "WebSocketTransport is the browser SDK's WebSocket transport as a Transport implementation, replayed against goldens recorded by running the real class in node (websocket_transport_goldens.mjs): the auth line is sent first, a keep_alive line every 50000ms while the driver reads, inbound text frames are split on newlines with partial lines kept, bad JSON dropped and ccr_event removed, writes go out verbatim, close sends 1000 Normal closure, close codes other than 1000 and 1001 fail with the upstream text, the connect timeout is 15000ms, abort and a not-ready write carry the upstream messages. headers is accepted and ignored by default like the browser class; HeaderDelivery::Handshake opts into sending them on the upgrade request. JSON values that are not objects are dropped because Transport yields objects. The query-level browser options (websocket, sse), SSE and the rest of the browser entrypoint stay out of scope."
+      "rationale": "WebSocketTransport is the browser SDK's WebSocket transport as a Transport implementation, replayed against goldens recorded by running the real class in node (websocket_transport_goldens.mjs): the auth line is sent first, a keep_alive line every 50000ms while the driver reads, inbound text frames are split on newlines with partial lines kept, bad JSON dropped and ccr_event removed, writes go out verbatim, close sends 1000 Normal closure, close codes other than 1000 and 1001 fail with the upstream text, the connect timeout is 15000ms, abort and a not-ready write carry the upstream messages. headers is accepted and ignored by default like the browser class; HeaderDelivery::Handshake opts into sending them on the upgrade request. JSON values that are not objects are dropped because Transport yields objects. The query-level browser options are in browser-entrypoint."
+    },
+    {
+      "id": "browser-sse-transport",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "browser.SSEOptions",
+            "browser.SSEOptions.streamUrl",
+            "browser.SSEOptions.sendUrl",
+            "browser.SSEOptions.sessionId",
+            "browser.SSEOptions.headers",
+            "browser.SSEOptions.fromSequenceNum",
+            "browser.SSEOptions.onCatchUpTruncated",
+            "browser.SSEOptions.onDeliveryUpdate",
+            "browser.G4_TEXT_ENVELOPE_ARM_PORTED"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SseTransport",
+        "SseHandle",
+        "SseOptions",
+        "SseError",
+        "CatchUpTruncatedHandler",
+        "DeliveryUpdateHandler",
+        "G4_TEXT_ENVELOPE_ARM_PORTED"
+      ],
+      "tests": [
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_session_matches_the_recorded_transport"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "handlers_that_throw_do_not_stop_the_stream"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_401_on_the_stream_is_permanent"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "the_reconnect_budget_runs_out"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_reset_stream_reconnects_from_the_cursor"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_silent_stream_is_reconnected"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_stream_that_never_answers_is_reconnected"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "suspending_and_resuming_the_stream"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_failed_write_waits_for_retry_after"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_write_is_dropped_after_three_failures"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "a_permanent_write_failure_fails_the_transport"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "the_queue_holds_a_thousand_lines"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "aborting_while_running"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "every_recorded_case_is_replayed"
+        },
+        {
+          "path": "src/sse_transport_tests.rs",
+          "name": "the_text_envelope_arm_is_ported"
+        },
+        {
+          "path": "src/sse_options_tests.rs",
+          "name": "debug_hides_urls_and_header_values"
+        }
+      ],
+      "status": "supported",
+      "rationale": "SseTransport is the browser SDK's SSE transport as a Transport implementation, replayed against goldens recorded by running the real class against a local HTTP server (sse_transport_goldens.mjs): the stream is requested with Accept text/event-stream and Last-Event-ID resumes from the cursor, 401, 403 and 404 are permanent while other failures reconnect with a 1000ms doubling backoff capped at 30000ms for five attempts in a row, the connect timeout is 15000ms and a silent stream is reconnected after 45000ms, writes are POSTed in order with a 30000ms timeout, retried with the Retry-After header clamped to 1000..30000ms plus jitter and dropped after three failures in a row, a permanent write failure fails the transport, the queue holds 1000 lines, and abort and close carry the upstream messages. A handler that panics is contained like a handler that throws upstream. The handle methods back the transport accessors that browser-entrypoint exposes on the query."
     },
     {
       "id": "browser-entrypoint",
@@ -3404,14 +4124,54 @@
         "typescript": {
           "symbols": [],
           "prefixes": [
-            "browser"
+            "browser",
+            "browser-sdk"
           ]
         }
       },
-      "rust_api": [],
-      "tests": [],
-      "status": "out_of_scope",
-      "rationale": "This TypeScript package entrypoint serves browser/remote bridge or binary-extraction hosting outside the native Rust subprocess contract. Its declaration changes remain visible for review even though no corresponding Rust API is promised."
+      "rust_api": [
+        "browser_query",
+        "BrowserQueryOptions",
+        "BrowserTransport",
+        "BrowserPrompt",
+        "get_sse_drop_counts",
+        "get_sse_last_sequence_num",
+        "get_ccr_event",
+        "suspend_sse_stream",
+        "resume_sse_stream"
+      ],
+      "tests": [
+        {
+          "path": "tests/browser_query.rs",
+          "name": "every_recorded_query_sends_the_recorded_initialize_request"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "dialog_kinds_without_a_handler_fail_before_connecting_with_the_recorded_text"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "the_recorded_transport_errors_stay_unrepresentable_or_have_no_rust_counterpart"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "a_websocket_query_has_no_sse_state"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "a_prompt_that_cannot_be_sent_aborts_the_query"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "an_sse_query_exposes_the_transport_state_through_the_accessors"
+        },
+        {
+          "path": "tests/browser_query.rs",
+          "name": "envelopes_and_the_delivered_number_follow_the_consumer_not_the_reads"
+        }
+      ],
+      "status": "supported",
+      "rationale": "browser_query is the browser entrypoint's query(): it connects over the WebSocket or SSE transport, sends an initialize request that carries hooks, the SDK MCP server names, jsonSchema, promptSuggestions and supportedDialogKinds and nothing else (replayed against goldens recorded by running the real browser-sdk.js in node, browser_query_goldens.mjs), streams the prompt in the background and aborts the query when a send fails. Declaring dialog kinds without a handler fails before any connection with the upstream text. The accessors take the Query and return None or false for a WebSocket query. The types the entrypoint re-exports (Query, messages, hooks, MCP servers, elicitation and dialog types, createSdkMcpServer, tool) are the crate's existing equivalents. Differences: the websocket and sse options are the BrowserTransport enum, so neither and both cannot be written; mcpServers that upstream rejects at run time (not an in-process server) cannot be expressed because sdk_mcp_servers only holds in-process servers; and get_ccr_event finds a message's envelope by its uuid, or by equal JSON when it has none, instead of by object identity, because messages are moved to the caller; the map is never trimmed, like the upstream WeakMap, and getSseLastSequenceNum advances when Query::next_message returns the message, as markDelivered does when the consumer receives it (both replayed against recorded goldens with several frames read ahead)."
     },
     {
       "id": "bridge-entrypoint",
@@ -3427,10 +4187,231 @@
           ]
         }
       },
-      "rust_api": [],
-      "tests": [],
-      "status": "out_of_scope",
-      "rationale": "This TypeScript package entrypoint serves browser/remote bridge or binary-extraction hosting outside the native Rust subprocess contract. Its declaration changes remain visible for review even though no corresponding Rust API is promised."
+      "rust_api": [
+        "attach_bridge_session",
+        "AttachBridgeSessionOptions",
+        "AttachCallbacks",
+        "AttachError",
+        "BridgeSession",
+        "ReconnectOptions",
+        "CLOSE_INIT_FAILED",
+        "ReconnectError"
+      ],
+      "tests": [
+        {
+          "path": "tests/bridge_session.rs",
+          "name": "every_recorded_stream_case_is_reproduced_through_the_session"
+        },
+        {
+          "path": "tests/bridge_session.rs",
+          "name": "the_recorded_attach_cases_are_reproduced"
+        },
+        {
+          "path": "tests/bridge_session.rs",
+          "name": "a_worker_refused_for_good_closes_the_session_with_4091"
+        },
+        {
+          "path": "tests/bridge_session.rs",
+          "name": "a_conflict_while_starting_closes_the_session_with_4090"
+        },
+        {
+          "path": "tests/bridge_session.rs",
+          "name": "registering_when_no_epoch_is_given_uses_the_epoch_the_service_issued"
+        },
+        {
+          "path": "tests/bridge_session.rs",
+          "name": "a_failed_registration_is_an_attach_error"
+        },
+        {
+          "path": "tests/bridge_session.rs",
+          "name": "an_upload_only_session_never_asks_for_the_stream"
+        },
+        {
+          "path": "tests/bridge_session_handle.rs",
+          "name": "every_recorded_handle_case_is_reproduced"
+        },
+        {
+          "path": "tests/bridge_session_handle.rs",
+          "name": "the_state_event_and_delivery_calls_are_reproduced_through_the_handle"
+        },
+        {
+          "path": "tests/bridge_session_attach_timeline.rs",
+          "name": "a_silent_stream_is_reopened_by_the_liveness_timer"
+        },
+        {
+          "path": "tests/bridge_session_attach_timeline.rs",
+          "name": "closing_stops_a_pending_open"
+        },
+        {
+          "path": "tests/bridge_session_stream_events.rs",
+          "name": "closing_sends_the_row_that_is_ready"
+        }
+      ],
+      "status": "supported",
+      "rationale": "attachBridgeSession and the session handle are replayed against goldens recorded from the real bridge.mjs: the registration and heartbeat requests, the read stream requests with their resume position, the control replies, the event, state, metadata and delivery uploads, sendResult, the historical flag, the control request and response bookkeeping, reconnectTransport carrying undelivered events to a new worker, its invalid URL rejection and the close issued while it is awaited, and the close codes. A default-option attach schedules its own heartbeat timer, upload task and read stream (with its connect, liveness and reconnect timers) and is replayed against timelines recorded from the real bridge.mjs with its timers, clocks and random draws stubbed, including the host closing while a stream waits, reconnects, opens or delivers and the rows still queued at close. The paths the upstream attach never reaches with the options it passes (hold options, outbound only control rejection, the exiting refusal, the unset callbacks, the unwatched thinking buffer) are recorded as behavior rows rather than ported."
+    },
+    {
+      "id": "bridge-credentials",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "bridge.RemoteCredentials",
+            "bridge.SessionState",
+            "bridge.CredentialsFailure",
+            "bridge.CredentialsFailure.reason",
+            "bridge.CredentialsFailure.source",
+            "bridge.CredentialsFailure.status",
+            "bridge.CredentialsFailure.terminal",
+            "bridge.CredentialsRejection",
+            "bridge.CredentialsRejection.reason",
+            "bridge.CredentialsRejection.terminal",
+            "bridge.fetchRemoteCredentials",
+            "bridge.isCredentialsFailure",
+            "bridge.isCredentialsRejection"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "BridgeClient",
+        "FetchRemoteCredentialsOptions",
+        "RemoteCredentials",
+        "RemoteMcpConfig",
+        "RemoteCredentialsOutcome",
+        "CredentialsFailure",
+        "CredentialsRejection",
+        "DeviceRefusal",
+        "FailureSource",
+        "SessionState",
+        "adapters::HttpExecute"
+      ],
+      "tests": [
+        {
+          "path": "tests/bridge_credentials.rs",
+          "name": "fetch_remote_credentials_matches_the_upstream_client"
+        },
+        {
+          "path": "src/bridge_types_tests.rs",
+          "name": "describes_credentials_failures"
+        },
+        {
+          "path": "src/bridge_js_tests.rs",
+          "name": "reads_numbers_like_the_number_function"
+        }
+      ],
+      "status": "supported",
+      "rationale": "fetchRemoteCredentials is replayed against goldens recorded by running the real bridge.mjs in node against a local server (bridge_credentials_goldens.mjs): the POST to /v1/code/sessions/{id}/bridge with its header order, the entrypoint to client platform mapping, the optional trusted device token header, the 401 and 403 classification (untrusted_device refusals, stale relogin, security tier, origin versus edge source from the response headers), the 200 body checks including the safe integer worker_epoch read through Number(), the undeclared mcp_config content, and null for 5xx, 408, 429, network errors and timeouts. The HTTP client is injected through HttpExecute so a decorator can stand in for the network; the native client follows up to 21 redirects like axios. SessionState is the idle, running and requires_action vocabulary the later session handle reports."
+    },
+    {
+      "id": "bridge-create-code-session",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "bridge.createCodeSession",
+            "bridge.CreateSessionFailure",
+            "bridge.CreateSessionFailure.detail",
+            "bridge.CreateSessionFailure.reason",
+            "bridge.CreateSessionFailure.status",
+            "bridge.CreateSessionFailure.terminal",
+            "bridge.isCreateSessionFailure",
+            "bridge.CodeSessionGitContext",
+            "bridge.CodeSessionGitContext.branch",
+            "bridge.CodeSessionGitContext.defaultBranch",
+            "bridge.CodeSessionGitContext.gitRepoUrl",
+            "bridge.BranchDropLogDedup",
+            "bridge.BranchDropLogDedup.lastKey"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "BridgeClient",
+        "CreateCodeSessionOptions",
+        "CreateSessionOutcome",
+        "CreateSessionFailure",
+        "CodeSessionGitContext",
+        "BranchDropLogDedup",
+        "GitContextProbe",
+        "GitRepository",
+        "DefaultGitProbe",
+        "GitProbeContext",
+        "PathGuard",
+        "PlatformProbe",
+        "HostProbe",
+        "Platform"
+      ],
+      "tests": [
+        {
+          "path": "tests/bridge_credentials.rs",
+          "name": "create_code_session_matches_the_upstream_client"
+        },
+        {
+          "path": "src/bridge_git_tests.rs",
+          "name": "drops_log_lines_that_repeat"
+        },
+        {
+          "path": "src/bridge_js_tests.rs",
+          "name": "drops_messages_the_cleaning_would_change"
+        },
+        {
+          "path": "src/bridge_js_tests.rs",
+          "name": "cleans_error_details_like_the_upstream_bridge"
+        },
+        {
+          "path": "src/bridge_url_tests.rs",
+          "name": "parses_addresses_like_the_upstream_bridge"
+        },
+        {
+          "path": "src/bridge_refs_tests.rs",
+          "name": "guesses_the_default_branch_like_the_upstream_bridge"
+        },
+        {
+          "path": "src/bridge_gitcmd_tests.rs",
+          "name": "guesses_gated_repositories_like_the_upstream_bridge"
+        },
+        {
+          "path": "src/bridge_gitcmd_tests.rs",
+          "name": "scrubs_the_environment_the_way_the_upstream_runner_does"
+        },
+        {
+          "path": "src/bridge_gitcmd_tests.rs",
+          "name": "refuses_to_run_outside_the_gate"
+        },
+        {
+          "path": "src/bridge_paths_tests.rs",
+          "name": "answers_path_checks_like_the_upstream_bridge_on_every_platform"
+        },
+        {
+          "path": "src/bridge_paths_tests.rs",
+          "name": "reads_automount_comments_like_the_upstream_pattern"
+        },
+        {
+          "path": "src/bridge_flavor_tests.rs",
+          "name": "answers_path_syntax_like_the_upstream_helpers"
+        },
+        {
+          "path": "src/bridge_platform_tests.rs",
+          "name": "tells_apart_what_a_path_is_on_the_real_host"
+        },
+        {
+          "path": "src/bridge_platform_tests.rs",
+          "name": "reads_the_file_system_type_and_names_the_failures"
+        },
+        {
+          "path": "src/bridge_unicode_tests.rs",
+          "name": "lowercases_like_the_javascript_runtime"
+        }
+      ],
+      "status": "supported",
+      "rationale": "createCodeSession is replayed against goldens recorded from the real bridge.mjs: the request body key order, the repository source and outcome entries, the branch drop log dedup state, grouping_rejected taking precedence over 401, 408 and 429, the cse_ session id check, and the error detail that is kept only when it is one plain line under the upstream sanitizer. Repository addresses go through ports of both upstream rejectors (bracket forms and the host differential across the ways an address can be read) and 594 recorded address cases. The default branch guess reads the repository files exactly as upstream does by default: nearest .git, gitdir files, commondir, origin/HEAD, loose and packed refs, then main, master and a main fallback, replayed against 90 recorded repository layouts including link and network path refusals, and packed references are searched by the same bisection as upstream, with sorted, rotated, reversed and shuffled files recorded. Character classes and lower casing use tables swept out of Node, proven by recorded cases covering the whole non-ASCII range and about 10,000 detail messages. Repositories using the reftable format are read by asking Git under the upstream trust gating (blocked host, session directory, same repository by device and inode, the fixed flags and scrubbed environment, five second limit), with every gate outcome replayed against goldens recorded from the real bundle over real repositories, linked worktrees and tampered common directories; the sandbox, cgroup and launcher wrappers around the child cannot be switched on through createCodeSession options, the environment or a server reply, which the b01-bridge-git-child-wrappers behavior row records with offsets. The path checks (share and device text, special mount roots, automounted hosts, the macOS network, home and data volume rules, link following with its depth limit, the repository marker rules and the Linux automount map root check with its cache of expected and repeated failures) ask the host only through a probe trait, and 521 scenarios recorded from the real bundle with the platform overridden to linux, darwin and win32 and the file system, file system type and home directory scripted are replayed through a fake probe. The Windows branches are ported as well: drive letters, backslashes, UNC and device roots, dot segment trimming and the Windows path module, recorded by running the bundle with node:path mapped to path.win32 through a loader hook, with the helper answers (roots, splits, joins, resolves, server names) recorded from the bundle's own expressions and checks. Notes: a lone surrogate cannot reach a Rust string, the guess is computed on every call instead of cached per host with watchers, which only saves work, and the Unicode tables follow the node version they were recorded with. attachBridgeSession and the session handle are mapped by the bridge entrypoint row."
     },
     {
       "id": "extract-entrypoint",
@@ -3446,10 +4427,28 @@
           ]
         }
       },
-      "rust_api": [],
-      "tests": [],
-      "status": "out_of_scope",
-      "rationale": "This TypeScript package entrypoint serves browser/remote bridge or binary-extraction hosting outside the native Rust subprocess contract. Its declaration changes remain visible for review even though no corresponding Rust API is promised."
+      "rust_api": [
+        "extract_from_bunfs",
+        "extract_from_bunfs_with",
+        "ExtractHost",
+        "NativeExtractHost"
+      ],
+      "tests": [
+        {
+          "path": "src/extract_from_bunfs_tests.rs",
+          "name": "every_recorded_upstream_case_is_reproduced"
+        },
+        {
+          "path": "src/extract_from_bunfs_tests.rs",
+          "name": "an_identical_copy_that_appears_during_the_rename_is_reused"
+        },
+        {
+          "path": "src/node_path_join_tests.rs",
+          "name": "every_recorded_join_matches_node_for_both_path_styles"
+        }
+      ],
+      "status": "supported",
+      "rationale": "extract_from_bunfs ports extractFromBunfs: a path without $bunfs or ~BUN passes through, any other is copied to a per-user content-addressed directory and every failure warns with the upstream text and returns the input path. Golden cases recorded by running the pinned extractFromBunfs.js (tests/fixtures/extract_from_bunfs/goldens.json, regenerated by extract_from_bunfs_goldens.mjs) pin the returned paths, directory names, file modes and warnings, including the Windows root and user-id fallback logic run on a Unix host. Where the platform has no file ids or link counts the copy check relies on the same stat comparison with those values unavailable."
     },
     {
       "id": "user-tool-result-json",
@@ -3463,6 +4462,7 @@
         "typescript": {
           "symbols": [
             "SDKUserMessage.tool_use_result",
+            "sdk.coreTypes.SDKUserMessage.tool_use_result",
             "core.SDKUserMessage.tool_use_result"
           ],
           "prefixes": []
@@ -3471,7 +4471,8 @@
       "rust_api": [
         "UserMessage.tool_use_result",
         "UserMessage.tool_use_result_object",
-        "UserMessage.to_sdk_message"
+        "UserMessage.to_sdk_message",
+        "UserMessage.typed_tool_use_result"
       ],
       "tests": [
         {
@@ -3489,10 +4490,18 @@
         {
           "path": "tests/message_decoding.rs",
           "name": "python_decoding_yields_what_the_pinned_python_query_yields"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "user_messages_expose_a_typed_tool_use_result_and_keep_the_raw_one"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "recorded_cli_tool_calls_decode_to_the_declared_types"
         }
       ],
       "status": "supported",
-      "rationale": "tool_use_result keeps any JSON value with omission distinct from null, which is what both pinned SDKs pass through on the wire; tool_use_result_object gives the dictionary view Python annotates. The goldens include list and null results."
+      "rationale": "tool_use_result keeps any JSON value with omission distinct from null, which is what both pinned SDKs pass through on the wire; tool_use_result_object gives the dictionary view Python annotates. The goldens include list and null results. typed_tool_use_result views the same value as the sdk-tools output type of the named tool, Unknown when that type does not reproduce it, and leaves tool_use_result unchanged."
     },
     {
       "id": "partial-event-envelope-metadata",
@@ -3500,9 +4509,13 @@
         "typescript": {
           "symbols": [
             "SDKPartialAssistantMessage.ttft_ms",
+            "sdk.coreTypes.SDKPartialAssistantMessage.ttft_ms",
             "SDKPartialAssistantMessage.user_message_uuid",
+            "sdk.coreTypes.SDKPartialAssistantMessage.user_message_uuid",
             "SDKPartialAssistantMessage.user_message_uuids",
+            "sdk.coreTypes.SDKPartialAssistantMessage.user_message_uuids",
             "SDKPartialAssistantMessage.resume_reason",
+            "sdk.coreTypes.SDKPartialAssistantMessage.resume_reason",
             "core.SDKPartialAssistantMessage.ttft_ms",
             "core.SDKPartialAssistantMessage.user_message_uuid",
             "core.SDKPartialAssistantMessage.user_message_uuids",
@@ -3602,14 +4615,19 @@
           "symbols": [],
           "prefixes": [
             "SandboxSettings",
+            "sdk.coreTypes.SandboxSettings",
             "core.SandboxSettings",
             "SandboxNetworkConfig",
+            "sdk.coreTypes.SandboxNetworkConfig",
             "core.SandboxNetworkConfig",
             "SandboxFilesystemConfig",
+            "sdk.coreTypes.SandboxFilesystemConfig",
             "core.SandboxFilesystemConfig",
             "SandboxCredentialsConfig",
+            "sdk.coreTypes.SandboxCredentialsConfig",
             "core.SandboxCredentialsConfig",
             "SandboxIgnoreViolations",
+            "sdk.coreTypes.SandboxIgnoreViolations",
             "core.SandboxIgnoreViolations"
           ]
         }
@@ -3651,6 +4669,7 @@
             "ResolveSettingsOptions",
             "core.ResolveSettingsOptions",
             "SDKSettingsParseError",
+            "sdk.coreTypes.SDKSettingsParseError",
             "core.SDKSettingsParseError"
           ]
         }
@@ -3931,6 +4950,7 @@
         "ToolConfig",
         "OAuthTokenHandler",
         "HostAuthTokenHandler",
+        "HostAuthToken",
         "SessionLoadTimeout"
       ],
       "tests": [
@@ -3967,8 +4987,16 @@
           "name": "a_non_string_token_state_reaches_the_oauth_handler_as_no_hint"
         },
         {
+          "path": "tests/golden_initialize_ordering.rs",
+          "name": "refresh_requests_are_answered_around_the_initialize_answer_like_sdk_mjs"
+        },
+        {
           "path": "tests/session_store.rs",
           "name": "python_dialect_reports_the_resume_materialization_text"
+        },
+        {
+          "path": "tests/session_store.rs",
+          "name": "store_failures_during_resume_read_like_each_sdk"
         },
         {
           "path": "src/run_as/tests.rs",
@@ -3976,7 +5004,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
+      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. The Python session store dialect also wraps a failing store call in the resume materialization text recorded from claude_agent_sdk 0.2.181. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. A host token handler can return any JSON value through HostAuthToken::Raw, which is sent whole unless it is a string or null, like the bundle. Known limit: token callbacks use the opt-in callback_timeout limit."
     },
     {
       "id": "core-options",
@@ -4078,10 +5106,42 @@
         {
           "path": "src/run_as/tests.rs",
           "name": "setting_the_uid_to_the_current_one_needs_no_privilege"
+        },
+        {
+          "path": "tests/run_end_ceiling_golden.rs",
+          "name": "typescript_matches_the_real_sdk_on_the_table"
+        },
+        {
+          "path": "tests/run_end_ceiling_golden.rs",
+          "name": "python_matches_the_real_package_on_the_table"
+        },
+        {
+          "path": "tests/run_end_ceiling_golden.rs",
+          "name": "typescript_matches_the_real_sdk_on_every_code_point"
+        },
+        {
+          "path": "tests/run_end_ceiling_golden.rs",
+          "name": "python_matches_the_real_package_on_every_code_point"
+        },
+        {
+          "path": "tests/run_end_ceiling.rs",
+          "name": "typescript_ends_the_run_at_the_ceiling_in_options_env"
+        },
+        {
+          "path": "tests/run_end_ceiling.rs",
+          "name": "python_ends_the_run_at_the_ceiling_in_options_env"
+        },
+        {
+          "path": "tests/run_end_ceiling.rs",
+          "name": "zero_arms_no_ceiling"
+        },
+        {
+          "path": "src/run_end_ceiling_tests.rs",
+          "name": "an_explicit_environment_mode_picks_where_typescript_reads"
         }
       ],
       "status": "supported",
-      "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI. user resolves the name with getpwnam and switches only the real and effective uid with setreuid in a pre_exec hook, as CPython does; debug_stderr is an accepted no-op."
+      "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI. CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS is read from the environment by default as TypeScript does (the child environment it builds), with Limits::python() selecting Python's lookup order (options.env, then the process) and int() parse, and RunEndTimeout::Fixed as the opt-in override; both parses are pinned to a table and a full code point sweep captured from the real packages. user resolves the name with getpwnam and switches only the real and effective uid with setreuid in a pre_exec hook, as CPython does; debug_stderr is an accepted no-op."
     },
     {
       "id": "python-thinking-config",
@@ -4652,6 +5712,589 @@
       ],
       "status": "supported",
       "rationale": "The first-party names each Python module imports are reachable from the crate root."
+    },
+    {
+      "id": "sdk-tool-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "modules.sdk-tools.d.ts.imports"
+          ],
+          "prefixes": [
+            "sdk-tools"
+          ]
+        }
+      },
+      "rust_api": [
+        "upstream::tool_inputs",
+        "upstream::tool_outputs",
+        "upstream::tool_inputs::ToolInputSchemas",
+        "upstream::tool_outputs::ToolOutputSchemas",
+        "ToolInputSchemas.for_tool",
+        "ToolOutputSchemas.for_tool"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_tool_inputs_fixtures.rs",
+          "name": "fixtures_cover_exactly_the_declared_inputs"
+        },
+        {
+          "path": "tests/upstream_tool_inputs_fixtures.rs",
+          "name": "every_built_in_tool_input_round_trips_its_upstream_shaped_fixture"
+        },
+        {
+          "path": "tests/upstream_tool_inputs_fixtures.rs",
+          "name": "the_input_union_round_trips_every_fixture_without_falling_back"
+        },
+        {
+          "path": "tests/upstream_tool_inputs_fixtures.rs",
+          "name": "the_input_union_has_exactly_the_members_upstream_declares"
+        },
+        {
+          "path": "tests/upstream_tool_outputs_fixtures.rs",
+          "name": "fixtures_cover_exactly_the_declared_outputs"
+        },
+        {
+          "path": "tests/upstream_tool_outputs_fixtures.rs",
+          "name": "every_built_in_tool_output_round_trips_its_upstream_shaped_fixture"
+        },
+        {
+          "path": "tests/upstream_tool_outputs_fixtures.rs",
+          "name": "the_output_union_round_trips_every_fixture"
+        },
+        {
+          "path": "tests/upstream_tool_inputs.rs",
+          "name": "string_literal_fields_decode_known_values_and_keep_unlisted_ones"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "every_declared_input_decodes_to_its_tool_type_and_reencodes_unchanged"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "every_declared_output_decodes_to_its_tool_type_and_reencodes_unchanged"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "union_outputs_pick_the_member_the_generated_union_picks"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "legacy_aliases_decode_to_the_type_of_the_tool_they_resolve_to"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "values_the_named_type_does_not_reproduce_stay_unknown_and_unchanged"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "recorded_cli_tool_calls_decode_to_the_declared_types"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Every input and output type in the pinned sdk-tools.d.ts, the ToolInputSchemas and ToolOutputSchemas unions included, is generated with undeclared keys kept in order so encoding reproduces the value. ToolInputSchemas::for_tool and ToolOutputSchemas::for_tool pick the type sdk-tools declares for a tool name (legacy aliases resolved as the pinned CLI resolves them, mcp__ names as McpInput and McpOutput) and fall back to Unknown with the value unchanged, never validating or rewriting it. Python declares no tool types; its tool_use_result, tool_input and tool_response stay the raw JSON values the Rust messages also keep. Tool calls recorded from the pinned CLI decode to the declared types."
+    },
+    {
+      "id": "builtin-tool-names",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "BUILTIN_TOOL_NAMES",
+            "core.BUILTIN_TOOL_NAMES"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "BuiltinToolName",
+        "BuiltinToolName.ALL",
+        "BuiltinToolName.LEGACY_ALIASES",
+        "BuiltinToolName.canonical_name",
+        "BuiltinToolName.REFRESH_MCP_TOOLS"
+      ],
+      "tests": [
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "builtin_constants_name_every_cli_tool_in_cli_order"
+        },
+        {
+          "path": "tests/typed_tool_views.rs",
+          "name": "legacy_aliases_resolve_like_the_cli_and_other_names_pass_through"
+        },
+        {
+          "path": "tests/builtin_tool_name.rs",
+          "name": "builtin_names_preserve_open_ended_names_and_converted_tool_names"
+        }
+      ],
+      "status": "supported",
+      "rationale": "BuiltinToolName::ALL lists the BUILTIN_TOOL_NAMES tuple in its order, each with its own constant, and any other name is still accepted as written. LEGACY_ALIASES and canonical_name resolve the legacy names the pinned CLI still accepts; the Eval alias is left out because the CLI applies it only in its gated REPL mode. Python exports no such list."
+    },
+    {
+      "id": "startup",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "startup",
+            "core.startup",
+            "SDKStartupFailureReason",
+            "core.SDKStartupFailureReason",
+            "sdk.coreTypes.SDKStartupFailureReason"
+          ],
+          "prefixes": [
+            "WarmQuery",
+            "core.WarmQuery"
+          ]
+        }
+      },
+      "rust_api": [
+        "startup",
+        "startup_with_adapters",
+        "StartupOptions",
+        "WarmQuery",
+        "WarmQuery.query",
+        "WarmQuery.close",
+        "WarmQuery.dispose",
+        "InitializeTimeoutError",
+        "ResultError.startup_failure_reason",
+        "StartupHooksRunning"
+      ],
+      "tests": [
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "a_passed_timeout_counts_from_the_start_and_names_the_last_mark"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "closing_a_warm_query_sends_no_prompt"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_writes_the_handshake_then_the_prompt"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_leaves_a_marks_flag_the_caller_already_has"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_marks_are_kept_up_to_sixty_four_characters"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_timeout_says_what_the_reported_hooks_did"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_exit_names_why_startup_failed"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_waits_sixty_seconds_when_no_hook_is_reported"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_does_not_count_one_hooks_time"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_counts_overlapping_hooks_once"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_stops_not_counting_hook_time_after_ten_minutes"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_after_a_prompt_is_a_message_and_a_nonzero_exit_then_names_it"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_after_a_prompt_ends_the_stream_cleanly_when_the_process_exits_zero"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "a_reason_the_sdk_does_not_list_is_kept_and_a_non_string_is_dropped"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_error_result_text_trims_and_joins_the_errors_or_uses_the_result_of_a_success_subtype"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "a_passed_limit_counts_hook_time"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "the_default_limit_does_not_count_hook_time"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "uncounted_time_stops_at_ten_minutes"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "uncounted_seconds_round_half_up"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "hook_summaries_follow_the_upstream_wording"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "hooks_past_the_followed_limit_are_only_counted"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "frames_map_to_startup_events"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "an_error_result_exposes_the_startup_failure_reason"
+        }
+      ],
+      "status": "supported",
+      "rationale": "startup() returns a WarmQuery after the initialize handshake, with the TypeScript initialize timer (60000 ms default, SessionStart and Setup hook time uncounted for at most 10 minutes only when no value is passed), startup marks and the SDKStartupFailureReason on the error result exit. Every golden, including the error result exit text and the default timer hook accounting, was captured live from the real sdk.mjs 0.3.323 talking to a scripted CLI (the default timer runs about 60 seconds there and under paused time here). Python 0.2.181 has no pre-warming. WarmQuery::query consumes self instead of throwing on a second call, so the once-only rule is enforced by Rust's type system."
+    },
+    {
+      "id": "prewarm",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "prewarm",
+            "core.prewarm",
+            "ClaimOptions",
+            "core.ClaimOptions",
+            "SpareProcess",
+            "core.SpareProcess"
+          ],
+          "prefixes": [
+            "SpareProcess",
+            "core.SpareProcess"
+          ]
+        }
+      },
+      "rust_api": [
+        "prewarm",
+        "prewarm_with_adapters",
+        "SpareProcess",
+        "SpareProcess.claim",
+        "SpareProcess.claimed",
+        "SpareProcess.exited",
+        "SpareProcess.close",
+        "SpareProcess.dispose",
+        "ClaimOptions",
+        "ClaimInfo",
+        "ClaimError"
+      ],
+      "tests": [
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_times_out_with_the_startup_texts_and_marks"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "prewarm_rejects_options_that_describe_a_session"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_plain_claim_writes_the_claim_and_the_prompt_before_any_answer"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "every_claim_option_keeps_the_upstream_key_order"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_that_sets_the_model_and_thinking_writes_them_before_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "settings_surround_the_claim_and_the_prompt_waits_for_every_answer"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "failed_settings_close_the_process_without_sending_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "failed_options_report_what_was_not_applied_after_sending_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_refused_claim_carries_the_cli_text_and_still_gets_a_result"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claimed_spare_yields_the_error_result_then_names_it_on_a_nonzero_exit"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "hook_settings_are_refused_without_sending_anything_and_the_spare_stays_claimable"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_can_be_claimed_only_once_and_not_after_it_closed"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_relative_claim_directory_resolves_against_the_process_and_a_home_one_is_sent_as_is"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "the_claim_answer_replaces_the_initialization_result_and_keeps_the_applied_flags"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_over_a_missing_initialize_response_rejects_the_initialization_result"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_initialize_of_any_type_is_spread_and_keeps_the_earlier_flags"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_without_a_directory_parks_under_the_config_home_until_it_is_claimed"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_relative_config_home_falls_back_to_the_process_home"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "settings_split_into_what_precedes_and_what_follows_the_claim"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "hook_settings_are_the_keys_a_claim_cannot_apply"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_directory_resolves_only_plain_relative_paths"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_directory_reports_an_unreadable_process_directory"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "the_claim_request_keeps_upstream_key_order"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "workspace_trust_is_sent_only_when_accepted_with_an_absolute_directory"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_errors_carry_the_upstream_messages"
+        }
+      ],
+      "status": "supported",
+      "rationale": "prewarm() starts a spare with --await-claim and SpareProcess::claim writes the claim_session request, applies model, thinking and settings around it and fails with settings_not_applied or option_not_applied like sdk.mjs 0.3.323; the claim initialize answer replaces the initialization result and keeps the four applied flags, and a spare without a directory parks under the config home spares directory, named spare- plus six characters of A-Z, a-z and 0-9 like Node's mkdtemp, until claimed. Goldens were captured from the real sdk.mjs. Python 0.2.181 has no pre-warming. A spare can be claimed only once, which Rust's type system and an internal flag enforce instead of a thrown error on reuse. ClaimOptions.settings takes a JSON object like TypeScript, whose declaration types it as the parameter of Query.applyFlagSettings. The claim prompt is a UserInput rather than an async iterable, consistent with the crate's query()."
+    },
+    {
+      "id": "control-request-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "sdk.SDKControlApplyFlagSettingsRequest",
+            "sdk.SDKControlBackgroundTasksRequest",
+            "sdk.SDKControlCancelAsyncMessageRequest",
+            "sdk.SDKControlCancelRequest",
+            "sdk.SDKControlElicitationRequest",
+            "sdk.SDKControlFileSuggestionsRequest",
+            "sdk.SDKControlGetBinaryVersionRequest",
+            "sdk.SDKControlGetContextUsageRequest",
+            "sdk.SDKControlGetHooksListingRequest",
+            "sdk.SDKControlGetSessionCostRequest",
+            "sdk.SDKControlGetSettingsRequest",
+            "sdk.SDKControlGetTaskOutputRequest",
+            "sdk.SDKControlGetUsageRequest",
+            "sdk.SDKControlInitializeRequest",
+            "sdk.SDKControlInterruptRequest",
+            "sdk.SDKControlListModelsRequest",
+            "sdk.SDKControlListPermissionRulesRequest",
+            "sdk.SDKControlMcpCallRequest",
+            "sdk.SDKControlMcpMessageRequest",
+            "sdk.SDKControlMcpReadResourceRequest",
+            "sdk.SDKControlMcpReconnectRequest",
+            "sdk.SDKControlMcpSetServersRequest",
+            "sdk.SDKControlMcpStatusRequest",
+            "sdk.SDKControlMcpToggleRequest",
+            "sdk.SDKControlPermissionRequest",
+            "sdk.SDKControlReadFileRequest",
+            "sdk.SDKControlRegisterRepoRootRequest",
+            "sdk.SDKControlReloadOutputStylesRequest",
+            "sdk.SDKControlReloadPluginsRequest",
+            "sdk.SDKControlReloadSkillsRequest",
+            "sdk.SDKControlRenameSessionRequest",
+            "sdk.SDKControlRequestUserDialogRequest",
+            "sdk.SDKControlRewindFilesRequest",
+            "sdk.SDKControlSeedReadStateRequest",
+            "sdk.SDKControlSetColorRequest",
+            "sdk.SDKControlSetHasSubscribersRequest",
+            "sdk.SDKControlSetMaxThinkingTokensRequest",
+            "sdk.SDKControlSetModelRequest",
+            "sdk.SDKControlSetPermissionModeRequest",
+            "sdk.SDKControlStopTaskRequest",
+            "sdk.SDKControlUpdateSettingsRequest"
+          ]
+        }
+      },
+      "rust_api": [
+        "upstream::control::SDKControlRequest",
+        "upstream::control::SDKControlRequestInner",
+        "upstream::control::SDKControlCancelRequest"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "every_control_wire_type_round_trips"
+        },
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "every_request_type_is_its_own_member_of_the_request_union"
+        },
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "the_fixtures_hold_exactly_the_listed_roots"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Every SDKControl request type, SDKControlCancelRequest included, is generated from the pinned declarations as a serde type that keeps undeclared keys and key order. Each one decodes as its own member of SDKControlRequestInner inside the control_request envelope and encodes back to the same bytes; the cancel request is a message of its own on the stream, not a member of that union. The request and response behavior of the control channel is covered by the control protocol rows."
+    },
+    {
+      "id": "control-response-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "sdk.ControlResponse",
+            "sdk.ControlErrorResponse"
+          ]
+        }
+      },
+      "rust_api": [
+        "upstream::control::ControlResponse",
+        "upstream::control::ControlErrorResponse",
+        "upstream::control::SDKControlResponse"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "every_control_wire_type_round_trips"
+        },
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "the_fixtures_hold_exactly_the_listed_roots"
+        }
+      ],
+      "status": "supported",
+      "rationale": "ControlResponse and ControlErrorResponse are the two members of SDKControlResponse.response. Both are generated from the pinned declarations, including the pending request lists, and round trip byte for byte with their undeclared keys."
+    },
+    {
+      "id": "sandbox-config-schemas",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "sdk.SandboxNetworkConfigSchema",
+            "sdk.SandboxFilesystemConfigSchema",
+            "sdk.SandboxCredentialsConfigSchema"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SandboxConfigSchema",
+        "SandboxConfigRejected"
+      ],
+      "tests": [
+        {
+          "path": "tests/sandbox_schemas.rs",
+          "name": "the_network_schema_answers_like_zod"
+        },
+        {
+          "path": "tests/sandbox_schemas.rs",
+          "name": "the_filesystem_schema_answers_like_zod"
+        },
+        {
+          "path": "tests/sandbox_schemas.rs",
+          "name": "the_credentials_schema_answers_like_zod"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The three Zod schemas are read from the pinned bundle by the settings schema extraction and run by the same interpreter as the settings document. SandboxConfigSchema::parse accepts and rejects the documents the real schemas do and returns the parsed output with the same keys in the same order, which goldens recorded from the real schemas pin for valid, invalid and undefined inputs."
+    },
+    {
+      "id": "create-sdk-mcp-server-options",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "sdk.CreateSdkMcpServerOptions"
+          ]
+        }
+      },
+      "rust_api": [
+        "LocalMcpServerOptions",
+        "McpSdkServerOptions::for_server"
+      ],
+      "tests": [
+        {
+          "path": "tests/create_sdk_mcp_server_options.rs",
+          "name": "every_create_sdk_mcp_server_field_has_a_rust_home"
+        },
+        {
+          "path": "tests/create_sdk_mcp_server_options.rs",
+          "name": "the_server_config_carries_the_name_and_a_positive_timeout"
+        },
+        {
+          "path": "tests/create_sdk_mcp_server_options.rs",
+          "name": "a_zero_timeout_is_left_out_like_upstream_does"
+        }
+      ],
+      "status": "supported",
+      "rationale": "name, version, instructions, tools and alwaysLoad are fields of LocalMcpServerOptions. timeout belongs to the sdk config the server is registered with, as createSdkMcpServer returns it next to the instance, so McpSdkServerOptions::for_server keeps it only when it is positive, like upstream."
+    },
+    {
+      "id": "core-types-module",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "sdk.coreTypes"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "upstream::messages",
+        "upstream::hooks",
+        "upstream::control"
+      ],
+      "tests": [
+        {
+          "path": "tests/core_types_module.rs",
+          "name": "a_message_decodes_as_the_core_types_union_and_round_trips"
+        },
+        {
+          "path": "tests/core_types_module.rs",
+          "name": "a_hook_event_name_decodes_as_the_core_types_union"
+        },
+        {
+          "path": "tests/core_types_module.rs",
+          "name": "the_control_family_lives_next_to_the_core_types"
+        }
+      ],
+      "status": "supported",
+      "rationale": "coreTypes is a namespace that re-exports declarations of the same file. The generated upstream modules hold those declarations under the same names, and the members of the namespace are mapped one by one by the rows of the families they belong to."
     }
   ]
 }

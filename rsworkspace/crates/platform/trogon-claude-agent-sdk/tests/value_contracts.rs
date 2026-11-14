@@ -11,7 +11,6 @@ use serde_json::{Value, json};
 use std::os::unix::ffi::OsStrExt;
 use std::{
     collections::BTreeMap,
-    num::NonZeroUsize,
     path::PathBuf,
     sync::{
         Arc,
@@ -546,16 +545,20 @@ fn agent_definitions_preserve_inline_and_named_mcp_scopes() -> TestResult {
         (EffortLevel::Max, "max"),
     ] {
         let mut agent = AgentDefinition::new("review", Prompt::from("review the change"));
-        agent.effort = Some(effort);
+        agent.effort = Some(effort.into());
         agent.execution = Some(AgentExecution::Foreground);
         agent.permission_mode = Some(PermissionMode::DontAsk);
-        agent.max_turns = NonZeroUsize::new(3);
+        agent.max_turns = Some(3.into());
         agent.mcp_servers = Some(vec![
             AgentMcpServerSpec::Named(McpServerName::from("named")),
-            AgentMcpServerSpec::Inline(BTreeMap::from([(
-                McpServerName::from("inline"),
-                McpServerOptions::Sse(McpRemoteServerOptions::new("https://example.com/events")),
-            )])),
+            AgentMcpServerSpec::Inline(
+                [(
+                    McpServerName::from("inline"),
+                    McpServerOptions::Sse(McpRemoteServerOptions::new("https://example.com/events")),
+                )]
+                .into_iter()
+                .collect(),
+            ),
         ]);
         let wire = agent.to_wire_json()?;
         assert_eq!(wire["effort"], literal);

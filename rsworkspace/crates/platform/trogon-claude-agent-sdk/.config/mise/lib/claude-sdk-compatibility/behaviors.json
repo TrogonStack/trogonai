@@ -57,15 +57,18 @@
         "behavior": "Both skip non-JSON lines. Python raises on a line that starts with '{' and does not parse; TypeScript logs and skips every unparseable line."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "With line framing a corrupt '{' line is a lost protocol message, such as a control_response, so skipping it silently can hang a pending request. Non-JSON noise is still skipped."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect and skips every stdout line that does not decode. ArgvStyle::Python skips only the lines that do not start with '{', fails on a corrupt '{' line with JsonDecodeError as CLIJSONDecodeError does, and drops a corrupt unterminated tail at the end of the stream as Python does."
       },
       "contracts": [
+        "shutdown_errors::e03_json_decode_error_carries_the_line_and_the_original_error",
+        "shutdown_errors::t03_a_corrupt_end_of_stream_tail_is_dropped_by_both_styles",
+        "shutdown_errors::t03_typescript_skips_a_corrupt_line_and_python_fails_on_it",
         "subprocess::s02_non_json_stdout_lines_are_skipped"
       ],
       "rust": [
-        "src/driver.rs",
-        "src/wire.rs"
+        "src/framing.rs",
+        "src/process_transport.rs"
       ]
     },
     {
@@ -164,6 +167,46 @@
       "rust": [
         "src/driver.rs",
         "src/error.rs"
+      ]
+    },
+    {
+      "id": "s44-run-end-ceiling-environment",
+      "concept": "Run-end ceiling read from the environment",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 61,
+        "line_end": 87,
+        "sha256": "58dabd55a8073d6cdb94aef41ce6d92af1294fa2b5805191c998d010a48862f5"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function gd(e){let t=String(e).trim();return wC(t)??parseInt(t,10)}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 157,
+        "span_after": 0,
+        "sha256": "00b3a1232adfd9164c6b87be62417a8b07dad76b4af4f0b51b1d940eb1313cae"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS sets the run-end ceiling, 0 for no limit, clamped to 2^31-1 ms, default 600000. TypeScript reads it from the child environment with exponent, grouped-digit and leading-digit spellings; Python reads options.env then os.environ with int()."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The default dialect follows TypeScript; Limits::python() selects Python's int() parse and lookup order, and RunEndTimeout::Fixed is an opt-in override."
+      },
+      "contracts": [
+        "run_end_ceiling_golden::typescript_matches_the_real_sdk_on_the_table",
+        "run_end_ceiling_golden::python_matches_the_real_package_on_the_table",
+        "run_end_ceiling_golden::typescript_matches_the_real_sdk_on_every_code_point",
+        "run_end_ceiling_golden::python_matches_the_real_package_on_every_code_point",
+        "run_end_ceiling::typescript_ends_the_run_at_the_ceiling_in_options_env",
+        "run_end_ceiling::python_ends_the_run_at_the_ceiling_in_options_env"
+      ],
+      "rust": [
+        "src/run_end_ceiling.rs",
+        "src/options.rs",
+        "src/driver.rs"
       ]
     },
     {
@@ -828,7 +871,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Both paths are resolved against the working directory first, so relative paths work; two parts ending in .jsonl give a main key and four or more parts give a subpath key with .jsonl stripped. Nothing is validated."
+        "behavior": "Both paths are resolved against the working directory first, so relative paths work; two parts ending in .jsonl give a main key and four or more parts give a subpath key with .jsonl stripped. Nothing is validated. On Windows the paths compare case-insensitively with both separators, drives and UNC shares, and the project, session and subpath names keep the case of the transcript path; Python reads a part with a colon second, such as a:x, as a drive (ntpath.join restarts the path there and PureWindowsPath makes it the first part), so its keys differ from TypeScript's at those parts; SessionKey::from_transcript_path_with takes the SummaryDialect (TypeScript by default, also used by the mirror unless the store options say Python) and the Python dialect reproduces CPython 3.12.16, the oracle the crate follows. The goldens record where CPython 3.13 and later differ as python_since_3_13."
       },
       "decision": {
         "kind": "upstream"
@@ -836,10 +879,13 @@
       "contracts": [
         "session_key_upstream::transcript_path_keys_match_the_typescript_and_python_sdks",
         "session_key_upstream::relative_paths_resolve_against_the_working_directory_like_absolute_ones",
+        "session_key_windows::windows_transcript_path_keys_match_the_typescript_sdk",
+        "session_key_windows::windows_python_dialect_keys_match_the_python_sdk_and_differ_from_typescript_at_drive_like_parts",
         "session_failure_contracts::s25_transcript_paths_below_a_session_map_to_subpaths"
       ],
       "rust": [
-        "src/session_key.rs"
+        "src/session_key.rs",
+        "src/windows_path.rs"
       ]
     },
     {
@@ -934,15 +980,18 @@
         "behavior": "Python decodes every suggestion, so a structurally broken one (a missing type, rules that are not a list) or a missing tool_name raises inside the control handler, which answers that request with an error response while the session continues. TypeScript forwards the raw suggestions to canUseTool without decoding them, so nothing fails."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "A typed suggestion cannot represent a broken object, so the request is answered with an error response instead of reaching the callback, and neither the session nor other requests are affected."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect and hands every field to the callback as sent, keeping broken suggestions as PermissionUpdate::Unknown; ArgvStyle::Python reproduces claude_agent_sdk's from_dict errors and the order it raises them in."
       },
       "contracts": [
+        "golden_inbound_control::permission_suggestions_reach_each_dialect_like_its_sdk",
         "permission_values::structurally_malformed_permission_updates_are_rejected",
-        "runtime_failure_contracts::malformed_permission_requests_get_an_error_response_and_the_session_continues"
+        "runtime_failure_contracts::malformed_permission_requests_reach_typescript_and_get_python_error_responses"
       ],
       "rust": [
         "src/driver.rs",
+        "src/permission.rs",
+        "src/permission_suggestions.rs",
         "src/permission_update.rs",
         "src/wire.rs"
       ]
@@ -1086,10 +1135,11 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "A duplicate name makes tools/list and tools/call disagree in Python; rejecting at registration is the only unambiguous outcome."
+        "reason": "TypeScript is the default: SdkTools::new rejects a repeated name with McpServer.registerTool's error. SdkTools::with_duplicates keeps every definition, lists them all and runs the last one with the name, as Python's create_sdk_mcp_server does."
       },
       "contracts": [
-        "sdk_tools::m01_exact_duplicate_tool_names_are_rejected_with_the_validated_name"
+        "sdk_tools::m01_exact_duplicate_tool_names_are_rejected_with_the_validated_name",
+        "sdk_tools::python_collections_keep_repeated_names"
       ],
       "rust": [
         "src/sdk_tools.rs"
@@ -1455,14 +1505,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Non-alphanumerics become '-'; keys over 200 chars are truncated and suffixed with a base36 hash."
+        "behavior": "Non-alphanumerics become '-'; keys over 200 chars are truncated and suffixed with a base36 hash. A project key is never validated upstream, so SessionProjectKey::new takes any name and SessionProjectKey::checked is the opt-in Rust-only check."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
         "session_failure_contracts::project_keys_use_native_paths_and_the_pinned_long_path_hash",
-        "session_project_key::project_key_matches_upstream_utf16_replacement"
+        "session_project_key::project_key_matches_upstream_utf16_replacement",
+        "session_project_key::explicit_project_keys_take_any_name_as_upstream_does_and_checked_rejects_unsafe_ones"
       ],
       "rust": [
         "src/session_project_key.rs"
@@ -1646,11 +1697,11 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "WindowsBatchCli::Run is the default, so a .bat or .cmd path starts as in TypeScript; WindowsBatchCli::Refuse selects Python's refusal with its message as CliPathError::WindowsBatchScript."
+        "reason": "WindowsBatchCli::Run is the default, so a .bat or .cmd path starts as in TypeScript; WindowsBatchCli::Refuse selects Python's refusal, which fires only on Windows and quotes the path as Python's repr does, as CliPathError::WindowsBatchScript. Paths and refusal text captured from the real Python package on each platform pin both sides."
       },
       "contracts": [
         "windows_batch_cli::windows_batch_cli_is_spawned_by_default",
-        "windows_batch_cli::windows_batch_cli_is_refused_before_spawn"
+        "windows_batch_cli::the_python_refusal_spawns_off_windows_as_python_does"
       ],
       "rust": [
         "src/cli_path.rs",
@@ -1774,7 +1825,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "Limits::stderr_tail defaults to TypeScript's 2048 units; Limits::python() sets it to 0. TypeScript's secret redaction of the tail is not ported."
+        "reason": "Limits::stderr_tail defaults to TypeScript's 2048 units; Limits::python() sets it to 0. The tail grows and is cut as TypeScript's does, and its secrets are redacted in the TypeScript dialect only (see r12-stderr-redaction)."
       },
       "contracts": [
         "upstream_defaults::r08_a_process_error_keeps_the_last_2048_stderr_units_trimmed",
@@ -1784,6 +1835,42 @@
       "rust": [
         "src/framing.rs",
         "src/process_transport.rs"
+      ]
+    },
+    {
+      "id": "r12-stderr-redaction",
+      "concept": "Secret redaction of stderr-derived error text",
+      "python": {
+        "status": "absent",
+        "reason": "Python keeps no stderr tail and redacts nothing."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function Em(e){return[...Uet,...Fet].reduce((t,[n,r])=>t.replace(n,r),String(e))}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "5172ee0063201e43c0064c426791fd2c10f0c81f46b50d57f57ec55078af324e"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript removes secret-shaped tokens (bearer and basic credentials, vendor API keys, cloud and source host tokens, webhooks, JWTs) from the stderr tail, from the spawn failure message and from the path in the not found and failed to launch message. Python puts none of that text in its errors."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The TypeScript dialect redacts with the same eighteen patterns in the same order, run on a matcher with JavaScript semantics; ArgvStyle::Python keeps its tail unredacted."
+      },
+      "contracts": [
+        "subprocess::process_failure_message_redacts_secrets_from_the_stderr_tail",
+        "shutdown_errors::t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory"
+      ],
+      "rust": [
+        "src/error.rs",
+        "src/framing.rs",
+        "src/js_regex.rs",
+        "src/process_transport.rs",
+        "src/stderr_redaction.rs"
       ]
     },
     {
@@ -2233,7 +2320,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "SessionKey::new and SessionSubpath::new accept any text, as upstream does. Upstream skips a non-UUID resume id and, with a warning, every listSubkeys subpath its own dialect rejects; Rust applies that dialect's rule at the resume site, and SessionKey::checked and SessionSubpath::checked are the opt-in Rust-only safety checks."
+        "behavior": "SessionKey::new, SessionProjectKey::new and SessionSubpath::new accept any text, as upstream does. Upstream skips a non-UUID resume id and, with a warning, every listSubkeys subpath its own dialect rejects; Rust applies that dialect's rule at the resume site, and SessionKey::checked, SessionProjectKey::checked and SessionSubpath::checked are the opt-in Rust-only safety checks. The Windows rules of both resume guards run on any host from a platform parameter and are pinned by goldens captured with Node path.win32 and Python ntpath; what Python's resolve() does on a real Windows file system (reserved device names) is not capturable off Windows. The Rust-only extras (empty components, reserved device names) live only in the opt-in SessionSubpath::checked, which reads a drive as the platform does (any character before a colon on Windows, a letter on POSIX; Python's own guard reads any character on every host, pinned by POSIX goldens). The project directory name folds to lowercase on Windows only, through one function both listings use, pinned by a golden captured with Node toLowerCase and Python lower."
       },
       "decision": {
         "kind": "upstream"
@@ -2246,12 +2333,17 @@
         "session_filesystem::s24_ts_a_dot_component_subpath_is_written_where_typescript_writes_it",
         "session_store::store_paths_reject_traversal_and_windows_aliases",
         "session_values::session_keys_take_any_identifier_as_upstream_does_and_checked_rejects_unsafe_ones",
-        "session_values::subpaths_take_any_text_and_checked_keeps_them_inside_the_session_directory"
+        "session_values::subpaths_take_any_text_and_checked_keeps_them_inside_the_session_directory",
+        "session_key_windows::windows_typescript_resume_guard_matches_the_sdk",
+        "session_key_windows::windows_python_resume_guard_matches_the_sdk_and_checked_only_adds_rust_rules",
+        "session_key_windows::checked_subpath_reads_drives_as_the_platform_does",
+        "session_key_windows::directory_names_fold_as_both_sdks_do_on_windows_only"
       ],
       "rust": [
         "src/session_key.rs",
         "src/session_subpath.rs",
-        "src/session_resume.rs"
+        "src/session_resume.rs",
+        "src/windows_path.rs"
       ]
     },
     {
@@ -2320,7 +2412,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Upstream creates its own temp config dir and copies auth files from the caller's config dir or home directory, joining a relative path as given; TypeScript keeps an empty options.env value while Python falls through to the next source. Rust does the same by default; SessionStoreOptions::require_absolute_config_paths opts into UnsafeConfigPath."
+        "behavior": "Upstream creates its own temp config dir and copies auth files from the caller's config dir or home directory (see r31-home-directory-fallback for the home lookup), joining a relative path as given; TypeScript keeps an empty options.env value while Python falls through to the next source. Rust does the same by default; SessionStoreOptions::require_absolute_config_paths opts into UnsafeConfigPath."
       },
       "decision": {
         "kind": "upstream"
@@ -2418,6 +2510,43 @@
       ]
     },
     {
+      "id": "r31-end-without-result",
+      "concept": "Output that ends in the middle of a turn",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 1105,
+        "line_end": 1118,
+        "sha256": "8c242c5bb6290a3bf290060448648cc713075f303cfbb81dcc7b73f4dbbdc384"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "getProcessExitError(e,t){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 264,
+        "sha256": "ba96025d258eea57135fc298e7c21ea8f056cf03b5717bcfa5c0125f9f5bf740"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Both treat only a failed exit as an error: when the CLI exits with status 0 before a result, the messages end quietly after what arrived. Rust ends them the same way by default; EndWithoutResult::Fail keeps UnexpectedEof as an opt-in."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "client_lifecycle_stream::the_query_ends_with_the_stream_like_sdk_mjs",
+        "client_lifecycle_stream::receive_response_ends_with_the_stream_like_python",
+        "client_lifecycle_stream::the_opt_in_limit_fails_a_clean_exit_without_a_result",
+        "subprocess::a_clean_exit_without_a_result_ends_the_messages_unless_the_limit_fails_it",
+        "upstream_defaults::the_default_limits_are_the_typescript_sdk"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/options.rs"
+      ]
+    },
+    {
       "id": "s29-hook-matcher-omitted",
       "concept": "Hook registration without a matcher",
       "python": {
@@ -2503,18 +2632,22 @@
         "reason": "sdk.mjs resolves a platform package instead of a bundled directory."
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Python checks <package>/_bundled/claude (claude.exe on Windows) before any other discovery and accepts it only when it exists and is a file."
+        "verdict": "disagree",
+        "behavior": "Python checks <package>/_bundled/claude (claude.exe on Windows) before any other discovery and accepts it only when it exists and is a file. TypeScript has no bundled directory and resolves the native binary from its platform package."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A Rust crate ships no binary and has no package directory, so find_bundled_cli takes the directory that holds _bundled from the caller and is not part of connect's discovery."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and has no bundled lookup. ClaudeAgentOptions::bundled_cli_root names the directory that holds _bundled, Python's package directory, and connect then takes the bundled executable before PATH as _find_cli does."
       },
       "contracts": [
-        "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory"
+        "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory",
+        "subprocess::connect_spawns_the_bundled_cli_under_the_configured_root"
       ],
       "rust": [
-        "src/bundled_cli.rs"
+        "src/bundled_cli.rs",
+        "src/cli_discovery.rs",
+        "src/client.rs",
+        "src/options.rs"
       ]
     },
     {
@@ -2538,16 +2671,16 @@
         "behavior": "TypeScript resolves <package>-<platform>-<arch>/claude (claude.exe on win32) through Node module resolution, tries the musl variant first on musl Linux and the glibc one first otherwise, uses a dedicated linux-<arch>-android package for Android, skips a candidate whose resolution throws or whose file is missing, and fails with a message naming the platform when none is found."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Node module resolution is a ResolveNodeModule adapter with a default that searches the same relative node_modules, NODE_PATH and home or prefix directories. Musl is read from the compile target because a Rust process has no Node process report."
+        "kind": "upstream"
       },
       "contracts": [
-        "bundled_cli::linux_orders_the_libc_variants_by_preference",
-        "bundled_cli::other_platforms_have_one_package_and_only_windows_adds_exe",
-        "bundled_cli::a_resolved_path_must_exist_and_later_candidates_are_tried",
         "bundled_cli::a_miss_names_the_platform_and_the_upstream_remedy",
+        "bundled_cli::a_resolved_path_must_exist_and_later_candidates_are_tried",
+        "bundled_cli::host_target_prefers_musl_on_linux_unless_the_process_runs_against_glibc",
+        "bundled_cli::linux_orders_the_libc_variants_by_preference",
         "bundled_cli::lookup_directories_follow_node_order",
-        "bundled_cli::lookup_resolves_the_nearest_file_to_its_canonical_path"
+        "bundled_cli::lookup_resolves_the_nearest_file_to_its_canonical_path",
+        "bundled_cli::other_platforms_have_one_package_and_only_windows_adds_exe"
       ],
       "rust": [
         "src/bundled_cli.rs"
@@ -2594,12 +2727,12 @@
         "reason": "sdk.mjs derives no client app label from the executable that it spawns."
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "A label is derived only when the SDK package pin (__cli_version__) meets the minimum, the spawned CLI is the bundled executable, and the claude.version file beside it records a version that meets the minimum. Any other CLI counts as too old, a bundled one with no readable record does too, and a failure to read never breaks connect."
+        "verdict": "disagree",
+        "behavior": "Python derives a label only when the SDK package pin (__cli_version__) meets the minimum, the spawned CLI is the bundled executable, and the claude.version file beside it records a version that meets the minimum. Any other CLI counts as too old, a bundled one with no readable record does too, and a failure to read never breaks connect. TypeScript derives no label."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "bundled_cli_derives_client_app answers the trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__. connect asks it only when ClaudeAgentOptions::client_app_derivation names a BundledCli, so TypeScript's behavior stays the default, and the label names this crate because Rust has no Python distribution metadata."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and derives no label. ClaudeAgentOptions::client_app_derivation set to ClientAppDerivation::Bundled(BundledCli) selects Python's trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__, and the label names this crate because Rust has no Python distribution metadata."
       },
       "contracts": [
         "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
@@ -2839,7 +2972,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default dialect. ClaudeAgentOptions::SummaryDialect::Python on the session store selects Python's argv and request, and the prompt forms that exist in only one SDK (a list of texts, a prompt file) are refused in the other dialect instead of being dropped."
+        "reason": "TypeScript is the default dialect. ArgvStyle::Python selects Python's argv and request, and the prompt forms that exist in only one SDK (a list of texts, a prompt file) are refused in the other dialect instead of being dropped."
       },
       "contracts": [
         "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects",
@@ -2848,7 +2981,7 @@
       "rust": [
         "src/system_prompt.rs",
         "src/driver.rs",
-        "src/initialize_order.rs",
+        "src/runtime_payload.rs",
         "src/argv.rs"
       ]
     },
@@ -3060,7 +3193,7 @@
     },
     {
       "id": "c10-supported-commands",
-      "concept": "Slash commands after commands_changed",
+      "concept": "Slash commands after commands_changed, and the getters over the initialization result",
       "python": {
         "status": "absent",
         "reason": "The pinned Python client has no supported commands accessor."
@@ -3071,23 +3204,25 @@
         "occurrence": 0,
         "occurrences": 1,
         "span_before": 0,
-        "span_after": 70,
-        "sha256": "b48e18460d09b93ba9f62da81bbf7416cd65b802fbcb8d63c12010ba1700e555"
+        "span_after": 202,
+        "sha256": "28d7cc7b2955c8d8a822605f75e96b616fdb77f01326013e3c35920a8df2e46a"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "supportedCommands returns the commands of the last system commands_changed message whose commands is an array, else the initialize commands."
+        "behavior": "supportedCommands destructures the initialization result first, then returns the commands of the last system commands_changed message whose commands is an array, else the initialize commands. supportedModels, supportedAgents and accountInfo read their field off the initialization result. When initialize answered without a response or with null, each getter rejects with the engine's TypeError, supportedCommands even after commands_changed. The expected texts were captured live from sdk.mjs 0.3.323 under Node and Bun driven by a scripted CLI."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
         "golden_controls::supported_commands_follow_commands_changed",
-        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns"
+        "golden_controls::typescript_controls_match_sdk_mjs_bytes_and_returns",
+        "golden_controls::the_getters_throw_the_engine_type_error_on_a_missing_or_null_initialize_response"
       ],
       "rust": [
         "src/client.rs",
-        "src/driver.rs"
+        "src/driver.rs",
+        "src/js_runtime.rs"
       ]
     },
     {
@@ -3139,17 +3274,17 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "backgroundTasks returns response.backgrounded, true when it is null or absent, and throws when the response itself is absent."
+        "behavior": "backgroundTasks returns response.backgrounded of whatever type, true when it is null or absent or the response is not an object, and throws when the response itself is null or absent."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A backgrounded that is not a boolean is a protocol error, where TypeScript returns the value untyped."
+        "kind": "upstream"
       },
       "contracts": [
         "golden_controls::background_tasks_reads_backgrounded_like_typescript",
         "golden_controls::typescript_rejections_keep_a_well_formed_error_code"
       ],
       "rust": [
+        "src/backgrounded.rs",
         "src/client.rs"
       ]
     },
@@ -3234,7 +3369,7 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "TypeScript answers oauth_token_refresh and host_auth_token_refresh with the callback result, forwards the decline reason and the cancel signal, and fails with 'getOAuthToken callback is not provided.' or 'getHostAuthToken callback is not provided.' when no callback is set."
+        "behavior": "TypeScript answers oauth_token_refresh and host_auth_token_refresh with the callback result as soon as they arrive, even before the CLI answers initialize, forwards the decline reason and the cancel signal, sends a host callback result that is neither a string nor null as the whole response, and fails with 'getOAuthToken callback is not provided.' or 'getHostAuthToken callback is not provided.' when no callback is set."
       },
       "decision": {
         "kind": "upstream"
@@ -3246,7 +3381,8 @@
         "callback_options::missing_callbacks_answer_with_the_bundle_errors",
         "callback_options::a_cancel_request_cancels_the_token_callback_signal",
         "golden_inbound_control::python_answers_token_refreshes_as_unsupported_even_with_handlers",
-        "golden_inbound_control::a_non_string_token_state_reaches_the_oauth_handler_as_no_hint"
+        "golden_inbound_control::a_non_string_token_state_reaches_the_oauth_handler_as_no_hint",
+        "golden_initialize_ordering::refresh_requests_are_answered_around_the_initialize_answer_like_sdk_mjs"
       ],
       "rust": [
         "src/auth_token.rs",
@@ -3377,13 +3513,17 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default dialect and SummaryDialect::Python on the session store selects the Python timeout text. The Python adapter-failure wrapper text is not reproduced."
+        "reason": "TypeScript is the default dialect and lets a store failure through unchanged; SummaryDialect::Python on the session store selects Python's timeout text and wraps a failing store call in its resume materialization text."
       },
       "contracts": [
+        "session_failure_contracts::python_resume_joins_relative_configuration_and_requires_listing_for_latest",
+        "session_store::a_store_failure_of_rust_origin_keeps_its_own_text_in_the_python_wrapper",
+        "session_store::python_dialect_reports_the_resume_materialization_text",
         "session_store::resume_load_timeout_does_not_install_any_files",
-        "session_store::python_dialect_reports_the_resume_materialization_text"
+        "session_store::store_failures_during_resume_read_like_each_sdk"
       ],
       "rust": [
+        "src/session_error.rs",
         "src/session_resume.rs"
       ]
     },
@@ -3555,6 +3695,1210 @@
       "rust": [
         "src/driver.rs",
         "src/wire.rs"
+      ]
+    },
+    {
+      "id": "b01-bridge-git-child-wrappers",
+      "concept": "Sandbox, cgroup and launcher wrappers around the bridge Git child",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no bridge entry point and never spawns the Git probe."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "async function Iy(e,t){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 900,
+        "sha256": "11265e6c1ada1d82f5fe7d6412c5d1bb90cea423b7328228081794045dda4e24"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "createCodeSession reaches the Git child only through Iy (bridge.mjs offset 603705), which calls tr (572753), then q1 (576140) and y1 (562379) without bwrapProfileFd, inheritFd, gitStartsIn or allowRepoGitHooks, so no sandbox profile is applied and no option, server reply or session field can add one. The memory cgroup is chosen by oy (569821) and Oke (568290), which need vke (567261) to see a Linux or WSL process that is not diskless, with CLAUDE_CODE_TOOL_MEMORY_LIMIT not set to none and either that variable parsing as a size (Gke) or the tengu_tool_memory_cgroup flag on; only the ambient process environment and flags decide it, and it caps memory without changing arguments, output or exit status. The Windows launcher probe (GU 614968, DIe 615116, IIe 615821) needs process.platform win32 and a git.exe under a cmd folder, and Yi answers plain git when the process is diskless."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_git_child::runs_plain_git_with_the_fixed_flags_and_the_sanitised_environment"
+      ],
+      "rust": [
+        "src/bridge_gitcmd.rs"
+      ]
+    },
+    {
+      "id": "c19-connector-real-path",
+      "concept": "Canonical path of a connector folder link target",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "case\"realpath\":return es(OYe.native(n))",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "783e3dd556760fd71f71a0a219d78434796460bfdc296b10885d02d7d11ee0e6"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript asks fs.realpathSync.native, which is libuv realpath: realpath(3) on Unix, decoded lossily, and GetFinalPathNameByHandleW on Windows with the \\\\?\\UNC\\ prefix turned into \\\\ and the \\\\?\\ prefix dropped, lone surrogates read as three U+FFFD; es then drops a remaining \\\\?\\ drive or UNC prefix."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve_connector.rs",
+        "src/connector_vetting.rs",
+        "src/constants.rs"
+      ]
+    },
+    {
+      "id": "c20-connector-real-path-errors",
+      "concept": "Error codes a failed realpath reports to the connector check",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "return n===\"ENOENT\"||n===\"ENOTDIR\"?\"gone\":\"unverified\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "a3fb87c76ecaf2e021e763ffe1ccfefd124fc598d16ed4723321a6e27ae55c09"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A realpath failure is gone for ENOENT or ENOTDIR and unverified otherwise; on Windows the code is the one uv_translate_sys_error gives the system error, UNKNOWN for a code libuv does not list."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve_connector.rs",
+        "src/constants.rs"
+      ]
+    },
+    {
+      "id": "c21-connector-link-target-writable",
+      "concept": "Writability of an outside link target",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "targetWritable",
+        "occurrence": 0,
+        "occurrences": 2,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "5759fed3dce5b49e840acb4284f22afdee5419636dd753ba56050317bf949509"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The linkage result carries targetWritable, but the connector check only reads whether a link exists and its kind, so the field never changes which folders load."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve_writable.rs"
+      ]
+    },
+    {
+      "id": "c22-windows-drive-working-directory",
+      "concept": "Resolving a drive-relative path on Windows",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "resolve as Nx,sep as f4}from\"path\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "92489e31741ee16dc15c992cff4485fb4c475ffdc4c9d0a571cfa31d6ec38237"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "path.win32.resolve takes the working directory of another drive from the =X: environment variable, matched without regard to case, and falls back to the process working directory when it is unset or empty, then to the drive root when that is on another drive."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/node_path.rs"
+      ]
+    },
+    {
+      "id": "c23-connector-home-directory",
+      "concept": "Home directory the connector check compares /home folders against",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function HQ(){let e;try{e=FI()}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "2b4c41fdec43a6122d787d5a9b3af026182c5e7f26fdb147cc59a84bdd51873b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The connector check reads the home directory only in HQ, which FQ reaches on darwin alone, so HOME then the password database is the whole lookup; the Windows readers of FI (the WindowsApps alias folders) belong to executable lookup, not to the connector check, so the GetUserProfileDirectory fallback is never reached here."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/connector_vetting.rs",
+        "src/adapters/host.rs"
+      ]
+    },
+    {
+      "id": "c24-launch-directory",
+      "concept": "Working directory captured at launch",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "XE=(()=>{if(typeof process>\"u\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "32772bb1b6497fcff3da79d27b1dd7b6464a0bc6273658f3089432366b588142"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Rust runs nothing at load time: capture_launch_directory reads the directory once into a OnceLock the first time the settings resolver needs it, and a binary that calls it at the top of main gets the upstream import-time reading."
+      },
+      "contracts": [],
+      "rust": [
+        "src/adapters/environment.rs",
+        "src/settings_resolve_state.rs",
+        "src/settings_resolve.rs"
+      ]
+    },
+    {
+      "id": "c25-local-settings-root",
+      "concept": "Folder that holds local settings",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "return wX(oE(t),t.canonicalGitRoot)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "54e17471686c6a9eaf7904bfb88ff2fe3f33d7cd0fc8c88da7b71c50ccb246d0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "With no launch store root and no project config dir, the local settings live under the working directory, and the SDK never sets a canonical git root."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve_sources.rs"
+      ]
+    },
+    {
+      "id": "c26-settings-working-directory",
+      "concept": "Working directory the settings resolver starts from",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "n={store:new Bs,cwd:Eet(",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "0b4320e2103b5343876d1bbc84bdb26355566097a79b12bbf6ab40327ab37487"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The SDK resolver makes the working directory absolute before it reads any source and sets no project config dir, so the resolve error for a relative working directory cannot be reached."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve.rs",
+        "src/settings_resolve_sources.rs"
+      ]
+    },
+    {
+      "id": "c27-delayed-kill",
+      "concept": "SIGKILL after SIGTERM when the CLI process is closed",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python transport closes the process its own way."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "setTimeout((a)=>{if(a.exitCode===null)a.kill(\"SIGKILL\")},5000,s).unref()",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "a4af33e29c7574aa5cd8fd29f761efcbc45c0680b3ee15e42a422c65e180ba55"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "After SIGTERM the transport schedules SIGKILL 5 seconds later without waiting for it, and sends it only when the process has not exited by then."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/process_transport.rs"
+      ]
+    },
+    {
+      "id": "r31-home-directory-fallback",
+      "concept": "Home directory when HOME is unset or empty",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/sessions.py",
+        "line_start": 122,
+        "line_end": 127,
+        "sha256": "04fd07ef9e562b140c436aeff6a5a1ed637dc61263e652dbe05bfb735228d17b"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "ED(e||a7(),\".claude.json\")",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "ed471c8227683083462841392075f144949a852368d7a96251e6f00bda32dc45"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Neither SDK fails for a missing HOME. TypeScript calls Node os.homedir(): HOME as set (even empty), else the passwd entry of the effective user, and it throws a system error only when there is no entry; the result is joined with path.join, which normalizes dot segments, repeated separators and empty bases. Python calls Path.home() (expanduser): HOME as set (even empty, which becomes the root directory), else the passwd entry of the real user, else it raises RuntimeError; a home that still starts with a tilde also raises, and dot-dot segments are kept. Both read the process environment, not options.env. Rust ports the exact algorithms: Node path.win32.join and normalize over UTF-16 code units, CPython ntpath.expanduser, splitroot and join with the pathlib PureWindowsPath normalization, byte-exact POSIX homes that are not UTF-8 (lossy UTF-8 for Node, surrogate escapes for Python), and the Windows process-token profile directory that libuv asks. Python has no Windows passwd fallback. The Python dialect reports a missing home as the RuntimeError text through SessionFiles::from_environment and the session helpers instead of an empty result."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "home_directory::an_unset_home_resolves_to_the_passwd_home_in_both_dialects",
+        "home_directory::the_process_home_wins_over_the_passwd_home",
+        "home_directory::an_empty_home_is_used_as_set_and_never_falls_back_to_the_passwd_home",
+        "home_directory::no_home_in_the_environment_or_the_passwd_database_is_a_missing_config_directory",
+        "home_directory::a_messy_home_is_normalized_by_node_but_not_by_python",
+        "home_directory::a_home_starting_with_a_tilde_fails_only_in_python",
+        "home_directory::the_absolute_path_check_stays_opt_in_for_a_relative_home",
+        "session_environment_helpers::the_environment_constructor_reports_a_missing_home_as_the_python_error",
+        "session_environment_helpers::listing_sessions_never_turns_a_missing_home_into_an_empty_list",
+        "session_environment_helpers::reading_one_session_never_turns_a_missing_home_into_none",
+        "session_environment_helpers::reading_messages_reports_a_missing_home_through_the_messages_error",
+        "session_environment_helpers::subagent_readers_never_turn_a_missing_home_into_an_empty_result",
+        "session_environment_helpers::mutations_report_a_missing_home_instead_of_a_missing_session"
+      ],
+      "rust": [
+        "src/adapters/passwd.rs",
+        "src/cli_discovery.rs",
+        "src/debug_file.rs",
+        "src/home_directory.rs",
+        "src/home_directory/node_win32.rs",
+        "src/home_directory/nt_path.rs",
+        "src/session_files.rs",
+        "src/session_messages_ts.rs",
+        "src/session_mutations.rs",
+        "src/session_reader.rs",
+        "src/session_resume.rs",
+        "src/settings_resolve_sources.rs"
+      ]
+    },
+    {
+      "id": "c19-query-close",
+      "concept": "Closing a query while control requests wait for their answers",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 1213,
+        "line_end": 1236,
+        "sha256": "a3bd878a6c883f8abf9b2ac912e9fc60ffe5a5b991612f74088a027986460e10"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "close(){this.cleanup()}cleanup(e){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 1042,
+        "sha256": "efdcd585a0af7c79b727340a896c0cbfb912fc3c3c18ec0c301a14b002e8e90b"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript's close is idempotent: it aborts in-flight callbacks, closes the transport, rejects every control and MCP request still waiting with Query closed before response received, and ends the message stream cleanly. Python's close cancels the read task without failing waiting control requests, so each one runs out its own timeout with Control request timeout: <subtype>, and the buffered messages stay readable."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "close() on a Query, the client or a handle takes &self, so it can be called while the stream is read, and rejects waiting control requests with Error::QueryClosed by default while the messages already received stay readable before the stream ends; ArgvStyle::Python leaves each to its control timeout as Python does. disconnect(self) on the query or the client closes and waits for the process in both styles."
+      },
+      "contracts": [
+        "shutdown_errors::close_rejects_a_waiting_control_like_typescript_and_ends_the_run_cleanly",
+        "shutdown_errors::close_leaves_a_waiting_control_to_its_timeout_like_python",
+        "client_lifecycle_stream::close_while_iterating_keeps_received_messages_and_ends_the_stream_like_sdk_mjs"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/client_stream.rs",
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "c20-abort-controller",
+      "concept": "A caller-supplied abort controller stops the process",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no abort controller; cancellation is the caller's task cancellation."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "this.abortHandler=()=>this.close(),this.abortController.signal.addEventListener(\"abort\",this.abortHandler),this.abortController.signal.aborted)this.close()",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "371a26fbdd0cc592b2f6c2ef953c2f76f621ce36e73a2f879d639530e87e126e"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript listens on abortController (a fresh one by default): aborting it closes the process, an already aborted controller closes it at spawn, an exit while aborted is Claude Code process aborted by user, and a write after it is Operation aborted. Closing the query does not abort the caller's controller."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "shutdown_errors::cancelling_the_abort_controller_stops_the_process_like_typescript",
+        "shutdown_errors::an_abort_controller_cancelled_before_connect_fails_the_connection",
+        "shutdown_errors::abort_cancels_the_supplied_controller"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/options.rs"
+      ]
+    },
+    {
+      "id": "c21-custom-spawn",
+      "concept": "A caller-supplied spawn function starts the CLI",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources spawn the CLI only through their own subprocess transport; a custom peer is a Transport."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Ye={command:Mt,args:ln,cwd:o,env:c,signal:this.forwardedAbort.signal};if(this.options.spawnClaudeCodeProcess)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 207,
+        "sha256": "c46915dea3a9add0b1393846e8359a27930bbf3e106635960af81ce820ac2e87"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript hands spawnClaudeCodeProcess the command, arguments, working directory, the whole child environment and its forwarded abort signal, uses the process it returns in place of its own spawn, derives no default debug file for it, and aborts the forwarded signal only after the close grace when the caller's controller was aborted."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "subprocess::a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query",
+        "subprocess::a_failing_custom_spawner_is_a_spawn_error",
+        "subprocess::the_forwarded_signal_is_cancelled_only_once_an_aborted_client_has_closed"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/process_options.rs",
+        "src/process_transport.rs"
+      ]
+    },
+    {
+      "id": "c22-on-process-spawned",
+      "concept": "The SDK reports the process it spawned",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no spawn callback."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "i=performance.now(),a=Ket(t,n,{cwd:r,stdio:[\"pipe\",\"pipe\",\"pipe\"],signal:s,env:o,windowsHide:!0}),l=performance.now()-i;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 154,
+        "sha256": "6f6a8a4892fb80ac2d34eaea8210440aa465ad629488147fcd6a06b7c4224700"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "After its own spawn, TypeScript calls onProcessSpawned with the pid and the milliseconds the spawn call took, only when the pid is known, and logs and ignores a throw from it."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "subprocess::on_process_spawned_reports_the_pid_of_the_sdk_spawn",
+        "subprocess::a_panicking_on_process_spawned_does_not_stop_the_query"
+      ],
+      "rust": [
+        "src/process_options.rs",
+        "src/process_transport.rs"
+      ]
+    },
+    {
+      "id": "c25-remote-control-work-secret",
+      "concept": "The host answers a remote control work secret refresh",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no work secret answerer; they answer the request with their unsupported subtype error."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "else if(e.request.subtype===\"remote_control_work_secret\"){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 286,
+        "sha256": "1411082d7df22fa0e4054c4e25cbf50a47375e0ded8b036426f9f6f78efff57f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript answers remote_control_work_secret only for the session the last enableRemoteControl attached, comparing ids with j8 (equal, or the same suffix of at least four characters after the last underscore). A missing answerer, or a session this host did not attach, is an error; otherwise refreshWorkSecret runs with the attached session id and the signal and an empty result answers {work_secret:null}."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_inbound_control::remote_control_work_secret_is_answered_for_the_attached_session",
+        "golden_inbound_control::an_attach_that_names_another_session_removes_the_work_secret_answerer",
+        "golden_inbound_control::python_answers_work_secret_requests_as_unsupported_even_with_an_answerer_set"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/remote_control.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "c26-enable-remote-control",
+      "concept": "enableRemoteControl installs the work secret answerer",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no enableRemoteControl method; they answer the request with their unsupported subtype error."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "async enableRemoteControl(e,t,n){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 759,
+        "sha256": "78200a9b9ea749bec93caf80409310f24e097e4acf64850bc27edb657125124b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript sends remote_control with the optional name, reattach_session_id, keep_session_on_exit and work_secret. When enabling and still the latest call, a response that is absent or null throws the engine TypeError Cannot read properties of undefined (or null) (reading 'bridge_session_id') after the answerer was installed, so the answerer stays; when disabling, the response is returned as it is. It answers for reattachSessionId, else the session id inside the work secret's ingress token, only when enabling with a work secret and a refresh function. A failed call clears the answerer unless a newer call began, and a successful enable keeps the candidate that j8 matches to the response's bridge_session_id."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_controls::enable_remote_control_writes_the_typescript_request_bytes",
+        "golden_controls::an_undefined_remote_control_response_follows_sdk_mjs",
+        "golden_inbound_control::remote_control_work_secret_is_answered_for_the_attached_session"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/remote_control.rs",
+        "src/runtime_payload.rs"
+      ]
+    },
+    {
+      "id": "c27-ui-host",
+      "concept": "A uiHost draws the CLI's prompt",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no uiHost option; they answer the request with their unsupported subtype error."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(e.request.subtype===\"ui_copy\"&&this.uiHost?.copy){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 789,
+        "sha256": "c0b26e1131ba4cbeebd7abf540545518582821f7c034a4367524e72b6f5d5367"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript routes ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_paint, ui_prompt_suggest and ui_read_selection to the matching uiHost method with the request minus its subtype and the signal; the method's return value is the response, and an undefined return answers success without a response key. A subtype whose method is absent falls through to the unsupported request error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_inbound_control::ui_requests_reach_the_matching_host_method",
+        "golden_inbound_control::python_answers_ui_requests_as_unsupported_even_with_a_host_set"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/remote_control.rs",
+        "src/ui_host.rs",
+        "src/wire.rs"
+      ]
+    },
+    {
+      "id": "c29-bidirectional-needs",
+      "concept": "The run ends at its result only when nothing needs the CLI to keep asking, and the reader keeps yielding until the CLI exits",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 1070,
+        "line_end": 1120,
+        "sha256": "a40157c5e7776cde1d3d22d52c0520669eb95bc137cb389706efc350027ba76b"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "hasBidirectionalNeeds(){return this.sdkMcpServers.size>0",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 234,
+        "sha256": "21662671158a7a5267c0fa8b6b0610b3e5e4ae44ef6ab0566391dd56304a8360"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript treats a run as needing the CLI when it has an embedded MCP server, a non-empty hooks object, canUseTool, onElicitation, onUserDialog, getOAuthToken, getHostAuthToken or a work secret answerer. Python's _has_bidirectional_needs knows only SDK MCP servers, hooks and can_use_tool. A streamed input is closed as soon as it was written when nothing needs the CLI, in both. A prompt string is a single user turn in TypeScript: a result ends it, and closes stdin, when the session reported no state or is idle or when nothing needs the CLI, otherwise the run end waits for idle or its ceiling. Python closes stdin as soon as a prompt string was written when nothing needs the CLI, and otherwise waits for the run to end. Both readers keep yielding every message the CLI sends after the result until the CLI exits."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_run_end::a_single_turn_ends_at_its_result_unless_something_needs_the_cli_like_sdk_mjs",
+        "golden_run_end::a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs",
+        "golden_run_end::a_single_prompt_keeps_yielding_after_its_result_like_sdk_mjs",
+        "golden_run_end::a_streamed_input_keeps_yielding_after_its_result_like_sdk_mjs",
+        "golden_run_end::python_closes_stdin_once_the_prompt_is_written_and_keeps_yielding",
+        "golden_run_end::without_a_result_stdin_closes_when_the_input_is_written_unless_something_needs_the_cli",
+        "golden_run_end::python_without_a_result_closes_stdin_once_the_prompt_is_written_unless_something_needs_the_cli"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c30-run-end-machine",
+      "concept": "Stdin closes by the run-end machine of each upstream SDK: results, session state, the ceiling and, in Python, tracked agents, with nothing else moving the moment",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 953,
+        "line_end": 1120,
+        "sha256": "7e43a859e8424330cd91c0302fa6b94dbff11fd6ee1c669c804807f03ab1c9ae"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "endRun(){if(this.runEnded)return;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 560,
+        "sha256": "7f6a513de0a76750084640f55d12dcfcd667aec703609deb8d9c0ba3a5711cf3"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript: a written prompt clears the result and ends nothing; a result ends the run when the session reported no state or is idle or when nothing needs the CLI, and otherwise arms the ceiling; idle after a result ends it; any other state reopens it and restarts or clears the ceiling (requires_action clears); main-thread assistant or stream frames reopen it and clear the ceiling; ending a single user turn closes stdin and a streamed input waits for the end only when it wrote a prompt and something needs the CLI. Tasks and queued turns play no part. Python adds tracked local_agent and local_workflow tasks: while one is in flight a result or idle does not end the run and the ceiling leaves it alone, and the ceiling restarts once the last one settles; it also never arms the ceiling during a main-thread turn or without needs."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_run_end::typescript_closes_stdin_at_idle_or_the_ceiling_whatever_tasks_and_continuations_are_reported",
+        "golden_run_end::python_closes_stdin_at_idle_or_the_ceiling_unless_a_tracked_task_is_in_flight"
+      ],
+      "rust": [
+        "src/run_end.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c31-controls-before-initialize-completes",
+      "concept": "Under the TypeScript style connect returns once the initialize request is queued, and a control request issued then is written right behind it",
+      "python": {
+        "file": "src/claude_agent_sdk/client.py",
+        "line_start": 243,
+        "line_end": 244,
+        "sha256": "6e3dff9cfe7e8790dfb7e8650a8675d62e41838286e973c72393ef172416c77d"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "this.initializeHasBeenWritten||this.writingFirstInitialize?Promise.resolve(m())",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 120,
+        "sha256": "30601c1518c8884c0f477db85aa9f58d84dbf59be5562fbdd47bf760b6558852"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript request() writes at once when the initialize request is already written or being written, so enableRemoteControl called before initialize resolves lands on the wire after the initialize bytes and before the initialize response is read. The TypeScript style of connect and query returns as soon as the initialize request is queued, so the same bytes land at the same point by default. Python awaits start and initialize inside connect, so the Python style returns only after the initialize response."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_controls::connect_returns_before_initialize_is_answered_like_sdk_mjs",
+        "public_api::python_connect_waits_for_initialization_and_disconnect_closes_input"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs"
+      ]
+    },
+    {
+      "id": "c32-initialize-failure-and-prompt-hold",
+      "concept": "An initialize failure surfaces through the stream and getters, and prompts wait behind initialize when blocking hooks or managed settings are set",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources wait for the initialize response inside connect, so a failure is raised by connect and no prompt can be written earlier."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "this.promptHold=this.initialization.then(",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 260,
+        "sha256": "3c8dccb4532defaedca08cc2b2b6ee8848cbe8213110ae49390b04fad7a83fb6"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript holds prompts, interrupts and settings-bearing controls behind the initialization promise and releases them in order once it resolves. A rejection, or the 660 second timer that fires when initialize never answers, cleans the query up: nothing held is written, every held and pending request is rejected with the initialize error, and the stream ends with it. Rust holds the same commands in the driver under the TypeScript style when blocking hooks or managed settings are set, releases them in order on success, rejects them with the initialize error on failure or timeout, and reports the failure through the stream and the async initialization getters as InitializationFailed. The goldens were captured from sdk.mjs for the success, error and timer paths."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_initialize::blocking_hooks_need_on_failure_support",
+        "golden_initialize::hooks_that_were_not_applied_are_refused",
+        "golden_initialize_hold::a_blocking_hook_holds_the_prompt_and_an_interrupt_behind_initialize_like_sdk_mjs",
+        "golden_initialize_hold::managed_settings_hold_every_request_behind_initialize_like_sdk_mjs",
+        "golden_initialize_hold::a_failed_initialize_writes_no_prompt_and_rejects_what_waited_like_sdk_mjs",
+        "golden_initialize_hold::a_failed_initialize_with_managed_settings_writes_nothing_after_it_like_sdk_mjs",
+        "golden_initialize_hold::the_captured_timer_matches_the_duration_and_messages_the_driver_uses",
+        "driver_tests::an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects_what_was_held"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "c33-stream-input",
+      "concept": "How a streamed input stops, fails and closes stdin",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 1122,
+        "line_end": 1162,
+        "sha256": "c3b9a0a0c92cea46da831a3fd6a5b7dd3fe40546086ff83f6c67c2d1d172a618"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "[Query.streamInput] Starting to process input stream",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 24,
+        "span_after": 947,
+        "sha256": "4bc8d078fa87ce7051367d70fcec755e98891874f2f72436cefd9dea53542b5f"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Both write each streamed message in order and close stdin once the stream ends, waiting for the run to end first only when that call wrote something and, in TypeScript, something needs the CLI; each counts the prompts of its own call, so one that wrote nothing closes stdin at once. TypeScript stops at an abort and resolves, stops once a failed prompt hold cleaned the query up, writes behind a pending prompt hold and skips closing stdin when the hold resolves false, and rejects with the write error after close or with the stream's own error while leaving stdin open. Python stops once the query is closed, logs a stream or write failure and closes stdin anyway, and never raises."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python reproduces the Python stream_input, and try_stream_input carries a fallible stream so both failure paths are reachable."
+      },
+      "contracts": [
+        "golden_stream_input::typescript_query_stream_input_ends_the_input_like_sdk_mjs",
+        "golden_stream_input::typescript_query_stream_input_stops_at_an_abort",
+        "golden_stream_input::typescript_query_stream_input_rejects_a_write_after_close",
+        "golden_stream_input::typescript_query_stream_input_rejects_with_a_failing_stream_and_leaves_stdin_open",
+        "golden_stream_input::typescript_query_stream_input_waits_behind_the_prompt_hold",
+        "golden_stream_input::python_query_stream_input_ends_the_input_like_claude_agent_sdk",
+        "golden_stream_input::python_query_stream_input_stops_at_a_close",
+        "golden_stream_input::python_query_stream_input_closes_stdin_after_a_failing_stream",
+        "golden_stream_input::the_infallible_stream_input_streams_like_query_stream_input",
+        "golden_stream_input::stream_input_counts_the_prompts_of_its_own_call"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/run_end.rs"
+      ]
+    },
+    {
+      "id": "c34-interactive-client-default-session",
+      "concept": "Session id written on a prompt that names none",
+      "python": {
+        "file": "src/claude_agent_sdk/client.py",
+        "line_start": 272,
+        "line_end": 306,
+        "sha256": "2acba8e2ecaabfff88538e160c1474b6c5eea96e305bfc5ea32967086abcac45"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "type:\"user\",session_id:\"\",message:{role:\"user\",content:[{type:\"text\",text:",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 110,
+        "sha256": "546fa8bafa0f1c7b94879e70a1de24a31bac6a7b7185630c1277ccb9cf9067d9"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python ClaudeSDKClient.query and connect(str) write a string prompt in session \"default\" unless query names another, and query(AsyncIterable) sets that session only on messages without a session_id key. sdk.mjs writes a string prompt with an empty session_id and passes an AsyncIterable prompt through unchanged."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect, so ClaudeSdkClient::query writes the empty session. Under ArgvStyle::Python it writes \"default\", and query_in_session, query_stream and query_stream_in_session follow Python's query(prompt, session_id)."
+      },
+      "contracts": [
+        "client_lifecycle_connect::connect_with_text_writes_it_in_the_default_session",
+        "client_lifecycle_connect::connect_with_text_under_typescript_uses_the_empty_session",
+        "client_lifecycle_connect::query_writes_in_the_default_session",
+        "client_lifecycle_connect::query_in_session_writes_in_that_session",
+        "client_lifecycle_connect::query_stream_fills_the_default_session",
+        "client_lifecycle_connect::query_stream_in_session_keeps_named_sessions"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/client_connect.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-initialize-timer",
+      "concept": "How long startup() waits for the CLI to answer initialize",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "class uD{clock;onRunning;limitMs;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 3169,
+        "sha256": "7721d1c340e4cd82cb81e6f0fade34a4f8203fd9d75ce6f2de1faf0dd41da5c8"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "startup() races the initialize answer against a timer. Without initializeTimeoutMs it allows 60000 ms and does not count the time in which Claude Code reports a SessionStart or Setup hook running, for at most 600000 ms; a value the caller passes counts throughout. The error names the limit, the uncounted seconds and what the reported hooks did, and carries the errorClass initialize_timeout with its first sentence as telemetryMessage. The default 60000 ms run and its uncounted hook seconds were captured live with a node harness that sent the hook frames at fixed offsets and never answered initialize. The ten minute cap was captured the same way: a Setup hook open from 20 seconds on made the timeout fire at 660 seconds and report 600 uncounted seconds."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::a_passed_timeout_counts_from_the_start_and_names_the_last_mark",
+        "golden_startup::the_timeout_says_what_the_reported_hooks_did",
+        "golden_startup::the_default_timeout_waits_sixty_seconds_when_no_hook_is_reported",
+        "golden_startup::the_default_timeout_does_not_count_one_hooks_time",
+        "golden_startup::the_default_timeout_counts_overlapping_hooks_once",
+        "golden_startup::the_default_timeout_stops_not_counting_hook_time_after_ten_minutes"
+      ],
+      "rust": [
+        "src/startup_timeout.rs",
+        "src/client.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-timeout-marks",
+      "concept": "Which startup mark an initialize timeout reports",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "catch(y){if(y instanceof Error&&\"errorClass\"in y&&y.errorClass===\"initialize_timeout\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 159,
+        "sha256": "0449b792c5afe69ab231c0e38077d57ceca6396b1f9a44caa344b091570e6910"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "An initialize timeout gains startupMark, the last startup mark the CLI reported or none, and startupMarkAgeMs, how long before the timeout that mark arrived. Only marks of at most 64 characters count, and hook progress frames are dropped while the wait lasts. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::startup_marks_are_kept_up_to_sixty_four_characters",
+        "golden_startup::a_passed_timeout_counts_from_the_start_and_names_the_last_mark"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/error.rs",
+        "src/startup_timeout.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-marks-flag",
+      "concept": "The environment flag that makes the CLI report startup marks",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(s&&!Object.keys(Ot).some((Tt)=>Tt.toUpperCase()===\"CLAUDE_CODE_SDK_READS_STARTUP_MARKS\"))Ot.CLAUDE_CODE_SDK_READS_STARTUP_MARKS=\"1\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "ee1b202f6b3b5c1d4f2dce36420cdbc8e0a9be5872a5c9521481046af9e01ac1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A process started by startup() or prewarm() gets CLAUDE_CODE_SDK_READS_STARTUP_MARKS=1 unless the environment it starts with already has a key of that name in any letter case. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::startup_writes_the_handshake_then_the_prompt",
+        "golden_startup::startup_leaves_a_marks_flag_the_caller_already_has"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/process_transport.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-warm-query",
+      "concept": "What a WarmQuery does with the prompt, close and dispose",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "let g=!1;return{warm:{query(y){if(g)throw Error(\"WarmQuery.query() can only be called once\")",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 190,
+        "sha256": "f98d6cd65e95db4a1d284b133b4660204bbd1f4e7cb36d3827a4263d0e2ccca0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "startup() resolves once initialize is answered. WarmQuery.query() may be called once and writes the prompt after the handshake that already happened; close() discards the process without writing a prompt, and disposing closes it and waits for its cleanup. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::startup_writes_the_handshake_then_the_prompt",
+        "golden_startup::closing_a_warm_query_sends_no_prompt"
+      ],
+      "rust": [
+        "src/prewarm.rs",
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "p01-startup-failure-reason",
+      "concept": "Why an error result exit names a startup failure",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "Claude Code returned an error result: ${t}`),{telemetryMessage:\"Claude Code returned an error result\",errorClass:\"error_result\",startupFailureReason:this.lastStartupFailureReason}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "e32a4bcde810b829667169dce0382775f276082c55425eac14e787fc73091ad9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The error that replaces a failed exit carries startupFailureReason, the startup_failure_reason of the last error result when it is a string, so a host can tell a refusal to start from any other failure. The error text is the result text of a success subtype or the trimmed, non-empty errors joined by a semicolon and a space. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI. An error result that follows a prompt reaches the caller as a message; the stream throws the replacement error only when the process then exits with a nonzero code, and a zero exit ends it without an error."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_startup::an_error_result_exit_names_why_startup_failed",
+        "golden_startup::a_reason_the_sdk_does_not_list_is_kept_and_a_non_string_is_dropped",
+        "golden_startup::the_error_result_text_trims_and_joins_the_errors_or_uses_the_result_of_a_success_subtype",
+        "golden_startup::an_error_result_after_a_prompt_is_a_message_and_a_nonzero_exit_then_names_it",
+        "golden_startup::an_error_result_after_a_prompt_ends_the_stream_cleanly_when_the_process_exits_zero",
+        "golden_prewarm::a_claimed_spare_yields_the_error_result_then_names_it_on_a_nonzero_exit"
+      ],
+      "rust": [
+        "src/driver.rs",
+        "src/error.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-await-claim",
+      "concept": "How prewarm starts a spare the CLI keeps parked",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "extraArgs:{...i.extraArgs,\"await-claim\":null}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 28,
+        "sha256": "c8fa8db07609b675fcd6bf0bfbd953d2262c346f851d7af7eb4808643019ad86"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "prewarm() starts the CLI like startup() with the extra flag --await-claim after the other arguments, completes the initialize handshake and writes nothing else until the spare is claimed. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::a_plain_claim_writes_the_claim_and_the_prompt_before_any_answer"
+      ],
+      "rust": [
+        "src/prewarm.rs",
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-claim-session",
+      "concept": "The claim_session request a claim writes",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "subtype:\"claim_session\",...e,include_initialize:e.include_initialize??!0",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "916369728bdfc8c2ce7798d28057bce88d0b423aa2fd1f46c1af59021839cf16"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A claim writes one claim_session control request whose keys keep a fixed order (cwd, permission_mode, env, additional_directories, append_system_prompt, title, agents, workspace_trust, sdk_mcp_servers, include_initialize) and asks for the initialize answer unless told not to. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::every_claim_option_keeps_the_upstream_key_order"
+      ],
+      "rust": [
+        "src/prewarm.rs",
+        "src/client.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-settings-not-applied",
+      "concept": "A claim whose settings were refused",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(je?.status===\"rejected\")g=!0,l.close(),S.reject(Object.assign(new De(`settings_not_applied: ${xt(je.reason)}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "a9a87517335777a10a99396c88f9ab97b16cd8ea8b796e1038f96a6386b51f2b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "When the settings a claim applies after claim_session are refused, the process is closed, the prompt is never sent and the claim fails with settings_not_applied carrying the claim information. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::failed_settings_close_the_process_without_sending_the_prompt",
+        "golden_prewarm::settings_surround_the_claim_and_the_prompt_waits_for_every_answer"
+      ],
+      "rust": [
+        "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-option-not-applied",
+      "concept": "A claim whose other options were refused",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "else if(mn.length>0)S.reject(Object.assign(new De(`option_not_applied: ${mn.join(\"; \")}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "bc618bb015c2577dd5cce4b499424197ea3047972dfc9d8101999fce73714903"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "When only options other than settings fail to apply, the prompt is still sent and the claim fails with option_not_applied listing each refused option, so the session runs without them. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::failed_options_report_what_was_not_applied_after_sending_the_prompt"
+      ],
+      "rust": [
+        "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-claim-initialize",
+      "concept": "What the claim answer does to the initialization result",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "if(r?.initialize===void 0)return n;let o=r.initialize",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 703,
+        "sha256": "d379d38d112ba7efeceeca535882414b166600f116835047101e3315347d9220"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The initialize result in a claim answer replaces the initialization result, spread the way JavaScript spreads any value, while each of the four applied flags (hooks, plugins, managed settings, code running MCP tools) it omits or sends as null keeps the value of the first answer, a null one included. The flags are read off the first answer before the claim's, so a first answer that was missing or null, or a claim initialize of null, rejects the initialization result with the engine's TypeError while claimed still resolves. The expected texts were captured live from sdk.mjs 0.3.323 under Node and Bun driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::the_claim_answer_replaces_the_initialization_result_and_keeps_the_applied_flags",
+        "golden_prewarm::a_claim_over_a_missing_initialize_response_rejects_the_initialization_result",
+        "golden_prewarm::a_claim_initialize_of_any_type_is_spread_and_keeps_the_earlier_flags"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/prewarm.rs",
+        "src/js_runtime.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-parked-directory",
+      "concept": "Where a spare without a directory is parked",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "let F=Lt(M,\"spares\");await vE(F,{recursive:!0,mode:448}),r=await Btt(Lt(F,\"spare-\"))",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "887d4cdce9b406564739de79d2daada0816df77ff34988052201fb1a994e962b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A spare started without a working directory is parked in a new directory spare-XXXXXX under the spares directory of the config home, created with mode 0700 and removed once the spare is claimed or closed; a config home that is not absolute falls back to the process home. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::a_spare_without_a_directory_parks_under_the_config_home_until_it_is_claimed",
+        "golden_prewarm::a_relative_config_home_falls_back_to_the_process_home"
+      ],
+      "rust": [
+        "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "p01-prewarm-workspace-trust",
+      "concept": "Where workspace trust goes when prewarming",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources have no pre-warming."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "prewarm(): workspaceTrust is a per-session attestation",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 62,
+        "sha256": "76e8bf7441180152b45a8c647321645982eee2f7ec8d32171ed3c6837bfa0c33"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "prewarm() does not send workspaceTrust to the spare and warns that it belongs to claim(), where it travels in the claim_session request only when accepted with an absolute directory. The expected texts were captured live from sdk.mjs 0.3.323 driven by a scripted CLI."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "golden_prewarm::prewarm_rejects_options_that_describe_a_session"
+      ],
+      "rust": [
+        "src/prewarm.rs"
       ]
     }
   ]

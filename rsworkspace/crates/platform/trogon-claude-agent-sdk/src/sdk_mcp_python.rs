@@ -4,7 +4,9 @@
 use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error, typescript::initialize_issues};
 use crate::{
     CallbackError, CancellationToken, JsonObject, McpToolRequest, ToolResultStatus, constants,
-    python_json::{float_repr, is_truthy, python_repr},
+    jsonrpc_message::{self, JsonRpcKind},
+    python_json::{is_truthy, python_repr},
+    python_value_repr::repr as py_repr,
 };
 use serde_json::Value;
 use std::{cmp::Reverse, sync::atomic::Ordering};
@@ -41,23 +43,24 @@ pub(crate) async fn request(
         session.initialized.store(false, Ordering::SeqCst);
         session.stopped.store(false, Ordering::SeqCst);
     }
-    if message.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return Err(McpServerError::Protocol("jsonrpc must be \"2.0\"".into()));
-    }
-    let Some(method) = message.get("method").and_then(Value::as_str) else {
-        // A response to the server is read and dropped; anything else fails to parse.
-        if message.get("method").is_none() && (message.contains_key("result") || message.contains_key("error")) {
+    // `parse_jsonrpc` raises the pydantic `ValidationError` for a message no JSON-RPC model accepts, which the
+    // bridge's caller answers as an internal error carrying its text.
+    let kind = jsonrpc_message::parse(&message).map_err(McpServerError::Protocol)?;
+    let method = message.get("method").and_then(Value::as_str).unwrap_or_default();
+    let params = match message.get("params") {
+        Some(Value::Object(params)) => Some(params),
+        _ => None,
+    };
+    match kind {
+        // A response to the server is read and dropped.
+        JsonRpcKind::Response => return Ok(None),
+        JsonRpcKind::Notification => {
+            notify(session, method, params);
             return Ok(None);
         }
-        return Err(McpServerError::Protocol("method must be a string".into()));
-    };
-    let params = match message.get("params") {
-        None | Some(Value::Null) => None,
-        Some(Value::Object(params)) => Some(params),
-        Some(_) => return Err(McpServerError::Protocol("params must be an object".into())),
-    };
+        JsonRpcKind::Request => {}
+    }
     let Some(id) = message.get("id").and_then(request_id) else {
-        notify(session, method, params);
         return Ok(None);
     };
     if signal.is_cancelled() {
@@ -630,31 +633,6 @@ fn py_equal(left: &Value, right: &Value) -> bool {
                     .all(|(key, value)| right.get(key).is_some_and(|other| py_equal(value, other)))
         }
         _ => left == right,
-    }
-}
-
-/// Python `repr` of the value `json.loads` reads from this JSON.
-fn py_repr(value: &Value) -> String {
-    match value {
-        Value::Null => "None".to_owned(),
-        Value::Bool(true) => "True".to_owned(),
-        Value::Bool(false) => "False".to_owned(),
-        Value::Number(number) => number
-            .as_i64()
-            .map(|integer| integer.to_string())
-            .or_else(|| number.as_u64().map(|integer| integer.to_string()))
-            .or_else(|| number.as_f64().map(float_repr))
-            .unwrap_or_else(|| number.to_string()),
-        Value::String(text) => python_repr(text),
-        Value::Array(items) => format!("[{}]", items.iter().map(py_repr).collect::<Vec<_>>().join(", ")),
-        Value::Object(object) => format!(
-            "{{{}}}",
-            object
-                .iter()
-                .map(|(key, value)| format!("{}: {}", python_repr(key), py_repr(value)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
     }
 }
 

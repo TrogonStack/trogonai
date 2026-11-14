@@ -419,6 +419,51 @@
    ],
    "typescript_write_fails": false,
    "python_write_fails": false
+  },
+  {
+   "subpath": "1:x",
+   "typescript": [
+    "1:x.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "é:x",
+   "typescript": [
+    "é:x.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "C::x",
+   "typescript": [
+    "C::x.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "a:",
+   "typescript": [
+    "a:.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
+  },
+  {
+   "subpath": "_:b/c",
+   "typescript": [
+    "_:b/c.jsonl"
+   ],
+   "python": [],
+   "typescript_write_fails": false,
+   "python_write_fails": false
   }
  ]
 }

@@ -16,7 +16,7 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 fn key(project: &str, session: &str) -> Result<SessionKey, Box<dyn Error>> {
     Ok(SessionKey::new(
-        SessionProjectKey::new(project)?,
+        SessionProjectKey::new(project),
         SessionId::from(session),
     ))
 }

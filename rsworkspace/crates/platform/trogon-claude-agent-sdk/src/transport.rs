@@ -53,6 +53,10 @@ pub trait Transport: Send + 'static {
     /// Python `end_input`: no more documents will be written (stdin is closed for a process).
     fn end_input(&mut self) -> impl Future<Output = Result<(), Error>> + Send;
 
+    /// TypeScript `transport.expectControlResponse?.(id)`: called with the id of each control request before it is
+    /// written, so a transport that filters inbound frames can tell which answers to expect. The default ignores it.
+    fn expect_control_response(&mut self, _request_id: &str) {}
+
     /// TypeScript `SpawnedProcess.kill` and `abortController.abort()`: stop the peer now, without waiting for it
     /// to finish. Called before [`Transport::close`] when the run ends on an error or an abort. The default does
     /// nothing, which is right for a transport whose `close` already tears the connection down.

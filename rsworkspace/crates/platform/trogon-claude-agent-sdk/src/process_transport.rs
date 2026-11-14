@@ -1,7 +1,8 @@
 //! The subprocess implementation of [`Transport`], Python's `SubprocessCLITransport`.
 
 use std::{
-    ffi::OsStr,
+    collections::BTreeMap,
+    ffi::{OsStr, OsString},
     io,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
@@ -32,7 +33,7 @@ use crate::{
 
 /// TypeScript's `endsWith` test is case-sensitive and works on the whole path string; Python has no script
 /// runtime, so its dialect keeps the lenient extension check.
-fn is_script(path: &Path, style: ArgvStyle) -> bool {
+pub(crate) fn is_script(path: &Path, style: ArgvStyle) -> bool {
     match style {
         ArgvStyle::TypeScript => {
             let path = path.to_string_lossy();
@@ -178,6 +179,57 @@ pub(crate) struct ProcessSpawn<'a, P> {
     /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` for a child resumed from a store, when the session runtime sets it.
     pub secure_storage_config_dir: Option<std::ffi::OsString>,
     pub closed: Closed,
+    /// The caller's whole environment, which a `spawn_claude_code_process` callback receives with the changes
+    /// applied. Read only when that callback is set.
+    pub parent_environment: Vec<(OsString, OsString)>,
+    /// `startup()` and `prewarm()`: ask the CLI to report startup marks, unless the caller's environment already
+    /// carries the variable.
+    pub startup_marks: bool,
+}
+
+/// TypeScript's `SpawnOptions` for the command the SDK would run. `signal` is the forwarded abort signal.
+fn spawn_options(
+    options: &ClaudeAgentOptions,
+    inherited: &Inherited,
+    parent_environment: Vec<(OsString, OsString)>,
+    command: &ProcessCommand,
+    signal: crate::CancellationToken,
+) -> Result<crate::SpawnOptions, Error> {
+    let command = command.as_std();
+    let mut env: BTreeMap<OsString, OsString> = if environment_plan::plan(options, inherited).clear {
+        BTreeMap::new()
+    } else {
+        parent_environment.into_iter().collect()
+    };
+    for (name, value) in command.get_envs() {
+        match value {
+            Some(value) => env.insert(name.to_owned(), value.to_owned()),
+            None => env.remove(name),
+        };
+    }
+    #[cfg(unix)]
+    let uid = match &options.user {
+        Some(name) => Some(crate::run_as::lookup(name).map_err(Error::Io)?),
+        None => options.run_as_uid,
+    };
+    #[cfg(not(unix))]
+    let uid = None;
+    Ok(crate::SpawnOptions {
+        command: command.get_program().to_owned(),
+        args: command.get_args().map(OsStr::to_owned).collect(),
+        cwd: command.get_current_dir().map(Path::to_path_buf),
+        env,
+        signal,
+        uid,
+    })
+}
+
+/// TypeScript logs a throw from `onProcessSpawned` and carries on.
+fn report_spawn(callback: &crate::OnProcessSpawned, pid: u32, spawn_sync_ms: f64) {
+    let call = std::panic::AssertUnwindSafe(|| (callback.0)(pid, crate::ProcessSpawnInfo { spawn_sync_ms }));
+    if std::panic::catch_unwind(call).is_err() {
+        tracing::debug!("onProcessSpawned threw");
+    }
 }
 
 pub(crate) struct ProcessTransport {
@@ -197,6 +249,14 @@ pub(crate) struct ProcessTransport {
     input_ended: bool,
     /// The `mcp_message` ids of the line `read_message` returned last, for the Python dialect.
     wire_ids: Option<crate::McpWireIds>,
+    /// TypeScript's `forwardedAbort` for a `spawn_claude_code_process` process, with the caller's abort controller
+    /// it follows once the close grace is over.
+    forwarded_abort: Option<ForwardedAbort>,
+}
+
+struct ForwardedAbort {
+    caller: crate::CancellationToken,
+    forwarded: crate::CancellationToken,
 }
 
 impl ProcessTransport {
@@ -212,36 +272,61 @@ impl ProcessTransport {
             derived_debug_file,
             secure_storage_config_dir,
             closed,
+            parent_environment,
+            startup_marks,
         } = input;
         let mut command = command(options, &cli_path, inherited, derived_debug_file)?;
+        if startup_marks {
+            command.env("CLAUDE_CODE_SDK_READS_STARTUP_MARKS", "1");
+        }
         if let Some(config_dir) = config_dir {
             command.env("CLAUDE_CONFIG_DIR", config_dir);
         }
         command.envs(secure_storage_config_dir.map(|directory| ("CLAUDE_SECURESTORAGE_CONFIG_DIR", directory)));
         crate::cli_path::reject_windows_batch_cli(cli_path.as_os_str(), options.windows_batch_cli)?;
-        let mut child = process.spawn(&mut command).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                match options.cwd.as_ref() {
-                    Some(cwd) if !cwd.exists() => Error::WorkingDirectoryMissing(cwd.clone()),
-                    _ => Error::CliNotFoundAt(cli_path.clone()),
+        let mut forwarded_abort = None;
+        let mut child = if let Some(spawner) = &options.spawn_claude_code_process {
+            let forwarded = crate::CancellationToken::new();
+            let spawn = spawn_options(options, inherited, parent_environment, &command, forwarded.clone())?;
+            forwarded_abort = Some(ForwardedAbort {
+                caller: options.abort_controller.clone().unwrap_or_default(),
+                forwarded,
+            });
+            (spawner.0)(spawn).map_err(Error::Spawn)?
+        } else {
+            let started = std::time::Instant::now();
+            let child = process.spawn(&mut command).map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    match options.cwd.as_ref() {
+                        Some(cwd) if !cwd.exists() => Error::WorkingDirectoryMissing(cwd.clone()),
+                        _ => Error::CliNotFoundAt(cli_path.clone()),
+                    }
+                } else {
+                    Error::Spawn(crate::error::launch_failure(&cli_path, error))
                 }
-            } else {
-                Error::Spawn(error)
+            })?;
+            let spawn_sync_ms = started.elapsed().as_secs_f64() * 1000.0;
+            if let (Some(pid), Some(callback)) = (child.id(), &options.on_process_spawned) {
+                report_spawn(callback, pid, spawn_sync_ms);
             }
-        })?;
+            child
+        };
         let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
         let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
-        let stderr = child.stderr.take().ok_or(Error::PipeUnavailable)?;
-        let stderr_tail = SharedTail::new(options.limits.stderr_tail);
-        let stderr = tokio::spawn(drain_stderr_with(
-            stderr,
-            stderr_tail.clone(),
-            options
-                .limits
-                .max_buffer_size
-                .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE),
-            options.stderr_handler.clone(),
-        ));
+        let stderr_tail = SharedTail::new(options.limits.stderr_tail, options.argv_style == ArgvStyle::TypeScript);
+        // A process from `spawn_claude_code_process` may come without a stderr pipe, as in TypeScript.
+        let stderr = match child.stderr.take() {
+            Some(stderr) => tokio::spawn(drain_stderr_with(
+                stderr,
+                stderr_tail.clone(),
+                options
+                    .limits
+                    .max_buffer_size
+                    .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE),
+                options.stderr_handler.clone(),
+            )),
+            None => tokio::spawn(async { Ok(()) }),
+        };
         Ok(Self {
             child: Some(child),
             stdin: Some(stdin),
@@ -254,6 +339,7 @@ impl ProcessTransport {
             forced: false,
             input_ended: false,
             wire_ids: None,
+            forwarded_abort,
         })
     }
 
@@ -308,8 +394,8 @@ impl ProcessTransport {
         }
     }
 
-    /// TypeScript's close: wait 2 seconds, then SIGTERM (none on Windows), and SIGKILL 5 seconds later without
-    /// waiting for it. Stderr gets 200 ms after the exit. Nothing here fails.
+    /// TypeScript's close: wait 2 seconds, then SIGTERM (none on Windows), and SIGKILL 5 seconds later if the process
+    /// is still running, without waiting for it. Stderr gets 200 ms after the exit. Nothing here fails.
     async fn reap_typescript(&mut self) -> Option<(ExitStatus, StderrTail)> {
         let mut child = self.child.take()?;
         if let Ok(Ok(status)) = timeout(TYPESCRIPT_CLOSE_GRACE, child.wait()).await {
@@ -320,10 +406,8 @@ impl ProcessTransport {
         if let Err(error) = Self::terminate(&mut child).await {
             tracing::debug!(%error, "could not send SIGTERM to Claude Code");
         }
-        // SIGKILL after the delay whether or not the process has gone: a signal to an exited child that was never
-        // waited for lands on its zombie, and dropping the child hands it to tokio's reaper. One line, because a test
-        // ends long before the delay and the task never resumes.
-        tokio::spawn(sleep(TYPESCRIPT_KILL_DELAY).map(move |()| child.start_kill().unwrap_or_default()));
+        // One line, because a test ends long before the delay and the task never resumes.
+        tokio::spawn(sleep(TYPESCRIPT_KILL_DELAY).map(move |()| kill_if_running(&mut child)));
         None
     }
 
@@ -451,6 +535,12 @@ impl Transport for ProcessTransport {
         self.input_ended = false;
         let reaped = self.reap().await;
         self.stderr.abort();
+        // TypeScript aborts the forwarded signal after the close grace, and only when the caller aborted.
+        if let Some(abort) = &self.forwarded_abort
+            && abort.caller.is_cancelled()
+        {
+            abort.forwarded.cancel();
+        }
         let Some((status, stderr)) = reaped? else {
             self.closed.record(ClosedReason::after_stop(self.argv_style, None));
             return Ok(());
@@ -487,6 +577,13 @@ impl Transport for ProcessTransport {
             .flatten();
         OptionFuture::from(running.map(Self::terminate)).await.unwrap_or(Ok(()))
     }
+}
+
+/// The delayed half of TypeScript's close: SIGKILL only a process that has not exited (`exitCode === null`
+/// upstream, where an exited child has no handle left and the kill does nothing). Whether the signal was sent.
+fn kill_if_running(child: &mut Child) -> bool {
+    let running = matches!(child.try_wait(), Ok(None));
+    running && child.start_kill().is_ok()
 }
 
 #[cfg(test)]
