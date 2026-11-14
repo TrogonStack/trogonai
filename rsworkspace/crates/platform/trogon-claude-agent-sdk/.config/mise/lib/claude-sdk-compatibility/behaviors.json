@@ -1865,10 +1865,12 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript dialect redacts with the same eighteen patterns in the same order, run on a matcher with JavaScript semantics; ArgvStyle::Python keeps its tail unredacted."
+        "reason": "The TypeScript dialect redacts with the same eighteen patterns in the same order, run on a matcher with JavaScript semantics; ArgvStyle::Python puts no stderr in its errors under Limits::python(), as claude_agent_sdk does, and leaves a tail opted into through Limits::stderr_tail unredacted."
       },
       "contracts": [
         "subprocess::process_failure_message_redacts_secrets_from_the_stderr_tail",
+        "subprocess::python_keeps_the_stderr_tail_it_opts_into_unredacted",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
         "shutdown_errors::t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory"
       ],
       "rust": [
