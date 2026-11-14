@@ -40,6 +40,7 @@ workspace_crate(
         "tests/fixtures/settings_option/*.json",
         "tests/fixtures/sse_frames/helpers.json",
         "tests/fixtures/sse_frames/message_filters.json",
+        "tests/fixtures/stderr_redaction/*.json",
         "tests/fixtures/websocket_transport/*.json",
         "tests/fixtures/sse_transport/*.jsonl",
     ]),

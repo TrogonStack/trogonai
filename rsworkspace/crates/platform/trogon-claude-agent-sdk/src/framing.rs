@@ -140,42 +140,68 @@ fn deliver_line(handler: &crate::StderrHandler, line: &[u8]) {
 }
 
 /// The stderr read so far, readable while the drain still runs so a stream left open does not lose it.
+///
+/// It follows the TypeScript SDK's `stderrTail`: each chunk is decoded as UTF-8 and appended, and once the text
+/// holds more than twice `units` UTF-16 code units it is cut to the last `units`. With `redact` the secrets in
+/// it are removed before every cut and again when the tail is read, as `redactSecrets` does there.
 #[derive(Clone, Default)]
 pub(crate) struct SharedTail {
-    bytes: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    state: std::sync::Arc<std::sync::Mutex<TailState>>,
     units: usize,
+    redact: bool,
+}
+
+#[derive(Default)]
+struct TailState {
+    text: String,
+    /// The start of a character a chunk ended in the middle of.
+    incomplete: Vec<u8>,
 }
 
 impl SharedTail {
-    pub(crate) fn new(units: usize) -> Self {
+    pub(crate) fn new(units: usize, redact: bool) -> Self {
         Self {
-            bytes: std::sync::Arc::default(),
+            state: std::sync::Arc::default(),
             units,
+            redact,
         }
     }
 
-    /// The last UTF-16 code units of what has been read, as TypeScript's `slice(-2048)` keeps them.
+    /// The last UTF-16 code units of what has been read, without surrounding whitespace, as TypeScript's
+    /// `formatStderrTail` keeps them.
     pub(crate) fn snapshot(&self) -> StderrTail {
-        let bytes = self.bytes.lock().map(|bytes| bytes.clone()).unwrap_or_default();
-        StderrTail(last_units(&bytes, self.units))
+        let text = self.state.lock().map(|state| state.text.clone()).unwrap_or_default();
+        let scrubbed = self.scrubbed(&text);
+        let kept = last_units(&scrubbed, self.units).trim_matches(crate::js_regex::is_whitespace);
+        StderrTail(kept.as_bytes().to_vec())
     }
 
-    fn append(&self, chunk: &[u8]) {
-        // A UTF-16 code unit takes at most three UTF-8 bytes; the slack covers a character cut at the front.
-        let limit = self
-            .units
-            .saturating_mul(3)
-            .saturating_add(4 * usize::from(self.units > 0));
-        let Ok(mut tail) = self.bytes.lock() else {
-            return;
-        };
-        if chunk.len() >= limit {
-            tail.clear();
-            tail.extend_from_slice(&chunk[chunk.len() - limit..]);
+    fn scrubbed(&self, text: &str) -> String {
+        if self.redact {
+            crate::stderr_redaction::redact(text)
         } else {
-            let excess = tail.len().saturating_add(chunk.len()).saturating_sub(limit);
-            tail.drain(..excess);
-            tail.extend_from_slice(chunk);
+            text.to_owned()
+        }
+    }
+
+    pub(crate) fn append(&self, chunk: &[u8]) {
+        if let Ok(mut state) = self.state.lock() {
+            let decoded = decode_chunk(&mut state.incomplete, chunk);
+            state.text.push_str(&decoded);
+            if state.text.encode_utf16().count() > self.units.saturating_mul(2) {
+                let scrubbed = self.scrubbed(&state.text);
+                state.text = last_units(&scrubbed, self.units).to_owned();
+            }
+        }
+    }
+
+    /// The stream ended: a character it ended in the middle of becomes one U+FFFD, as the decoder's `end` returns.
+    pub(crate) fn finish(&self) {
+        if let Ok(mut state) = self.state.lock()
+            && !state.incomplete.is_empty()
+        {
+            state.incomplete.clear();
+            state.text.push('\u{fffd}');
         }
     }
 }
@@ -199,6 +225,7 @@ pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
             {
                 deliver_lines(handler, &mut pending, true);
             }
+            tail.finish();
             return Ok(());
         }
         if let Some(handler) = &handler {
@@ -220,10 +247,9 @@ pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
     }
 }
 
-/// The last `units` UTF-16 code units of the lossily decoded bytes. A surrogate pair cut in half leaves a lone low
-/// surrogate in JavaScript, which UTF-8 cannot carry, so it is dropped.
-fn last_units(bytes: &[u8], units: usize) -> Vec<u8> {
-    let text = String::from_utf8_lossy(bytes);
+/// The last `units` UTF-16 code units of `text`, TypeScript's `slice(-units)`. A surrogate pair cut in half leaves a
+/// lone low surrogate in JavaScript, which UTF-8 cannot carry, so it is dropped.
+fn last_units(text: &str, units: usize) -> &str {
     let mut kept = 0_usize;
     let mut start = text.len();
     for (index, character) in text.char_indices().rev() {
@@ -234,11 +260,7 @@ fn last_units(bytes: &[u8], units: usize) -> Vec<u8> {
         kept += width;
         start = index;
     }
-    // TypeScript trims the kept tail with `String.prototype.trim`, which also strips the byte order mark.
-    text[start..]
-        .trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
-        .as_bytes()
-        .to_vec()
+    &text[start..]
 }
 
 #[cfg(test)]
