@@ -373,7 +373,7 @@ impl HookOutput {
 
     pub fn to_wire_json(&self) -> Result<Value, serde_json::Error> {
         match self {
-            Self::Json(output) => serde_json::to_value(output),
+            Self::Json(output) => crate::deep_json::encode(output),
             Self::Async { timeout } => serde_json::to_value(AsyncHookOutputWire {
                 asynchronous: true,
                 async_timeout: timeout.map(|timeout| timeout.as_duration().as_millis()),

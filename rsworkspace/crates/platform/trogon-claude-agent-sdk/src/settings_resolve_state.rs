@@ -9,6 +9,8 @@ use crate::{
     connector_folder::ConnectorFolders,
     connector_vetting::VettingState,
     node_path::NodePathDialect,
+    node_stack::NodeStack,
+    python_c_stack::PythonCStack,
     settings_resolve_platform::platform_kind,
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_reread::{PolicyRereads, PolicyState, Reading},
@@ -27,6 +29,8 @@ pub struct ResolverState {
     policy: Mutex<PolicyState>,
     rereads: PolicyRereads,
     platform: OnceLock<PlatformKind>,
+    python_c_stack: Option<PythonCStack>,
+    node_stack: NodeStack,
 }
 
 impl ResolverState {
@@ -72,6 +76,36 @@ impl ResolverState {
             node_path_dialect: dialect,
             ..self
         }
+    }
+
+    /// Reads settings files in the Python dialect as deeply as `json.loads` does where `stack` says the Python SDK
+    /// runs; [`PythonCStack::MODULE`] by default.
+    #[must_use]
+    pub fn with_python_c_stack(self, stack: PythonCStack) -> Self {
+        Self {
+            python_c_stack: Some(stack),
+            ..self
+        }
+    }
+
+    /// Reads and merges settings files in the TypeScript dialect as deeply as the Node process that `stack`
+    /// describes; [`NodeStack::for_build_target`] by default.
+    #[must_use]
+    pub fn with_node_stack(self, stack: NodeStack) -> Self {
+        Self {
+            node_stack: stack,
+            ..self
+        }
+    }
+
+    /// The stack of the Node process the TypeScript dialect reads and merges settings files on.
+    pub(crate) fn node_stack(&self) -> NodeStack {
+        self.node_stack
+    }
+
+    /// Where `json.loads` runs when the Python dialect reads a settings file.
+    pub(crate) fn python_c_stack(&self) -> PythonCStack {
+        self.python_c_stack.unwrap_or(PythonCStack::MODULE)
     }
 
     /// The machine policy reading this call goes on with, re-reading the host when upstream would.

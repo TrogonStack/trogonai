@@ -305,7 +305,8 @@ pub(crate) fn to_number(value: &Value) -> Option<f64> {
     }
 }
 
-fn string_to_number(text: &str) -> Option<f64> {
+/// `Number(text)`, `None` standing for `NaN`.
+pub(crate) fn string_to_number(text: &str) -> Option<f64> {
     let trimmed = crate::session_prompt::js_trim(text);
     if trimmed.is_empty() {
         return Some(0.0);

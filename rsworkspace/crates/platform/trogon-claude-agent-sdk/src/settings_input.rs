@@ -22,7 +22,7 @@ impl Settings {
 
     /// Encodes the settings as a JSON value.
     pub fn to_value(&self) -> Result<serde_json::Value, serde_json::Error> {
-        serde_json::to_value(self)
+        crate::deep_json::encode(self)
     }
 }
 

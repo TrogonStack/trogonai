@@ -35,13 +35,36 @@ impl PartialEq for KeyOrder {
 
 impl Eq for KeyOrder {}
 
-/// Writes an encoded object with its keys in the recorded order.
+/// The serializer an object falls back to when it does not encode as a `serde_json::Value`: its JSON text,
+/// written into a buffer.
+pub(super) type TextSerializer<'a> = serde_json::Serializer<&'a mut Vec<u8>>;
+
+/// Writes the members an object keeps under undeclared keys: each nested past `SHALLOW` levels as its compact JSON
+/// text, so writing the object walks no deeper than that.
+pub(super) fn shallow_members<S: Serializer>(
+    members: &indexmap::IndexMap<String, crate::DeepJsonValue>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(
+        members
+            .iter()
+            .map(|(key, member)| (key, crate::deep_json::ShallowWrite(member.as_value()))),
+    )
+}
+
+/// Writes an encoded object with its keys in the recorded order. An object holding a member under an undeclared key
+/// nested past what `serde_json` reads back does not encode as a `serde_json::Value`, so `text` writes it as JSON
+/// text instead, and its members are written in the recorded order as that text holds them.
 pub(super) fn ordered<S: Serializer>(
     encoded: Result<serde_json::Value, serde_json::Error>,
+    text: impl FnOnce(&mut TextSerializer<'_>) -> Result<(), serde_json::Error>,
     order: &KeyOrder,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    match encoded.map_err(serde::ser::Error::custom)? {
+    let Ok(encoded) = encoded else {
+        return ordered_text(text, order, serializer);
+    };
+    match encoded {
         serde_json::Value::Object(mut map) => {
             let mut out = serde_json::Map::with_capacity(map.len());
             for key in &order.0 {
@@ -56,10 +79,30 @@ pub(super) fn ordered<S: Serializer>(
     }
 }
 
+/// [`ordered`] for an object `text` writes as JSON text: each member is copied as the text holds it.
+fn ordered_text<S: Serializer>(
+    text: impl FnOnce(&mut TextSerializer<'_>) -> Result<(), serde_json::Error>,
+    order: &KeyOrder,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut bytes = Vec::new();
+    text(&mut serde_json::Serializer::new(&mut bytes)).map_err(serde::ser::Error::custom)?;
+    let mut members: indexmap::IndexMap<String, Box<serde_json::value::RawValue>> =
+        serde_json::from_slice(&bytes).map_err(serde::ser::Error::custom)?;
+    let mut out = indexmap::IndexMap::with_capacity(members.len());
+    for key in &order.0 {
+        if let Some(member) = members.swap_remove(key) {
+            out.insert(key.clone(), member);
+        }
+    }
+    out.extend(members);
+    out.serialize(serializer)
+}
+
 /// Decodes `value` as `T` only when encoding it again reproduces `value` exactly.
 pub(super) fn exact<T: Serialize + serde::de::DeserializeOwned>(value: &serde_json::Value) -> Option<T> {
     let inner: T = serde_json::from_value(value.clone()).ok()?;
-    serde_json::to_value(&inner)
+    crate::deep_json::encode(&inner)
         .is_ok_and(|round| round == *value)
         .then_some(inner)
 }

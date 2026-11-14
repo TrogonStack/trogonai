@@ -1,8 +1,13 @@
+use std::cell::Cell;
+
 use serde_json::{Map, Value};
 
 use crate::settings_schema::{SettingsSchema, schema};
 
-use crate::{constants::POLICY_META_KEYS, settings_merge_spec::MergeSpec, settings_numbers::same_value_zero};
+use crate::{
+    constants::POLICY_META_KEYS, node_merge::NodeMerge, node_merge_call::NodeMergeCall, node_merge_warmth::MergeWarmth,
+    node_stack::NodeStack, settings_merge_spec::MergeSpec, settings_numbers::same_value_zero,
+};
 
 pub(crate) type SettingsMap = Map<String, Value>;
 
@@ -100,6 +105,21 @@ pub(crate) fn merge_with_union(destination: &mut SettingsMap, source: &SettingsM
     match schema() {
         Some(schema) => merge_rules(schema.merge_spec(), destination, source),
         None => merge_rules(&MergeSpec::default(), destination, source),
+    }
+}
+
+/// [`merge_with_union`] of `source` into `destination` as lodash `mergeWith` runs it on the `node` stack in the
+/// merge `call`, after merges that left V8 as warm as `warmth` says, keeping what it wrote before it runs out.
+pub(crate) fn merge_within(
+    node: NodeStack,
+    call: NodeMergeCall,
+    warmth: &Cell<MergeWarmth>,
+    destination: &mut SettingsMap,
+    source: &SettingsMap,
+) -> NodeMerge {
+    match schema() {
+        Some(schema) => node.merge_within(call, schema.merge_spec(), destination, source, warmth),
+        None => node.merge_within(call, &MergeSpec::default(), destination, source, warmth),
     }
 }
 

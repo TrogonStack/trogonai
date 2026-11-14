@@ -246,6 +246,7 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | Rust | Python | TypeScript |
 | --- | --- | --- |
 | `Settings` (generated, all 182 declared keys plus unknown keys) | no type; the `settings` option is a string | `Settings` |
+| `DeepJsonValue`, each value of the `extra` map of every generated type | `Any` | the value under an undeclared key (`unknown`) |
 | `SettingsInput::{Path, Json, Inline}` | `settings` string, path or JSON by braces | `Options.settings: string \| Settings` |
 | `ClaudeAgentOptions::managed_settings`, `ManagedSettingsDelivery::{Argv, Initialize}` | none (ignored) | `Options.managedSettings`, `managedSettingsDelivery` |
 | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxFilesystemConfig`, `SandboxCredentialsConfig`, `SandboxIgnoreViolations` (aliases of the generated `Settings.sandbox` types) | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxIgnoreViolations` TypedDicts (subset of the keys) | `SandboxSettings` and its parts |

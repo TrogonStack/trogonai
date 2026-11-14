@@ -10,7 +10,7 @@ pub struct SettingsPolicyHelper {
     pub timeout_ms: Option<serde_json::Number>,
     pub refresh_interval_ms: Option<serde_json::Number>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -23,8 +23,8 @@ struct SettingsPolicyHelperWire {
     pub timeout_ms: Option<serde_json::Number>,
     #[serde(rename = "refreshIntervalMs", default, skip_serializing_if = "Option::is_none")]
     pub refresh_interval_ms: Option<serde_json::Number>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -41,7 +41,7 @@ impl SettingsPolicyHelper {
 
 impl Serialize for SettingsPolicyHelper {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsPolicyHelperWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsPolicyHelperWire::serialize(self, serde_json::value::Serializer), |text| SettingsPolicyHelperWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -92,7 +92,7 @@ pub struct SettingsFileSuggestion {
     pub r#type: SettingsFileSuggestionType,
     pub command: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -102,8 +102,8 @@ pub struct SettingsFileSuggestion {
 struct SettingsFileSuggestionWire {
     pub r#type: SettingsFileSuggestionType,
     pub command: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -120,7 +120,7 @@ impl SettingsFileSuggestion {
 
 impl Serialize for SettingsFileSuggestion {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsFileSuggestionWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsFileSuggestionWire::serialize(self, serde_json::value::Serializer), |text| SettingsFileSuggestionWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -142,7 +142,7 @@ pub struct SettingsAttributionVariant1 {
     /// Whether to append the claude.ai session link to commits and PRs created from web or Remote Control sessions (default: true). Set to false to omit the Claude-Session trailer and PR-body link.
     pub session_url: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -156,8 +156,8 @@ struct SettingsAttributionVariant1Wire {
     pub pr: Option<String>,
     #[serde(rename = "sessionUrl", default, skip_serializing_if = "Option::is_none")]
     pub session_url: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -174,7 +174,7 @@ impl SettingsAttributionVariant1 {
 
 impl Serialize for SettingsAttributionVariant1 {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAttributionVariant1Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAttributionVariant1Wire::serialize(self, serde_json::value::Serializer), |text| SettingsAttributionVariant1Wire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -231,7 +231,7 @@ pub struct SettingsAttributionProjectPolicy {
     /// The Project used when neither CLAUDE_CODE_ATTRIBUTION_PROJECT nor attributionProject names one: its ID, starting with "claude_proj_" or "chan_", or the UUID of a "claude_proj_" Project.
     pub default: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -241,8 +241,8 @@ pub struct SettingsAttributionProjectPolicy {
 struct SettingsAttributionProjectPolicyWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -259,7 +259,7 @@ impl SettingsAttributionProjectPolicy {
 
 impl Serialize for SettingsAttributionProjectPolicy {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAttributionProjectPolicyWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAttributionProjectPolicyWire::serialize(self, serde_json::value::Serializer), |text| SettingsAttributionProjectPolicyWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -418,7 +418,7 @@ pub struct SettingsPermissions {
     /// Additional directories to include in the permission scope
     pub additional_directories: Option<Vec<String>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -450,8 +450,8 @@ struct SettingsPermissionsWire {
     pub deny_instead_of_prompting: Option<bool>,
     #[serde(rename = "additionalDirectories", default, skip_serializing_if = "Option::is_none")]
     pub additional_directories: Option<Vec<String>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -468,7 +468,7 @@ impl SettingsPermissions {
 
 impl Serialize for SettingsPermissions {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsPermissionsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsPermissionsWire::serialize(self, serde_json::value::Serializer), |text| SettingsPermissionsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -529,7 +529,7 @@ pub struct SettingsModelPickerOptionsItem {
     /// For a model this version of Claude Code does not know: the ID of a model it does know (e.g. "claude-opus-4-8") whose client-side handling - prompt profile, capability and effort defaults - applies to it. Changes neither the row's label nor the model ID sent. Without it, a model-catalog row for a model this version does not know is not offered until Claude Code is updated.
     pub behaves_as: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -544,8 +544,8 @@ struct SettingsModelPickerOptionsItemWire {
     pub description: Option<String>,
     #[serde(rename = "behavesAs", default, skip_serializing_if = "Option::is_none")]
     pub behaves_as: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -562,7 +562,7 @@ impl SettingsModelPickerOptionsItem {
 
 impl Serialize for SettingsModelPickerOptionsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsModelPickerOptionsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsModelPickerOptionsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsModelPickerOptionsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -582,7 +582,7 @@ pub struct SettingsModelPicker {
     /// When true, the picker shows only the Default row and these options - the built-in lineup, gateway-discovered models and ANTHROPIC_CUSTOM_MODEL_OPTION are hidden. When false or unset, these options are added after the built-in lineup.
     pub replace_built_in_options: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -593,8 +593,8 @@ struct SettingsModelPickerWire {
     pub options: Vec<SettingsModelPickerOptionsItem>,
     #[serde(rename = "replaceBuiltInOptions", default, skip_serializing_if = "Option::is_none")]
     pub replace_built_in_options: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -611,7 +611,7 @@ impl SettingsModelPicker {
 
 impl Serialize for SettingsModelPicker {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsModelPickerWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsModelPickerWire::serialize(self, serde_json::value::Serializer), |text| SettingsModelPickerWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -631,7 +631,7 @@ pub struct SettingsModelPricingOverridesValue {
     pub cache_read: serde_json::Number,
     pub cache_write: serde_json::Number,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -645,8 +645,8 @@ struct SettingsModelPricingOverridesValueWire {
     pub cache_read: serde_json::Number,
     #[serde(rename = "cacheWrite")]
     pub cache_write: serde_json::Number,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -663,7 +663,7 @@ impl SettingsModelPricingOverridesValue {
 
 impl Serialize for SettingsModelPricingOverridesValue {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsModelPricingOverridesValueWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsModelPricingOverridesValueWire::serialize(self, serde_json::value::Serializer), |text| SettingsModelPricingOverridesValueWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -681,7 +681,7 @@ pub struct SettingsModelPricing {
     pub multiplier: Option<serde_json::Number>,
     pub overrides: Option<indexmap::IndexMap<String, SettingsModelPricingOverridesValue>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -693,8 +693,8 @@ struct SettingsModelPricingWire {
     pub multiplier: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overrides: Option<indexmap::IndexMap<String, SettingsModelPricingOverridesValue>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -711,7 +711,7 @@ impl SettingsModelPricing {
 
 impl Serialize for SettingsModelPricing {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsModelPricingWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsModelPricingWire::serialize(self, serde_json::value::Serializer), |text| SettingsModelPricingWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -780,7 +780,7 @@ pub struct SettingsAllowedMcpServersItem {
     /// URL pattern with wildcard support (e.g., "https://*.example.com/*") for allowed remote MCP servers
     pub server_url: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -794,8 +794,8 @@ struct SettingsAllowedMcpServersItemWire {
     pub server_command: Option<Vec<String>>,
     #[serde(rename = "serverUrl", default, skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -812,7 +812,7 @@ impl SettingsAllowedMcpServersItem {
 
 impl Serialize for SettingsAllowedMcpServersItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMcpServersItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMcpServersItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMcpServersItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -836,7 +836,7 @@ pub struct SettingsDeniedMcpServersItem {
     /// URL pattern with wildcard support (e.g., "https://*.example.com/*") for blocked remote MCP servers
     pub server_url: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -850,8 +850,8 @@ struct SettingsDeniedMcpServersItemWire {
     pub server_command: Option<Vec<String>>,
     #[serde(rename = "serverUrl", default, skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -868,7 +868,7 @@ impl SettingsDeniedMcpServersItem {
 
 impl Serialize for SettingsDeniedMcpServersItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsDeniedMcpServersItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsDeniedMcpServersItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsDeniedMcpServersItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1013,7 +1013,7 @@ pub struct SettingsHooksValueItemHooksItemCommand {
     /// If true, hook runs in background and wakes the model on exit code 2 (blocking error). Implies async.
     pub async_rewake: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1041,8 +1041,8 @@ struct SettingsHooksValueItemHooksItemCommandWire {
     pub r#async: Option<bool>,
     #[serde(rename = "asyncRewake", default, skip_serializing_if = "Option::is_none")]
     pub async_rewake: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1059,7 +1059,7 @@ impl SettingsHooksValueItemHooksItemCommand {
 
 impl Serialize for SettingsHooksValueItemHooksItemCommand {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsHooksValueItemHooksItemCommandWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsHooksValueItemHooksItemCommandWire::serialize(self, serde_json::value::Serializer), |text| SettingsHooksValueItemHooksItemCommandWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1124,7 +1124,7 @@ pub struct SettingsHooksValueItemHooksItemPrompt {
     /// If true, hook runs once and is removed after execution
     pub once: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1146,8 +1146,8 @@ struct SettingsHooksValueItemHooksItemPromptWire {
     pub status_message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub once: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1164,7 +1164,7 @@ impl SettingsHooksValueItemHooksItemPrompt {
 
 impl Serialize for SettingsHooksValueItemHooksItemPrompt {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsHooksValueItemHooksItemPromptWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsHooksValueItemHooksItemPromptWire::serialize(self, serde_json::value::Serializer), |text| SettingsHooksValueItemHooksItemPromptWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1227,7 +1227,7 @@ pub struct SettingsHooksValueItemHooksItemAgent {
     /// If true, hook runs once and is removed after execution
     pub once: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1247,8 +1247,8 @@ struct SettingsHooksValueItemHooksItemAgentWire {
     pub status_message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub once: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1265,7 +1265,7 @@ impl SettingsHooksValueItemHooksItemAgent {
 
 impl Serialize for SettingsHooksValueItemHooksItemAgent {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsHooksValueItemHooksItemAgentWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsHooksValueItemHooksItemAgentWire::serialize(self, serde_json::value::Serializer), |text| SettingsHooksValueItemHooksItemAgentWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1369,7 +1369,7 @@ pub struct SettingsHooksValueItemHooksItemHttp {
     /// If true, hook runs once and is removed after execution
     pub once: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1393,8 +1393,8 @@ struct SettingsHooksValueItemHooksItemHttpWire {
     pub status_message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub once: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1411,7 +1411,7 @@ impl SettingsHooksValueItemHooksItemHttp {
 
 impl Serialize for SettingsHooksValueItemHooksItemHttp {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsHooksValueItemHooksItemHttpWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsHooksValueItemHooksItemHttpWire::serialize(self, serde_json::value::Serializer), |text| SettingsHooksValueItemHooksItemHttpWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1476,7 +1476,7 @@ pub struct SettingsHooksValueItemHooksItemMcpTool {
     /// If true, hook runs once and is removed after execution
     pub once: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1497,8 +1497,8 @@ struct SettingsHooksValueItemHooksItemMcpToolWire {
     pub status_message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub once: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1515,7 +1515,7 @@ impl SettingsHooksValueItemHooksItemMcpTool {
 
 impl Serialize for SettingsHooksValueItemHooksItemMcpTool {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsHooksValueItemHooksItemMcpToolWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsHooksValueItemHooksItemMcpToolWire::serialize(self, serde_json::value::Serializer), |text| SettingsHooksValueItemHooksItemMcpToolWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1583,7 +1583,7 @@ pub struct SettingsHooksValueItem {
     /// List of hooks to execute when the matcher matches
     pub hooks: Vec<SettingsHooksValueItemHooksItem>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1594,8 +1594,8 @@ struct SettingsHooksValueItemWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matcher: Option<String>,
     pub hooks: Vec<SettingsHooksValueItemHooksItem>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1612,7 +1612,7 @@ impl SettingsHooksValueItem {
 
 impl Serialize for SettingsHooksValueItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsHooksValueItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsHooksValueItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsHooksValueItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1712,7 +1712,7 @@ pub struct SettingsWorktree {
     /// Directory under which Claude Code Desktop creates the worktrees of SSH sessions that run on this machine (an absolute path or one starting with ~/), instead of \<project\>/.claude/worktrees. Read by the desktop app from the SSH host user settings; a location chosen in the desktop app's SSH connection settings takes precedence. The CLI (--worktree, EnterWorktree, agent isolation) does not read it yet.
     pub location: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1730,8 +1730,8 @@ struct SettingsWorktreeWire {
     pub bg_isolation: Option<SettingsWorktreeBgIsolation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1748,7 +1748,7 @@ impl SettingsWorktree {
 
 impl Serialize for SettingsWorktree {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsWorktreeWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsWorktreeWire::serialize(self, serde_json::value::Serializer), |text| SettingsWorktreeWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1970,7 +1970,7 @@ pub struct SettingsStatusLine {
     /// Hide the built-in `-- INSERT --` / `-- VISUAL --` indicator below the prompt. Use this when your status line script renders `vim.mode` itself.
     pub hide_vim_mode_indicator: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1986,8 +1986,8 @@ struct SettingsStatusLineWire {
     pub refresh_interval: Option<serde_json::Number>,
     #[serde(rename = "hideVimModeIndicator", default, skip_serializing_if = "Option::is_none")]
     pub hide_vim_mode_indicator: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2004,7 +2004,7 @@ impl SettingsStatusLine {
 
 impl Serialize for SettingsStatusLine {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStatusLineWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStatusLineWire::serialize(self, serde_json::value::Serializer), |text| SettingsStatusLineWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2061,7 +2061,7 @@ pub struct SettingsFooterLinksRegexesItemVariant1 {
     /// Badge text. {name} placeholders filled from named capture groups; defaults to the full match.
     pub label: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2074,8 +2074,8 @@ struct SettingsFooterLinksRegexesItemVariant1Wire {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2092,7 +2092,7 @@ impl SettingsFooterLinksRegexesItemVariant1 {
 
 impl Serialize for SettingsFooterLinksRegexesItemVariant1 {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsFooterLinksRegexesItemVariant1Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsFooterLinksRegexesItemVariant1Wire::serialize(self, serde_json::value::Serializer), |text| SettingsFooterLinksRegexesItemVariant1Wire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2110,7 +2110,7 @@ pub struct SettingsFooterLinksRegexesItemVariant2 {
     /// Config variant discriminator for entries this client does not understand; the entry is preserved as-is and skipped at runtime.
     pub r#type: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2119,8 +2119,8 @@ pub struct SettingsFooterLinksRegexesItemVariant2 {
 #[serde(remote = "SettingsFooterLinksRegexesItemVariant2")]
 struct SettingsFooterLinksRegexesItemVariant2Wire {
     pub r#type: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2137,7 +2137,7 @@ impl SettingsFooterLinksRegexesItemVariant2 {
 
 impl Serialize for SettingsFooterLinksRegexesItemVariant2 {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsFooterLinksRegexesItemVariant2Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsFooterLinksRegexesItemVariant2Wire::serialize(self, serde_json::value::Serializer), |text| SettingsFooterLinksRegexesItemVariant2Wire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2227,7 +2227,7 @@ pub struct SettingsSubagentStatusLine {
     pub r#type: SettingsSubagentStatusLineType,
     pub command: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2237,8 +2237,8 @@ pub struct SettingsSubagentStatusLine {
 struct SettingsSubagentStatusLineWire {
     pub r#type: SettingsSubagentStatusLineType,
     pub command: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2255,7 +2255,7 @@ impl SettingsSubagentStatusLine {
 
 impl Serialize for SettingsSubagentStatusLine {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSubagentStatusLineWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSubagentStatusLineWire::serialize(self, serde_json::value::Serializer), |text| SettingsSubagentStatusLineWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2353,7 +2353,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceUrl {
     /// Command that prints a JSON object of HTTP headers (e.g. a short-lived auth token). Its output overrides `headers` and, like `headers`, is inherited by same-origin archive downloads from this marketplace. Runs from a fixed directory (the Claude config home, never the session's), so give a bare command found via PATH or an absolute path; it is re-run on later refreshes of this marketplace.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2367,8 +2367,8 @@ struct SettingsExtraKnownMarketplacesValueSourceUrlWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2385,7 +2385,7 @@ impl SettingsExtraKnownMarketplacesValueSourceUrl {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2445,7 +2445,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceGithub {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2463,8 +2463,8 @@ struct SettingsExtraKnownMarketplacesValueSourceGithubWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2481,7 +2481,7 @@ impl SettingsExtraKnownMarketplacesValueSourceGithub {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2541,7 +2541,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceGit {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2559,8 +2559,8 @@ struct SettingsExtraKnownMarketplacesValueSourceGitWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2577,7 +2577,7 @@ impl SettingsExtraKnownMarketplacesValueSourceGit {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceGit {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceGitWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceGitWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceGitWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2633,7 +2633,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceNpm {
     /// Registry URL. When adding a marketplace: a one-off registry override (otherwise your npm configuration decides). Under allowManagedPermissionRulesOnly, an npm marketplace keeps plugin allowed-tools only when both the entry and the registration pin this same registry.
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2647,8 +2647,8 @@ struct SettingsExtraKnownMarketplacesValueSourceNpmWire {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2665,7 +2665,7 @@ impl SettingsExtraKnownMarketplacesValueSourceNpm {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2717,7 +2717,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceFile {
     /// Local file path to marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2727,8 +2727,8 @@ pub struct SettingsExtraKnownMarketplacesValueSourceFile {
 struct SettingsExtraKnownMarketplacesValueSourceFileWire {
     pub source: SettingsExtraKnownMarketplacesValueSourceFileSource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2745,7 +2745,7 @@ impl SettingsExtraKnownMarketplacesValueSourceFile {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceFile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceFileWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceFileWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2797,7 +2797,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceDirectory {
     /// Local directory containing .claude-plugin/marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2807,8 +2807,8 @@ pub struct SettingsExtraKnownMarketplacesValueSourceDirectory {
 struct SettingsExtraKnownMarketplacesValueSourceDirectoryWire {
     pub source: SettingsExtraKnownMarketplacesValueSourceDirectorySource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2825,7 +2825,7 @@ impl SettingsExtraKnownMarketplacesValueSourceDirectory {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceDirectory {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceDirectoryWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceDirectoryWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceDirectoryWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2875,7 +2875,7 @@ impl<'de> Deserialize<'de> for SettingsExtraKnownMarketplacesValueSourceSkillsDi
 pub struct SettingsExtraKnownMarketplacesValueSourceSkillsDir {
     pub source: SettingsExtraKnownMarketplacesValueSourceSkillsDirSource,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2884,8 +2884,8 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSkillsDir {
 #[serde(remote = "SettingsExtraKnownMarketplacesValueSourceSkillsDir")]
 struct SettingsExtraKnownMarketplacesValueSourceSkillsDirWire {
     pub source: SettingsExtraKnownMarketplacesValueSourceSkillsDirSource,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2902,7 +2902,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSkillsDir {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSkillsDir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSkillsDirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSkillsDirWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSkillsDirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2954,7 +2954,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceHostPattern {
     /// Regex pattern to match the host/domain extracted from any marketplace source type. For github sources, matches against github.com. For git sources (SSH or HTTPS), extracts the hostname from the URL. Use in strictKnownMarketplaces to allow all marketplaces from a specific host (e.g., "^github\\.mycompany\\.com$").
     pub host_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2965,8 +2965,8 @@ struct SettingsExtraKnownMarketplacesValueSourceHostPatternWire {
     pub source: SettingsExtraKnownMarketplacesValueSourceHostPatternSource,
     #[serde(rename = "hostPattern")]
     pub host_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2983,7 +2983,7 @@ impl SettingsExtraKnownMarketplacesValueSourceHostPattern {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceHostPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceHostPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceHostPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceHostPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3035,7 +3035,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourcePathPattern {
     /// Regex pattern matched against the .path field of file and directory sources. Use in strictKnownMarketplaces to allow filesystem-based marketplaces alongside hostPattern restrictions for network sources. Use ".*" to allow all filesystem paths, or a narrower pattern (e.g., "^/opt/approved/") to restrict to specific directories.
     pub path_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3046,8 +3046,8 @@ struct SettingsExtraKnownMarketplacesValueSourcePathPatternWire {
     pub source: SettingsExtraKnownMarketplacesValueSourcePathPatternSource,
     #[serde(rename = "pathPattern")]
     pub path_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3064,7 +3064,7 @@ impl SettingsExtraKnownMarketplacesValueSourcePathPattern {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourcePathPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourcePathPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourcePathPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourcePathPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3153,7 +3153,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm
     /// Custom NPM registry URL (defaults to using system default, likely npmjs.org)
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3167,8 +3167,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpmWire
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3185,7 +3185,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3241,7 +3241,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3255,8 +3255,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrlWire
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3273,7 +3273,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3329,7 +3329,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGit
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3343,8 +3343,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithubW
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3361,7 +3361,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithub {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3419,7 +3419,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGit
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3434,8 +3434,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubd
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3452,7 +3452,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceGitSubdirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3506,7 +3506,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArc
     /// SHA-256 digest of the archive. When set, every download is verified against it and the install is refused on mismatch. It also serves as the version identity when neither plugin.json nor the marketplace entry declares a `version`. Recommended. Note the update signal is the version string (plugin.json version, else the entry version, else this digest) - changing only the digest while a version is declared does not trigger an update.
     pub sha256: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3518,8 +3518,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3536,7 +3536,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchive {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceArchiveWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3629,7 +3629,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCom
     /// copy (default): the printed directory is copied into the plugin cache and content-hashed, so it may be deleted afterwards. link: the cache entry links to the printed directory in place (no copy, no size limit; macOS/Linux) - for large exports; the directory must then stay valid while Claude Code runs, and a different printed path is what signals new content.
     pub mode: Option<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommandMode>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3643,8 +3643,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand
     pub timeout: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommandMode>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3661,7 +3661,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommand {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceCommandWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3712,7 +3712,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUns
     pub source: SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedSource,
     pub error: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3723,8 +3723,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsuppo
     pub source: SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3741,7 +3741,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupport
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupported {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3827,7 +3827,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItem {
     /// Command that prints a JSON object of HTTP headers for downloading this entry's `archive` source. Runs only when a user explicitly installs or updates this plugin. Unlike a catalog entry, an entry written here does not need `strict: false`: it is declared in a settings file, which has no manifest fields to inline. A declaration in project settings is not operator-authored, so request-routing and client-identity header names are still filtered there. Use an absolute path.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3849,8 +3849,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3867,7 +3867,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItem {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3889,7 +3889,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettingsOwner {
     /// Website, GitHub profile, or organization URL
     pub url: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3902,8 +3902,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsOwnerWire {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3920,7 +3920,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettingsOwner {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettingsOwner {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsOwnerWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsOwnerWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsOwnerWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3942,7 +3942,7 @@ pub struct SettingsExtraKnownMarketplacesValueSourceSettings {
     pub plugins: Vec<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItem>,
     pub owner: Option<SettingsExtraKnownMarketplacesValueSourceSettingsOwner>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3955,8 +3955,8 @@ struct SettingsExtraKnownMarketplacesValueSourceSettingsWire {
     pub plugins: Vec<SettingsExtraKnownMarketplacesValueSourceSettingsPluginsItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<SettingsExtraKnownMarketplacesValueSourceSettingsOwner>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3973,7 +3973,7 @@ impl SettingsExtraKnownMarketplacesValueSourceSettings {
 
 impl Serialize for SettingsExtraKnownMarketplacesValueSourceSettings {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueSourceSettingsWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueSourceSettingsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4060,7 +4060,7 @@ pub struct SettingsExtraKnownMarketplacesValue {
     /// Managed settings only: the plugins of this marketplace that an organization delivers with its own tier, by plugin name, each with the digests of its releases. A plugin also enabled and listed in prependPlugins or appendPlugins by managed settings the session vouches for loads its hooks module only from a folder that proves one of them, and is then seated in that tier; any other copy does not load. A digest is sha256- and the base64 SHA-256 of, for every regular file in the folder in UTF-16 code unit order of its path, not normalized, "f PATH" NUL BYTE-LENGTH NUL BYTES, with / in paths; .git, .in_use, .orphaned_at, .claude-plugin-link, .claude-directory-proof.json and .links_materialized at the root are left out. The plugin keeps its manifest at .claude-plugin/plugin.json and names one module in hooks/hooks.json. A string of any other form, or a list that is empty or of any other shape, matches no folder. A symbolic link, or a surface module, proves nothing. A proved plugin ships bundled with no install step: the digest covers the whole folder, node_modules included. A checkout whose line endings were converted proves nothing.
     pub plugin_digests: Option<indexmap::IndexMap<String, Vec<String>>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4075,8 +4075,8 @@ struct SettingsExtraKnownMarketplacesValueWire {
     pub auto_update: Option<bool>,
     #[serde(rename = "pluginDigests", default, skip_serializing_if = "Option::is_none")]
     pub plugin_digests: Option<indexmap::IndexMap<String, Vec<String>>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4093,7 +4093,7 @@ impl SettingsExtraKnownMarketplacesValue {
 
 impl Serialize for SettingsExtraKnownMarketplacesValue {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsExtraKnownMarketplacesValueWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsExtraKnownMarketplacesValueWire::serialize(self, serde_json::value::Serializer), |text| SettingsExtraKnownMarketplacesValueWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4149,7 +4149,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceUrl {
     /// Command that prints a JSON object of HTTP headers (e.g. a short-lived auth token). Its output overrides `headers` and, like `headers`, is inherited by same-origin archive downloads from this marketplace. Runs from a fixed directory (the Claude config home, never the session's), so give a bare command found via PATH or an absolute path; it is re-run on later refreshes of this marketplace.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4163,8 +4163,8 @@ struct SettingsAdditionalMarketplacesValueSourceUrlWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4181,7 +4181,7 @@ impl SettingsAdditionalMarketplacesValueSourceUrl {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4241,7 +4241,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceGithub {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4259,8 +4259,8 @@ struct SettingsAdditionalMarketplacesValueSourceGithubWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4277,7 +4277,7 @@ impl SettingsAdditionalMarketplacesValueSourceGithub {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4337,7 +4337,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceGit {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4355,8 +4355,8 @@ struct SettingsAdditionalMarketplacesValueSourceGitWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4373,7 +4373,7 @@ impl SettingsAdditionalMarketplacesValueSourceGit {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceGit {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceGitWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceGitWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceGitWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4429,7 +4429,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceNpm {
     /// Registry URL. When adding a marketplace: a one-off registry override (otherwise your npm configuration decides). Under allowManagedPermissionRulesOnly, an npm marketplace keeps plugin allowed-tools only when both the entry and the registration pin this same registry.
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4443,8 +4443,8 @@ struct SettingsAdditionalMarketplacesValueSourceNpmWire {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4461,7 +4461,7 @@ impl SettingsAdditionalMarketplacesValueSourceNpm {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4513,7 +4513,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceFile {
     /// Local file path to marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4523,8 +4523,8 @@ pub struct SettingsAdditionalMarketplacesValueSourceFile {
 struct SettingsAdditionalMarketplacesValueSourceFileWire {
     pub source: SettingsAdditionalMarketplacesValueSourceFileSource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4541,7 +4541,7 @@ impl SettingsAdditionalMarketplacesValueSourceFile {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceFile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceFileWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceFileWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4593,7 +4593,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceDirectory {
     /// Local directory containing .claude-plugin/marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4603,8 +4603,8 @@ pub struct SettingsAdditionalMarketplacesValueSourceDirectory {
 struct SettingsAdditionalMarketplacesValueSourceDirectoryWire {
     pub source: SettingsAdditionalMarketplacesValueSourceDirectorySource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4621,7 +4621,7 @@ impl SettingsAdditionalMarketplacesValueSourceDirectory {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceDirectory {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceDirectoryWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceDirectoryWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceDirectoryWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4671,7 +4671,7 @@ impl<'de> Deserialize<'de> for SettingsAdditionalMarketplacesValueSourceSkillsDi
 pub struct SettingsAdditionalMarketplacesValueSourceSkillsDir {
     pub source: SettingsAdditionalMarketplacesValueSourceSkillsDirSource,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4680,8 +4680,8 @@ pub struct SettingsAdditionalMarketplacesValueSourceSkillsDir {
 #[serde(remote = "SettingsAdditionalMarketplacesValueSourceSkillsDir")]
 struct SettingsAdditionalMarketplacesValueSourceSkillsDirWire {
     pub source: SettingsAdditionalMarketplacesValueSourceSkillsDirSource,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4698,7 +4698,7 @@ impl SettingsAdditionalMarketplacesValueSourceSkillsDir {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSkillsDir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSkillsDirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSkillsDirWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSkillsDirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4750,7 +4750,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceHostPattern {
     /// Regex pattern to match the host/domain extracted from any marketplace source type. For github sources, matches against github.com. For git sources (SSH or HTTPS), extracts the hostname from the URL. Use in strictKnownMarketplaces to allow all marketplaces from a specific host (e.g., "^github\\.mycompany\\.com$").
     pub host_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4761,8 +4761,8 @@ struct SettingsAdditionalMarketplacesValueSourceHostPatternWire {
     pub source: SettingsAdditionalMarketplacesValueSourceHostPatternSource,
     #[serde(rename = "hostPattern")]
     pub host_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4779,7 +4779,7 @@ impl SettingsAdditionalMarketplacesValueSourceHostPattern {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceHostPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceHostPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceHostPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceHostPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4831,7 +4831,7 @@ pub struct SettingsAdditionalMarketplacesValueSourcePathPattern {
     /// Regex pattern matched against the .path field of file and directory sources. Use in strictKnownMarketplaces to allow filesystem-based marketplaces alongside hostPattern restrictions for network sources. Use ".*" to allow all filesystem paths, or a narrower pattern (e.g., "^/opt/approved/") to restrict to specific directories.
     pub path_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4842,8 +4842,8 @@ struct SettingsAdditionalMarketplacesValueSourcePathPatternWire {
     pub source: SettingsAdditionalMarketplacesValueSourcePathPatternSource,
     #[serde(rename = "pathPattern")]
     pub path_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4860,7 +4860,7 @@ impl SettingsAdditionalMarketplacesValueSourcePathPattern {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourcePathPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourcePathPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourcePathPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourcePathPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4949,7 +4949,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm
     /// Custom NPM registry URL (defaults to using system default, likely npmjs.org)
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4963,8 +4963,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpmWire
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4981,7 +4981,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5037,7 +5037,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5051,8 +5051,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrlWire
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5069,7 +5069,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5125,7 +5125,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGit
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5139,8 +5139,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithubW
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5157,7 +5157,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithub {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5215,7 +5215,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGit
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5230,8 +5230,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubd
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5248,7 +5248,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceGitSubdirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5302,7 +5302,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArc
     /// SHA-256 digest of the archive. When set, every download is verified against it and the install is refused on mismatch. It also serves as the version identity when neither plugin.json nor the marketplace entry declares a `version`. Recommended. Note the update signal is the version string (plugin.json version, else the entry version, else this digest) - changing only the digest while a version is declared does not trigger an update.
     pub sha256: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5314,8 +5314,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5332,7 +5332,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchive {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceArchiveWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5425,7 +5425,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCom
     /// copy (default): the printed directory is copied into the plugin cache and content-hashed, so it may be deleted afterwards. link: the cache entry links to the printed directory in place (no copy, no size limit; macOS/Linux) - for large exports; the directory must then stay valid while Claude Code runs, and a different printed path is what signals new content.
     pub mode: Option<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommandMode>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5439,8 +5439,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand
     pub timeout: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommandMode>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5457,7 +5457,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommand {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceCommandWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5508,7 +5508,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUns
     pub source: SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedSource,
     pub error: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5519,8 +5519,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsuppo
     pub source: SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5537,7 +5537,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupport
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupported {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemSourceUnsupportedWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5623,7 +5623,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItem {
     /// Command that prints a JSON object of HTTP headers for downloading this entry's `archive` source. Runs only when a user explicitly installs or updates this plugin. Unlike a catalog entry, an entry written here does not need `strict: false`: it is declared in a settings file, which has no manifest fields to inline. A declaration in project settings is not operator-authored, so request-routing and client-identity header names are still filtered there. Use an absolute path.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5645,8 +5645,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5663,7 +5663,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsPluginsItem {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsPluginsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsPluginsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5685,7 +5685,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettingsOwner {
     /// Website, GitHub profile, or organization URL
     pub url: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5698,8 +5698,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsOwnerWire {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5716,7 +5716,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettingsOwner {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettingsOwner {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsOwnerWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsOwnerWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsOwnerWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5738,7 +5738,7 @@ pub struct SettingsAdditionalMarketplacesValueSourceSettings {
     pub plugins: Vec<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItem>,
     pub owner: Option<SettingsAdditionalMarketplacesValueSourceSettingsOwner>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5751,8 +5751,8 @@ struct SettingsAdditionalMarketplacesValueSourceSettingsWire {
     pub plugins: Vec<SettingsAdditionalMarketplacesValueSourceSettingsPluginsItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<SettingsAdditionalMarketplacesValueSourceSettingsOwner>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5769,7 +5769,7 @@ impl SettingsAdditionalMarketplacesValueSourceSettings {
 
 impl Serialize for SettingsAdditionalMarketplacesValueSourceSettings {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueSourceSettingsWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueSourceSettingsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5856,7 +5856,7 @@ pub struct SettingsAdditionalMarketplacesValue {
     /// Managed settings only: the plugins of this marketplace that an organization delivers with its own tier, by plugin name, each with the digests of its releases. A plugin also enabled and listed in prependPlugins or appendPlugins by managed settings the session vouches for loads its hooks module only from a folder that proves one of them, and is then seated in that tier; any other copy does not load. A digest is sha256- and the base64 SHA-256 of, for every regular file in the folder in UTF-16 code unit order of its path, not normalized, "f PATH" NUL BYTE-LENGTH NUL BYTES, with / in paths; .git, .in_use, .orphaned_at, .claude-plugin-link, .claude-directory-proof.json and .links_materialized at the root are left out. The plugin keeps its manifest at .claude-plugin/plugin.json and names one module in hooks/hooks.json. A string of any other form, or a list that is empty or of any other shape, matches no folder. A symbolic link, or a surface module, proves nothing. A proved plugin ships bundled with no install step: the digest covers the whole folder, node_modules included. A checkout whose line endings were converted proves nothing.
     pub plugin_digests: Option<indexmap::IndexMap<String, Vec<String>>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5871,8 +5871,8 @@ struct SettingsAdditionalMarketplacesValueWire {
     pub auto_update: Option<bool>,
     #[serde(rename = "pluginDigests", default, skip_serializing_if = "Option::is_none")]
     pub plugin_digests: Option<indexmap::IndexMap<String, Vec<String>>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5889,7 +5889,7 @@ impl SettingsAdditionalMarketplacesValue {
 
 impl Serialize for SettingsAdditionalMarketplacesValue {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAdditionalMarketplacesValueWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAdditionalMarketplacesValueWire::serialize(self, serde_json::value::Serializer), |text| SettingsAdditionalMarketplacesValueWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -5945,7 +5945,7 @@ pub struct SettingsStrictKnownMarketplacesItemUrl {
     /// Command that prints a JSON object of HTTP headers (e.g. a short-lived auth token). Its output overrides `headers` and, like `headers`, is inherited by same-origin archive downloads from this marketplace. Runs from a fixed directory (the Claude config home, never the session's), so give a bare command found via PATH or an absolute path; it is re-run on later refreshes of this marketplace.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -5959,8 +5959,8 @@ struct SettingsStrictKnownMarketplacesItemUrlWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -5977,7 +5977,7 @@ impl SettingsStrictKnownMarketplacesItemUrl {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6037,7 +6037,7 @@ pub struct SettingsStrictKnownMarketplacesItemGithub {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6055,8 +6055,8 @@ struct SettingsStrictKnownMarketplacesItemGithubWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6073,7 +6073,7 @@ impl SettingsStrictKnownMarketplacesItemGithub {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6133,7 +6133,7 @@ pub struct SettingsStrictKnownMarketplacesItemGit {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6151,8 +6151,8 @@ struct SettingsStrictKnownMarketplacesItemGitWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6169,7 +6169,7 @@ impl SettingsStrictKnownMarketplacesItemGit {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemGit {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemGitWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemGitWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemGitWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6225,7 +6225,7 @@ pub struct SettingsStrictKnownMarketplacesItemNpm {
     /// Registry URL. When adding a marketplace: a one-off registry override (otherwise your npm configuration decides). Under allowManagedPermissionRulesOnly, an npm marketplace keeps plugin allowed-tools only when both the entry and the registration pin this same registry.
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6239,8 +6239,8 @@ struct SettingsStrictKnownMarketplacesItemNpmWire {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6257,7 +6257,7 @@ impl SettingsStrictKnownMarketplacesItemNpm {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6309,7 +6309,7 @@ pub struct SettingsStrictKnownMarketplacesItemFile {
     /// Local file path to marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6319,8 +6319,8 @@ pub struct SettingsStrictKnownMarketplacesItemFile {
 struct SettingsStrictKnownMarketplacesItemFileWire {
     pub source: SettingsStrictKnownMarketplacesItemFileSource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6337,7 +6337,7 @@ impl SettingsStrictKnownMarketplacesItemFile {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemFile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemFileWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemFileWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6389,7 +6389,7 @@ pub struct SettingsStrictKnownMarketplacesItemDirectory {
     /// Local directory containing .claude-plugin/marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6399,8 +6399,8 @@ pub struct SettingsStrictKnownMarketplacesItemDirectory {
 struct SettingsStrictKnownMarketplacesItemDirectoryWire {
     pub source: SettingsStrictKnownMarketplacesItemDirectorySource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6417,7 +6417,7 @@ impl SettingsStrictKnownMarketplacesItemDirectory {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemDirectory {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemDirectoryWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemDirectoryWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemDirectoryWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6467,7 +6467,7 @@ impl<'de> Deserialize<'de> for SettingsStrictKnownMarketplacesItemSkillsDirSourc
 pub struct SettingsStrictKnownMarketplacesItemSkillsDir {
     pub source: SettingsStrictKnownMarketplacesItemSkillsDirSource,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6476,8 +6476,8 @@ pub struct SettingsStrictKnownMarketplacesItemSkillsDir {
 #[serde(remote = "SettingsStrictKnownMarketplacesItemSkillsDir")]
 struct SettingsStrictKnownMarketplacesItemSkillsDirWire {
     pub source: SettingsStrictKnownMarketplacesItemSkillsDirSource,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6494,7 +6494,7 @@ impl SettingsStrictKnownMarketplacesItemSkillsDir {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSkillsDir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSkillsDirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSkillsDirWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSkillsDirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6546,7 +6546,7 @@ pub struct SettingsStrictKnownMarketplacesItemHostPattern {
     /// Regex pattern to match the host/domain extracted from any marketplace source type. For github sources, matches against github.com. For git sources (SSH or HTTPS), extracts the hostname from the URL. Use in strictKnownMarketplaces to allow all marketplaces from a specific host (e.g., "^github\\.mycompany\\.com$").
     pub host_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6557,8 +6557,8 @@ struct SettingsStrictKnownMarketplacesItemHostPatternWire {
     pub source: SettingsStrictKnownMarketplacesItemHostPatternSource,
     #[serde(rename = "hostPattern")]
     pub host_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6575,7 +6575,7 @@ impl SettingsStrictKnownMarketplacesItemHostPattern {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemHostPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemHostPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemHostPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemHostPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6627,7 +6627,7 @@ pub struct SettingsStrictKnownMarketplacesItemPathPattern {
     /// Regex pattern matched against the .path field of file and directory sources. Use in strictKnownMarketplaces to allow filesystem-based marketplaces alongside hostPattern restrictions for network sources. Use ".*" to allow all filesystem paths, or a narrower pattern (e.g., "^/opt/approved/") to restrict to specific directories.
     pub path_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6638,8 +6638,8 @@ struct SettingsStrictKnownMarketplacesItemPathPatternWire {
     pub source: SettingsStrictKnownMarketplacesItemPathPatternSource,
     #[serde(rename = "pathPattern")]
     pub path_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6656,7 +6656,7 @@ impl SettingsStrictKnownMarketplacesItemPathPattern {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemPathPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemPathPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemPathPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemPathPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6745,7 +6745,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm {
     /// Custom NPM registry URL (defaults to using system default, likely npmjs.org)
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6759,8 +6759,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpmWire {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6777,7 +6777,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6833,7 +6833,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl {
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6847,8 +6847,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrlWire {
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6865,7 +6865,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -6921,7 +6921,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub {
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -6935,8 +6935,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithubWire {
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -6953,7 +6953,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7011,7 +7011,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7026,8 +7026,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdirWire
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7044,7 +7044,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7098,7 +7098,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive {
     /// SHA-256 digest of the archive. When set, every download is verified against it and the install is refused on mismatch. It also serves as the version identity when neither plugin.json nor the marketplace entry declares a `version`. Recommended. Note the update signal is the version string (plugin.json version, else the entry version, else this digest) - changing only the digest while a version is declared does not trigger an update.
     pub sha256: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7110,8 +7110,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchiveWire {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7128,7 +7128,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchive {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7221,7 +7221,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand {
     /// copy (default): the printed directory is copied into the plugin cache and content-hashed, so it may be deleted afterwards. link: the cache entry links to the printed directory in place (no copy, no size limit; macOS/Linux) - for large exports; the directory must then stay valid while Claude Code runs, and a different printed path is what signals new content.
     pub mode: Option<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommandMode>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7235,8 +7235,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommandWire {
     pub timeout: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommandMode>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7253,7 +7253,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommand {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7304,7 +7304,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupport
     pub source: SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupportedSource,
     pub error: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7315,8 +7315,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupportedWi
     pub source: SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupportedSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7333,7 +7333,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupported {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupported {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7419,7 +7419,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsPluginsItem {
     /// Command that prints a JSON object of HTTP headers for downloading this entry's `archive` source. Runs only when a user explicitly installs or updates this plugin. Unlike a catalog entry, an entry written here does not need `strict: false`: it is declared in a settings file, which has no manifest fields to inline. A declaration in project settings is not operator-authored, so request-routing and client-identity header names are still filtered there. Use an absolute path.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7441,8 +7441,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsPluginsItemWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7459,7 +7459,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsPluginsItem {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsPluginsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsPluginsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7481,7 +7481,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettingsOwner {
     /// Website, GitHub profile, or organization URL
     pub url: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7494,8 +7494,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsOwnerWire {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7512,7 +7512,7 @@ impl SettingsStrictKnownMarketplacesItemSettingsOwner {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettingsOwner {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsOwnerWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsOwnerWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsOwnerWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7534,7 +7534,7 @@ pub struct SettingsStrictKnownMarketplacesItemSettings {
     pub plugins: Vec<SettingsStrictKnownMarketplacesItemSettingsPluginsItem>,
     pub owner: Option<SettingsStrictKnownMarketplacesItemSettingsOwner>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7547,8 +7547,8 @@ struct SettingsStrictKnownMarketplacesItemSettingsWire {
     pub plugins: Vec<SettingsStrictKnownMarketplacesItemSettingsPluginsItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<SettingsStrictKnownMarketplacesItemSettingsOwner>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7565,7 +7565,7 @@ impl SettingsStrictKnownMarketplacesItemSettings {
 
 impl Serialize for SettingsStrictKnownMarketplacesItemSettings {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsStrictKnownMarketplacesItemSettingsWire::serialize(self, serde_json::value::Serializer), |text| SettingsStrictKnownMarketplacesItemSettingsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7684,7 +7684,7 @@ pub struct SettingsAllowedMarketplacesItemUrl {
     /// Command that prints a JSON object of HTTP headers (e.g. a short-lived auth token). Its output overrides `headers` and, like `headers`, is inherited by same-origin archive downloads from this marketplace. Runs from a fixed directory (the Claude config home, never the session's), so give a bare command found via PATH or an absolute path; it is re-run on later refreshes of this marketplace.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7698,8 +7698,8 @@ struct SettingsAllowedMarketplacesItemUrlWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7716,7 +7716,7 @@ impl SettingsAllowedMarketplacesItemUrl {
 
 impl Serialize for SettingsAllowedMarketplacesItemUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7776,7 +7776,7 @@ pub struct SettingsAllowedMarketplacesItemGithub {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7794,8 +7794,8 @@ struct SettingsAllowedMarketplacesItemGithubWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7812,7 +7812,7 @@ impl SettingsAllowedMarketplacesItemGithub {
 
 impl Serialize for SettingsAllowedMarketplacesItemGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7872,7 +7872,7 @@ pub struct SettingsAllowedMarketplacesItemGit {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7890,8 +7890,8 @@ struct SettingsAllowedMarketplacesItemGitWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7908,7 +7908,7 @@ impl SettingsAllowedMarketplacesItemGit {
 
 impl Serialize for SettingsAllowedMarketplacesItemGit {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemGitWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemGitWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemGitWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -7964,7 +7964,7 @@ pub struct SettingsAllowedMarketplacesItemNpm {
     /// Registry URL. When adding a marketplace: a one-off registry override (otherwise your npm configuration decides). Under allowManagedPermissionRulesOnly, an npm marketplace keeps plugin allowed-tools only when both the entry and the registration pin this same registry.
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -7978,8 +7978,8 @@ struct SettingsAllowedMarketplacesItemNpmWire {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -7996,7 +7996,7 @@ impl SettingsAllowedMarketplacesItemNpm {
 
 impl Serialize for SettingsAllowedMarketplacesItemNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8048,7 +8048,7 @@ pub struct SettingsAllowedMarketplacesItemFile {
     /// Local file path to marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8058,8 +8058,8 @@ pub struct SettingsAllowedMarketplacesItemFile {
 struct SettingsAllowedMarketplacesItemFileWire {
     pub source: SettingsAllowedMarketplacesItemFileSource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8076,7 +8076,7 @@ impl SettingsAllowedMarketplacesItemFile {
 
 impl Serialize for SettingsAllowedMarketplacesItemFile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemFileWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemFileWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8128,7 +8128,7 @@ pub struct SettingsAllowedMarketplacesItemDirectory {
     /// Local directory containing .claude-plugin/marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8138,8 +8138,8 @@ pub struct SettingsAllowedMarketplacesItemDirectory {
 struct SettingsAllowedMarketplacesItemDirectoryWire {
     pub source: SettingsAllowedMarketplacesItemDirectorySource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8156,7 +8156,7 @@ impl SettingsAllowedMarketplacesItemDirectory {
 
 impl Serialize for SettingsAllowedMarketplacesItemDirectory {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemDirectoryWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemDirectoryWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemDirectoryWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8206,7 +8206,7 @@ impl<'de> Deserialize<'de> for SettingsAllowedMarketplacesItemSkillsDirSource {
 pub struct SettingsAllowedMarketplacesItemSkillsDir {
     pub source: SettingsAllowedMarketplacesItemSkillsDirSource,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8215,8 +8215,8 @@ pub struct SettingsAllowedMarketplacesItemSkillsDir {
 #[serde(remote = "SettingsAllowedMarketplacesItemSkillsDir")]
 struct SettingsAllowedMarketplacesItemSkillsDirWire {
     pub source: SettingsAllowedMarketplacesItemSkillsDirSource,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8233,7 +8233,7 @@ impl SettingsAllowedMarketplacesItemSkillsDir {
 
 impl Serialize for SettingsAllowedMarketplacesItemSkillsDir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSkillsDirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSkillsDirWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSkillsDirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8285,7 +8285,7 @@ pub struct SettingsAllowedMarketplacesItemHostPattern {
     /// Regex pattern to match the host/domain extracted from any marketplace source type. For github sources, matches against github.com. For git sources (SSH or HTTPS), extracts the hostname from the URL. Use in strictKnownMarketplaces to allow all marketplaces from a specific host (e.g., "^github\\.mycompany\\.com$").
     pub host_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8296,8 +8296,8 @@ struct SettingsAllowedMarketplacesItemHostPatternWire {
     pub source: SettingsAllowedMarketplacesItemHostPatternSource,
     #[serde(rename = "hostPattern")]
     pub host_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8314,7 +8314,7 @@ impl SettingsAllowedMarketplacesItemHostPattern {
 
 impl Serialize for SettingsAllowedMarketplacesItemHostPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemHostPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemHostPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemHostPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8366,7 +8366,7 @@ pub struct SettingsAllowedMarketplacesItemPathPattern {
     /// Regex pattern matched against the .path field of file and directory sources. Use in strictKnownMarketplaces to allow filesystem-based marketplaces alongside hostPattern restrictions for network sources. Use ".*" to allow all filesystem paths, or a narrower pattern (e.g., "^/opt/approved/") to restrict to specific directories.
     pub path_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8377,8 +8377,8 @@ struct SettingsAllowedMarketplacesItemPathPatternWire {
     pub source: SettingsAllowedMarketplacesItemPathPatternSource,
     #[serde(rename = "pathPattern")]
     pub path_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8395,7 +8395,7 @@ impl SettingsAllowedMarketplacesItemPathPattern {
 
 impl Serialize for SettingsAllowedMarketplacesItemPathPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemPathPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemPathPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemPathPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8484,7 +8484,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm {
     /// Custom NPM registry URL (defaults to using system default, likely npmjs.org)
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8498,8 +8498,8 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpmWire {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8516,7 +8516,7 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8572,7 +8572,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl {
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8586,8 +8586,8 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrlWire {
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8604,7 +8604,7 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8660,7 +8660,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub {
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8674,8 +8674,8 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithubWire {
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8692,7 +8692,7 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8750,7 +8750,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8765,8 +8765,8 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire {
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8783,7 +8783,7 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8837,7 +8837,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive {
     /// SHA-256 digest of the archive. When set, every download is verified against it and the install is refused on mismatch. It also serves as the version identity when neither plugin.json nor the marketplace entry declares a `version`. Recommended. Note the update signal is the version string (plugin.json version, else the entry version, else this digest) - changing only the digest while a version is declared does not trigger an update.
     pub sha256: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8849,8 +8849,8 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchiveWire {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8867,7 +8867,7 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchive {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -8960,7 +8960,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand {
     /// copy (default): the printed directory is copied into the plugin cache and content-hashed, so it may be deleted afterwards. link: the cache entry links to the printed directory in place (no copy, no size limit; macOS/Linux) - for large exports; the directory must then stay valid while Claude Code runs, and a different printed path is what signals new content.
     pub mode: Option<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommandMode>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -8974,8 +8974,8 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommandWire {
     pub timeout: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommandMode>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -8992,7 +8992,7 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommand {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9043,7 +9043,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported {
     pub source: SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupportedSource,
     pub error: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9054,8 +9054,8 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire {
     pub source: SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupportedSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9072,7 +9072,7 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupported {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9158,7 +9158,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsPluginsItem {
     /// Command that prints a JSON object of HTTP headers for downloading this entry's `archive` source. Runs only when a user explicitly installs or updates this plugin. Unlike a catalog entry, an entry written here does not need `strict: false`: it is declared in a settings file, which has no manifest fields to inline. A declaration in project settings is not operator-authored, so request-routing and client-identity header names are still filtered there. Use an absolute path.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9180,8 +9180,8 @@ struct SettingsAllowedMarketplacesItemSettingsPluginsItemWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9198,7 +9198,7 @@ impl SettingsAllowedMarketplacesItemSettingsPluginsItem {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsPluginsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsPluginsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9220,7 +9220,7 @@ pub struct SettingsAllowedMarketplacesItemSettingsOwner {
     /// Website, GitHub profile, or organization URL
     pub url: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9233,8 +9233,8 @@ struct SettingsAllowedMarketplacesItemSettingsOwnerWire {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9251,7 +9251,7 @@ impl SettingsAllowedMarketplacesItemSettingsOwner {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettingsOwner {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsOwnerWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsOwnerWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsOwnerWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9273,7 +9273,7 @@ pub struct SettingsAllowedMarketplacesItemSettings {
     pub plugins: Vec<SettingsAllowedMarketplacesItemSettingsPluginsItem>,
     pub owner: Option<SettingsAllowedMarketplacesItemSettingsOwner>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9286,8 +9286,8 @@ struct SettingsAllowedMarketplacesItemSettingsWire {
     pub plugins: Vec<SettingsAllowedMarketplacesItemSettingsPluginsItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<SettingsAllowedMarketplacesItemSettingsOwner>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9304,7 +9304,7 @@ impl SettingsAllowedMarketplacesItemSettings {
 
 impl Serialize for SettingsAllowedMarketplacesItemSettings {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedMarketplacesItemSettingsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedMarketplacesItemSettingsWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedMarketplacesItemSettingsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9423,7 +9423,7 @@ pub struct SettingsBlockedMarketplacesItemUrl {
     /// Command that prints a JSON object of HTTP headers (e.g. a short-lived auth token). Its output overrides `headers` and, like `headers`, is inherited by same-origin archive downloads from this marketplace. Runs from a fixed directory (the Claude config home, never the session's), so give a bare command found via PATH or an absolute path; it is re-run on later refreshes of this marketplace.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9437,8 +9437,8 @@ struct SettingsBlockedMarketplacesItemUrlWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9455,7 +9455,7 @@ impl SettingsBlockedMarketplacesItemUrl {
 
 impl Serialize for SettingsBlockedMarketplacesItemUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9515,7 +9515,7 @@ pub struct SettingsBlockedMarketplacesItemGithub {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9533,8 +9533,8 @@ struct SettingsBlockedMarketplacesItemGithubWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9551,7 +9551,7 @@ impl SettingsBlockedMarketplacesItemGithub {
 
 impl Serialize for SettingsBlockedMarketplacesItemGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9611,7 +9611,7 @@ pub struct SettingsBlockedMarketplacesItemGit {
     /// Has no effect; accepted so existing settings keep working. Claude Code's own git never downloads Git LFS content: LFS-tracked files in the marketplace repository are checked out as pointer files whether or not this is set, and adding or updating the marketplace says how many were. To fetch their content, run `git lfs pull` in the marketplace's checkout under ~/.claude/plugins/marketplaces/.
     pub skip_lfs: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9629,8 +9629,8 @@ struct SettingsBlockedMarketplacesItemGitWire {
     pub sparse_paths: Option<Vec<String>>,
     #[serde(rename = "skipLfs", default, skip_serializing_if = "Option::is_none")]
     pub skip_lfs: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9647,7 +9647,7 @@ impl SettingsBlockedMarketplacesItemGit {
 
 impl Serialize for SettingsBlockedMarketplacesItemGit {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemGitWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemGitWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemGitWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9703,7 +9703,7 @@ pub struct SettingsBlockedMarketplacesItemNpm {
     /// Registry URL. When adding a marketplace: a one-off registry override (otherwise your npm configuration decides). Under allowManagedPermissionRulesOnly, an npm marketplace keeps plugin allowed-tools only when both the entry and the registration pin this same registry.
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9717,8 +9717,8 @@ struct SettingsBlockedMarketplacesItemNpmWire {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9735,7 +9735,7 @@ impl SettingsBlockedMarketplacesItemNpm {
 
 impl Serialize for SettingsBlockedMarketplacesItemNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9787,7 +9787,7 @@ pub struct SettingsBlockedMarketplacesItemFile {
     /// Local file path to marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9797,8 +9797,8 @@ pub struct SettingsBlockedMarketplacesItemFile {
 struct SettingsBlockedMarketplacesItemFileWire {
     pub source: SettingsBlockedMarketplacesItemFileSource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9815,7 +9815,7 @@ impl SettingsBlockedMarketplacesItemFile {
 
 impl Serialize for SettingsBlockedMarketplacesItemFile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemFileWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemFileWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemFileWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9867,7 +9867,7 @@ pub struct SettingsBlockedMarketplacesItemDirectory {
     /// Local directory containing .claude-plugin/marketplace.json
     pub path: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9877,8 +9877,8 @@ pub struct SettingsBlockedMarketplacesItemDirectory {
 struct SettingsBlockedMarketplacesItemDirectoryWire {
     pub source: SettingsBlockedMarketplacesItemDirectorySource,
     pub path: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9895,7 +9895,7 @@ impl SettingsBlockedMarketplacesItemDirectory {
 
 impl Serialize for SettingsBlockedMarketplacesItemDirectory {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemDirectoryWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemDirectoryWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemDirectoryWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -9945,7 +9945,7 @@ impl<'de> Deserialize<'de> for SettingsBlockedMarketplacesItemSkillsDirSource {
 pub struct SettingsBlockedMarketplacesItemSkillsDir {
     pub source: SettingsBlockedMarketplacesItemSkillsDirSource,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -9954,8 +9954,8 @@ pub struct SettingsBlockedMarketplacesItemSkillsDir {
 #[serde(remote = "SettingsBlockedMarketplacesItemSkillsDir")]
 struct SettingsBlockedMarketplacesItemSkillsDirWire {
     pub source: SettingsBlockedMarketplacesItemSkillsDirSource,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -9972,7 +9972,7 @@ impl SettingsBlockedMarketplacesItemSkillsDir {
 
 impl Serialize for SettingsBlockedMarketplacesItemSkillsDir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSkillsDirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSkillsDirWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSkillsDirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10024,7 +10024,7 @@ pub struct SettingsBlockedMarketplacesItemHostPattern {
     /// Regex pattern to match the host/domain extracted from any marketplace source type. For github sources, matches against github.com. For git sources (SSH or HTTPS), extracts the hostname from the URL. Use in strictKnownMarketplaces to allow all marketplaces from a specific host (e.g., "^github\\.mycompany\\.com$").
     pub host_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10035,8 +10035,8 @@ struct SettingsBlockedMarketplacesItemHostPatternWire {
     pub source: SettingsBlockedMarketplacesItemHostPatternSource,
     #[serde(rename = "hostPattern")]
     pub host_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10053,7 +10053,7 @@ impl SettingsBlockedMarketplacesItemHostPattern {
 
 impl Serialize for SettingsBlockedMarketplacesItemHostPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemHostPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemHostPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemHostPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10105,7 +10105,7 @@ pub struct SettingsBlockedMarketplacesItemPathPattern {
     /// Regex pattern matched against the .path field of file and directory sources. Use in strictKnownMarketplaces to allow filesystem-based marketplaces alongside hostPattern restrictions for network sources. Use ".*" to allow all filesystem paths, or a narrower pattern (e.g., "^/opt/approved/") to restrict to specific directories.
     pub path_pattern: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10116,8 +10116,8 @@ struct SettingsBlockedMarketplacesItemPathPatternWire {
     pub source: SettingsBlockedMarketplacesItemPathPatternSource,
     #[serde(rename = "pathPattern")]
     pub path_pattern: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10134,7 +10134,7 @@ impl SettingsBlockedMarketplacesItemPathPattern {
 
 impl Serialize for SettingsBlockedMarketplacesItemPathPattern {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemPathPatternWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemPathPatternWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemPathPatternWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10223,7 +10223,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm {
     /// Custom NPM registry URL (defaults to using system default, likely npmjs.org)
     pub registry: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10237,8 +10237,8 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpmWire {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10255,7 +10255,7 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpm {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsPluginsItemSourceNpmWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10311,7 +10311,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl {
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10325,8 +10325,8 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrlWire {
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10343,7 +10343,7 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrl {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUrlWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10399,7 +10399,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub {
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10413,8 +10413,8 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithubWire {
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10431,7 +10431,7 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithub {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGithubWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10489,7 +10489,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
     /// Specific commit SHA to use
     pub sha: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10504,8 +10504,8 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire {
     pub r#ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10522,7 +10522,7 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdir {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsPluginsItemSourceGitSubdirWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10576,7 +10576,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive {
     /// SHA-256 digest of the archive. When set, every download is verified against it and the install is refused on mismatch. It also serves as the version identity when neither plugin.json nor the marketplace entry declares a `version`. Recommended. Note the update signal is the version string (plugin.json version, else the entry version, else this digest) - changing only the digest while a version is declared does not trigger an update.
     pub sha256: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10588,8 +10588,8 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchiveWire {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10606,7 +10606,7 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchive {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsPluginsItemSourceArchiveWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10699,7 +10699,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand {
     /// copy (default): the printed directory is copied into the plugin cache and content-hashed, so it may be deleted afterwards. link: the cache entry links to the printed directory in place (no copy, no size limit; macOS/Linux) - for large exports; the directory must then stay valid while Claude Code runs, and a different printed path is what signals new content.
     pub mode: Option<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommandMode>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10713,8 +10713,8 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommandWire {
     pub timeout: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommandMode>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10731,7 +10731,7 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommand {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsPluginsItemSourceCommandWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10782,7 +10782,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported {
     pub source: SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupportedSource,
     pub error: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10793,8 +10793,8 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire {
     pub source: SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupportedSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10811,7 +10811,7 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupported {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsPluginsItemSourceUnsupportedWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10897,7 +10897,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsPluginsItem {
     /// Command that prints a JSON object of HTTP headers for downloading this entry's `archive` source. Runs only when a user explicitly installs or updates this plugin. Unlike a catalog entry, an entry written here does not need `strict: false`: it is declared in a settings file, which has no manifest fields to inline. A declaration in project settings is not operator-authored, so request-routing and client-identity header names are still filtered there. Use an absolute path.
     pub headers_helper: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10919,8 +10919,8 @@ struct SettingsBlockedMarketplacesItemSettingsPluginsItemWire {
     pub headers: Option<indexmap::IndexMap<String, String>>,
     #[serde(rename = "headersHelper", default, skip_serializing_if = "Option::is_none")]
     pub headers_helper: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10937,7 +10937,7 @@ impl SettingsBlockedMarketplacesItemSettingsPluginsItem {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsPluginsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsPluginsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsPluginsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -10959,7 +10959,7 @@ pub struct SettingsBlockedMarketplacesItemSettingsOwner {
     /// Website, GitHub profile, or organization URL
     pub url: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -10972,8 +10972,8 @@ struct SettingsBlockedMarketplacesItemSettingsOwnerWire {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -10990,7 +10990,7 @@ impl SettingsBlockedMarketplacesItemSettingsOwner {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettingsOwner {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsOwnerWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsOwnerWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsOwnerWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -11012,7 +11012,7 @@ pub struct SettingsBlockedMarketplacesItemSettings {
     pub plugins: Vec<SettingsBlockedMarketplacesItemSettingsPluginsItem>,
     pub owner: Option<SettingsBlockedMarketplacesItemSettingsOwner>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -11025,8 +11025,8 @@ struct SettingsBlockedMarketplacesItemSettingsWire {
     pub plugins: Vec<SettingsBlockedMarketplacesItemSettingsPluginsItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<SettingsBlockedMarketplacesItemSettingsOwner>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -11043,7 +11043,7 @@ impl SettingsBlockedMarketplacesItemSettings {
 
 impl Serialize for SettingsBlockedMarketplacesItemSettings {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsBlockedMarketplacesItemSettingsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsBlockedMarketplacesItemSettingsWire::serialize(self, serde_json::value::Serializer), |text| SettingsBlockedMarketplacesItemSettingsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -11380,7 +11380,7 @@ pub struct SettingsSandboxNetworkTlsTerminate {
     pub ca_cert_path: Option<String>,
     pub ca_key_path: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -11392,8 +11392,8 @@ struct SettingsSandboxNetworkTlsTerminateWire {
     pub ca_cert_path: Option<String>,
     #[serde(rename = "caKeyPath", default, skip_serializing_if = "Option::is_none")]
     pub ca_key_path: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -11410,7 +11410,7 @@ impl SettingsSandboxNetworkTlsTerminate {
 
 impl Serialize for SettingsSandboxNetworkTlsTerminate {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxNetworkTlsTerminateWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxNetworkTlsTerminateWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxNetworkTlsTerminateWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -11448,7 +11448,7 @@ pub struct SettingsSandboxNetwork {
     /// \[EXPERIMENTAL\] Enable in-process TLS termination so the per-request filter can see HTTPS request bodies. Provide a CA cert+key, or omit both to have sandbox-runtime generate an ephemeral one for the session. On native Windows an ephemeral CA cannot pass the sandbox trust check, so omitting the paths uses a persistent CA managed by the sandbox runtime (set up and trusted via /sandbox install); configured paths are passed to the sandbox runtime verbatim, which rejects a bad or incomplete pair at sandbox initialization. Only honored from user, managed/policy, or CLI (`--settings`) settings - project settings (.claude/settings.json and .claude/settings.local.json) are ignored.
     pub tls_terminate: Option<SettingsSandboxNetworkTlsTerminate>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -11478,8 +11478,8 @@ struct SettingsSandboxNetworkWire {
     pub socks_proxy_port: Option<serde_json::Number>,
     #[serde(rename = "tlsTerminate", default, skip_serializing_if = "Option::is_none")]
     pub tls_terminate: Option<SettingsSandboxNetworkTlsTerminate>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -11496,7 +11496,7 @@ impl SettingsSandboxNetwork {
 
 impl Serialize for SettingsSandboxNetwork {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxNetworkWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxNetworkWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxNetworkWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -11524,7 +11524,7 @@ pub struct SettingsSandboxFilesystem {
     /// macOS and Linux/WSL only: skip filesystem isolation entirely while keeping network and seccomp isolation. Ignored on native Windows, where the sandboxed process runs as a separate user with no inherent rights, so skipping the filesystem rules would withhold every access grant rather than loosen them - filesystem isolation stays on there. Sandboxed commands get unrestricted read/write access to the host filesystem; network egress is still confined to network.allowedDomains. Intended for deployments whose goal is egress control rather than filesystem containment. Does not change Bash prompting: sandbox.autoAllowBashIfSandboxed is independent and still defaults to true, so set it to false to keep prompting for sandboxed commands. Drops the read protection from filesystem.denyRead and credentials.files deny entries for sandboxed commands, since both are enforced by the filesystem layer this turns off; credentials.files mask entries (sentinel binds) and credentials.envVars deny/mask are unaffected. Only honored from user, managed/policy, or CLI (`--settings`) settings - project settings (.claude/settings.json and .claude/settings.local.json) are ignored. If managed settings configure sandbox.filesystem at all, or list any sandbox.credentials.files deny entry, only managed settings can set this: an admin who deployed filesystem restrictions must not have them switched off by a user-writable file. (sandbox.credentials.envVars and credentials.files mask entries do not pin it - env scrubbing and sentinel binds are independent of the filesystem layer and survive this setting.) When unset, filesystem isolation stays on.
     pub disabled: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -11544,8 +11544,8 @@ struct SettingsSandboxFilesystemWire {
     pub allow_managed_read_paths_only: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -11562,7 +11562,7 @@ impl SettingsSandboxFilesystem {
 
 impl Serialize for SettingsSandboxFilesystem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxFilesystemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxFilesystemWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxFilesystemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -11705,7 +11705,7 @@ pub struct SettingsSandboxCredentialsFilesItem {
     /// Optional narrowing of where the proxy substitutes this credential. Only meaningful when mode is `mask`; accepted but ignored for `deny`. If unset, defaults to `network.allowedDomains` - the credential is injected at every reachable host. Each entry must be reachable via `network.allowedDomains` (sandbox-runtime validates this).
     pub inject_hosts: Option<Vec<String>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -11727,8 +11727,8 @@ struct SettingsSandboxCredentialsFilesItemWire {
     pub mask_duplicates: Option<bool>,
     #[serde(rename = "injectHosts", default, skip_serializing_if = "Option::is_none")]
     pub inject_hosts: Option<Vec<String>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -11745,7 +11745,7 @@ impl SettingsSandboxCredentialsFilesItem {
 
 impl Serialize for SettingsSandboxCredentialsFilesItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxCredentialsFilesItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxCredentialsFilesItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxCredentialsFilesItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -11886,7 +11886,7 @@ pub struct SettingsSandboxCredentialsEnvVarsItem {
     /// Optional narrowing of where the proxy substitutes this credential. Only meaningful when mode is `mask`; accepted but ignored for `deny`. If unset, defaults to `network.allowedDomains` - the credential is injected at every reachable host. Each entry must be reachable via `network.allowedDomains` (sandbox-runtime validates this).
     pub inject_hosts: Option<Vec<String>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -11906,8 +11906,8 @@ struct SettingsSandboxCredentialsEnvVarsItemWire {
     pub mask_claims: Option<Vec<String>>,
     #[serde(rename = "injectHosts", default, skip_serializing_if = "Option::is_none")]
     pub inject_hosts: Option<Vec<String>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -11924,7 +11924,7 @@ impl SettingsSandboxCredentialsEnvVarsItem {
 
 impl Serialize for SettingsSandboxCredentialsEnvVarsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxCredentialsEnvVarsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxCredentialsEnvVarsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxCredentialsEnvVarsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -11946,7 +11946,7 @@ pub struct SettingsSandboxCredentialsAwsPairsItem {
     /// Optional name of the masked env var holding the AWS session token (temporary credentials). When set, the proxy sends the real token as x-amz-security-token on re-signed requests and adds it to the signed header set if the client did not.
     pub session_token_var: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -11960,8 +11960,8 @@ struct SettingsSandboxCredentialsAwsPairsItemWire {
     pub secret_access_key_var: String,
     #[serde(rename = "sessionTokenVar", default, skip_serializing_if = "Option::is_none")]
     pub session_token_var: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -11978,7 +11978,7 @@ impl SettingsSandboxCredentialsAwsPairsItem {
 
 impl Serialize for SettingsSandboxCredentialsAwsPairsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxCredentialsAwsPairsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxCredentialsAwsPairsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxCredentialsAwsPairsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -12111,7 +12111,7 @@ pub struct SettingsSandboxCredentialsSigv4 {
     /// Policy for SigV4A (AWS4-ECDSA-P256-SHA256) asymmetric signatures: there is no shared-key HMAC to recompute. `deny` (default) or `passthrough`.
     pub sigv4a: Option<SettingsSandboxCredentialsSigv4Sigv4a>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -12125,8 +12125,8 @@ struct SettingsSandboxCredentialsSigv4Wire {
     pub presigned: Option<SettingsSandboxCredentialsSigv4Presigned>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sigv4a: Option<SettingsSandboxCredentialsSigv4Sigv4a>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -12143,7 +12143,7 @@ impl SettingsSandboxCredentialsSigv4 {
 
 impl Serialize for SettingsSandboxCredentialsSigv4 {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxCredentialsSigv4Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxCredentialsSigv4Wire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxCredentialsSigv4Wire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -12169,7 +12169,7 @@ pub struct SettingsSandboxCredentials {
     /// Policies for AWS SigV4 request shapes the proxy cannot re-sign (streaming, presigned, sigv4a) when they reference a masked credential pair: `deny` (default) or `passthrough`. Only honored from user, managed/policy, or CLI (`--settings`) settings - project settings (.claude/settings.json and .claude/settings.local.json) are ignored.
     pub sigv4: Option<SettingsSandboxCredentialsSigv4>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -12187,8 +12187,8 @@ struct SettingsSandboxCredentialsWire {
     pub aws_pairs: Option<Vec<SettingsSandboxCredentialsAwsPairsItem>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sigv4: Option<SettingsSandboxCredentialsSigv4>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -12205,7 +12205,7 @@ impl SettingsSandboxCredentials {
 
 impl Serialize for SettingsSandboxCredentials {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxCredentialsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxCredentialsWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxCredentialsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -12223,7 +12223,7 @@ pub struct SettingsSandboxRipgrep {
     pub command: String,
     pub args: Option<Vec<String>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -12234,8 +12234,8 @@ struct SettingsSandboxRipgrepWire {
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -12252,7 +12252,7 @@ impl SettingsSandboxRipgrep {
 
 impl Serialize for SettingsSandboxRipgrep {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxRipgrepWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxRipgrepWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxRipgrepWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -12296,7 +12296,7 @@ pub struct SettingsSandbox {
     /// Linux/WSL only: Absolute path to the socat binary used for the sandbox network proxy. Overrides auto-detection via PATH. Only honored from admin-controlled managed settings.
     pub socat_path: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -12336,8 +12336,8 @@ struct SettingsSandboxWire {
     pub bwrap_path: Option<String>,
     #[serde(rename = "socatPath", default, skip_serializing_if = "Option::is_none")]
     pub socat_path: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -12354,7 +12354,7 @@ impl SettingsSandbox {
 
 impl Serialize for SettingsSandbox {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSandboxWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSandboxWire::serialize(self, serde_json::value::Serializer), |text| SettingsSandboxWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -12450,7 +12450,7 @@ pub struct SettingsSpinnerVerbs {
     pub mode: SettingsSpinnerVerbsMode,
     pub verbs: Vec<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -12460,8 +12460,8 @@ pub struct SettingsSpinnerVerbs {
 struct SettingsSpinnerVerbsWire {
     pub mode: SettingsSpinnerVerbsMode,
     pub verbs: Vec<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -12478,7 +12478,7 @@ impl SettingsSpinnerVerbs {
 
 impl Serialize for SettingsSpinnerVerbs {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSpinnerVerbsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSpinnerVerbsWire::serialize(self, serde_json::value::Serializer), |text| SettingsSpinnerVerbsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -12539,7 +12539,7 @@ pub struct SettingsSpinnerTipsOverride {
     /// Prefix shown before your tips in the spinner (default "Tip")
     pub label: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -12555,8 +12555,8 @@ struct SettingsSpinnerTipsOverrideWire {
     pub tips_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -12573,7 +12573,7 @@ impl SettingsSpinnerTipsOverride {
 
 impl Serialize for SettingsSpinnerTipsOverride {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSpinnerTipsOverrideWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSpinnerTipsOverrideWire::serialize(self, serde_json::value::Serializer), |text| SettingsSpinnerTipsOverrideWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -12597,7 +12597,7 @@ pub struct SettingsSpellcheck {
     /// Color of misspelled words (they are also underlined): a terminal color name such as "red" or "magenta", "#rrggbb", "rgb(r,g,b)", "ansi256(n)" or "ansi:\<name\>". Default: the theme's error color
     pub color: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -12613,8 +12613,8 @@ struct SettingsSpellcheckWire {
     pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -12631,7 +12631,7 @@ impl SettingsSpellcheck {
 
 impl Serialize for SettingsSpellcheck {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSpellcheckWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSpellcheckWire::serialize(self, serde_json::value::Serializer), |text| SettingsSpellcheckWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -12987,7 +12987,7 @@ pub struct SettingsModelSettingsValue {
     /// Auto-compact window for this model, in tokens (100000 to 1000000), or "auto" for the window tuned for the model. Within one settings file it replaces the top-level autoCompactWindow for the model. /autocompact saves here. The canonical model name as key also matches its dated, \[1m\], Bedrock and Vertex spellings.
     pub auto_compact_window: Option<SettingsModelSettingsValueAutoCompactWindow>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -13001,8 +13001,8 @@ struct SettingsModelSettingsValueWire {
     pub max_effort_level: Option<SettingsModelSettingsValueMaxEffortLevel>,
     #[serde(rename = "autoCompactWindow", default, skip_serializing_if = "Option::is_none")]
     pub auto_compact_window: Option<SettingsModelSettingsValueAutoCompactWindow>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -13019,7 +13019,7 @@ impl SettingsModelSettingsValue {
 
 impl Serialize for SettingsModelSettingsValue {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsModelSettingsValueWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsModelSettingsValueWire::serialize(self, serde_json::value::Serializer), |text| SettingsModelSettingsValueWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -13219,7 +13219,7 @@ pub struct SettingsPluginConfigsValueVariant1 {
     /// Non-sensitive option values from plugin manifest userConfig, keyed by option name. Sensitive values go to secure storage instead.
     pub options: Option<indexmap::IndexMap<String, SettingsPluginConfigsValueVariant1OptionsValue>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -13231,8 +13231,8 @@ struct SettingsPluginConfigsValueVariant1Wire {
     pub mcp_servers: Option<indexmap::IndexMap<String, indexmap::IndexMap<String, SettingsPluginConfigsValueVariant1McpServersValueValue>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<indexmap::IndexMap<String, SettingsPluginConfigsValueVariant1OptionsValue>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -13249,7 +13249,7 @@ impl SettingsPluginConfigsValueVariant1 {
 
 impl Serialize for SettingsPluginConfigsValueVariant1 {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsPluginConfigsValueVariant1Wire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsPluginConfigsValueVariant1Wire::serialize(self, serde_json::value::Serializer), |text| SettingsPluginConfigsValueVariant1Wire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -13306,7 +13306,7 @@ pub struct SettingsRemote {
     /// Default environment ID to use for cloud sessions
     pub default_environment_id: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -13316,8 +13316,8 @@ pub struct SettingsRemote {
 struct SettingsRemoteWire {
     #[serde(rename = "defaultEnvironmentId", default, skip_serializing_if = "Option::is_none")]
     pub default_environment_id: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -13334,7 +13334,7 @@ impl SettingsRemote {
 
 impl Serialize for SettingsRemote {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsRemoteWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsRemoteWire::serialize(self, serde_json::value::Serializer), |text| SettingsRemoteWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -13470,7 +13470,7 @@ pub struct SettingsVoice {
     /// Submit the prompt when hold-to-talk is released (hold mode only)
     pub auto_submit: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -13484,8 +13484,8 @@ struct SettingsVoiceWire {
     pub mode: Option<SettingsVoiceMode>,
     #[serde(rename = "autoSubmit", default, skip_serializing_if = "Option::is_none")]
     pub auto_submit: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -13502,7 +13502,7 @@ impl SettingsVoice {
 
 impl Serialize for SettingsVoice {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsVoiceWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsVoiceWire::serialize(self, serde_json::value::Serializer), |text| SettingsVoiceWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -13520,7 +13520,7 @@ pub struct SettingsAllowedChannelPluginsItem {
     pub marketplace: String,
     pub plugin: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -13530,8 +13530,8 @@ pub struct SettingsAllowedChannelPluginsItem {
 struct SettingsAllowedChannelPluginsItemWire {
     pub marketplace: String,
     pub plugin: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -13548,7 +13548,7 @@ impl SettingsAllowedChannelPluginsItem {
 
 impl Serialize for SettingsAllowedChannelPluginsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAllowedChannelPluginsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAllowedChannelPluginsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsAllowedChannelPluginsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -13609,7 +13609,7 @@ pub struct SettingsSshConfigsItem {
     /// Default working directory on the remote host. Supports tilde expansion (e.g. ~/projects). If not specified, defaults to the remote user home directory. Can be overridden by the \[dir\] positional argument in `claude ssh \<config\> \[dir\]`.
     pub start_directory: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -13627,8 +13627,8 @@ struct SettingsSshConfigsItemWire {
     pub ssh_identity_file: Option<String>,
     #[serde(rename = "startDirectory", default, skip_serializing_if = "Option::is_none")]
     pub start_directory: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -13645,7 +13645,7 @@ impl SettingsSshConfigsItem {
 
 impl Serialize for SettingsSshConfigsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsSshConfigsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsSshConfigsItemWire::serialize(self, serde_json::value::Serializer), |text| SettingsSshConfigsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -13925,7 +13925,7 @@ pub struct SettingsAutoMode {
     /// When true, every Bash/PowerShell allow rule is suspended while auto mode is active so all shell commands are routed through the classifier (higher safety, more classifier calls). Default: false.
     pub classify_all_shell: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -13943,8 +13943,8 @@ struct SettingsAutoModeWire {
     pub environment: Option<Vec<String>>,
     #[serde(rename = "classifyAllShell", default, skip_serializing_if = "Option::is_none")]
     pub classify_all_shell: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -13961,7 +13961,7 @@ impl SettingsAutoMode {
 
 impl Serialize for SettingsAutoMode {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsAutoModeWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsAutoModeWire::serialize(self, serde_json::value::Serializer), |text| SettingsAutoModeWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -14416,7 +14416,7 @@ pub struct Settings {
     /// Default transcript view: chat (SendUserMessage checkpoints only) or transcript (full)
     pub default_view: Option<SettingsDefaultView>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -14788,8 +14788,8 @@ struct SettingsWire {
     pub voice_enabled: Option<bool>,
     #[serde(rename = "defaultView", default, skip_serializing_if = "Option::is_none")]
     pub default_view: Option<SettingsDefaultView>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -14806,7 +14806,7 @@ impl Settings {
 
 impl Serialize for Settings {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SettingsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SettingsWire::serialize(self, serde_json::value::Serializer), |text| SettingsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 

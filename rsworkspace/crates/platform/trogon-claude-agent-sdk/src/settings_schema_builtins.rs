@@ -22,6 +22,7 @@ use crate::{
         is_not_impersonating, is_not_reserved_marketplace, is_package_name, is_provider_name, is_server_key,
         managed_server_issues, marketplace_key_issues, number_value, reserved_name_issues, to_number,
     },
+    settings_strings::js_length,
 };
 
 /// The fixed inputs the extraction ran every function on, by battery name.
@@ -396,11 +397,6 @@ impl Transform {
     }
 }
 
-/// JavaScript `String.prototype.trim` white space (not the Unicode `White_Space` property).
-fn utf16_length(text: &str) -> usize {
-    text.encode_utf16().count()
-}
-
 fn has_remote_scheme(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     // The scheme list is case-insensitive in the upstream expression.
@@ -511,7 +507,7 @@ impl Predicate {
         match self {
             Predicate::Unported(_) | Predicate::Always => true,
             Predicate::NoNul => value.as_str().is_none_or(|text| !text.contains('\0')),
-            Predicate::MaxUtf16(maximum) => value.as_str().is_none_or(|text| utf16_length(text) <= *maximum),
+            Predicate::MaxUtf16(maximum) => value.as_str().is_none_or(|text| js_length(text) <= *maximum),
             Predicate::NonBlank => value.as_str().is_none_or(|text| !js_trim(text).is_empty()),
             Predicate::Trimmed => value.as_str().is_none_or(|text| js_trim(text) == text),
             Predicate::NoSpace => value.as_str().is_none_or(|text| !text.contains(' ')),

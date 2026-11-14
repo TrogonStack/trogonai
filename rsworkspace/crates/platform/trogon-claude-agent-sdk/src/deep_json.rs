@@ -97,13 +97,39 @@ fn parse_scalar(bytes: &[u8], at: usize) -> Option<(Value, usize)> {
 /// The JSON object `bytes` holds, read with an explicit stack of the containers it is inside. On failure, how
 /// many containers were open where the text went wrong.
 fn parse_nested(bytes: &[u8]) -> Result<JsonObject, usize> {
+    match read_value(bytes)? {
+        Value::Object(object) => Ok(object),
+        other => {
+            drop_value(other);
+            Err(0)
+        }
+    }
+}
+
+/// The JSON value `bytes` holds, read as [`parse_nested`] reads it.
+fn read_value(bytes: &[u8]) -> Result<Value, usize> {
     let mut open: Vec<Reading> = Vec::new();
     let read = read_nested(bytes, &mut open);
     open.into_iter().map(Reading::finish).for_each(drop_value);
     read
 }
 
-fn read_nested(bytes: &[u8], open: &mut Vec<Reading>) -> Result<JsonObject, usize> {
+/// The JSON value `text` holds, as `serde_json::from_str` reads it but at any nesting and without recursion.
+/// `None` for text `serde_json` rejects.
+pub(crate) fn parse_value(text: &str) -> Option<Value> {
+    read_value(text.as_bytes()).ok()
+}
+
+/// `serde_json::to_value(value)`, which fails on a value whose members under undeclared keys of a generated upstream
+/// type nest past what `serde_json` reads back, falling back to reading the JSON text `value` writes at any nesting.
+pub(crate) fn encode<T: serde::Serialize + ?Sized>(value: &T) -> Result<Value, serde_json::Error> {
+    serde_json::to_value(value).or_else(|_| {
+        let text = serde_json::to_string(value)?;
+        parse_value(&text).ok_or_else(|| serde::de::Error::custom("the encoded JSON text does not parse"))
+    })
+}
+
+fn read_nested(bytes: &[u8], open: &mut Vec<Reading>) -> Result<Value, usize> {
     let mut at = skip_whitespace(bytes, 0);
     loop {
         let failed = open.len();
@@ -137,13 +163,11 @@ fn read_nested(bytes: &[u8], open: &mut Vec<Reading>) -> Result<JsonObject, usiz
         loop {
             let failed = open.len();
             let Some(innermost) = open.last_mut() else {
-                return match value {
-                    Value::Object(object) if skip_whitespace(bytes, at) == bytes.len() => Ok(object),
-                    other => {
-                        drop_value(other);
-                        Err(0)
-                    }
-                };
+                if skip_whitespace(bytes, at) == bytes.len() {
+                    return Ok(value);
+                }
+                drop_value(value);
+                return Err(0);
             };
             at = skip_whitespace(bytes, at);
             let separator = bytes.get(at).copied();
@@ -654,7 +678,9 @@ impl From<DeepJsonObject> for JsonObject {
     }
 }
 
-/// A JSON value that drops at any nesting, as [`DeepJsonObject`] holds an object.
+/// A JSON value that drops at any nesting, as [`DeepJsonObject`] holds an object. It also compares and prints with
+/// loops, as `serde_json::Value` compares and prints, and [`DeepJsonValue::to_json`] writes it at any nesting.
+/// Each value under an undeclared key of a generated upstream type, such as `Settings`, is one.
 #[derive(Default)]
 pub struct DeepJsonValue(Value);
 
@@ -668,6 +694,19 @@ impl DeepJsonValue {
     pub fn into_value(mut self) -> Value {
         std::mem::take(&mut self.0)
     }
+
+    /// `serde_json::to_string(self)` at any nesting, written with a loop.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        compact(&self.0)
+    }
+
+    /// `serde_json::to_value(value)` for a value holding generated upstream types, such as `Settings`, at any
+    /// nesting. Such a type writes each member under an undeclared key nested past [`SHALLOW`] levels as its JSON
+    /// text, which `serde_json::to_value` reads back only up to the 128 levels `serde_json` reads; this reads it
+    /// back without recursion.
+    pub fn encode<T: serde::Serialize + ?Sized>(value: &T) -> Result<Self, serde_json::Error> {
+        encode(value).map(Self)
+    }
 }
 
 impl Clone for DeepJsonValue {
@@ -679,6 +718,46 @@ impl Clone for DeepJsonValue {
 impl From<DeepJsonValue> for Value {
     fn from(value: DeepJsonValue) -> Self {
         value.into_value()
+    }
+}
+
+impl std::fmt::Debug for DeepJsonValue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        debug_value(&self.0, formatter)
+    }
+}
+
+impl PartialEq for DeepJsonValue {
+    fn eq(&self, other: &Self) -> bool {
+        equal(&self.0, &other.0)
+    }
+}
+
+impl Eq for DeepJsonValue {}
+
+impl PartialEq<Value> for DeepJsonValue {
+    fn eq(&self, other: &Value) -> bool {
+        equal(&self.0, other)
+    }
+}
+
+impl std::fmt::Debug for DeepJsonObject {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, formatter)
+    }
+}
+
+impl PartialEq for DeepJsonObject {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for DeepJsonObject {}
+
+impl PartialEq<JsonObject> for DeepJsonObject {
+    fn eq(&self, other: &JsonObject) -> bool {
+        self.0 == *other
     }
 }
 
@@ -704,26 +783,6 @@ macro_rules! deep_json_holder {
             impl From<$held> for $holder {
                 fn from(held: $held) -> Self {
                     Self(held)
-                }
-            }
-
-            impl std::fmt::Debug for $holder {
-                fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    std::fmt::Debug::fmt(&self.0, formatter)
-                }
-            }
-
-            impl PartialEq for $holder {
-                fn eq(&self, other: &Self) -> bool {
-                    self.0 == other.0
-                }
-            }
-
-            impl Eq for $holder {}
-
-            impl PartialEq<$held> for $holder {
-                fn eq(&self, other: &$held) -> bool {
-                    self.0 == *other
                 }
             }
 
@@ -755,6 +814,195 @@ macro_rules! deep_json_holder {
 }
 
 deep_json_holder!(DeepJsonObject(JsonObject), DeepJsonValue(Value));
+
+/// A value as the members under undeclared keys of a generated upstream type write it: as `serde_json::Value`
+/// writes it while it nests [`SHALLOW`] levels or fewer, and deeper as its compact JSON text, which `serde_json`
+/// writers copy as is, so writing it walks no deeper than [`SHALLOW`] levels.
+pub(crate) struct ShallowWrite<'a>(pub(crate) &'a Value);
+
+impl serde::Serialize for ShallowWrite<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if nests_within(self.0, SHALLOW) {
+            return serde::Serialize::serialize(self.0, serializer);
+        }
+        let text = compact(self.0).map_err(serde::ser::Error::custom)?;
+        let raw = serde_json::value::RawValue::from_string(text).map_err(serde::ser::Error::custom)?;
+        serde::Serialize::serialize(&raw, serializer)
+    }
+}
+
+/// Whether no array or object of `value` sits inside `limit` others.
+fn nests_within(value: &Value, limit: usize) -> bool {
+    let mut pending = vec![(value, 0_usize)];
+    while let Some((value, enclosing)) = pending.pop() {
+        let nested = enclosing.saturating_add(1);
+        match value {
+            Value::Array(items) if enclosing < limit => pending.extend(items.iter().map(|child| (child, nested))),
+            Value::Object(object) if enclosing < limit => {
+                pending.extend(object.values().map(|child| (child, nested)));
+            }
+            Value::Array(_) | Value::Object(_) => return false,
+            _ => {}
+        }
+    }
+    true
+}
+
+/// `left == right` at any nesting: arrays equal item by item, objects equal key by key in any order.
+fn equal(left: &Value, right: &Value) -> bool {
+    let mut pending = vec![(left, right)];
+    while let Some(pair) = pending.pop() {
+        match pair {
+            (Value::Array(left), Value::Array(right)) => {
+                if left.len() != right.len() {
+                    return false;
+                }
+                pending.extend(left.iter().zip(right));
+            }
+            (Value::Object(left), Value::Object(right)) => {
+                if left.len() != right.len() {
+                    return false;
+                }
+                for (key, child) in left {
+                    let Some(other) = right.get(key) else {
+                        return false;
+                    };
+                    pending.push((child, other));
+                }
+            }
+            (Value::Array(_) | Value::Object(_), _) | (_, Value::Array(_) | Value::Object(_)) => return false,
+            (left, right) => {
+                if left != right {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// A container [`compact`] or [`debug_value`] is inside, with the children it has left to write.
+enum Writing<'a> {
+    Array(std::slice::Iter<'a, Value>),
+    Object(serde_json::map::Iter<'a>),
+}
+
+impl<'a> Writing<'a> {
+    /// The next child to write and, in an object, its key.
+    fn next_child(&mut self) -> Option<(Option<&'a String>, &'a Value)> {
+        match self {
+            Self::Array(items) => items.next().map(|child| (None, child)),
+            Self::Object(entries) => entries.next().map(|(key, child)| (Some(key), child)),
+        }
+    }
+
+    fn close(&self) -> &'static str {
+        match self {
+            Self::Array(_) => "]",
+            Self::Object(_) => "}",
+        }
+    }
+}
+
+/// `serde_json::to_string(value)` at any nesting.
+fn compact(value: &Value) -> Result<String, serde_json::Error> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut open: Vec<(Writing<'_>, bool)> = Vec::new();
+    let mut next = Some(value);
+    loop {
+        match next.take() {
+            Some(Value::Array(items)) => {
+                out.push(b'[');
+                open.push((Writing::Array(items.iter()), false));
+            }
+            Some(Value::Object(object)) => {
+                out.push(b'{');
+                open.push((Writing::Object(object.iter()), false));
+            }
+            Some(scalar) => serde_json::to_writer(&mut out, scalar)?,
+            None => {}
+        }
+        let Some((innermost, written)) = open.last_mut() else {
+            break;
+        };
+        match innermost.next_child() {
+            Some((key, child)) => {
+                if *written {
+                    out.push(b',');
+                }
+                *written = true;
+                if let Some(key) = key {
+                    serde_json::to_writer(&mut out, key)?;
+                    out.push(b':');
+                }
+                next = Some(child);
+            }
+            None => {
+                out.extend_from_slice(innermost.close().as_bytes());
+                open.pop();
+            }
+        }
+    }
+    String::from_utf8(out).map_err(serde::ser::Error::custom)
+}
+
+/// `Debug` of `serde_json::Value` at any nesting, `{:#?}` included: each container opens with `Array [` or
+/// `Object {`, and with `{:#?}` each child sits on its own line, four spaces in per enclosing container.
+fn debug_value(value: &Value, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let pretty = formatter.alternate();
+    let mut open: Vec<(Writing<'_>, bool)> = Vec::new();
+    let mut next = Some(value);
+    loop {
+        match next.take() {
+            Some(Value::Array(items)) => {
+                formatter.write_str("Array [")?;
+                open.push((Writing::Array(items.iter()), false));
+            }
+            Some(Value::Object(object)) => {
+                formatter.write_str("Object {")?;
+                open.push((Writing::Object(object.iter()), false));
+            }
+            Some(scalar) => std::fmt::Debug::fmt(scalar, formatter)?,
+            None => {}
+        }
+        let depth = open.len();
+        let Some((innermost, written)) = open.last_mut() else {
+            return Ok(());
+        };
+        match innermost.next_child() {
+            Some((key, child)) => {
+                if pretty {
+                    formatter.write_str(if *written { ",\n" } else { "\n" })?;
+                    indent(formatter, depth)?;
+                } else if *written {
+                    formatter.write_str(", ")?;
+                }
+                *written = true;
+                if let Some(key) = key {
+                    std::fmt::Debug::fmt(key, formatter)?;
+                    formatter.write_str(": ")?;
+                }
+                next = Some(child);
+            }
+            None => {
+                if pretty && *written {
+                    formatter.write_str(",\n")?;
+                    indent(formatter, depth.saturating_sub(1))?;
+                }
+                formatter.write_str(innermost.close())?;
+                open.pop();
+            }
+        }
+    }
+}
+
+/// Four spaces per enclosing container, as `{:#?}` indents a child.
+fn indent(formatter: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Result {
+    for _ in 0..depth {
+        formatter.write_str("    ")?;
+    }
+    Ok(())
+}
 
 /// A message whose containers nested [`SHALLOW`] levels deep are set aside, so recursive walks such as `serde`
 /// decoding run over a bounded `skeleton`. Each container set aside is a string in the skeleton: `marker` and its

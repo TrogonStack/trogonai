@@ -1,0 +1,26 @@
+{
+  "python": "3.12.16",
+  "depth": [
+    {"caller": "module", "loads": 9997, "error": "maximum recursion depth exceeded while decoding a JSON array from a unicode string", "x_sha256": "dfd1729acec3b04a053237f01f48601dda00adfdba6e0e7a2c480341e180e318", "x_length": 19996},
+    {"caller": "client_connect", "loads": 9993, "error": "maximum recursion depth exceeded while decoding a JSON array from a unicode string", "x_sha256": "0b920778341b61cc313db2747599a4f94c81f6bb69615d2760e4617dbfc6602f", "x_length": 19988},
+    {"caller": "query", "loads": 9987, "error": "maximum recursion depth exceeded while decoding a JSON array from a unicode string", "x_sha256": "8371cbbb553f7bcf96585f7f793617c3c4ba1279e7622f95a13236455581c321", "x_length": 19976}
+  ],
+  "surrogates": [
+    ["{\"x\":\"\\ud800\"}", "\"\\ud800\""],
+    ["{\"x\":\"a\\udc00b\"}", "\"a\\udc00b\""],
+    ["{\"x\":\"\\ude00\\ud83d\"}", "\"\\ude00\\ud83d\""],
+    ["{\"x\":\"\\ud83d\\ude00\"}", "\"\\ud83d\\ude00\""],
+    ["{\"x\":[\"\\udbff\",{\"k\\ud83d\":\"\\ude00\",\"\\ud800\":null}]}", "[\"\\udbff\", {\"k\\ud83d\": \"\\ude00\", \"\\ud800\": null}]"],
+    ["{\"x\":{\"\\udfff\":\"\\udfff\",\"\\udfff \":1}}", "{\"\\udfff\": \"\\udfff\", \"\\udfff \": 1}"],
+    ["{\"x\":[\"\\ud800\",\"\\ue000\",\"\\ue800\\udc00\"]}", "[\"\\ud800\", \"\\ue000\", \"\\ue800\\udc00\"]"],
+    ["{\"x\":\"\\ue000\"}", "\"\\ue000\""]
+  ],
+  "collisions": [
+    [["userSettings", "{\"x\":\"\\ud800\"}", "{\"x\": \"\\ud800\", \"sandbox\": {\"enabled\": true}}"], ["projectSettings", "{\"y\":\"\\ue000\"}", "{\"y\": \"\\ue000\", \"sandbox\": {\"enabled\": true}}"]],
+    [["userSettings", "{\"x\":\"\\ue000\"}", "{\"x\": \"\\ue000\", \"sandbox\": {\"enabled\": true}}"], ["projectSettings", "{\"y\":\"\\ud800\"}", "{\"y\": \"\\ud800\", \"sandbox\": {\"enabled\": true}}"]],
+    [["userSettings", "{\"x\":\"\\ud800\"}", "{\"x\": \"\\ud800\", \"sandbox\": {\"enabled\": true}}"], ["projectSettings", "{\"y\":\"\ue000\"}", "{\"y\": \"\\ue000\", \"sandbox\": {\"enabled\": true}}"]],
+    [["userSettings", "{\"x\":[\"\\ud800\",\"\\ue000x\"]}", "{\"x\": [\"\\ud800\", \"\\ue000x\"], \"sandbox\": {\"enabled\": true}}"]],
+    [["userSettings", "{\"x\":\"\\ue800\"}", "{\"x\": \"\\ue800\", \"sandbox\": {\"enabled\": true}}"], ["projectSettings", "{\"y\":\"\\uf000\\udbff\"}", "{\"y\": \"\\uf000\\udbff\", \"sandbox\": {\"enabled\": true}}"], ["localSettings", "{\"z\":\"\\ue000\\ud800\"}", "{\"z\": \"\\ue000\\ud800\", \"sandbox\": {\"enabled\": true}}"]],
+    [["policySettings", "{\"p\":\"\\ue000\"}", "{\"p\": \"\\ue000\", \"sandbox\": {\"enabled\": true}}"], ["userSettings", "{\"x\":\"\\ud800\"}", "{\"x\": \"\\ud800\", \"sandbox\": {\"enabled\": true}}"]]
+  ]
+}

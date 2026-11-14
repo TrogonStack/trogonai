@@ -4,20 +4,22 @@ use serde_json::Value;
 
 use crate::JsonObject;
 
+/// The array index a property name spells: its canonical decimal form below 2^32 - 1.
+pub(crate) fn array_index(key: &str) -> Option<u32> {
+    let canonical = key == "0" || (!key.starts_with('0') && key.bytes().all(|byte| byte.is_ascii_digit()));
+    if !canonical || key.is_empty() || key.len() > 10 {
+        return None;
+    }
+    key.parse::<u32>().ok().filter(|number| *number != u32::MAX)
+}
+
 /// The own keys of a JavaScript object in enumeration order: array indices ascending first, then the other keys in
 /// insertion order.
 pub(crate) fn js_key_order(map: &JsonObject) -> Vec<(&String, &Value)> {
-    fn index(key: &str) -> Option<u32> {
-        let canonical = key == "0" || (!key.starts_with('0') && key.bytes().all(|byte| byte.is_ascii_digit()));
-        if !canonical || key.is_empty() || key.len() > 10 {
-            return None;
-        }
-        key.parse::<u32>().ok().filter(|number| *number != u32::MAX)
-    }
     let mut indexed: Vec<(u32, &String, &Value)> = Vec::new();
     let mut named: Vec<(&String, &Value)> = Vec::new();
     for (key, value) in map {
-        match index(key) {
+        match array_index(key) {
             Some(number) => indexed.push((number, key, value)),
             None => named.push((key, value)),
         }
