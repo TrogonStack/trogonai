@@ -11,6 +11,7 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod auth_token;
+mod backgrounded;
 mod bridge_client;
 #[cfg(test)]
 mod bridge_fake_probe;
@@ -250,6 +251,7 @@ pub use auth_token::{
     HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
     OAuthTokenFuture, OAuthTokenHandler, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
 };
+pub use backgrounded::{Backgrounded, BackgroundedError};
 pub use bridge_client::BridgeClient;
 pub use bridge_git::{BranchDropLogDedup, CodeSessionGitContext, DefaultGitProbe, GitContextProbe, GitRepository};
 pub use bridge_gitcmd::GitProbeContext;

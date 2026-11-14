@@ -84,7 +84,13 @@ async fn typed_controls_preserve_receipts_and_use_exact_wire_operations() -> Tes
         .toggle_mcp_server(McpServerName::from("local"), McpEnabled::Disabled)
         .await?;
     handle.stop_task(TaskId::from("task-one")).await?;
-    assert!(handle.background_tasks(Some(ToolUseId::from("tool-one"))).await?);
+    assert_eq!(
+        handle
+            .background_tasks(Some(ToolUseId::from("tool-one")))
+            .await?
+            .as_bool(),
+        Some(true)
+    );
     let requests = timeout(Duration::from_secs(3), async {
         let mut requests = Vec::new();
         while requests.len() < 11 {
