@@ -17,23 +17,6 @@ rust:
   - 'devops/docker/compose/services/a2a-gateway/**'
   - 'devops/docker/compose/services/nats/**'
 
-go:
-  - 'goworkspace/**'
-  - '.config/mise/config.toml'
-  - '.config/mise/mise.lock'
-  - 'buf.yaml'
-  - 'buf.lock'
-  - 'proto/trogonai/scheduler/schedules/v1/schedule_completed.proto'
-  - 'proto/trogonai/scheduler/schedules/v1/schedule_paused.proto'
-  - 'proto/trogonai/scheduler/schedules/v1/schedule_removed.proto'
-  - 'proto/trogonai/scheduler/schedules/v1/schedule_resumed.proto'
-  - 'proto/trogonai/scheduler/schedules/v1/schedule_status.proto'
-  - '.config/mise/lib/**'
-  - '.config/mise/tasks/check/go'
-  - '.config/mise/tasks/build/go'
-  - '.config/mise/tasks/test/go/**'
-  - '.config/mise/tasks/github/workflows/ci-go/**'
-
 proto:
   - 'proto/**'
   - 'buf.yaml'

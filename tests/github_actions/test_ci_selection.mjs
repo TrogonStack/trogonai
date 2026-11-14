@@ -12,7 +12,6 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const load = (file) => yaml.load(fs.readFileSync(path.join(root, file), 'utf8'));
 const workflows = {
   rust: load('.github/workflows/ci-rust.yml'),
-  go: load('.github/workflows/ci-go.yml'),
   proto: load('.github/workflows/ci-proto.yml'),
   codeql: load('.github/workflows/codeql.yml'),
 };
@@ -48,25 +47,24 @@ for (const event of ['pull_request', 'push']) {
       'tests/github_actions/test_canary_is_branch_tip.py',
     ];
     assert.equal(selected('rust', files, event), false);
-    assert.equal(selected('go', files, event), false);
     assert.equal(selected('proto', files, event), true);
     assert.deepEqual(selected('codeql', files, event), []);
   });
 
   test(`${event}: canary helper and tests need only automation validation`, () => {
     const files = ['.config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip', 'tests/github_actions/test_canary_is_branch_tip.py'];
-    for (const suite of ['rust', 'go', 'proto']) assert.equal(selected(suite, files, event), false);
+    for (const suite of ['rust', 'proto']) assert.equal(selected(suite, files, event), false);
     assert.deepEqual(selected('codeql', files, event), []);
   });
 
   test(`${event}: workflow and selection maintenance remain lightweight`, () => {
     const files = [
-      '.github/workflows/ci-rust.yml', '.github/workflows/ci-go.yml',
+      '.github/workflows/ci-rust.yml',
       '.github/workflows/ci-proto.yml', '.github/workflows/codeql.yml',
       '.github/workflows/ci-selection.yml', '.github/filters/ci.yml',
       '.github/filters/codeql.yml', 'tests/github_actions/test_ci_selection.mjs',
     ];
-    for (const suite of ['rust', 'go', 'proto']) assert.equal(selected(suite, files, event), false);
+    for (const suite of ['rust', 'proto']) assert.equal(selected(suite, files, event), false);
     assert.deepEqual(selected('codeql', files, event), []);
   });
 }
@@ -88,15 +86,6 @@ const rustInputs = [
   'devops/docker/compose/services/a2a-gateway/config.json',
 ];
 for (const file of rustInputs) test(`Rust dependency: ${file}`, () => assert.equal(selected('rust', [file], 'pull_request'), true));
-
-for (const file of [
-  'goworkspace/internal/protowit/generate.go', 'goworkspace/go.mod',
-  '.config/mise/tasks/check/go', '.config/mise/tasks/test/go/race',
-  '.config/mise/tasks/build/go', '.config/mise/lib/shared.sh',
-  '.config/mise/tasks/github/workflows/ci-go/result',
-  'proto/trogonai/scheduler/schedules/v1/schedule_completed.proto', 'buf.yaml', 'buf.lock',
-  '.config/mise/config.toml', '.config/mise/mise.lock',
-]) test(`Go dependency: ${file}`, () => assert.equal(selected('go', [file], 'pull_request'), true));
 
 for (const file of [
   'buf.gen.yaml', 'proto/trogonai/policy/subjects/v1alpha1/subject.proto',
@@ -142,7 +131,7 @@ test('every heavy job is gated, including comparison failures and cancellation',
       if (id === 'changes' || id === 'result') continue;
       assert.equal(job.needs, 'changes');
       for (const result of ['success', 'failure']) {
-        const outputs = { rust: 'false', go: 'false', proto: 'false', changes: '[]' };
+        const outputs = { rust: 'false', proto: 'false', changes: '[]' };
         const context = { needs: { changes: { result, outputs } }, github: { event_name: 'pull_request' } };
         assert.equal((await evaluate(job.if, context)).coerceString(), String(result !== 'success'), `${suite}/${id}`);
         assert.equal((await evaluate(job.if, context, true)).coerceString(), 'false', `${suite}/${id} cancellation`);
@@ -157,7 +146,7 @@ test('selection always runs with conservative fallback defaults', async () => {
   const job = load('.github/workflows/ci-selection.yml').jobs.filter;
   const filter = job.steps.find((step) => step.id === 'filter');
   assert.equal(filter.if, undefined);
-  for (const name of ['rust', 'go', 'proto']) {
+  for (const name of ['rust', 'proto']) {
     assert.equal((await evaluate(job.outputs[name], { steps: { filter: { outputs: {} } } })).coerceString(), 'true');
     assert.equal((await evaluate(job.outputs[name], { steps: { filter: { outputs: { [name]: 'false' } } } })).coerceString(), 'false');
   }
@@ -211,8 +200,8 @@ test('CodeQL result reports every outcome so branch rules can require it', async
   }
 });
 
-test('Rust, Go and Proto results cover every job so branch rules can require them', () => {
-  for (const [suite, name] of [['rust', 'Rust'], ['go', 'Go'], ['proto', 'Proto']]) {
+test('Rust and Proto results cover every job so branch rules can require them', () => {
+  for (const [suite, name] of [['rust', 'Rust'], ['proto', 'Proto']]) {
     const { result, ...jobs } = workflows[suite].jobs;
     assert.equal(result.name, `${name} result`);
     assert.deepEqual(result.needs, Object.keys(jobs), `${suite} result needs every job`);
@@ -239,7 +228,7 @@ test('Rust, Go and Proto results cover every job so branch rules can require the
 });
 
 test('actual direct and transitive mise dependencies remain selected', () => {
-  for (const [suite, name] of [['rust', 'ci-rust'], ['go', 'ci-go'], ['proto', 'ci-proto']]) {
+  for (const [suite, name] of [['rust', 'ci-rust'], ['proto', 'ci-proto']]) {
     const documents = [fs.readFileSync(path.join(root, `.github/workflows/${name}.yml`), 'utf8')];
     if (suite === 'rust') documents.push(fs.readFileSync(path.join(root, '.github/actions/setup-rust/action.yml'), 'utf8'));
     const pending = documents.flatMap((source) => [...source.matchAll(/mise run(?: --[\w-]+)* ([\w:-]+)/g)].map((match) => match[1]));

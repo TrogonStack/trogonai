@@ -75,6 +75,12 @@ use_repo(crate, "crates")
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
 go_sdk.wrap(root_file = "@mise_go//:ROOT")
 
+# Runs the go vet analyzers on every compile of the repository's own Go code.
+go_sdk.nogo(
+    nogo = "//goworkspace:nogo",
+    includes = ["//goworkspace:__subpackages__"],
+)
+
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//goworkspace:go.mod")
 use_repo(
