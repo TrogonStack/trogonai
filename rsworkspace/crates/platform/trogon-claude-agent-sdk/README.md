@@ -473,7 +473,9 @@ upstream SDKs).
   when a tool permission handler exists. `HookRegistration::on_failure` is an
   `Option` and the wire field is omitted when unset.
 - `ClaudeSdkClient::connect` discovers the CLI in Python's order when `cli_path` is
-  omitted (no bundled binary exists in this crate); a miss is `CliNotFoundError`
+  omitted, starting with `<root>/_bundled/claude[.exe]` when `bundled_cli_root`
+  names Python's package directory (off by default, because this crate ships no
+  binary and TypeScript has no bundled lookup); a miss is `CliNotFoundError`
   with Python's hint text. `connect_with_adapters` never discovers, matching
   Python's custom transport and TypeScript's `spawnClaudeCodeProcess`: its
   spawner receives `claude` when `cli_path` is omitted.
@@ -508,8 +510,8 @@ upstream SDKs).
   custom spawn gets no default debug file. `on_process_spawned` is TypeScript's
   undeclared `onProcessSpawned`: after the SDK's own spawn it receives the pid
   and `spawn_sync_ms`, and a panic in it is logged and ignored.
-- Bundled executables are caller-driven lookups, not part of `connect`.
-  `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check.
+- `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check, which
+  `connect` runs only through `bundled_cli_root`.
   `bundled_cli_derives_client_app` and `meets_derived_client_app_minimum` port
   Python's version gate for deriving an app label (the pinned CLI version and the
   `claude.version` record beside the bundled binary must both be `999.0.0` or
@@ -519,8 +521,9 @@ upstream SDKs).
   (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, musl before glibc on musl
   Linux, `-android` packages, `.exe` on win32) over a `ResolveNodeModule`
   adapter; `NodeModuleLookup` is the default and searches Node's `node_modules`,
-  `NODE_PATH`, home and prefix directories. Musl comes from the compile target
-  (`NativePackageTarget::host`) because a Rust process has no Node process report.
+  `NODE_PATH`, home and prefix directories. `NativePackageTarget::host` prefers
+  musl on Linux unless the process reports a glibc runtime version
+  (`gnu_get_libc_version`), as the Node process report does.
 - Failures follow upstream. A missing executable is `Error::CliNotFoundAt`, a missing
   `cwd` is `Error::WorkingDirectoryMissing`, any other spawn failure is
   `Error::Spawn` ("Failed to start Claude Code: ..."). `Error::Process` displays

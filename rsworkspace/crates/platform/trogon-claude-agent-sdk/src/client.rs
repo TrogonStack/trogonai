@@ -185,6 +185,7 @@ impl ClaudeSdkClient {
                 &inherited,
                 &adapters.filesystem,
                 cfg!(windows),
+                options.bundled_cli_root.as_deref(),
             )?)
         } else {
             None
@@ -227,9 +228,11 @@ impl ClaudeSdkClient {
             let inherited = capture_inherited(&adapters.environment, &options);
             crate::argv::request_await_initialize(&mut options);
             Some(crate::cli_discovery::discover(
+                &adapters.environment,
                 &inherited,
                 &adapters.filesystem,
                 cfg!(windows),
+                options.bundled_cli_root.as_deref(),
             )?)
         } else {
             None

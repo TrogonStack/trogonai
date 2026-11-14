@@ -49,10 +49,10 @@ fn path_hit_requires_an_executable_file() -> TestResult {
     let bin = root.path().join("bin");
     make(&bin.join("claude"), 0o644)?;
     let environment = environment(Some(&root.path().join("home")), None);
-    assert!(discover(&environment, &inherited(&bin), &NativeFileSystem, false).is_err());
+    assert!(discover(&environment, &inherited(&bin), &NativeFileSystem, false, None).is_err());
     make(&bin.join("claude"), 0o755)?;
     assert_eq!(
-        discover(&environment, &inherited(&bin), &NativeFileSystem, false),
+        discover(&environment, &inherited(&bin), &NativeFileSystem, false, None),
         Ok(bin.join("claude"))
     );
     Ok(())
@@ -70,7 +70,8 @@ fn falls_back_to_home_install_locations_in_upstream_order() -> TestResult {
             &environment(Some(&home), None),
             &inherited(&empty),
             &NativeFileSystem,
-            false
+            false,
+            None
         ),
         Ok(home.join(".npm-global/bin/claude"))
     );
@@ -83,13 +84,13 @@ fn reports_the_exact_install_hint_when_nothing_is_found() -> TestResult {
     // Both hints are only reachable when no well-known location exists, so the home is the empty temp directory.
     let environment = environment(Some(root.path()), None);
     if let Err(CliDiscoveryError::NotFound(error)) =
-        discover(&environment, &inherited(root.path()), &NativeFileSystem, false)
+        discover(&environment, &inherited(root.path()), &NativeFileSystem, false, None)
     {
         assert!(error.message().starts_with(
             "Claude Code not found. Install with:\n  npm install -g @anthropic-ai/claude-code\n\nIf already installed locally, try:\n  export PATH=\"$HOME/node_modules/.bin:$PATH\"\n"
         ));
     }
-    let windows = discover(&environment, &inherited(root.path()), &NativeFileSystem, true);
+    let windows = discover(&environment, &inherited(root.path()), &NativeFileSystem, true, None);
     let Err(CliDiscoveryError::NotFound(windows)) = windows else {
         return Err("expected a Windows discovery failure".into());
     };
@@ -107,7 +108,8 @@ fn windows_only_searches_absolute_path_entries_for_claude_exe() -> TestResult {
             &environment(Some(root.path()), None),
             &inherited(&bin),
             &NativeFileSystem,
-            true
+            true,
+            None
         ),
         Ok(bin.join("claude.exe"))
     );
@@ -122,11 +124,11 @@ fn a_path_hit_needs_no_home_directory() -> TestResult {
     make(&bin.join("claude.exe"), 0o644)?;
     let nowhere = environment(None, None);
     assert_eq!(
-        discover(&nowhere, &inherited(&bin), &NativeFileSystem, false),
+        discover(&nowhere, &inherited(&bin), &NativeFileSystem, false, None),
         Ok(bin.join("claude"))
     );
     assert_eq!(
-        discover(&nowhere, &inherited(&bin), &NativeFileSystem, true),
+        discover(&nowhere, &inherited(&bin), &NativeFileSystem, true, None),
         Ok(bin.join("claude.exe"))
     );
     Ok(())
@@ -137,7 +139,7 @@ fn a_missing_home_raises_after_the_path_lookup_like_path_home() -> TestResult {
     let root = tempfile::tempdir()?;
     let nowhere = environment(None, None);
     for windows in [false, true] {
-        let error = discover(&nowhere, &inherited(root.path()), &NativeFileSystem, windows)
+        let error = discover(&nowhere, &inherited(root.path()), &NativeFileSystem, windows, None)
             .err()
             .ok_or("expected the home lookup to fail")?;
         let CliDiscoveryError::Home(home) = &error else {
@@ -160,7 +162,8 @@ fn an_unset_home_searches_under_the_passwd_entry_of_the_real_user() -> TestResul
             &environment(None, Some(&passwd_home)),
             &inherited(&empty),
             &NativeFileSystem,
-            false
+            false,
+            None
         ),
         Ok(passwd_home.join(".local/bin/claude"))
     );
@@ -171,4 +174,63 @@ fn an_unset_home_searches_under_the_passwd_entry_of_the_real_user() -> TestResul
 fn a_not_found_failure_converts_to_the_public_error() {
     let error = CliDiscoveryError::NotFound(super::CliNotFoundError { message: "missing" });
     assert!(matches!(Error::from(error), Error::CliNotFound(found) if found.message() == "missing"));
+}
+
+const BUNDLED_GOLDENS: &str = include_str!("../../tests/fixtures/cli_discovery/python_bundled_lookup.json");
+
+#[test]
+fn the_bundled_directory_comes_first_like_python_and_only_when_named() -> TestResult {
+    let goldens: serde_json::Value = serde_json::from_str(BUNDLED_GOLDENS)?;
+    for case in goldens["cases"].as_array().ok_or("goldens have no cases")? {
+        let name = case["name"].as_str().ok_or("case without a name")?;
+        let windows = case["windows"] == true;
+        let executable = if windows { "claude.exe" } else { "claude" };
+        let root = tempfile::tempdir()?;
+        let package = root.path().join("package");
+        let bundled = package.join("_bundled").join(executable);
+        std::fs::create_dir_all(package.join("_bundled"))?;
+        match case["bundled"].as_str() {
+            Some("file") => make(&bundled, 0o644)?,
+            Some("executable") => make(&bundled, 0o755)?,
+            Some("symlink") => {
+                make(&root.path().join("target"), 0o644)?;
+                std::os::unix::fs::symlink(root.path().join("target"), &bundled)?;
+            }
+            Some("dangling") => std::os::unix::fs::symlink(root.path().join("missing"), &bundled)?,
+            Some("directory") => std::fs::create_dir(&bundled)?,
+            Some("extensionless") => make(&package.join("_bundled/claude"), 0o644)?,
+            None => {}
+            Some(other) => return Err(format!("{name}: unknown bundled state {other}").into()),
+        }
+        let bin = root.path().join("bin");
+        std::fs::create_dir_all(&bin)?;
+        if case["path"] == true {
+            make(&bin.join(executable), 0o755)?;
+        }
+        let home = root.path().join("home");
+        std::fs::create_dir_all(&home)?;
+        if case["home"] == true {
+            make(&home.join(".local/bin").join(executable), 0o644)?;
+        }
+        let expected = match case["python"].as_str() {
+            Some("bundled") => bundled.clone(),
+            Some("path") => bin.join(executable),
+            Some("home") => home.join(".local/bin").join(executable),
+            other => return Err(format!("{name}: unexpected outcome {other:?}").into()),
+        };
+        let environment = environment(Some(&home), None);
+        let inherited = inherited(&bin);
+        assert_eq!(
+            discover(&environment, &inherited, &NativeFileSystem, windows, Some(&package)),
+            Ok(expected),
+            "{name}"
+        );
+        // TypeScript has no bundled directory, so without a root the bundled executable is never taken.
+        assert_ne!(
+            discover(&environment, &inherited, &NativeFileSystem, windows, None).ok(),
+            Some(bundled),
+            "{name}"
+        );
+    }
+    Ok(())
 }

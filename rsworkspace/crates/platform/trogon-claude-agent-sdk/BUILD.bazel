@@ -34,6 +34,7 @@ workspace_crate(
         "tests/fixtures/bridge_create_session/platform.json",
         "tests/fixtures/bridge_create_session/unicode.json",
         "tests/fixtures/bridge_create_session/urls.json",
+        "tests/fixtures/cli_discovery/python_bundled_lookup.json",
         "tests/fixtures/connector_vetting/probes.json",
         "tests/fixtures/usd_budget/goldens.json",
         "tests/fixtures/python_text/goldens.json",

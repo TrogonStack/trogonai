@@ -1,5 +1,5 @@
-//! Claude Code executable discovery in the order of Python `_find_cli` (0.2.181), minus the bundled binary
-//! because a Rust crate ships none.
+//! Claude Code executable discovery in the order of Python `_find_cli` (0.2.181). The bundled binary comes first
+//! when the caller names the directory that holds `_bundled`, because a Rust crate ships none of its own.
 
 use crate::constants::{UNIX_HINT, WINDOWS_HINT};
 use std::path::{Path, PathBuf};
@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::{
     Error,
     adapters::{EnvironmentVariable, ReadMetadata},
+    bundled_cli::find_bundled_cli,
     environment_plan::Inherited,
     home_directory::{HomeDirectoryError, Platform, python_home, python_join},
 };
@@ -66,7 +67,11 @@ pub(crate) fn discover<E: EnvironmentVariable, F: ReadMetadata<Error = std::io::
     inherited: &Inherited,
     filesystem: &F,
     windows: bool,
+    bundled_root: Option<&Path>,
 ) -> Result<PathBuf, CliDiscoveryError> {
+    if let Some(bundled) = bundled_root.and_then(|root| find_bundled_cli(root, windows, filesystem)) {
+        return Ok(bundled);
+    }
     let path_variable = inherited.get(std::ffi::OsStr::new("PATH")).cloned().unwrap_or_default();
     let platform = if windows { Platform::Windows } else { Platform::Posix };
     let locations: Vec<PathBuf> = if windows {
