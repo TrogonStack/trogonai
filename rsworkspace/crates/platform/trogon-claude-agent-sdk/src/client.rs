@@ -8,6 +8,7 @@ use crate::{
     js_runtime::Nullish,
     process_options::EnvironmentMode,
     process_transport::{Closed, ProcessSpawn, ProcessTransport},
+    python_c_stack::PythonCStack,
     startup_timeout::{StartupEvent, StartupTimer},
     upstream::control as wire_types,
     wire::runtime_payload::RequestPayload,
@@ -195,7 +196,15 @@ impl ClaudeSdkClient {
         } else {
             None
         };
-        Box::pin(Self::connect_resolved(options, adapters, discovered, true, None)).await
+        Box::pin(Self::connect_resolved(
+            options,
+            adapters,
+            discovered,
+            true,
+            None,
+            PythonCStack::CLIENT_CONNECT,
+        ))
+        .await
     }
 
     /// Connects through caller-supplied adapters. The caller owns spawning, so no executable discovery runs and
@@ -211,7 +220,15 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
-        Box::pin(Self::connect_resolved(options, adapters, None, false, None)).await
+        Box::pin(Self::connect_resolved(
+            options,
+            adapters,
+            None,
+            false,
+            None,
+            PythonCStack::CLIENT_CONNECT,
+        ))
+        .await
     }
 
     /// `startup()` and `prewarm()`: connects, then waits for initialize under the startup timer. Like `connect`, an
@@ -248,6 +265,8 @@ impl ClaudeSdkClient {
             discovered,
             discover,
             Some(startup),
+            // Python 0.2.181 has no startup() or prewarm(), and builds the command at connect time.
+            PythonCStack::CLIENT_CONNECT,
         ))
         .await
     }
@@ -258,6 +277,7 @@ impl ClaudeSdkClient {
         discovered: Option<std::path::PathBuf>,
         derive_debug_file: bool,
         startup: Option<crate::startup_timeout::StartupSettings>,
+        python_stack: PythonCStack,
     ) -> Result<Self, Error>
     where
         E: crate::adapters::EnvironmentVariable
@@ -322,6 +342,7 @@ impl ClaudeSdkClient {
                 Vec::new()
             },
             startup_marks: startup.is_some() && !startup_marks_requested(&options, &adapters.environment),
+            python_stack,
         })?;
         let version_check = (!crate::version_check::skip_requested(
             inherited
@@ -1791,7 +1812,15 @@ where
     P: crate::adapters::SpawnProcess<Error = std::io::Error>,
     F: crate::adapters::SessionFileSystem,
 {
-    let client = Box::pin(ClaudeSdkClient::connect_with_adapters(options, adapters)).await?;
+    let client = Box::pin(ClaudeSdkClient::connect_resolved(
+        options,
+        adapters,
+        None,
+        false,
+        None,
+        PythonCStack::QUERY,
+    ))
+    .await?;
     Box::pin(start_query(client, prompt.into(), completion, PromptShape::SdkMjs)).await
 }
 

@@ -1,0 +1,2216 @@
+{
+ "comment": "Recorded with CPython 3.12.16 under -I: urllib.request._parse_proxy, proxy_bypass_environment, getproxies_environment and base64.b64encode, then urlopen through *_proxy variables against a loopback proxy and origin server. {PROXY} and {ORIGIN} stand for their ports.",
+ "parse": [
+  {
+   "proxy": "http://127.0.0.1:3128",
+   "parsed": [
+    "http",
+    null,
+    null,
+    "127.0.0.1:3128"
+   ]
+  },
+  {
+   "proxy": "127.0.0.1:3128",
+   "parsed": [
+    null,
+    null,
+    null,
+    "127.0.0.1:3128"
+   ]
+  },
+  {
+   "proxy": "http://u:p@h:1",
+   "parsed": [
+    "http",
+    "u",
+    "p",
+    "h:1"
+   ]
+  },
+  {
+   "proxy": "http://u@h",
+   "parsed": [
+    "http",
+    "u",
+    null,
+    "h"
+   ]
+  },
+  {
+   "proxy": "http://u:@h",
+   "parsed": [
+    "http",
+    "u",
+    "",
+    "h"
+   ]
+  },
+  {
+   "proxy": "http://:p@h",
+   "parsed": [
+    "http",
+    "",
+    "p",
+    "h"
+   ]
+  },
+  {
+   "proxy": "http:/h",
+   "error": "proxy URL with no authority: 'http:/h'"
+  },
+  {
+   "proxy": "/h",
+   "error": "proxy URL with no authority: '/h'"
+  },
+  {
+   "proxy": "//h:1/x",
+   "parsed": [
+    null,
+    null,
+    null,
+    "h:1"
+   ]
+  },
+  {
+   "proxy": "HTTP://H:1",
+   "parsed": [
+    "http",
+    null,
+    null,
+    "H:1"
+   ]
+  },
+  {
+   "proxy": "http://a@b@c/d",
+   "parsed": [
+    "http",
+    "a@b",
+    null,
+    "c"
+   ]
+  },
+  {
+   "proxy": "http://a/b@c",
+   "parsed": [
+    "http",
+    "a/b",
+    null,
+    "c"
+   ]
+  },
+  {
+   "proxy": "http://h/p/q",
+   "parsed": [
+    "http",
+    null,
+    null,
+    "h"
+   ]
+  },
+  {
+   "proxy": "http://",
+   "parsed": [
+    "http",
+    null,
+    null,
+    ""
+   ]
+  },
+  {
+   "proxy": "h",
+   "parsed": [
+    null,
+    null,
+    null,
+    "h"
+   ]
+  },
+  {
+   "proxy": "socks5://h:1080",
+   "parsed": [
+    "socks5",
+    null,
+    null,
+    "h:1080"
+   ]
+  },
+  {
+   "proxy": "http://u%3Ax:p%40y@h",
+   "parsed": [
+    "http",
+    "u%3Ax",
+    "p%40y",
+    "h"
+   ]
+  },
+  {
+   "proxy": "a:b@c",
+   "parsed": [
+    null,
+    "a",
+    "b",
+    "c"
+   ]
+  },
+  {
+   "proxy": "http://@h",
+   "parsed": [
+    "http",
+    "",
+    null,
+    "h"
+   ]
+  },
+  {
+   "proxy": "http://u:p:q@h",
+   "parsed": [
+    "http",
+    "u",
+    "p:q",
+    "h"
+   ]
+  },
+  {
+   "proxy": "x:/",
+   "error": "proxy URL with no authority: 'x:/'"
+  },
+  {
+   "proxy": ":80",
+   "parsed": [
+    null,
+    null,
+    null,
+    ":80"
+   ]
+  },
+  {
+   "proxy": "u:p@h:1/x",
+   "parsed": [
+    null,
+    "u",
+    "p",
+    "h:1/x"
+   ]
+  }
+ ],
+ "bypass": [
+  {
+   "no": "127.0.0.1",
+   "host": "127.0.0.1",
+   "bypass": true
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "127.0.0.1:8080",
+   "bypass": true
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": "127.0.0.1",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": "127.0.0.1",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": "*",
+   "host": "127.0.0.1",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "127.0.0.1:8080",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "www.example.com",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "Example.COM:443",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "host:80",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "host",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": ":80",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "a.b",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "localhost:8080",
+   "bypass": true
+  },
+  {
+   "no": "*",
+   "host": "x.localhost",
+   "bypass": true
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "127.0.0.1",
+   "bypass": true
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "127.0.0.1:8080",
+   "bypass": true
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": " .0.0.1 , other",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": "www.example.com",
+   "bypass": true
+  },
+  {
+   "no": "example.com,,",
+   "host": "Example.COM:443",
+   "bypass": true
+  },
+  {
+   "no": "example.com,,",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": "example.com,,",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": "127.0.0.1",
+   "bypass": true
+  },
+  {
+   "no": "0.1",
+   "host": "127.0.0.1:8080",
+   "bypass": true
+  },
+  {
+   "no": "0.1",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": "0.1",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "www.example.com",
+   "bypass": true
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "Example.COM:443",
+   "bypass": true
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": "EXAMPLE.com",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": "www.example.com",
+   "bypass": true
+  },
+  {
+   "no": ".example.com",
+   "host": "Example.COM:443",
+   "bypass": true
+  },
+  {
+   "no": ".example.com",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": ".example.com",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "host:80",
+   "bypass": true
+  },
+  {
+   "no": "host:80",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": "host:80",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": ", ,",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "",
+   "bypass": true
+  },
+  {
+   "no": "..",
+   "host": ":80",
+   "bypass": true
+  },
+  {
+   "no": "..",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": "..",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "",
+   "bypass": true
+  },
+  {
+   "no": ".",
+   "host": ":80",
+   "bypass": true
+  },
+  {
+   "no": ".",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": ".",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": " * ",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "a.b",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "localhost:8080",
+   "bypass": false
+  },
+  {
+   "no": "a,*",
+   "host": "x.localhost",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "127.0.0.1",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "127.0.0.1:8080",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "www.example.com",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "Example.COM:443",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "host:80",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "host",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": ":80",
+   "bypass": false
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "a.b",
+   "bypass": true
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "localhost:8080",
+   "bypass": true
+  },
+  {
+   "no": "localhost:8080,b",
+   "host": "x.localhost",
+   "bypass": false
+  }
+ ],
+ "environment": [
+  {
+   "env": [
+    [
+     "http_proxy",
+     "a"
+    ]
+   ],
+   "proxies": [
+    [
+     "http",
+     "a"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "HTTP_PROXY",
+     "a"
+    ]
+   ],
+   "proxies": [
+    [
+     "http",
+     "a"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "Http_Proxy",
+     "a"
+    ]
+   ],
+   "proxies": [
+    [
+     "http",
+     "a"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "HTTP_PROXY",
+     "a"
+    ],
+    [
+     "http_proxy",
+     ""
+    ]
+   ],
+   "proxies": []
+  },
+  {
+   "env": [
+    [
+     "http_proxy",
+     ""
+    ],
+    [
+     "HTTP_PROXY",
+     "a"
+    ]
+   ],
+   "proxies": []
+  },
+  {
+   "env": [
+    [
+     "HTTP_PROXY",
+     "a"
+    ],
+    [
+     "REQUEST_METHOD",
+     "GET"
+    ]
+   ],
+   "proxies": []
+  },
+  {
+   "env": [
+    [
+     "http_proxy",
+     "a"
+    ],
+    [
+     "REQUEST_METHOD",
+     ""
+    ]
+   ],
+   "proxies": [
+    [
+     "http",
+     "a"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "HTTPS_PROXY",
+     "a"
+    ],
+    [
+     "https_proxy",
+     "b"
+    ]
+   ],
+   "proxies": [
+    [
+     "https",
+     "b"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "https_proxy",
+     "b"
+    ],
+    [
+     "HTTPS_PROXY",
+     "a"
+    ]
+   ],
+   "proxies": [
+    [
+     "https",
+     "b"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "_proxy",
+     "a"
+    ],
+    [
+     "proxy",
+     "b"
+    ],
+    [
+     "xproxy",
+     "c"
+    ]
+   ],
+   "proxies": [
+    [
+     "",
+     "a"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "a_proxy",
+     "1"
+    ],
+    [
+     "b_proxy",
+     "2"
+    ],
+    [
+     "A_PROXY",
+     "3"
+    ]
+   ],
+   "proxies": [
+    [
+     "a",
+     "1"
+    ],
+    [
+     "b",
+     "2"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "B_PROXY",
+     "1"
+    ],
+    [
+     "a_proxy",
+     "2"
+    ],
+    [
+     "b_proxy",
+     "3"
+    ]
+   ],
+   "proxies": [
+    [
+     "b",
+     "3"
+    ],
+    [
+     "a",
+     "2"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "ÄÖ_PROXY",
+     "x"
+    ]
+   ],
+   "proxies": [
+    [
+     "äö",
+     "x"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "http_x_proxy",
+     "x"
+    ],
+    [
+     "DO_PROXY",
+     "y"
+    ]
+   ],
+   "proxies": [
+    [
+     "http_x",
+     "x"
+    ],
+    [
+     "do",
+     "y"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "no_proxy",
+     "a"
+    ],
+    [
+     "NO_PROXY",
+     "b"
+    ]
+   ],
+   "proxies": [
+    [
+     "no",
+     "a"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "HTTP_PROXY",
+     "a"
+    ],
+    [
+     "http_proxy",
+     "b"
+    ],
+    [
+     "REQUEST_METHOD",
+     "x"
+    ]
+   ],
+   "proxies": [
+    [
+     "http",
+     "b"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "Http_proxy",
+     "a"
+    ]
+   ],
+   "proxies": [
+    [
+     "http",
+     "a"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "http_PROXY",
+     "a"
+    ]
+   ],
+   "proxies": [
+    [
+     "http",
+     "a"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "FTP_proxy",
+     ""
+    ],
+    [
+     "ftp_proxy",
+     "z"
+    ]
+   ],
+   "proxies": [
+    [
+     "ftp",
+     "z"
+    ]
+   ]
+  },
+  {
+   "env": [
+    [
+     "ftp_proxy",
+     ""
+    ],
+    [
+     "FTP_PROXY",
+     ""
+    ]
+   ],
+   "proxies": []
+  }
+ ],
+ "b64": [
+  [
+   "",
+   ""
+  ],
+  [
+   "a",
+   "YQ=="
+  ],
+  [
+   "ab",
+   "YWI="
+  ],
+  [
+   "abc",
+   "YWJj"
+  ],
+  [
+   "abcd",
+   "YWJjZA=="
+  ],
+  [
+   "user:p@ss",
+   "dXNlcjpwQHNz"
+  ],
+  [
+   "é:☃",
+   "w6k64piD"
+  ],
+  [
+   "u:p",
+   "dTpw"
+  ]
+ ],
+ "cases": [
+  {
+   "name": "http_proxy forwards the absolute URL",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "HTTP_PROXY in upper case",
+   "env": [
+    [
+     "HTTP_PROXY",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "HTTP_PROXY is ignored under REQUEST_METHOD",
+   "env": [
+    [
+     "HTTP_PROXY",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "REQUEST_METHOD",
+     "GET"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "http_proxy in lower case still applies under REQUEST_METHOD",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "REQUEST_METHOD",
+     "GET"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "an empty lower case variable removes the upper case one",
+   "env": [
+    [
+     "HTTP_PROXY",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "http_proxy",
+     ""
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "lower case wins over upper case",
+   "env": [
+    [
+     "HTTP_PROXY",
+     "http://127.0.0.1:1"
+    ],
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "lower case wins whatever the order",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "HTTP_PROXY",
+     "http://127.0.0.1:1"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "mixed case is read in the first pass only",
+   "env": [
+    [
+     "Http_Proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "credentials become Proxy-Authorization",
+   "env": [
+    [
+     "http_proxy",
+     "http://us%65r:p%40ss@127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nProxy-Authorization: Basic dXNlcjpwQHNz\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a user without a password sends no credentials",
+   "env": [
+    [
+     "http_proxy",
+     "http://user@127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a proxy without a scheme",
+   "env": [
+    [
+     "http_proxy",
+     "127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a proxy URL without an authority",
+   "env": [
+    [
+     "http_proxy",
+     "http:/127.0.0.1"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "open_error": {
+    "class": "ValueError",
+    "text": "proxy URL with no authority: 'http:/127.0.0.1'"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "a proxy URL with a path",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}/ignored/path"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "no_proxy names the host",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "no_proxy",
+     "127.0.0.1"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "no_proxy names the host and port",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "no_proxy",
+     "127.0.0.1:{ORIGIN}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "no_proxy star",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "no_proxy",
+     "*"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "no_proxy suffix with a leading dot",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "no_proxy",
+     " .0.0.1 , other"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "no_proxy in upper case",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "NO_PROXY",
+     "127.0.0.1"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "no_proxy that does not match",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "no_proxy",
+     "example.com,,"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "no_proxy does not match a partial label",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ],
+    [
+     "no_proxy",
+     "0.1"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "https_proxy tunnels with CONNECT",
+   "env": [
+    [
+     "https_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://127.0.0.1:{ORIGIN}/a.json",
+   "proxy_answer": "HTTP/1.1 407 Proxy Authentication Required \r\nContent-Length: 0\r\n\r\n",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error Tunnel connection failed: 407 Proxy Authentication Required>"
+   },
+   "proxy_heads": [
+    "CONNECT 127.0.0.1:{ORIGIN} HTTP/1.1\r\nHost: 127.0.0.1:{ORIGIN}"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "https_proxy tunnels to the default port",
+   "env": [
+    [
+     "https_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://localhost/a.json",
+   "proxy_answer": "HTTP/1.1 407 Proxy Authentication Required \r\nContent-Length: 0\r\n\r\n",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error Tunnel connection failed: 407 Proxy Authentication Required>"
+   },
+   "proxy_heads": [
+    "CONNECT localhost:443 HTTP/1.1\r\nHost: localhost:443"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "https_proxy credentials go on the CONNECT",
+   "env": [
+    [
+     "https_proxy",
+     "http://u:p@127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://127.0.0.1:{ORIGIN}/a.json",
+   "proxy_answer": "HTTP/1.1 407 Proxy Authentication Required \r\nContent-Length: 0\r\n\r\n",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error Tunnel connection failed: 407 Proxy Authentication Required>"
+   },
+   "proxy_heads": [
+    "CONNECT 127.0.0.1:{ORIGIN} HTTP/1.1\r\nProxy-Authorization: Basic dTpw\r\nHost: 127.0.0.1:{ORIGIN}"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "https_proxy without a port connects to 443",
+   "env": [
+    [
+     "https_proxy",
+     "http://127.0.0.1"
+    ]
+   ],
+   "url": "https://127.0.0.1:{ORIGIN}/a.json",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [Errno 61] Connection refused>"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "a tunnel the proxy accepts then closes",
+   "env": [
+    [
+     "https_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://127.0.0.1:{ORIGIN}/a.json",
+   "proxy_answer": "HTTP/1.1 200 Connection established\r\n\r\n",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1011)>"
+   },
+   "proxy_heads": [
+    "CONNECT 127.0.0.1:{ORIGIN} HTTP/1.1\r\nHost: 127.0.0.1:{ORIGIN}"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a tunnel the proxy answers with garbage",
+   "env": [
+    [
+     "https_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://127.0.0.1:{ORIGIN}/a.json",
+   "proxy_answer": "garbage\r\n\r\n",
+   "open_error": {
+    "class": "BadStatusLine",
+    "text": "garbage\r\n"
+   },
+   "proxy_heads": [
+    "CONNECT 127.0.0.1:{ORIGIN} HTTP/1.1\r\nHost: 127.0.0.1:{ORIGIN}"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a tunnel the proxy closes",
+   "env": [
+    [
+     "https_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://127.0.0.1:{ORIGIN}/a.json",
+   "proxy_answer": " ",
+   "open_error": {
+    "class": "BadStatusLine",
+    "text": " "
+   },
+   "proxy_heads": [
+    "CONNECT 127.0.0.1:{ORIGIN} HTTP/1.1\r\nHost: 127.0.0.1:{ORIGIN}"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "http_proxy does not apply to https",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://127.0.0.1:1/a.json",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [Errno 61] Connection refused>"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "ftp_proxy over http",
+   "env": [
+    [
+     "ftp_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "ftp://user:pw@127.0.0.1:{ORIGIN}/dir/a.json;type=i",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET ftp://user:pw@127.0.0.1:{ORIGIN}/dir/a.json;type=i HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: user:pw@127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "ftp_proxy then http_proxy",
+   "env": [
+    [
+     "ftp_proxy",
+     "http://127.0.0.1:1"
+    ],
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "ftp://127.0.0.1/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET ftp://127.0.0.1/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a proxy loop",
+   "env": [
+    [
+     "http_proxy",
+     "ftp://127.0.0.1:1"
+    ],
+    [
+     "ftp_proxy",
+     "http://127.0.0.1:2"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "open_error": {
+    "class": "RecursionError",
+    "text": "maximum recursion depth exceeded"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "http_proxy with an https proxy URL",
+   "env": [
+    [
+     "http_proxy",
+     "https://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1011)>"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "data_proxy restarts a data URL over http",
+   "env": [
+    [
+     "data_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "data:,x",
+   "open_error": {
+    "class": "TypeError",
+    "text": "expected string or bytes-like object, got 'NoneType'"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "file_proxy restarts a file URL over http",
+   "env": [
+    [
+     "file_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "file:///etc/hosts",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET file:///etc/hosts HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: \r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "default_proxy applies to every scheme",
+   "env": [
+    [
+     "default_proxy",
+     "127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "default_proxy with a scheme restarts",
+   "env": [
+    [
+     "default_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "data:,x",
+   "open_error": {
+    "class": "TypeError",
+    "text": "expected string or bytes-like object, got 'NoneType'"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "unknown_proxy catches unknown schemes",
+   "env": [
+    [
+     "unknown_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "gopher://127.0.0.1/a",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET gopher://127.0.0.1/a HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a variable with an underscore in its type",
+   "env": [
+    [
+     "http_x_proxy",
+     "http://127.0.0.1:1"
+    ],
+    [
+     "no_proxy",
+     "z"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "proxy_proxy is never a handler",
+   "env": [
+    [
+     "proxy_proxy",
+     "http://127.0.0.1:1"
+    ],
+    [
+     "http_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "do_proxy is never a handler",
+   "env": [
+    [
+     "do_proxy",
+     "http://127.0.0.1:1"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "a short variable name",
+   "env": [
+    [
+     "_proxy",
+     "http://127.0.0.1:1"
+    ],
+    [
+     "xproxy",
+     "http://127.0.0.1:1"
+    ],
+    [
+     "no_proxy",
+     "z"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [],
+   "origin_heads": [
+    "GET /a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "a redirect away from the proxy keeps the credentials",
+   "env": [
+    [
+     "http_proxy",
+     "http://u:p@127.0.0.1:{PROXY}"
+    ],
+    [
+     "no_proxy",
+     "127.0.0.1"
+    ]
+   ],
+   "url": "http://localhost:{ORIGIN}/a.json",
+   "proxy_answer": "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{ORIGIN}/b.json\r\nContent-Length: 0\r\n\r\n",
+   "body": "eyJvcmlnaW4iOiB0cnVlfQ==",
+   "proxy_heads": [
+    "GET http://localhost:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: localhost:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nProxy-Authorization: Basic dTpw\r\nConnection: close"
+   ],
+   "origin_heads": [
+    "GET /b.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nProxy-Authorization: Basic dTpw\r\nConnection: close"
+   ]
+  },
+  {
+   "name": "a proxy host with a bad port",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:x"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "open_error": {
+    "class": "InvalidURL",
+    "text": "nonnumeric port: 'x'"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "a proxy host with percent escapes",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.%31:{PROXY}"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "body": "eyJwcm94eSI6IHRydWV9",
+   "proxy_heads": [
+    "GET http://127.0.0.1:{ORIGIN}/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: 127.0.0.1:{ORIGIN}\r\nUser-Agent: python-jsonschema (deprecated $ref resolution)\r\nConnection: close"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a refused proxy",
+   "env": [
+    [
+     "http_proxy",
+     "http://127.0.0.1:1"
+    ]
+   ],
+   "url": "http://127.0.0.1:{ORIGIN}/a.json",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [Errno 61] Connection refused>"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "a tunnel host with a bad port",
+   "env": [
+    [
+     "https_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://127.0.0.1:x/a.json",
+   "open_error": {
+    "class": "InvalidURL",
+    "text": "nonnumeric port: 'x'"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "a tunnel to an IPv6 host",
+   "env": [
+    [
+     "https_proxy",
+     "http://127.0.0.1:{PROXY}"
+    ]
+   ],
+   "url": "https://[::1]:8443/a.json",
+   "proxy_answer": "HTTP/1.1 407 Proxy Authentication Required \r\nContent-Length: 0\r\n\r\n",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error Tunnel connection failed: 407 Proxy Authentication Required>"
+   },
+   "proxy_heads": [
+    "CONNECT [::1]:8443 HTTP/1.1\r\nHost: ::1:8443"
+   ],
+   "origin_heads": []
+  },
+  {
+   "name": "a restart that ends in a data URL has no msg",
+   "env": [
+    [
+     "http_proxy",
+     "data://h"
+    ]
+   ],
+   "url": "http://127.0.0.1:1/a,b",
+   "open_error": {
+    "class": "AttributeError",
+    "text": "'_io.BytesIO' object has no attribute 'msg'"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "a restart reads the data of the full URL",
+   "env": [
+    [
+     "file_proxy",
+     "data://h"
+    ]
+   ],
+   "url": "file:///etc/hosts",
+   "open_error": {
+    "class": "ValueError",
+    "text": "not enough values to unpack (expected 2, got 1)"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  },
+  {
+   "name": "the unknown scheme is unknown",
+   "env": [],
+   "url": "unknown://x/",
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error unknown url type: unknown>"
+   },
+   "proxy_heads": [],
+   "origin_heads": []
+  }
+ ]
+}

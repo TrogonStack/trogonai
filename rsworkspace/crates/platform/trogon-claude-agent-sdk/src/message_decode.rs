@@ -68,8 +68,8 @@ pub(crate) fn typed(raw: &JsonObject, mode: MessageDecoding) -> Message {
         let (kind, data) = split_type(raw);
         Message::Unknown {
             kind,
-            data,
-            raw: raw.clone(),
+            data: data.into(),
+            raw: raw.clone().into(),
         }
     })
 }
@@ -275,7 +275,10 @@ fn blocks(values: Vec<Value>, side: Side, mode: MessageDecoding) -> Option<Vec<C
         }
         blocks.push(block(&object).unwrap_or_else(|| {
             let (kind, data) = split_type(&object);
-            ContentBlock::Unknown { kind, data }
+            ContentBlock::Unknown {
+                kind,
+                data: data.into(),
+            }
         }));
     }
     Some(blocks)
@@ -299,14 +302,14 @@ fn block(object: &JsonObject) -> Option<ContentBlock> {
             ContentBlock::ToolUse {
                 id: ToolUseId::from(wire.id),
                 name: ToolName::from(wire.name),
-                input: wire.input,
+                input: wire.input.into(),
             }
         }
         "tool_result" => {
             let wire: ToolResultWire = fields(object)?;
             ContentBlock::ToolResult {
                 tool_use_id: ToolUseId::from(wire.tool_use_id),
-                content: wire.content,
+                content: wire.content.into(),
                 status: match wire.is_error {
                     Some(true) => ToolResultStatus::Error,
                     Some(false) => ToolResultStatus::Success,
@@ -319,14 +322,14 @@ fn block(object: &JsonObject) -> Option<ContentBlock> {
             ContentBlock::ServerToolUse {
                 id: ToolUseId::from(wire.id),
                 name: wire.name,
-                input: wire.input,
+                input: wire.input.into(),
             }
         }
         "advisor_tool_result" => {
             let wire: ServerToolResultWire = fields(object)?;
             ContentBlock::ServerToolResult {
                 tool_use_id: ToolUseId::from(wire.tool_use_id),
-                content: wire.content,
+                content: wire.content.into(),
             }
         }
         _ => return None,

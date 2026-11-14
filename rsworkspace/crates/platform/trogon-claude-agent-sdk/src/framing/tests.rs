@@ -1,13 +1,134 @@
-use super::FrameReader;
-use crate::{Error, error::JsonDecodeSourceError};
+use super::{FrameReader, typescript_lines};
+use crate::python_urlopen_text::python_decode;
+use crate::{ArgvStyle, Error, error::JsonDecodeSourceError};
+use std::collections::VecDeque;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, ReadBuf};
 
 async fn frames(input: &[u8], limit: Option<usize>) -> Result<Vec<Vec<u8>>, Error> {
-    let mut reader = FrameReader::new(input, limit);
+    let style = if limit.is_some() {
+        ArgvStyle::Python
+    } else {
+        ArgvStyle::TypeScript
+    };
+    read_all(FrameReader::new(input, limit, style)).await
+}
+
+async fn read_all<R: AsyncRead + Unpin>(mut reader: FrameReader<R>) -> Result<Vec<Vec<u8>>, Error> {
     let mut out = Vec::new();
     while let Some(frame) = reader.next().await? {
         out.push(frame);
     }
     Ok(out)
+}
+
+/// A pipe that yields these chunks, one per read, as the CLI's writes arrive.
+struct Chunks(VecDeque<Vec<u8>>);
+
+impl AsyncRead for Chunks {
+    fn poll_read(mut self: Pin<&mut Self>, _: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        if let Some(chunk) = self.0.pop_front() {
+            buf.put_slice(&chunk);
+        }
+        Poll::Ready(Ok(()))
+    }
+}
+
+fn python_chunks(chunks: &[&[u8]], limit: usize) -> FrameReader<Chunks> {
+    let chunks = Chunks(chunks.iter().map(|chunk| chunk.to_vec()).collect());
+    FrameReader::new(chunks, Some(limit), ArgvStyle::Python)
+}
+
+#[test]
+fn python_decodes_each_chunk_strictly_and_holds_back_a_cut_character() {
+    assert_eq!(python_decode("aé".as_bytes()), Ok(0));
+    assert_eq!(python_decode(b"a\xe2\x82"), Ok(2));
+    assert_eq!(
+        python_decode(b"ab\xff"),
+        Err("'utf-8' codec can't decode byte 0xff in position 2: invalid start byte".to_owned())
+    );
+    assert_eq!(
+        python_decode(b"a\xc0\x80"),
+        Err("'utf-8' codec can't decode byte 0xc0 in position 1: invalid start byte".to_owned())
+    );
+    assert_eq!(
+        python_decode(b"\xed\xa0\x80"),
+        Err("'utf-8' codec can't decode byte 0xed in position 0: invalid continuation byte".to_owned())
+    );
+    assert_eq!(
+        python_decode(b"x\xe2\x82A"),
+        Err("'utf-8' codec can't decode bytes in position 1-2: invalid continuation byte".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn python_raises_for_a_chunk_that_is_not_utf_8_before_the_lines_in_it() -> Result<(), std::io::Error> {
+    let mut reader = python_chunks(&[b"one\n", b"two\nthree\xff\n"], 100);
+    assert_eq!(reader.next().await.ok().flatten(), Some(b"one".to_vec()));
+    let Err(Error::UnicodeDecode(text)) = reader.next().await else {
+        return Err(std::io::Error::other("expected UnicodeDecodeError"));
+    };
+    assert_eq!(
+        text,
+        "'utf-8' codec can't decode byte 0xff in position 9: invalid start byte"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_counts_a_held_character_from_the_chunk_that_completes_it() -> Result<(), Error> {
+    // The guard sees four characters, then four again once the cut "é" completes.
+    let reader = python_chunks(&[b"abc\xc3", b"\xa9\n", b"abcd\xc3"], 4);
+    assert_eq!(read_all(reader).await?, ["abcé".as_bytes().to_vec(), b"abcd".to_vec()]);
+    let reader = python_chunks(&[b"abcd\xc3", b"\xa9"], 4);
+    assert!(matches!(read_all(reader).await, Err(Error::JsonDecode(_))));
+    let reader = python_chunks(&[b"\xc3"], 4);
+    assert_eq!(read_all(reader).await?, Vec::<Vec<u8>>::new());
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_raises_with_the_position_in_the_held_bytes_and_the_new_chunk() -> Result<(), std::io::Error> {
+    let reader = python_chunks(&[b"a\xe2", b"\x82x\n"], 100);
+    let Err(Error::UnicodeDecode(text)) = read_all(reader).await else {
+        return Err(std::io::Error::other("expected UnicodeDecodeError"));
+    };
+    assert_eq!(
+        text,
+        "'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn typescript_ends_a_line_at_a_lone_carriage_return_and_the_unicode_separators_too() -> Result<(), Error> {
+    assert_eq!(typescript_lines(b"ab".to_vec()), [b"ab".to_vec()]);
+    assert_eq!(
+        typescript_lines(b"a\rb\r".to_vec()),
+        [b"a".to_vec(), b"b".to_vec(), Vec::new()]
+    );
+    assert_eq!(
+        typescript_lines(b"\xe2\x80\xa8a\xe2\x80\xa9\xe2\x80\xa7\xc3\xa9\xe2\xe2\x80\xa8".to_vec()),
+        [
+            Vec::new(),
+            b"a".to_vec(),
+            b"\xe2\x80\xa7\xc3\xa9\xe2".to_vec(),
+            Vec::new()
+        ]
+    );
+    assert_eq!(typescript_lines(b"\xe2\x80".to_vec()), [b"\xe2\x80".to_vec()]);
+    assert_eq!(
+        frames(b"a\rb\r\nc\r\r\n\xff\n", None).await?,
+        [
+            b"a".to_vec(),
+            b"b".to_vec(),
+            b"c".to_vec(),
+            Vec::new(),
+            b"\xff".to_vec()
+        ]
+    );
+    Ok(())
 }
 
 #[tokio::test]

@@ -4,6 +4,9 @@ workspace_crate(
     compile_data = [
         "README.md",
         "src/**/*.json",
+        # The jsonschema metaschema vocabularies keep the package's extensionless names.
+        "src/upstream/metaschemas/**",
+        "src/upstream/python_nameprep.txt",
         "tests/fixtures/**",
     ],
     examples = {

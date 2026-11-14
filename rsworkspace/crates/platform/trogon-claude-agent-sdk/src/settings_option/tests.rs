@@ -5,13 +5,15 @@ use std::{
 };
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::{
     ArgvStyle, ClaudeAgentOptions, ExtraArgument, ManagedSettingsDelivery, PluginDelivery, SandboxSettings, Settings,
-    SettingsInput, adapters::ReadFile, argv::build_with,
+    SettingsInput, adapters::ReadFile, argv::build_with, python_c_stack::PythonCStack,
 };
 
 const GOLDENS: &str = include_str!("../../tests/fixtures/settings_option/goldens.json");
+const PYTHON_SETTINGS: &str = include_str!("../../tests/fixtures/settings_option/python_settings.json");
 const SETTINGS_FILE: &str = r#"{"permissions":{"allow":["Bash(ls)"]},"sandbox":{"enabled":false,"network":{"allowedDomains":["a.example"],"httpProxyPort":8080}},"éx":"ü"}"#;
 
 /// Serves one settings file for `settings_file.json` and records every path asked for.
@@ -70,7 +72,7 @@ fn typescript(options: ClaudeAgentOptions) -> ClaudeAgentOptions {
 }
 
 fn run(options: &ClaudeAgentOptions, files: &Files) -> Result<Vec<String>, String> {
-    build_with(options, None, files)
+    build_with(options, None, files, PythonCStack::MODULE)
         .map(|argv| argv.iter().map(|token| token.to_string_lossy().into_owned()).collect())
         .map_err(|error| error.to_string())
 }
@@ -96,14 +98,7 @@ fn expect_python(name: &str, options: ClaudeAgentOptions) {
     };
     let got = run(&options, &Files::new());
     match want["error"].as_str() {
-        Some(error) => {
-            let got = got.err().unwrap_or_default();
-            let error = error.split(" Expecting ").next().unwrap_or(error);
-            assert!(got.starts_with("Failed to load settings: "), "{name}: {got}");
-            if error.contains("[Errno") {
-                assert_eq!(got, error, "{name}");
-            }
-        }
+        Some(error) => assert_eq!(got, Err(error.to_owned()), "{name}"),
         None => {
             let want: Vec<String> = serde_json::from_value(want["argv"].clone()).unwrap_or_default();
             assert_eq!(got, Ok(want), "{name}");
@@ -534,4 +529,62 @@ fn python_strips_settings_text_as_str_strip_does() {
     let files = Files::new();
     assert!(run(&options("\u{feff}{\"a\": 1}"), &files).is_err());
     assert_eq!(*files.asked.borrow(), [PathBuf::from("\u{feff}{\"a\": 1}")]);
+}
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+fn python_sandboxed(text: impl Into<String>) -> ClaudeAgentOptions {
+    ClaudeAgentOptions {
+        argv_style: ArgvStyle::Python,
+        settings: Some(SettingsInput::from_wire_string(text)),
+        sandbox: sandbox(r#"{"enabled":true}"#),
+        ..Default::default()
+    }
+}
+
+fn settings_value(argv: &[String]) -> Option<String> {
+    let position = argv.iter().position(|token| token == "--settings")?;
+    argv.get(position + 1).cloned()
+}
+
+#[test]
+fn python_keeps_lone_surrogate_escapes_in_the_settings_value() -> TestResult {
+    let goldens: Value = serde_json::from_str(PYTHON_SETTINGS)?;
+    let pairs = goldens["surrogates"]
+        .as_array()
+        .ok_or("the goldens have no surrogate pairs")?;
+    let mut expected = Vec::new();
+    let mut actual = Vec::new();
+    for pair in pairs {
+        let text = pair[0].as_str().ok_or("a surrogate pair has no settings text")?;
+        expected.push(pair[1].as_str().map(str::to_owned));
+        actual.push(settings_value(&run(&python_sandboxed(text), &Files::new())?));
+    }
+    assert_eq!((pairs.len(), actual), (4, expected));
+    Ok(())
+}
+
+#[test]
+fn python_settings_nest_as_deep_as_json_loads_reads_them_in_a_plain_python_call() -> TestResult {
+    let goldens: Value = serde_json::from_str(PYTHON_SETTINGS)?;
+    let module = goldens["depth"]
+        .as_array()
+        .and_then(|entries| entries.iter().find(|entry| entry["caller"] == "module"))
+        .ok_or("the goldens have no module depth")?;
+    let loads = usize::try_from(module["loads"].as_u64().ok_or("the module depth has no loads")?)?;
+    let nested = |depth: usize| format!("{}null{}", "{\"a\":".repeat(depth), "}".repeat(depth));
+    let value = settings_value(&run(&python_sandboxed(nested(loads)), &Files::new())?).ok_or("no --settings value")?;
+    let digest: String = Sha256::digest(value.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let refused = run(&python_sandboxed(nested(loads + 1)), &Files::new()).map(|argv| settings_value(&argv));
+    let actual = (Some(digest), u64::try_from(value.len()).ok(), refused);
+    let expected = (
+        module["value_sha256"].as_str().map(str::to_owned),
+        module["value_length"].as_u64(),
+        Err(module["error"].as_str().unwrap_or_default().to_owned()),
+    );
+    assert_eq!(actual, expected);
+    Ok(())
 }

@@ -203,3 +203,126 @@ fn ui_requests_keep_their_payload_and_other_ui_subtypes_are_unsupported() -> Res
     ));
     Ok(())
 }
+
+/// Containers deeper than the native stack of a test thread holds a recursive walk over.
+const DEEP: usize = 100_000;
+
+/// Whether `value` holds the string `leaf` [`DEEP`] containers down. No string in it may be a detached marker.
+fn holds_deep_leaf(value: &Value) -> bool {
+    let mut found = false;
+    let mut pending = vec![(value, 0)];
+    while let Some((value, depth)) = pending.pop() {
+        match value {
+            Value::String(text) => {
+                assert!(
+                    !text.starts_with("\u{0}detached:"),
+                    "a detached marker stayed in the frame"
+                );
+                found |= text == "leaf" && depth >= DEEP;
+            }
+            Value::Array(items) => pending.extend(items.iter().map(|item| (item, depth + 1))),
+            Value::Object(members) => pending.extend(members.values().map(|member| (member, depth + 1))),
+            _ => {}
+        }
+    }
+    found
+}
+
+#[test]
+fn every_frame_decodes_routes_and_drops_containers_nested_past_the_native_stack()
+-> Result<(), Box<dyn std::error::Error>> {
+    let deep = format!("{}\"leaf\"{}", "[".repeat(DEEP), "]".repeat(DEEP));
+    let request = |body: &str| format!(r#"{{"type":"control_request","request_id":"r","request":{body}}}"#);
+    let cases = [
+        (
+            r#"{"type":"system","subtype":"deep","payload":DEEP}"#.to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            r#"{"type":"system","subtype":"deep","payload":DEEP}"#.to_owned(),
+            MessageDecoding::Python,
+            true,
+        ),
+        (
+            r#"{"type":"future","payload":DEEP}"#.to_owned(),
+            MessageDecoding::Python,
+            false,
+        ),
+        (
+            r#"{"type":"keep_alive","payload":DEEP}"#.to_owned(),
+            MessageDecoding::TypeScript,
+            false,
+        ),
+        (
+            request(
+                r#"{"subtype":"can_use_tool","tool_name":"Bash","input":{"a":DEEP},
+                    "permission_suggestions":[{"type":"future","a":DEEP}],"a":DEEP}"#,
+            ),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            request(r#"{"subtype":"can_use_tool","input":DEEP}"#),
+            MessageDecoding::TypeScript,
+            false,
+        ),
+        (
+            request(r#"{"subtype":"hook_callback","callback_id":"c","input":{"a":DEEP}}"#),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            request(r#"{"subtype":"mcp_message","server_name":DEEP,"message":DEEP}"#),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            request(r#"{"subtype":"elicitation","mcp_server_name":"s","message":"m","requested_schema":{"a":DEEP}}"#),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            request(r#"{"subtype":"request_user_dialog","dialog_kind":"k","payload":{"a":DEEP}}"#),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            request(r#"{"subtype":"future","a":DEEP}"#),
+            MessageDecoding::TypeScript,
+            false,
+        ),
+        (
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"r","response":{"a":DEEP}}}"#
+                .to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            r#"{"type":"control_response","response":{"subtype":"error","request_id":"r","error":"e"},"a":DEEP}"#
+                .to_owned(),
+            MessageDecoding::TypeScript,
+            false,
+        ),
+        (
+            r#"{"type":"control_cancel_request","request_id":"r","a":DEEP}"#.to_owned(),
+            MessageDecoding::TypeScript,
+            false,
+        ),
+        (
+            r#"{"type":"transcript_mirror","filePath":"f","entries":[{"a":DEEP}]}"#.to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+    ];
+    for (text, mode, routed) in cases {
+        let mut object = crate::deep_json::parse_object(text.replace("DEEP", &deep).as_bytes())?;
+        let mut frame = parse_value(&object, mode)?;
+        let mut found = false;
+        frame.each_value(&mut |value| found |= holds_deep_leaf(value));
+        assert_eq!(found, routed, "{text}");
+        frame.drop_values();
+        crate::deep_json::clear_object(&mut object);
+    }
+    Ok(())
+}

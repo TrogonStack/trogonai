@@ -4,7 +4,7 @@
 
 use crate::{
     constants,
-    python_value_repr::{repr, type_name},
+    python_value_repr::{json_type_name, repr_json},
 };
 use serde_json::Value;
 
@@ -42,8 +42,8 @@ pub(crate) fn render(title: &str, errors: &[LineError], whole: &Value) -> String
             error.location.join("."),
             error.message,
             error.kind,
-            truncated(repr(input)),
-            type_name(input),
+            truncated(repr_json(input)),
+            json_type_name(input),
             error.kind,
             DOCUMENTATION_VERSION = constants::PYDANTIC_DOCUMENTATION_VERSION,
         ));

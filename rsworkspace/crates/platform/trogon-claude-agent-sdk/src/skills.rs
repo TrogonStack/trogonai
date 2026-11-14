@@ -3,8 +3,10 @@
 //! `subprocess_cli.py`).
 
 use crate::{
-    ClaudeAgentOptions, OptionError, Skills, constants::SKILLS_DEFAULT_SETTING_SOURCES, process_options::ArgvStyle,
-    python_json::python_repr,
+    ClaudeAgentOptions, OptionError, Skills,
+    constants::SKILLS_DEFAULT_SETTING_SOURCES,
+    process_options::ArgvStyle,
+    python_json::{is_python_whitespace, python_repr},
 };
 
 /// JavaScript `String.prototype.trim` whitespace: `WhiteSpace` plus `LineTerminator`.
@@ -23,12 +25,6 @@ fn is_javascript_whitespace(c: char) -> bool {
             | '\u{1680}'
             | '\u{2000}'..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
     )
-}
-
-/// Python `str.strip()` whitespace: `str.isspace`, which is the Unicode `White_Space` set plus the four
-/// information separators.
-pub(crate) fn is_python_whitespace(c: char) -> bool {
-    c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}')
 }
 
 fn trim_with(name: &str, whitespace: fn(char) -> bool) -> &str {

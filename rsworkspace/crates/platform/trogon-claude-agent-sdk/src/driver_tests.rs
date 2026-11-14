@@ -5,10 +5,14 @@ use std::{
     time::Duration,
 };
 
+use serde_json::error::Category;
 use tokio::sync::mpsc;
 
 use super::*;
-use crate::{ToolPermissionRequest, ToolSet, environment_plan::Inherited, process_transport::command};
+use crate::{
+    ToolPermissionRequest, ToolSet, environment_plan::Inherited, process_transport::command,
+    python_c_stack::PythonCStack,
+};
 
 /// A transport the test scripts: documents the driver writes arrive on `written`, and objects sent on
 /// `incoming` are what the driver reads.
@@ -441,7 +445,7 @@ async fn an_abandoned_message_consumer_stops_publication() -> Result<(), Box<dyn
 async fn a_stale_panicked_callback_cannot_terminate_the_current_session() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     let id = ControlRequestId::from("stale-panic");
-    fixture.driver.spawn_callback(
+    fixture.driver.spawn_callback::<_, serde_json::Value>(
         id.clone(),
         crate::CancellationToken::new(),
         Some(Duration::from_secs(1)),
@@ -556,7 +560,13 @@ fn tool_lists_reach_the_cli_verbatim() -> Result<(), Error> {
         tools: ToolSet::Only(vec![crate::BuiltinToolName::from("Read Bash")]),
         ..ClaudeAgentOptions::default()
     };
-    let command = command(&options, std::path::Path::new("claude"), &Inherited::new(), None)?;
+    let command = command(
+        &options,
+        std::path::Path::new("claude"),
+        &Inherited::new(),
+        None,
+        PythonCStack::CLIENT_CONNECT,
+    )?;
     let arguments: Vec<_> = command
         .as_std()
         .get_args()
@@ -603,7 +613,7 @@ fn argv_delivery_leaves_the_initialize_request_without_plugins() -> Result<(), E
 }
 
 fn derived_label_in(options: &ClaudeAgentOptions, inherited: &Inherited, cli: &std::path::Path) -> Option<String> {
-    let command = command(options, cli, inherited, None).ok()?;
+    let command = command(options, cli, inherited, None, PythonCStack::CLIENT_CONNECT).ok()?;
     command
         .as_std()
         .get_envs()
@@ -833,7 +843,7 @@ async fn backpressure_stops_reading_and_overflow_reaches_the_caller() -> Result<
     let reader = async {
         let mut seen = Vec::new();
         while let Some(Message::System(message)) = fixture.messages.recv().await {
-            seen.push(message.subtype);
+            seen.push(message.subtype.clone());
             if seen.len() == 5 {
                 break;
             }
@@ -854,7 +864,7 @@ async fn a_duplicate_in_flight_request_is_skipped_or_run_by_policy() -> Result<(
         crate::CancellationToken::new(),
         None,
         wire::callback_error_response(&id, "fallback").map(Some),
-        pending(),
+        pending::<Result<Option<serde_json::Value>, ProtocolError>>(),
     );
     assert!(!fixture.driver.admit_callback(&id).await?);
     assert_eq!(fixture.driver.running_callbacks(), 1);
@@ -984,4 +994,67 @@ fn the_initialize_request_carries_managed_settings_after_the_plugins() -> Result
         },
     )?;
     Ok(())
+}
+
+/// Deeper than the native stack of a test thread holds a recursive walk over.
+const DEEP: usize = 200_000;
+
+/// `levels` arrays around `null`, built without recursion.
+fn deep_value(levels: usize) -> serde_json::Value {
+    (0..levels).fold(serde_json::Value::Null, |inner, _| {
+        serde_json::Value::Array(vec![inner])
+    })
+}
+
+/// How many arrays `value` opens before its first item that is not one.
+fn array_depth(mut value: &serde_json::Value) -> usize {
+    let mut levels = 0;
+    while let Some(inner) = value.as_array().and_then(|items| items.first()) {
+        levels += 1;
+        value = inner;
+    }
+    levels
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_message_nested_past_the_native_stack_is_decoded_routed_and_dropped() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut fixture = DriverFixture::new()?;
+    let field = |key: &str, value: serde_json::Value| (key.to_owned(), value);
+    let result = JsonObject::from_iter([
+        field("type", "result".into()),
+        field("subtype", "error_during_execution".into()),
+        field("duration_ms", 1.into()),
+        field("duration_api_ms", 1.into()),
+        field("is_error", true.into()),
+        field("num_turns", 1.into()),
+        field("session_id", "s".into()),
+        field("extra", deep_value(DEEP)),
+    ]);
+    let system = JsonObject::from_iter([
+        field("type", "system".into()),
+        field("subtype", "deep".into()),
+        field("payload", deep_value(DEEP)),
+    ]);
+    for object in [result, system] {
+        let frame = fixture.driver.decode_message(object)?;
+        fixture.driver.frame(frame).await?;
+    }
+    assert!(fixture.driver.last_error_result.is_none());
+    let Some(Message::Result(result)) = fixture.messages.recv().await else {
+        return Err("expected the result".into());
+    };
+    assert_eq!(result.additional_fields.get("extra").map(array_depth), Some(DEEP));
+    let Some(Message::System(system)) = fixture.messages.recv().await else {
+        return Err("expected the system message".into());
+    };
+    assert_eq!(system.data.get("payload").map(array_depth), Some(DEEP));
+    drop((result, system));
+    fixture.finish().await
+}
+
+#[test]
+fn a_control_response_that_is_not_an_object_is_a_protocol_error() {
+    let response = control_object(deep_value(DEEP));
+    assert!(matches!(response, Err(Error::Protocol(ProtocolError::Json(error))) if error.classify() == Category::Data));
 }
