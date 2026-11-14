@@ -262,8 +262,8 @@ pub use python_json_value::{
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use raw_json_id::{RawJsonId, RawJsonIdError};
 pub use runtime_options::{
-    DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
-    ThinkingDisplay,
+    DangerousPermissionSkip, DebugOutput, EmptyCollection, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget,
+    ThinkingConfig, ThinkingDisplay,
 };
 pub use sdk_mcp_server::{
     LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, SdkMcpServer, SdkMcpSession,

@@ -60,6 +60,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `McpUrl` | Python / TypeScript MCP `url` string | Infallible opaque text sent verbatim, as both SDKs do. `McpUrl::validated` is an opt-in check for HTTP(S), userinfo and fragments that neither SDK performs. |
 | `McpServerOptions` | Python `McpStdioServerConfig`, `McpSSEServerConfig`, `McpHttpServerConfig`, `McpSdkServerConfig` / TypeScript `McpServerConfigForProcessTransport` | Every upstream field in declaration order, then `extra` keys verbatim. `McpServerToolPolicy` carries the per-tool `tools` entries. |
 | `DialogKind` | TypeScript `Options.supportedDialogKinds` entry; no corresponding option in pinned Python | Infallible opaque text; every string is stored verbatim. |
+| `EmptyCollection` | TypeScript `hooks: {}` and `supportedDialogKinds: []`; Python never sends either | `Omitted` by default. `Sent` makes the TypeScript dialect write the empty value to `initialize` as the TypeScript SDK does when the caller passes it. |
 | `McpToolName` | [Python `SdkMcpTool.name`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/__init__.py#L270) / TypeScript `SdkMcpToolDefinition.name` | Infallible opaque text. The built-in MCP server lists every name. In the TypeScript dialect it logs the `console.warn` lines `createSdkMcpServer` prints for a name the MCP tool naming standard discourages; the Python dialect logs nothing. |
 | `ToolRule` | Python `allowed_tools` / `disallowed_tools` entry; TypeScript `allowedTools` / `disallowedTools` entry | Infallible opaque text. Rules are joined with commas unvalidated, as both upstream SDKs do; callers must avoid commas, which the CLI would split into separate rules. |
 | `AgentName` | TypeScript `Options.agent`; not exposed in pinned Python | Infallible opaque text; every string is stored verbatim. |
@@ -108,6 +109,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `Error::Process { .. }`, `exit_code()`, `typescript_message()` | `ProcessError` | exit-code error text |
 | `Error::Result(ResultError)` | `ResultError` | error result text |
 | `Error::Aborted(AbortError)`, `abort()` | not applicable | `AbortError` |
+| `ClaudeAgentOptions.abort_signal` | not applicable | `Options.abortController` |
 | `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
 | `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |
 | `Error::WriteFailed(io::Error)` | `CLIConnectionError` (write failed) | same text |

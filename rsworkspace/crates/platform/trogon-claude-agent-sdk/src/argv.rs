@@ -658,7 +658,12 @@ where
     }
     if let Some(schema) = &options.output_schema {
         a.push("--json-schema".into());
-        a.push(serde_json::Value::Object(schema.as_json().clone()).to_string().into());
+        // Python writes the schema with `json.dumps` and its default separators.
+        a.push(
+            crate::python_json::to_string(schema.as_json())
+                .map_err(ProtocolError::from)?
+                .into(),
+        );
     }
     a.push("--input-format".into());
     a.push("stream-json".into());

@@ -1,0 +1,3333 @@
+{
+ "comment": "Captured by running the real @anthropic-ai/claude-agent-sdk 0.3.323 and claude-agent-sdk 0.2.181 with one option set at a time against a recording CLI. env holds the child environment entries that differ from a run with no options; a null value means the entry was removed. Requests are compact JSON with the key order each SDK wrote.",
+ "typescript": {
+  "baseline": {
+   "option": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "additionalDirectories": {
+   "option": "additionalDirectories",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--add-dir=/a",
+    "--add-dir=/b c"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "additionalDirectories_empty": {
+   "option": "additionalDirectories",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "agent": {
+   "option": "agent",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--agent=reviewer"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "agentProgressSummaries_true": {
+   "option": "agentProgressSummaries",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"agentProgressSummaries\":true}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "agentProgressSummaries_false": {
+   "option": "agentProgressSummaries",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"agentProgressSummaries\":false}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "agents_basic": {
+   "option": "agents",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"agents\":{\"rev\":{\"description\":\"d\",\"prompt\":\"p\"}}}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "agents_fields": {
+   "option": "agents",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"agents\":{\"rev\":{\"description\":\"d\",\"prompt\":\"p\",\"tools\":[\"Read\",\"Edit\"],\"disallowedTools\":[\"Bash\"],\"model\":\"opus\",\"skills\":[\"s1\"],\"maxTurns\":3,\"effort\":\"high\"},\"second\":{\"description\":\"o\",\"prompt\":\"q\"}}}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "allowDangerouslySkipPermissions_true": {
+   "option": "allowDangerouslySkipPermissions",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--allow-dangerously-skip-permissions"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "allowDangerouslySkipPermissions_false": {
+   "option": "allowDangerouslySkipPermissions",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "allowedTools": {
+   "option": "allowedTools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--allowedTools=Read,Bash(ls:*),mcp__s__t"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "allowedTools_empty": {
+   "option": "allowedTools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "betas": {
+   "option": "betas",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--betas=context-1m-2025-08-07"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "betas_empty": {
+   "option": "betas",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "canUseTool": {
+   "option": "canUseTool",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-prompt-tool=stdio"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "continue_true": {
+   "option": "continue",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--continue"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "continue_false": {
+   "option": "continue",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "cwd": {
+   "option": "cwd",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false,
+   "directory": "work"
+  },
+  "debug_true": {
+   "option": "debug",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--debug"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "debug_false": {
+   "option": "debug",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "debugFile": {
+   "option": "debugFile",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--debug-file=debug.log"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "debugFile_with_debug": {
+   "option": "debugFile",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--debug-file=debug.log"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "disallowedTools": {
+   "option": "disallowedTools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--disallowedTools=Write,Bash(rm:*)"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_low": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--effort=low"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_medium": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--effort=medium"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_high": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--effort=high"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_xhigh": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--effort=xhigh"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_max": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--effort=max"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "enableFileCheckpointing_true": {
+   "option": "enableFileCheckpointing",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {
+    "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING": "true"
+   },
+   "user_client_composed": false
+  },
+  "enableFileCheckpointing_false": {
+   "option": "enableFileCheckpointing",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "env": {
+   "option": "env",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {
+    "FOO": "bar",
+    "EMPTY": ""
+   },
+   "user_client_composed": false
+  },
+  "executable": {
+   "option": "executable",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false,
+   "spawn": {
+    "command": "<node>",
+    "args": [
+     "<cli>",
+     "--output-format",
+     "stream-json",
+     "--verbose",
+     "--input-format",
+     "stream-json"
+    ]
+   }
+  },
+  "executableArgs": {
+   "option": "executableArgs",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false,
+   "spawn": {
+    "command": "<node>",
+    "args": [
+     "--no-warnings",
+     "--stack-size=2000",
+     "<cli>",
+     "--output-format",
+     "stream-json",
+     "--verbose",
+     "--input-format",
+     "stream-json"
+    ]
+   }
+  },
+  "pathToClaudeCodeExecutable": {
+   "option": "pathToClaudeCodeExecutable",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false,
+   "spawn": {
+    "command": "<cli>",
+    "args": [
+     "--output-format",
+     "stream-json",
+     "--verbose",
+     "--input-format",
+     "stream-json"
+    ]
+   }
+  },
+  "extraArgs": {
+   "option": "extraArgs",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--bare-flag",
+    "--spaced",
+    "value",
+    "--dashed=-1",
+    "--empty",
+    ""
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "fallbackModel": {
+   "option": "fallbackModel",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--fallback-model=sonnet"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "forkSession_true": {
+   "option": "forkSession",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--fork-session"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "forkSession_false": {
+   "option": "forkSession",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "forwardSubagentText_true": {
+   "option": "forwardSubagentText",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"forwardSubagentText\":true}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "forwardSubagentText_false": {
+   "option": "forwardSubagentText",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"forwardSubagentText\":false}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "hooks": {
+   "option": "hooks",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hookCallbackIds\":[\"hook_0\",\"hook_1\"],\"timeout\":30}],\"PostToolUse\":[{\"hookCallbackIds\":[\"hook_2\"]}]},\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "hooks_empty_list": {
+   "option": "hooks",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":{},\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "includeHookEvents_true": {
+   "option": "includeHookEvents",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--include-hook-events"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "includeHookEvents_false": {
+   "option": "includeHookEvents",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "includePartialMessages_true": {
+   "option": "includePartialMessages",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--include-partial-messages"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "includePartialMessages_false": {
+   "option": "includePartialMessages",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "managedSettings": {
+   "option": "managedSettings",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--managed-settings",
+    "{\"model\":\"opus\",\"permissions\":{\"allow\":[\"Bash(ls)\"]}}"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "maxBudgetUsd": {
+   "option": "maxBudgetUsd",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--max-budget-usd=1.5"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "maxBudgetUsd_zero": {
+   "option": "maxBudgetUsd",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--max-budget-usd=0"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "maxThinkingTokens": {
+   "option": "maxThinkingTokens",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--max-thinking-tokens=1000"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "maxThinkingTokens_zero": {
+   "option": "maxThinkingTokens",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--thinking=disabled"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "maxTurns": {
+   "option": "maxTurns",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--max-turns=7"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "mcpServers_external": {
+   "option": "mcpServers",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--mcp-config",
+    "{\"mcpServers\":{\"local\":{\"command\":\"server\",\"args\":[\"--flag\"],\"env\":{\"K\":\"v\"}},\"remote\":{\"type\":\"http\",\"url\":\"https://example.com/mcp\",\"headers\":{\"A\":\"b\"}},\"events\":{\"type\":\"sse\",\"url\":\"https://example.com/sse\"}}}"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "mcpServers_sdk": {
+   "option": "mcpServers",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"sdkMcpServers\":[\"inproc\"],\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "mcpServers_empty": {
+   "option": "mcpServers",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "model": {
+   "option": "model",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--model=opus"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "outputFormat": {
+   "option": "outputFormat",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--json-schema={\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}}}"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"jsonSchema\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}}},\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "perTaskStopAffordance_true": {
+   "option": "perTaskStopAffordance",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"perTaskStopAffordance\":true}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "perTaskStopAffordance_false": {
+   "option": "perTaskStopAffordance",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"perTaskStopAffordance\":false}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionMode_default": {
+   "option": "permissionMode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-mode=default"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionMode_acceptEdits": {
+   "option": "permissionMode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-mode=acceptEdits"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionMode_plan": {
+   "option": "permissionMode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-mode=plan"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionMode_bypassPermissions": {
+   "option": "permissionMode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-mode=bypassPermissions"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionMode_dontAsk": {
+   "option": "permissionMode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-mode=dontAsk"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionMode_auto": {
+   "option": "permissionMode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-mode=auto"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionPromptToolName": {
+   "option": "permissionPromptToolName",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-prompt-tool=mcp__x__approve"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionPrompts_host": {
+   "option": "permissionPrompts",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-prompts=host"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permissionPrompts_none": {
+   "option": "permissionPrompts",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--permission-prompts=none"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "persistSession_false": {
+   "option": "persistSession",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--no-session-persistence"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "persistSession_true": {
+   "option": "persistSession",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "planModeInstructions": {
+   "option": "planModeInstructions",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"planModeInstructions\":\"plan it\"}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "plugins": {
+   "option": "plugins",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--plugin-dir=plug1",
+    "--plugin-dir-no-mcp=plug2"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "pluginDelivery_argv": {
+   "option": "pluginDelivery",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--plugin-dir=plug1",
+    "--plugin-dir-no-mcp=plug2"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "pluginDelivery_initialize": {
+   "option": "pluginDelivery",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--await-initialize"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"plugins\":[{\"type\":\"local\",\"path\":\"plug1\"},{\"type\":\"local\",\"path\":\"plug2\",\"skipMcpDiscovery\":true}]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "pluginDelivery_initialize_no_plugins": {
+   "option": "pluginDelivery",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "projectConfigRoot": {
+   "option": "projectConfigRoot",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--project-config-root=cfgroot"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "promptSuggestions_true": {
+   "option": "promptSuggestions",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"promptSuggestions\":true}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "promptSuggestions_false": {
+   "option": "promptSuggestions",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"promptSuggestions\":false}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "resume": {
+   "option": "resume",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--resume=11111111-1111-4111-8111-111111111111"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "resumeDropsTurn": {
+   "option": "resumeDropsTurn",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--resume=11111111-1111-4111-8111-111111111111",
+    "--resume-drops-turn=11111111-1111-4111-8111-111111111111"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "resumeSessionAt": {
+   "option": "resumeSessionAt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--resume=11111111-1111-4111-8111-111111111111",
+    "--resume-session-at=22222222-2222-4222-8222-222222222222"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sandbox": {
+   "option": "sandbox",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--settings",
+    "{\"sandbox\":{\"enabled\":true,\"network\":{\"allowedDomains\":[\"x.com\"],\"httpProxyPort\":1},\"filesystem\":{\"denyRead\":[\"/a\"]},\"failIfUnavailable\":true}}"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sandbox_disabled": {
+   "option": "sandbox",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--settings",
+    "{\"sandbox\":{\"enabled\":false}}"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sessionId": {
+   "option": "sessionId",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--session-id=11111111-1111-4111-8111-111111111111"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sessionStore": {
+   "option": "sessionStore",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--session-mirror"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sessionStoreFlush_eager": {
+   "option": "sessionStoreFlush",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--session-mirror"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sessionStoreFlush_batched": {
+   "option": "sessionStoreFlush",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--session-mirror"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sessionStoreFlush_alone": {
+   "option": "sessionStoreFlush",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "settingSources": {
+   "option": "settingSources",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--setting-sources=user,project,local"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "settingSources_empty": {
+   "option": "settingSources",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--setting-sources="
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "settings_path": {
+   "option": "settings",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--settings",
+    "settings_file.json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "settings_json": {
+   "option": "settings",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--settings",
+    "{\"a\": 1, \"b\": [1, 2]}"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "settings_object": {
+   "option": "settings",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--settings",
+    "{\"model\":\"opus\",\"permissions\":{\"allow\":[\"Bash(ls)\"]}}"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "skills_all": {
+   "option": "skills",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--allowedTools=Skill"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "skills_named": {
+   "option": "skills",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--allowedTools=Skill(a),Skill(b)"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"skills\":[\"a\",\"b\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "skills_empty": {
+   "option": "skills",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"skills\":[]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "strictMcpConfig_true": {
+   "option": "strictMcpConfig",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--strict-mcp-config"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "strictMcpConfig_false": {
+   "option": "strictMcpConfig",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "supportedDialogKinds": {
+   "option": "supportedDialogKinds",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"supportedDialogKinds\":[\"refusal_fallback_prompt\",\"k2\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "supportedDialogKinds_empty": {
+   "option": "supportedDialogKinds",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"supportedDialogKinds\":[]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "systemPrompt_string": {
+   "option": "systemPrompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"be brief\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "systemPrompt_preset": {
+   "option": "systemPrompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\"}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "systemPrompt_preset_append": {
+   "option": "systemPrompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"appendSystemPrompt\":\"more\"}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "systemPrompt_array": {
+   "option": "systemPrompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"a\",\"b\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "taskBudget": {
+   "option": "taskBudget",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--task-budget=5000"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_adaptive": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--thinking=adaptive"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_adaptive_display": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--thinking=adaptive",
+    "--thinking-display=summarized"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_enabled": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--max-thinking-tokens=2000"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_enabled_display": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--max-thinking-tokens=2000",
+    "--thinking-display=omitted"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_enabled_no_budget": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--thinking=adaptive"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_disabled": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--thinking=disabled"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "title": {
+   "option": "title",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"title\":\"My title\"}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "toolAliases": {
+   "option": "toolAliases",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"],\"toolAliases\":{\"Bash\":\"mcp__w__bash\",\"Read\":\"mcp__w__read\"}}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "toolConfig_html": {
+   "option": "toolConfig",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {
+    "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT": "html"
+   },
+   "user_client_composed": false
+  },
+  "toolConfig_markdown": {
+   "option": "toolConfig",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {
+    "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT": "markdown"
+   },
+   "user_client_composed": false
+  },
+  "toolConfig_empty": {
+   "option": "toolConfig",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "tools_list": {
+   "option": "tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--tools=Read,Edit"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "tools_empty": {
+   "option": "tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--tools="
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "tools_preset": {
+   "option": "tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json",
+    "--tools=default"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "verbatimPrompts_true": {
+   "option": "verbatimPrompts",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": true
+  },
+  "verbatimPrompts_false": {
+   "option": "verbatimPrompts",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}",
+   "env": {},
+   "user_client_composed": false
+  }
+ },
+ "python": {
+  "baseline": {
+   "option": null,
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "add_dirs": {
+   "option": "add_dirs",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--add-dir",
+    "/a",
+    "--add-dir",
+    "/b c",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "add_dirs_empty": {
+   "option": "add_dirs",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "agents_basic": {
+   "option": "agents",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null,\"agents\":{\"rev\":{\"description\":\"d\",\"prompt\":\"p\"}}}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "agents_fields": {
+   "option": "agents",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null,\"agents\":{\"rev\":{\"description\":\"d\",\"prompt\":\"p\",\"tools\":[\"Read\",\"Edit\"],\"disallowedTools\":[\"Bash\"],\"model\":\"opus\",\"skills\":[\"s1\"],\"maxTurns\":3,\"effort\":\"high\"},\"second\":{\"description\":\"o\",\"prompt\":\"q\"}}}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "allowed_tools": {
+   "option": "allowed_tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--allowedTools",
+    "Read,Bash(ls:*),mcp__s__t",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "allowed_tools_empty": {
+   "option": "allowed_tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "betas": {
+   "option": "betas",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--betas",
+    "context-1m-2025-08-07",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "betas_empty": {
+   "option": "betas",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "can_use_tool": {
+   "option": "can_use_tool",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--permission-prompt-tool",
+    "stdio",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "cli_path": {
+   "option": "cli_path",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "client_app": {
+   "option": "client_app",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {
+    "CLAUDE_AGENT_SDK_CLIENT_APP": "my-app"
+   },
+   "user_client_composed": false
+  },
+  "continue_conversation_true": {
+   "option": "continue_conversation",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--continue",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "continue_conversation_false": {
+   "option": "continue_conversation",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "cwd": {
+   "option": "cwd",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {
+    "PWD": "work"
+   },
+   "user_client_composed": false,
+   "directory": "work"
+  },
+  "disallowed_tools": {
+   "option": "disallowed_tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--disallowedTools",
+    "Write,Bash(rm:*)",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_low": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--effort",
+    "low",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_medium": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--effort",
+    "medium",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_high": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--effort",
+    "high",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_xhigh": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--effort",
+    "xhigh",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "effort_max": {
+   "option": "effort",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--effort",
+    "max",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "enable_file_checkpointing_true": {
+   "option": "enable_file_checkpointing",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {
+    "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING": "true"
+   },
+   "user_client_composed": false
+  },
+  "enable_file_checkpointing_false": {
+   "option": "enable_file_checkpointing",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "env": {
+   "option": "env",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {
+    "FOO": "bar",
+    "EMPTY": ""
+   },
+   "user_client_composed": false
+  },
+  "extra_args": {
+   "option": "extra_args",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--bare-flag",
+    "--spaced",
+    "value",
+    "--dashed=-1",
+    "--empty",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "fallback_model": {
+   "option": "fallback_model",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--fallback-model",
+    "sonnet",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "fork_session_true": {
+   "option": "fork_session",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--fork-session",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "fork_session_false": {
+   "option": "fork_session",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "forward_subagent_text_true": {
+   "option": "forward_subagent_text",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null,\"forwardSubagentText\":true}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "forward_subagent_text_false": {
+   "option": "forward_subagent_text",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "hooks": {
+   "option": "hooks",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hookCallbackIds\":[\"hook_0\",\"hook_1\"],\"timeout\":30}],\"PostToolUse\":[{\"matcher\":null,\"hookCallbackIds\":[\"hook_2\"]}]}}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "hooks_empty_list": {
+   "option": "hooks",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "hooks_empty_dict": {
+   "option": "hooks",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "include_hook_events_true": {
+   "option": "include_hook_events",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--include-hook-events",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "include_hook_events_false": {
+   "option": "include_hook_events",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "include_partial_messages_true": {
+   "option": "include_partial_messages",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--include-partial-messages",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "include_partial_messages_false": {
+   "option": "include_partial_messages",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "max_budget_usd": {
+   "option": "max_budget_usd",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--max-budget-usd",
+    "1.5",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "max_budget_usd_zero": {
+   "option": "max_budget_usd",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--max-budget-usd",
+    "0",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "max_thinking_tokens": {
+   "option": "max_thinking_tokens",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--max-thinking-tokens",
+    "1000",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "max_thinking_tokens_zero": {
+   "option": "max_thinking_tokens",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--max-thinking-tokens",
+    "0",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "max_turns": {
+   "option": "max_turns",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--max-turns",
+    "7",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "mcp_servers_external": {
+   "option": "mcp_servers",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--mcp-config",
+    "{\"mcpServers\": {\"local\": {\"command\": \"server\", \"args\": [\"--flag\"], \"env\": {\"K\": \"v\"}}, \"remote\": {\"type\": \"http\", \"url\": \"https://example.com/mcp\", \"headers\": {\"A\": \"b\"}}, \"events\": {\"type\": \"sse\", \"url\": \"https://example.com/sse\"}}}",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "mcp_servers_sdk": {
+   "option": "mcp_servers",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--mcp-config",
+    "{\"mcpServers\": {\"inproc\": {\"type\": \"sdk\", \"name\": \"inproc\"}}}",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "mcp_servers_empty": {
+   "option": "mcp_servers",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "model": {
+   "option": "model",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--model",
+    "opus",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "output_format": {
+   "option": "output_format",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--json-schema",
+    "{\"type\": \"object\", \"properties\": {\"a\": {\"type\": \"string\"}}}",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permission_mode_default": {
+   "option": "permission_mode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--permission-mode",
+    "default",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permission_mode_acceptEdits": {
+   "option": "permission_mode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--permission-mode",
+    "acceptEdits",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permission_mode_plan": {
+   "option": "permission_mode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--permission-mode",
+    "plan",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permission_mode_bypassPermissions": {
+   "option": "permission_mode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--permission-mode",
+    "bypassPermissions",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permission_mode_dontAsk": {
+   "option": "permission_mode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--permission-mode",
+    "dontAsk",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permission_mode_auto": {
+   "option": "permission_mode",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--permission-mode",
+    "auto",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "permission_prompt_tool_name": {
+   "option": "permission_prompt_tool_name",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--permission-prompt-tool",
+    "mcp__x__approve",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "plugins": {
+   "option": "plugins",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--plugin-dir",
+    "plug1",
+    "--plugin-dir",
+    "plug2",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "resume": {
+   "option": "resume",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--resume=11111111-1111-4111-8111-111111111111",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "resume_drops_turn": {
+   "option": "resume_drops_turn",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--resume=11111111-1111-4111-8111-111111111111",
+    "--resume-drops-turn=11111111-1111-4111-8111-111111111111",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "resume_session_at": {
+   "option": "resume_session_at",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--resume=11111111-1111-4111-8111-111111111111",
+    "--resume-session-at=22222222-2222-4222-8222-222222222222",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sandbox": {
+   "option": "sandbox",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "{\"sandbox\": {\"enabled\": true, \"network\": {\"allowedDomains\": [\"x.com\"], \"httpProxyPort\": 1}, \"filesystem\": {\"denyRead\": [\"/a\"]}}}",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "sandbox_disabled": {
+   "option": "sandbox",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "{\"sandbox\": {\"enabled\": false}}",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "session_id": {
+   "option": "session_id",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--session-id=11111111-1111-4111-8111-111111111111",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "session_store": {
+   "option": "session_store",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--session-mirror",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "session_store_flush_eager": {
+   "option": "session_store_flush",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--session-mirror",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "session_store_flush_batched": {
+   "option": "session_store_flush",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--session-mirror",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "session_store_flush_alone": {
+   "option": "session_store_flush",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "setting_sources": {
+   "option": "setting_sources",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--setting-sources=user,project,local",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "setting_sources_empty": {
+   "option": "setting_sources",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--setting-sources=",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "settings_path": {
+   "option": "settings",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "settings_file.json",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "settings_json": {
+   "option": "settings",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--settings",
+    "{\"a\": 1, \"b\": [1, 2]}",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "skills_all": {
+   "option": "skills",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--allowedTools",
+    "Skill",
+    "--setting-sources=user,project",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "skills_named": {
+   "option": "skills",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--allowedTools",
+    "Skill(a),Skill(b)",
+    "--setting-sources=user,project",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null,\"skills\":[\"a\",\"b\"]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "skills_empty": {
+   "option": "skills",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--setting-sources=user,project",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null,\"skills\":[]}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "strict_mcp_config_true": {
+   "option": "strict_mcp_config",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--strict-mcp-config",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "strict_mcp_config_false": {
+   "option": "strict_mcp_config",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "system_prompt_string": {
+   "option": "system_prompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "be brief",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "system_prompt_empty": {
+   "option": "system_prompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "system_prompt_preset": {
+   "option": "system_prompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "system_prompt_preset_append": {
+   "option": "system_prompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--append-system-prompt",
+    "more",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "system_prompt_file": {
+   "option": "system_prompt",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt-file",
+    "prompt.txt",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "task_budget": {
+   "option": "task_budget",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--task-budget",
+    "5000",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_adaptive": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--thinking",
+    "adaptive",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_adaptive_display": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--thinking",
+    "adaptive",
+    "--thinking-display",
+    "summarized",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_enabled": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--max-thinking-tokens",
+    "2000",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_enabled_display": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--max-thinking-tokens",
+    "2000",
+    "--thinking-display",
+    "omitted",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "thinking_disabled": {
+   "option": "thinking",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--thinking",
+    "disabled",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "tools_list": {
+   "option": "tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--tools",
+    "Read,Edit",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "tools_empty": {
+   "option": "tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--tools",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "tools_preset": {
+   "option": "tools",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--tools",
+    "default",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  },
+  "verbatim_prompts_true": {
+   "option": "verbatim_prompts",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": true
+  },
+  "verbatim_prompts_false": {
+   "option": "verbatim_prompts",
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--system-prompt",
+    "",
+    "--input-format",
+    "stream-json"
+   ],
+   "request": "{\"subtype\":\"initialize\",\"hooks\":null}",
+   "env": {},
+   "user_client_composed": false
+  }
+ },
+ "covered_elsewhere": {
+  "typescript": {
+   "abortController": "tests/shutdown_errors.rs::cancelling_the_abort_signal_ends_the_run_like_abort",
+   "loadTimeoutMs": "tests/session_store.rs::resume_load_timeout_does_not_install_any_files",
+   "onElicitation": "tests/runtime_features.rs::elicitation_callback_returns_a_typed_form_response",
+   "onUserDialog": "tests/runtime_features.rs::declared_user_dialog_calls_the_handler",
+   "spawnClaudeCodeProcess": "tests/runtime_adapters.rs::injected_process_runs_protocol_and_closes_input_on_disconnect",
+   "stderr": "tests/core_options_golden.rs::typescript_stderr_reaches_the_callback_as_raw_chunks"
+  },
+  "python": {
+   "debug_stderr": "tests/native_options_golden.rs::python_debug_stderr_is_accepted_without_changing_the_wire",
+   "load_timeout_ms": "tests/session_store.rs::resume_load_timeout_does_not_install_any_files",
+   "max_buffer_size": "tests/subprocess.rs::oversized_frame_is_rejected",
+   "stderr": "tests/core_options_golden.rs::python_stderr_reaches_the_callback_as_trimmed_lines",
+   "user": "src/process_transport/run_as_tests.rs::a_named_user_is_resolved_and_the_uid_switch_is_applied_in_the_child"
+  }
+ },
+ "upstream_keys": {
+  "typescript": [
+   "abortController",
+   "additionalDirectories",
+   "agent",
+   "agentProgressSummaries",
+   "agents",
+   "allowDangerouslySkipPermissions",
+   "allowedTools",
+   "betas",
+   "canUseTool",
+   "continue",
+   "cwd",
+   "debug",
+   "debugFile",
+   "disallowedTools",
+   "effort",
+   "enableFileCheckpointing",
+   "env",
+   "executable",
+   "executableArgs",
+   "extraArgs",
+   "fallbackModel",
+   "forkSession",
+   "forwardSubagentText",
+   "hooks",
+   "includeHookEvents",
+   "includePartialMessages",
+   "loadTimeoutMs",
+   "managedSettings",
+   "maxBudgetUsd",
+   "maxThinkingTokens",
+   "maxTurns",
+   "mcpServers",
+   "model",
+   "onElicitation",
+   "onUserDialog",
+   "outputFormat",
+   "pathToClaudeCodeExecutable",
+   "perTaskStopAffordance",
+   "permissionMode",
+   "permissionPromptToolName",
+   "permissionPrompts",
+   "persistSession",
+   "planModeInstructions",
+   "pluginDelivery",
+   "plugins",
+   "projectConfigRoot",
+   "promptSuggestions",
+   "resume",
+   "resumeDropsTurn",
+   "resumeSessionAt",
+   "sandbox",
+   "sessionId",
+   "sessionStore",
+   "sessionStoreFlush",
+   "settingSources",
+   "settings",
+   "skills",
+   "spawnClaudeCodeProcess",
+   "stderr",
+   "strictMcpConfig",
+   "supportedDialogKinds",
+   "systemPrompt",
+   "taskBudget",
+   "thinking",
+   "title",
+   "toolAliases",
+   "toolConfig",
+   "tools",
+   "verbatimPrompts"
+  ],
+  "python": [
+   "add_dirs",
+   "agents",
+   "allowed_tools",
+   "betas",
+   "can_use_tool",
+   "cli_path",
+   "client_app",
+   "continue_conversation",
+   "cwd",
+   "debug_stderr",
+   "disallowed_tools",
+   "effort",
+   "enable_file_checkpointing",
+   "env",
+   "extra_args",
+   "fallback_model",
+   "fork_session",
+   "forward_subagent_text",
+   "hooks",
+   "include_hook_events",
+   "include_partial_messages",
+   "load_timeout_ms",
+   "max_budget_usd",
+   "max_buffer_size",
+   "max_thinking_tokens",
+   "max_turns",
+   "mcp_servers",
+   "model",
+   "output_format",
+   "permission_mode",
+   "permission_prompt_tool_name",
+   "plugins",
+   "resume",
+   "resume_drops_turn",
+   "resume_session_at",
+   "sandbox",
+   "session_id",
+   "session_store",
+   "session_store_flush",
+   "setting_sources",
+   "settings",
+   "skills",
+   "stderr",
+   "strict_mcp_config",
+   "system_prompt",
+   "task_budget",
+   "thinking",
+   "tools",
+   "user",
+   "verbatim_prompts"
+  ]
+ }
+}

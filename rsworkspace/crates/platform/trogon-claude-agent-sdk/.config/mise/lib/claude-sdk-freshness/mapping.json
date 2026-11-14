@@ -20,10 +20,38 @@
       },
       "rust_api": [
         "ClaudeAgentOptions",
+        "ClaudeAgentOptions.abort_signal",
+        "ClaudeAgentOptions.hooks_when_empty",
+        "ClaudeAgentOptions.supported_dialog_kinds_when_empty",
+        "EmptyCollection",
         "adapters::EnvironmentVariable",
         "adapters::CurrentDirectory"
       ],
       "tests": [
+        {
+          "path": "tests/native_options_golden.rs",
+          "name": "every_typescript_option_matches_the_upstream_wire_form"
+        },
+        {
+          "path": "tests/native_options_golden.rs",
+          "name": "every_python_option_matches_the_upstream_wire_form"
+        },
+        {
+          "path": "tests/native_options_golden.rs",
+          "name": "python_debug_stderr_is_accepted_without_changing_the_wire"
+        },
+        {
+          "path": "tests/native_options_golden.rs",
+          "name": "every_upstream_option_has_a_golden_case"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "cancelling_the_abort_signal_ends_the_run_like_abort"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "an_abort_signal_cancelled_before_connect_fails_the_connection"
+        },
         {
           "path": "tests/runtime_features.rs",
           "name": "structured_input_and_declarative_configuration_reach_the_cli"
@@ -37,8 +65,8 @@
           "name": "missing_config_variable_falls_back_to_injected_home_in_order"
         }
       ],
-      "status": "partial",
-      "rationale": "Native options are explicitly selected. Aggregate mapping does not claim every option exists; unmapped option behavior remains review work."
+      "status": "supported",
+      "rationale": "Every TypeScript Options key and Python ClaudeAgentOptions field has a golden case recorded from the pinned upstream packages, comparing argv, environment, working directory and the initialize request byte for byte in both dialects; callback and transport options are pinned by the behavior tests listed in the fixture."
     },
     {
       "id": "configuration-preservation",

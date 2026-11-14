@@ -77,6 +77,15 @@ pub enum HookEvents {
     Include,
 }
 
+/// Whether the TypeScript dialect sends an option given as an empty collection, as `hooks: {}` and
+/// `supportedDialogKinds: []` reach `initialize` when the caller passes them. Python never sends either.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EmptyCollection {
+    #[default]
+    Omitted,
+    Sent,
+}
+
 /// TypeScript `allowDangerouslySkipPermissions`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DangerousPermissionSkip {

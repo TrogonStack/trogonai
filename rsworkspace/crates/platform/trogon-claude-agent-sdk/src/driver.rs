@@ -482,7 +482,11 @@ fn initialize_config(
                 .map_err(ProtocolError::from)?,
         )
     };
-    let supported_dialog_kinds = (!options.supported_dialog_kinds.is_empty()).then(|| {
+    // TypeScript sends a `hooks` object and a `supportedDialogKinds` list whenever the caller gave one, even empty.
+    let send_empty = |when_empty: crate::EmptyCollection| typescript && when_empty == crate::EmptyCollection::Sent;
+    let supported_dialog_kinds = (!options.supported_dialog_kinds.is_empty()
+        || send_empty(options.supported_dialog_kinds_when_empty))
+    .then(|| {
         options
             .supported_dialog_kinds
             .iter()
@@ -507,7 +511,7 @@ fn initialize_config(
             .collect()
     });
     let request = InitializeRequest {
-        hooks: (!options.hooks.is_empty()).then_some(hooks),
+        hooks: (!options.hooks.is_empty() || send_empty(options.hooks_when_empty)).then_some(hooks),
         sdk_mcp_servers,
         json_schema: options.output_schema.as_ref().map(crate::OutputSchema::as_json),
         system_prompt: prompt.system_prompt,
