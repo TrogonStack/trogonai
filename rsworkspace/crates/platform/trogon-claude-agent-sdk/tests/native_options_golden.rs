@@ -290,6 +290,8 @@ fn agents(options: &mut ClaudeAgentOptions, every_field: bool) {
         reviewer.skills = Some(vec!["s1".to_owned()]);
         reviewer.max_turns = Some(3.into());
         reviewer.effort = Some(EffortLevel::High.into());
+        // The captured TypeScript caller lists `prompt` right after `description`.
+        reviewer.key_order = ["description", "prompt"].map(str::to_owned).to_vec();
     }
     options.agents.insert(AgentName::from("rev"), reviewer);
     if every_field {
