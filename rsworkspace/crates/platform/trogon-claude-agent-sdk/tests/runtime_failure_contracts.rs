@@ -885,7 +885,7 @@ async fn mcp_message_routing_replays_the_typescript_golden() -> TestResult {
                     received: received.clone(),
                     capture_replies: case["capture_replies"][server].clone(),
                     capture_received: capture_received[index].clone(),
-                    connect_send: case["connect_send"][server.as_str().unwrap_or("s")]
+                    connect_send: case["connect_send"][server]
                         .as_array()
                         .into_iter()
                         .flatten()

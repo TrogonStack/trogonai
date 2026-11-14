@@ -22,8 +22,8 @@ use std::{
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
     AgentDefinition, AgentName, ClaimError, ClaimInfo, ClaimOptions, ClaudeAgentOptions, ContinueConversation, Error,
-    FeatureSupport, JsRuntime, PermissionMode, Prompt, SessionFork, SessionId, SpareProcess, StartupOptions,
-    WorkspaceTrust, prewarm_with_adapters, upstream::messages::SDKStartupFailureReason,
+    ExtraArgument, FeatureSupport, JsRuntime, PermissionMode, Prompt, SessionFork, SessionId, SpareProcess,
+    StartupOptions, WorkspaceTrust, prewarm_with_adapters, upstream::messages::SDKStartupFailureReason,
 };
 
 #[path = "support/scripted_process.rs"]
@@ -715,5 +715,85 @@ async fn a_claimed_spare_yields_the_error_result_then_names_it_on_a_nonzero_exit
     let (messages, error) = claimed_error_result(0).await?;
     assert_eq!(messages, 1);
     assert!(error.is_none(), "unexpected error {error:?}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn closing_a_parked_spare_twice_then_disposing_it_removes_its_directory() -> Outcome {
+    let root = tempfile::tempdir()?;
+    let config = root.path().join("cfg");
+    let config_text = config.to_string_lossy().into_owned();
+    let (adapters, run) = start(Script::default(), &[("CLAUDE_CONFIG_DIR", config_text.as_str())]);
+    let unparked = ClaudeAgentOptions {
+        cwd: None,
+        ..options(SPARE)
+    };
+    let spare = prewarm_with_adapters(StartupOptions::new(unparked), adapters).await?;
+    let parked = run
+        .command()?
+        .directory
+        .ok_or("the spare was not started in a directory")?;
+    assert!(parked.is_dir());
+    spare.close();
+    spare.close();
+    spare.dispose().await;
+    tokio::time::timeout(WAIT, async {
+        while parked.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await?;
+    let settled = failure(spare.claimed().await)?;
+    assert!(matches!(settled, ClaimError::SpareClosed), "{settled:?}");
+    assert_eq!(run.lines().await?, vec![INIT.to_owned()]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_spare_drops_workspace_trust_and_sends_await_claim_without_a_value() -> Outcome {
+    let (adapters, run) = start(Script::default(), &[]);
+    let spare_options = ClaudeAgentOptions {
+        workspace_trust: Some(WorkspaceTrust {
+            accepted: Some(true),
+            directory: Some("/trusted".into()),
+        }),
+        extra_args: vec![ExtraArgument {
+            flag: "await-claim".into(),
+            value: Some("x".into()),
+        }],
+        ..options(SPARE)
+    };
+    let spare = prewarm_with_adapters(StartupOptions::new(spare_options), adapters).await?;
+    let mut expected = COLD_ARGUMENTS.map(str::to_owned).to_vec();
+    expected.push("--await-claim".to_owned());
+    assert_eq!(arguments(&run.command()?), expected);
+    spare.close();
+    assert_eq!(run.lines().await?, vec![INIT.to_owned()]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_native_entry_points_report_a_missing_executable_by_path() -> Outcome {
+    let root = tempfile::tempdir()?;
+    let missing = std::path::PathBuf::from("/nonexistent-claude-sdk-test/claude");
+    let native = ClaudeAgentOptions {
+        cli_path: Some(missing.clone()),
+        cwd: Some(root.path().to_path_buf()),
+        ..ClaudeAgentOptions::default()
+    };
+    let warm = trogon_claude_agent_sdk::startup(StartupOptions::new(native.clone()))
+        .await
+        .err();
+    assert!(
+        matches!(&warm, Some(Error::CliNotFoundAt(path)) if *path == missing),
+        "{warm:?}"
+    );
+    let spare = trogon_claude_agent_sdk::prewarm(StartupOptions::new(native))
+        .await
+        .err();
+    assert!(
+        matches!(&spare, Some(Error::CliNotFoundAt(path)) if *path == missing),
+        "{spare:?}"
+    );
     Ok(())
 }

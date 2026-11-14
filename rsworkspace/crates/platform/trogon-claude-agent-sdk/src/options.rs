@@ -140,19 +140,6 @@ pub enum RunEndTimeout {
     Fixed(Timeout),
 }
 
-impl RunEndTimeout {
-    /// The ceiling this selection applies for the variable's value, with `None` for no limit. Anything that does
-    /// not parse is the 600 second default, as is an unset variable.
-    #[must_use]
-    pub fn for_variable(self, value: Option<&str>) -> Option<std::time::Duration> {
-        match self {
-            Self::TypeScript => crate::run_end_ceiling::typescript(value),
-            Self::Python => crate::run_end_ceiling::python(value),
-            Self::Fixed(timeout) => Some(timeout.as_duration()),
-        }
-    }
-}
-
 /// How the process is stopped once stdin is closed.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Shutdown {

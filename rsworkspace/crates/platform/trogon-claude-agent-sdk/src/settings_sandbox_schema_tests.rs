@@ -9,7 +9,7 @@ fn undefined_parses_to_nothing_and_a_wrong_type_is_rejected() {
     for schema in SandboxConfigSchema::ALL {
         assert_eq!(schema.parse(None), Ok(None));
         assert!(schema.accepts(None));
-        assert_eq!(schema.parse(Some(&json!(1))), Err(SandboxConfigRejected(schema)));
+        assert_eq!(schema.parse(Some(&json!(1))), Err(SandboxConfigRejectedError(schema)));
         assert!(!schema.accepts(Some(&json!(1))));
     }
 }

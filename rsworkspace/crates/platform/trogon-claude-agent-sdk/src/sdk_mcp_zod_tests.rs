@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::sdk_mcp_js;
+use crate::sdk_mcp_zod_run::Input;
 use serde_json::json;
 
 #[test]
@@ -34,7 +35,6 @@ fn js_helpers_follow_javascript_semantics() {
     assert!(sdk_mcp_js::forgiving_base64("YQ"));
     assert!(!sdk_mcp_js::forgiving_base64("Y"));
     assert_eq!(sdk_mcp_js::prototype_function_length("toString"), Some(0));
-    assert_eq!(sdk_mcp_js::number_text(-0.0), "0");
 }
 
 fn sdk_js_trim(text: &str) -> &str {

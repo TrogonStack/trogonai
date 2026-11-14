@@ -1,42 +1,9 @@
 //! Node's `path.win32.join` and `path.win32.normalize`, ported over UTF-16 code units the way the JavaScript
 //! indexes strings, so every length, slice and index means what it means upstream.
 
-const BACKSLASH: u16 = b'\\' as u16;
-const SLASH: u16 = b'/' as u16;
-const COLON: u16 = b':' as u16;
-const DOT: u16 = b'.' as u16;
-const QUESTION: u16 = b'?' as u16;
+mod constants;
 
-const RESERVED_NAMES: [&str; 28] = [
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    "COM1",
-    "COM2",
-    "COM3",
-    "COM4",
-    "COM5",
-    "COM6",
-    "COM7",
-    "COM8",
-    "COM9",
-    "LPT1",
-    "LPT2",
-    "LPT3",
-    "LPT4",
-    "LPT5",
-    "LPT6",
-    "LPT7",
-    "LPT8",
-    "LPT9",
-    "COM\u{b9}",
-    "COM\u{b2}",
-    "COM\u{b3}",
-    "LPT\u{b9}",
-    "LPT\u{b2}",
-    "LPT\u{b3}",
-];
+use constants::{BACKSLASH, COLON, DOT, QUESTION, RESERVED_NAMES, SLASH};
 
 fn units(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()

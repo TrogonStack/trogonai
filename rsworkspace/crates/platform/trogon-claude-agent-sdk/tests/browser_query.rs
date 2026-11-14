@@ -30,6 +30,8 @@ type TestResult = Result<(), Box<dyn StdError>>;
 
 const FIXTURE: &str = include_str!("fixtures/browser_query/cases.json");
 const WAIT: Duration = Duration::from_secs(5);
+/// How long the recorder lets a query run before it takes the frames the socket was sent.
+const RECORDED_WAIT: Duration = Duration::from_millis(30);
 
 fn line(value: &Value) -> Frame {
     Frame::text(format!("{value}\n"))
@@ -208,16 +210,18 @@ async fn every_recorded_query_sends_the_recorded_initialize_request() -> TestRes
         let (url, mut seen) = websocket_cli(false).await?;
         assert_eq!(case["urls"], json!(["ws://127.0.0.1:1/"]), "{name}");
         let query = timeout(WAIT, browser_query(recorded_options(name, &url)?)).await??;
-        let mut request = seen.try_recv()?;
+        // The recorder takes what the socket was sent 30 ms after `query()`; the fake CLI reads it on its own task.
+        let mut request = timeout(WAIT, seen.recv()).await?.ok_or("an initialize request")?;
         request["request_id"] = json!("REQUEST");
         assert_eq!(
             serde_json::to_string(&request)?,
             serde_json::to_string(&case["frames"][0])?,
             "{name}"
         );
+        tokio::time::sleep(RECORDED_WAIT).await;
         assert!(seen.try_recv().is_err(), "{name}");
         assert_eq!(case["frames"].as_array().map(Vec::len), Some(1), "{name}");
-        query.close().await?;
+        query.close();
     }
     Ok(())
 }
@@ -285,7 +289,7 @@ async fn a_websocket_query_has_no_sse_state() -> TestResult {
     assert_eq!(get_ccr_event(&query, &message), None);
     assert!(!suspend_sse_stream(&query));
     assert!(!resume_sse_stream(&query));
-    query.close().await?;
+    query.close();
     Ok(())
 }
 
@@ -323,8 +327,10 @@ async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {
         }
         buffer.extend_from_slice(chunk.get(..read)?);
     };
-    let head = String::from_utf8_lossy(buffer.get(..end)?).to_lowercase();
-    let method = head.split_whitespace().next()?.to_owned();
+    let raw = String::from_utf8_lossy(buffer.get(..end)?);
+    // The method is case-sensitive; only the header names are matched without case.
+    let method = raw.split_whitespace().next()?.to_owned();
+    let head = raw.to_lowercase();
     let length = head
         .lines()
         .find_map(|line| line.strip_prefix("content-length:"))
@@ -479,7 +485,7 @@ async fn an_sse_query_exposes_the_transport_state_through_the_accessors() -> Tes
     assert!(!suspend_sse_stream(&query));
     assert!(resume_sse_stream(&query));
     assert!(!resume_sse_stream(&query));
-    query.close().await?;
+    query.close();
     Ok(())
 }
 
@@ -541,7 +547,7 @@ async fn envelopes_and_the_delivered_number_follow_the_consumer_not_the_reads() 
                 .collect();
             assert_eq!(Value::Array(envelopes), step["ccr"], "{name} {}", step["at"]);
         }
-        query.close().await?;
+        query.close();
     }
     Ok(())
 }

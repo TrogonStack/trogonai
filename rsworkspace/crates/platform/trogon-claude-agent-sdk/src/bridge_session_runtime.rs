@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use crate::adapters::HttpExecute;
-use crate::bridge_session::CloseCallback;
+use crate::bridge_session_callbacks::CloseCallback;
 use crate::bridge_session_stream_events::StreamEvents;
 use crate::bridge_worker::{WorkerClient, WorkerPacing};
 use crate::bridge_worker_events::ClientEvent;
@@ -188,7 +188,7 @@ impl Uploads {
     /// Ends the stream window when its time has come; true when events became ready.
     pub(crate) fn fire(&self) -> bool {
         let mut held = self.held();
-        if !held.window.due().is_some_and(|due| due <= Instant::now()) {
+        if held.window.due().is_none_or(|due| due > Instant::now()) {
             return false;
         }
         let sent = held.window.take();

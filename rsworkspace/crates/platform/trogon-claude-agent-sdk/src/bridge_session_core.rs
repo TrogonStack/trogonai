@@ -10,10 +10,10 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::adapters::HttpExecute;
-use crate::bridge_session::{InboundMessageCallback, PermissionResponseCallback, request_key};
+use crate::bridge_session_callbacks::{InboundMessageCallback, PermissionResponseCallback, request_key};
 use crate::bridge_session_runtime::{Lifecycle, Uploads, wind_down};
 use crate::bridge_worker::{WorkerClient, WorkerPacing};
-use crate::bridge_worker_control::{ControlCallbacks, ControlReply, ControlSession, answer_control_request};
+use crate::bridge_worker_control::{BridgeControlReply, ControlCallbacks, ControlSession, answer_control_request};
 use crate::bridge_worker_control_async::AsyncControl;
 use crate::bridge_worker_delivery::DeliveryStatus;
 use crate::bridge_worker_heartbeat::HeartbeatDriver;
@@ -152,12 +152,12 @@ impl<H, P> Runtime<H, P> {
             &mut core.control,
         );
         let task = match reply {
-            ControlReply::Frame(frame) => {
+            BridgeControlReply::Frame(frame) => {
                 self.queue_frame(frame);
                 None
             }
-            ControlReply::Deferred(work) => core.async_control.start(request, work),
-            ControlReply::Pending(pending) => Some(core.async_control.finish_pending(request, pending)),
+            BridgeControlReply::Deferred(work) => core.async_control.start(request, work),
+            BridgeControlReply::Pending(pending) => Some(core.async_control.finish_pending(request, pending)),
         };
         if let Some(task) = task {
             core.tasks.push(tokio::spawn(task));

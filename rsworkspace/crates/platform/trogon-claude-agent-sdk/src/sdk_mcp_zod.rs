@@ -9,18 +9,18 @@
 //!
 //! Where JSON Schema cannot tell two zod schemas apart, the result is the one zod's own mapping makes
 //! most likely: a discriminated union is a plain union, `nullable` and a union with `null` are the same,
-//! `length(n)` is `min(n).max(n)`, regular expression flags are lost, and transforms and refinements are
-//! invisible. The tool author overrides each of these with the `x-trogon-*` keywords that
-//! `ValidationChoices::prepare` writes into a copy of the schema, which `tools/list` never sees; the
-//! choices are checked by `tests/fixtures/sdk_mcp/typescript_choices.json`. The Rust regular expression and
-//! URL engines stand in for the JavaScript ones.
+//! `length(n)` is `min(n).max(n)`, regular expression flags are lost, an object is the bundled one a raw shape
+//! is wrapped in, and transforms and refinements are invisible. The tool author overrides each of these with
+//! the `x-trogon-*` keywords that `ValidationChoices::prepare` writes into a copy of the schema, which
+//! `tools/list` never sees; the choices are checked by `tests/fixtures/sdk_mcp/typescript_choices.json`, and
+//! the object choice by `tests/fixtures/sdk_mcp/typescript_zod.json`. The Rust regular expression and URL
+//! engines stand in for the JavaScript ones.
 
 use crate::{
     JsonObject, constants,
     sdk_mcp_choices::{SchemaCallback, StringCheckKind},
     sdk_mcp_js::ordered_keys,
     sdk_mcp_regexp,
-    sdk_mcp_zod_issue::Issue,
 };
 use serde_json::{Number, Value};
 use std::sync::Arc;
@@ -28,8 +28,6 @@ use std::sync::Arc;
 /// The callbacks of a tool's validation choices, indexed by the `x-trogon-callback` keyword of the schema nodes
 /// they belong to.
 pub(crate) type Callbacks<'a> = &'a [Arc<SchemaCallback>];
-
-pub(crate) use crate::sdk_mcp_zod_run::{Input, run};
 
 /// A number from the schema: kept as written for messages, as a float for comparisons.
 #[derive(Clone)]
@@ -119,12 +117,15 @@ pub(crate) struct ArrayNode {
 pub(crate) enum ObjectMode {
     Strip,
     Strict,
-    Catchall(Node),
+    Catchall(Box<Node>),
 }
 
 pub(crate) struct ObjectNode {
     pub(crate) properties: Vec<(String, Node, bool)>,
     pub(crate) mode: ObjectMode,
+    /// The tool author's zod 4.1.12 object rather than the bundled zod 4.6.2 one: an absent required key keeps
+    /// the value its schema gives `undefined` instead of reporting `nonoptional`.
+    pub(crate) author: bool,
 }
 
 pub(crate) enum Node {
@@ -170,15 +171,6 @@ impl Node {
     /// The zod schema a JSON Schema document stands for.
     pub(crate) fn from_schema(schema: &Value, callbacks: Callbacks<'_>) -> Self {
         modeled(schema, callbacks)
-    }
-
-    /// `schema.safeParse(input)`.
-    pub(crate) fn parse(&self, input: Input<'_>) -> Parsed {
-        let outcome = run(self, input);
-        Parsed {
-            issues: outcome.issues.iter().map(Issue::report).collect(),
-            value: outcome.value.into_json(),
-        }
     }
 }
 
@@ -424,7 +416,7 @@ fn check_order(schema: &JsonObject) -> [StringCheckKind; 3] {
 /// The flags of the `RegExp` behind a pattern. The JSON Schema zod lists drops them, so a validation choice
 /// names them (`x-trogon-flags`); without one only the flags zod itself gives a format's regex apply (`u` for
 /// emoji).
-fn regexp_flags(schema: &JsonObject, format: Option<&str>) -> String {
+pub(crate) fn regexp_flags(schema: &JsonObject, format: Option<&str>) -> String {
     match schema.get("x-trogon-flags").and_then(Value::as_str) {
         Some(flags) => flags.to_owned(),
         None if format == Some("emoji") => "u".to_owned(),
@@ -539,11 +531,17 @@ fn object(schema: &JsonObject, callbacks: Callbacks<'_>) -> Node {
     };
     let mode = match additional {
         Some(Value::Bool(false)) => ObjectMode::Strict,
-        Some(Value::Object(catchall)) if catchall.is_empty() => ObjectMode::Catchall(Node::Any),
-        Some(catchall @ Value::Object(_)) => ObjectMode::Catchall(build(catchall, true, callbacks)),
+        Some(Value::Object(catchall)) if catchall.is_empty() => ObjectMode::Catchall(Box::new(Node::Any)),
+        Some(catchall @ Value::Object(_)) => ObjectMode::Catchall(Box::new(build(catchall, true, callbacks))),
+        // A schema that declares no `properties` has no shape to strip against, so its keys pass through.
+        _ if schema.get("properties").is_none() => ObjectMode::Catchall(Box::new(Node::Any)),
         _ => ObjectMode::Strip,
     };
-    Node::Object(ObjectNode { properties, mode })
+    Node::Object(ObjectNode {
+        properties,
+        mode,
+        author: schema.contains_key("x-trogon-author-object"),
+    })
 }
 
 /// `CallToolResultSchema` of the bundle, as the JSON Schema `zod` itself derives from it (with the one

@@ -424,7 +424,7 @@ async fn a_result_reaches_the_run_end_machine_only_after_its_flush() -> Result<(
         "type": "system", "subtype": "session_state_changed", "state": "idle", "session_id": "s",
     }));
     fixture.driver.run_end.prompt_written();
-    fixture.driver.run_end.finish(false, true);
+    fixture.driver.run_end.finish(false, true, None);
     fixture.driver.held_observations.push_back((result, true));
     fixture.driver.held_observations.push_back((later, false));
     assert!(!fixture.driver.run_end.close_due());
@@ -636,10 +636,15 @@ async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects
         );
         // The prompt is dropped unsent, and the held control fails with the same message.
         assert!(matches!(prompted.await?, Ok(())));
-        assert!(matches!(
-            controlled.await?,
-            Err(Error::InitializationFailed(inner)) if inner.to_string() == expected
-        ));
+        let controlled = controlled.await?;
+        assert!(
+            matches!(controlled, Err(Error::InitializationFailed(_))),
+            "{controlled:?}"
+        );
+        assert_eq!(
+            controlled.err().map(|error| error.to_string()).as_deref(),
+            Some(expected)
+        );
         assert!(fixture.driver.held_commands.is_empty());
         fixture.finish().await?;
     }

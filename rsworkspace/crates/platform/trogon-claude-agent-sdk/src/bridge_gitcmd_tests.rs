@@ -1,5 +1,7 @@
 use std::fs;
 use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -148,7 +150,6 @@ fn keeps_the_default_context_open_to_the_real_process() {
 
 #[cfg(unix)]
 fn script(root: &Path, name: &str, body: &str) -> io::Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
     let path = root.join(name);
     fs::write(&path, format!("#!/bin/sh\n{body}\n"))?;
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;

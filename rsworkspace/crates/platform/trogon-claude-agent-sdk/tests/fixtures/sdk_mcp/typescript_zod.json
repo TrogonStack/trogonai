@@ -2382,7 +2382,19 @@
       "annotations": null,
       "search_hint": null,
       "always_load": false,
-      "handler": "args"
+      "handler": "args",
+      "validation": {
+       "choices": [
+        {
+         "pointer": "",
+         "choice": {
+          "kind": "object",
+          "value": "author"
+         }
+        }
+       ],
+       "callbacks": []
+      }
      }
     ]
    },

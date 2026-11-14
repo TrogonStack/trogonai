@@ -23,30 +23,13 @@ use crate::{
     adapters::SpawnProcess,
     argv,
     constants::{
-        CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, PYTHON_CLOSE_WAIT, SCRIPT_EXTENSIONS, STDERR_SETTLE,
-        TYPESCRIPT_CLOSE_GRACE, TYPESCRIPT_KILL_DELAY,
+        CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, PYTHON_CLOSE_WAIT, STDERR_SETTLE, TYPESCRIPT_CLOSE_GRACE,
+        TYPESCRIPT_KILL_DELAY,
     },
     environment_plan::{self, Inherited},
     framing::{FrameReader, SharedTail, drain_stderr_with},
-    process_options::EnvironmentMode,
+    process_options::{EnvironmentMode, is_script},
 };
-
-/// TypeScript's `endsWith` test is case-sensitive and works on the whole path string; Python has no script
-/// runtime, so its dialect keeps the lenient extension check.
-pub(crate) fn is_script(path: &Path, style: ArgvStyle) -> bool {
-    match style {
-        ArgvStyle::TypeScript => {
-            let path = path.to_string_lossy();
-            SCRIPT_EXTENSIONS
-                .iter()
-                .any(|extension| path.ends_with(&format!(".{extension}")))
-        }
-        ArgvStyle::Python => path
-            .extension()
-            .and_then(OsStr::to_str)
-            .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())),
-    }
-}
 
 /// Builds the child command. A script path runs under `script_runtime.executable` (default `node`), as the
 /// TypeScript SDK does; any other path is the program itself.
@@ -247,6 +230,8 @@ pub(crate) struct ProcessTransport {
     /// TypeScript's `endInput` ends the stream but keeps the transport ready, so a later write is dropped without
     /// an error (`[ProcessTransport] Dropping write to ended stdin stream`).
     input_ended: bool,
+    /// The reader reached the end of stdout, so the CLI finished on its own rather than being stopped.
+    stdout_ended: bool,
     /// The `mcp_message` ids of the line `read_message` returned last, for the Python dialect.
     wire_ids: Option<crate::McpWireIds>,
     /// TypeScript's `forwardedAbort` for a `spawn_claude_code_process` process, with the caller's abort controller
@@ -313,9 +298,14 @@ impl ProcessTransport {
         };
         let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
         let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
-        let stderr_tail = SharedTail::new(options.limits.stderr_tail, options.argv_style == ArgvStyle::TypeScript);
-        // A process from `spawn_claude_code_process` may come without a stderr pipe, as in TypeScript.
+        // A process from `spawn_claude_code_process` may come without a stderr pipe, as in TypeScript. The SDK's own
+        // spawn always pipes stderr, like `sdk.mjs`, so a process adapter that drops it fails like a missing pipe.
         let stderr = match child.stderr.take() {
+            None if options.spawn_claude_code_process.is_none() => return Err(Error::PipeUnavailable),
+            stderr => stderr,
+        };
+        let stderr_tail = SharedTail::new(options.limits.stderr_tail, options.argv_style == ArgvStyle::TypeScript);
+        let stderr = match stderr {
             Some(stderr) => tokio::spawn(drain_stderr_with(
                 stderr,
                 stderr_tail.clone(),
@@ -338,6 +328,7 @@ impl ProcessTransport {
             closed,
             forced: false,
             input_ended: false,
+            stdout_ended: false,
             wire_ids: None,
             forwarded_abort,
         })
@@ -493,6 +484,7 @@ impl Transport for ProcessTransport {
     async fn read_message(&mut self) -> Result<Option<JsonObject>, Error> {
         loop {
             let Some(frame) = self.frames.next().await? else {
+                self.stdout_ended = true;
                 return Ok(None);
             };
             if !frame.trim_ascii_start().starts_with(b"{") {
@@ -546,7 +538,14 @@ impl Transport for ProcessTransport {
             return Ok(());
         };
         let exit_code = crate::error::exit_code(&status);
-        self.closed.record(ClosedReason::after_stop(self.argv_style, exit_code));
+        // Python's clean end of the stream closes the transport (`_ready` is false) before a later write, which
+        // then reports "not ready"; a failed exit or a stopped run leaves it ready and reports the terminated process.
+        let reason = if self.argv_style == ArgvStyle::Python && self.stdout_ended && !self.forced && status.success() {
+            ClosedReason::NotReady
+        } else {
+            ClosedReason::after_stop(self.argv_style, exit_code)
+        };
+        self.closed.record(reason);
         if !self.forced && !status.success() {
             return Err(Error::Process { status, stderr });
         }

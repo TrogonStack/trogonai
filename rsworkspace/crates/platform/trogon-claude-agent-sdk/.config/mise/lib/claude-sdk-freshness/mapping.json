@@ -6214,7 +6214,7 @@
       },
       "rust_api": [
         "SandboxConfigSchema",
-        "SandboxConfigRejected"
+        "SandboxConfigRejectedError"
       ],
       "tests": [
         {

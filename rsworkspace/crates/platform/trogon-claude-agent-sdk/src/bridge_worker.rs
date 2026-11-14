@@ -33,7 +33,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Method;
 use reqwest::header::{HeaderMap, HeaderValue};
-use serde_json::{Map, Value, json};
+use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::SensitiveString;
 use crate::adapters::HttpExecute;
@@ -45,49 +46,23 @@ use crate::bridge_worker_events::{ClientEvent, EventNext, EventQueue, refused_fo
 use crate::bridge_worker_queue::{Next, Patch, PatchQueue, requeue_after_refusal, without_status};
 use crate::bridge_worker_stream::StreamRequest;
 use crate::bridge_worker_types::{
-    InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
+    InitError, InitFailureError, MismatchReason, RegisterFailureError, RequestFailure, RequestOutcome,
+    RequiresActionDetails,
 };
 use crate::settings_json::js_stringify;
 use crate::settings_parse::parse_json;
 
-/// How often the worker beats until the service advises another interval.
-pub const DEFAULT_HEARTBEAT_INTERVAL_MS: u64 = 20_000;
-/// The shortest interval the service may advise.
-pub const HEARTBEAT_INTERVAL_FLOOR_MS: u64 = 10_000;
-/// The longest interval the service may advise.
-pub const HEARTBEAT_INTERVAL_CEILING_MS: u64 = 300_000;
-/// The longest a single heartbeat may wait for its answer.
-pub const HEARTBEAT_TIMEOUT_CEILING_MS: u64 = 15_000;
-/// How much of the interval a heartbeat leaves for the next one to start on time.
-pub const HEARTBEAT_TIMEOUT_MARGIN_MS: u64 = 5_000;
-/// The shortest a single heartbeat may wait for its answer.
-pub const HEARTBEAT_TIMEOUT_FLOOR_MS: u64 = 5_000;
-/// Consecutive `401` or `403` answers after which the worker gives up.
-pub const AUTH_FAILURES_BEFORE_EXIT: u32 = 10;
-/// Consecutive `404` answers after which the worker gives up.
-pub const NOT_FOUND_BEFORE_EXIT: u32 = 3;
+mod constants;
 
-const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const INIT_ATTEMPTS: u32 = 10;
-const GET_ATTEMPTS: u32 = 10;
-const GOODBYE_TIMEOUT: Duration = Duration::from_secs(2);
-const GET_TIMEOUT: Duration = Duration::from_secs(30);
-/// `initStateGetOrderingBoundMs` (bridge.mjs offset 1133 region, `dHe`): how long `initialize` waits for the stored
-/// record before it registers.
-const INIT_STATE_GET_ORDERING_BOUND: Duration = Duration::from_secs(10);
-const INIT_BACKOFF_CEILING_MS: u64 = 30_000;
-/// `qHe` (bridge.mjs offset 1019297): the metadata keys that are not sent again when the stored record holds them.
-const RECORDED_KEYS: [&str; 6] = [
-    "context_usage",
-    "cross_session_inbound",
-    "is_ultraplan_mode",
-    "last_served_model",
-    "permission_mode",
-    "rate_limit_info",
-];
-const SESSION_TICKET_HEADER: &str = "x-ccr-ticket-session";
-const TICKET_HEADERS: [&str; 3] = ["x-ccr-ticket-rev", SESSION_TICKET_HEADER, "x-ccr-ticket-seq"];
+pub use constants::{
+    AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
+    HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
+    NOT_FOUND_BEFORE_EXIT,
+};
+use constants::{
+    GET_ATTEMPTS, GET_TIMEOUT, GOODBYE_TIMEOUT, INIT_ATTEMPTS, INIT_BACKOFF_CEILING_MS, INIT_STATE_GET_ORDERING_BOUND,
+    RECORDED_KEYS, REGISTER_TIMEOUT, REQUEST_TIMEOUT, SESSION_TICKET_HEADER, TICKET_HEADERS,
+};
 
 /// What the worker waits with: the pause between init attempts and the jitter added to it.
 pub trait WorkerPacing {
@@ -116,17 +91,17 @@ impl WorkerPacing for TokioPacing {
 /// A session id the service would not accept in a URL.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("Invalid sessionId: contains unsafe characters")]
-pub struct InvalidSessionId;
+pub struct InvalidSessionIdError;
 
 /// `${apiBaseUrl without trailing slashes}/v1/code/sessions/${sessionId}`, for a session id of letters, digits,
 /// `_` and `-`.
-pub fn session_url(api_base_url: &str, session_id: &str) -> Result<String, InvalidSessionId> {
+pub fn session_url(api_base_url: &str, session_id: &str) -> Result<String, InvalidSessionIdError> {
     let safe = !session_id.is_empty()
         && session_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
     if !safe {
-        return Err(InvalidSessionId);
+        return Err(InvalidSessionIdError);
     }
     Ok(format!(
         "{}/v1/code/sessions/{session_id}",
@@ -325,13 +300,13 @@ fn header_value(text: &str, for_fetch: bool) -> Option<HeaderValue> {
 }
 
 /// What axios throws for a request that never got an answer, read from the transport error.
-fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailure {
+fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailureError {
     let host = url
         .host_str()
         .unwrap_or_default()
         .trim_matches(|c| c == '[' || c == ']');
     let port = url.port_or_known_default().unwrap_or_default();
-    let named = |message: String, code: &str| RegisterFailure::Network {
+    let named = |message: String, code: &str| RegisterFailureError::Network {
         message,
         code: Some(code.to_owned()),
     };
@@ -346,13 +321,6 @@ fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailur
     }
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(current) = source {
-        let shown = current.to_string();
-        if shown.contains("dns error") || shown.contains("failed to lookup address information") {
-            return named(format!("getaddrinfo ENOTFOUND {host}"), "ENOTFOUND");
-        }
-        if shown.contains("connection closed before message completed") {
-            return named("socket hang up".to_owned(), "ECONNRESET");
-        }
         if let Some(io) = current.downcast_ref::<std::io::Error>() {
             match io.kind() {
                 std::io::ErrorKind::ConnectionRefused if host.eq_ignore_ascii_case("localhost") => {
@@ -366,10 +334,25 @@ fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailur
                 std::io::ErrorKind::ConnectionReset
                 | std::io::ErrorKind::ConnectionAborted
                 | std::io::ErrorKind::UnexpectedEof => return named("socket hang up".to_owned(), "ECONNRESET"),
+                // A failed name lookup is a connect failure whose io error carries no OS code and a kind of its
+                // own that none of the arms here or the usual transport kinds name.
+                std::io::ErrorKind::InvalidData
+                | std::io::ErrorKind::InvalidInput
+                | std::io::ErrorKind::Other
+                | std::io::ErrorKind::TimedOut
+                | std::io::ErrorKind::PermissionDenied => {}
+                _ if error.is_connect() && io.raw_os_error().is_none() => {
+                    return named(format!("getaddrinfo ENOTFOUND {host}"), "ENOTFOUND");
+                }
                 _ => {}
             }
         }
         source = current.source();
+    }
+    // The connection was dropped mid-request without an io error to say so: the peer closed before the message
+    // completed.
+    if error.is_request() && !error.is_connect() && !error.is_timeout() {
+        return named("socket hang up".to_owned(), "ECONNRESET");
     }
     named("Network Error".to_owned(), "ERR_NETWORK")
 }
@@ -426,7 +409,7 @@ fn decode(bytes: &[u8]) -> Value {
     parse_json(&text).unwrap_or(Value::String(text))
 }
 
-fn worker_epoch(data: &Value) -> Result<i64, RegisterFailure> {
+fn worker_epoch(data: &Value) -> Result<i64, RegisterFailureError> {
     let number = match data.get("worker_epoch") {
         Some(Value::Number(number)) => number.as_f64(),
         Some(Value::String(text)) => Some(js_number(text)),
@@ -434,7 +417,7 @@ fn worker_epoch(data: &Value) -> Result<i64, RegisterFailure> {
     };
     number
         .and_then(safe_integer)
-        .ok_or_else(|| RegisterFailure::InvalidEpoch {
+        .ok_or_else(|| RegisterFailureError::InvalidEpoch {
             detail: plain_detail(&js_stringify(data)),
         })
 }
@@ -561,7 +544,7 @@ pub struct WorkerClient<H, P = TokioPacing> {
 }
 
 impl<H, P> WorkerClient<H, P> {
-    pub fn new(http: H, pacing: P, config: WorkerConfig) -> Result<Self, InvalidSessionId> {
+    pub fn new(http: H, pacing: P, config: WorkerConfig) -> Result<Self, InvalidSessionIdError> {
         let session_url = session_url(&config.api_base_url, &config.session_id)?;
         let interval = config.heartbeat_interval_ms.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL_MS);
         Ok(Self {
@@ -686,8 +669,8 @@ impl<H, P> WorkerClient<H, P> {
 
 impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// `registerWorker`: asks the service for the epoch this worker will run under.
-    pub async fn register_worker(&self) -> Result<i64, RegisterFailure> {
-        let named = |message: String, code: &str| RegisterFailure::Network {
+    pub async fn register_worker(&self) -> Result<i64, RegisterFailureError> {
+        let named = |message: String, code: &str| RegisterFailureError::Network {
             message,
             code: Some(code.to_owned()),
         };
@@ -717,14 +700,14 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         let reply = exchange(&*self.http, request, REGISTER_TIMEOUT)
             .await
             .map_err(|fault| match fault {
-                Fault::TimedOut => RegisterFailure::TimedOut,
+                Fault::TimedOut => RegisterFailureError::TimedOut,
                 Fault::Unreachable(error) => network_failure(&target, &error),
             })?;
         let Some(body) = &reply.body else {
             return Err(named("stream has been aborted".to_owned(), "ERR_BAD_RESPONSE"));
         };
         if !(200..300).contains(&reply.status) {
-            return Err(RegisterFailure::Status(reply.status));
+            return Err(RegisterFailureError::Status(reply.status));
         }
         worker_epoch(&decode(body))
     }
@@ -755,11 +738,15 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         if let Some(Err(reason)) = answered {
             return Err(InitError::Mismatch(reason));
         }
-        let body = json!({
-            "worker_status": "idle",
-            "worker_epoch": epoch,
-            "external_metadata": {"pending_action": null, "pending_actions": null, "task_summary": null},
-        });
+        let body = RegisterBody {
+            worker_status: "idle",
+            worker_epoch: epoch,
+            external_metadata: ClearedActions {
+                pending_action: (),
+                pending_actions: (),
+                task_summary: (),
+            },
+        };
         let registered = {
             let registration = self.register_idle(&body);
             tokio::pin!(registration);
@@ -779,7 +766,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         Ok(())
     }
 
-    async fn register_idle(&self, body: &Value) -> Result<(), InitError> {
+    async fn register_idle(&self, body: &impl Serialize) -> Result<(), InitError> {
         let mut attempt = 0;
         let failure = loop {
             attempt += 1;
@@ -798,7 +785,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             let delay = Duration::from_millis(backoff) + Duration::from_secs_f64(self.pacing.jitter() * 0.5);
             self.pacing.pause(delay).await;
         };
-        Err(InitError::Failed(InitFailure {
+        Err(InitError::Failed(InitFailureError {
             reason: "worker_register_failed",
             http_status: failure.status,
             no_answer: failure.fetch_failed,
@@ -818,12 +805,12 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 return Ok(None);
             }
             held.state = state;
-            json!({
-                "worker_epoch": held.epoch,
-                "worker_status": state.as_str(),
-                "requires_action_details": details.map_or(Value::Null, RequiresActionDetails::to_json),
-                "internal_metadata": {"reply_degraded": held.reply_degraded},
-            })
+            StateReport {
+                worker_epoch: held.epoch,
+                worker_status: state.as_str(),
+                requires_action_details: details.map_or(Value::Null, RequiresActionDetails::to_json),
+                internal_metadata: reply_degraded_metadata(held.reply_degraded),
+            }
         };
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
@@ -841,10 +828,10 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             let Some(metadata) = without_repeats_of_record(&mut held, metadata) else {
                 return Ok(None);
             };
-            json!({
-                "worker_epoch": held.epoch,
-                "external_metadata": external_metadata_patch(&metadata),
-            })
+            MetadataReport {
+                worker_epoch: held.epoch,
+                external_metadata: external_metadata_patch(&metadata),
+            }
         };
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
@@ -860,14 +847,14 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         }
         held.state = state;
         let mut patch = Patch::new();
-        patch.insert("worker_status".to_owned(), json!(state.as_str()));
+        patch.insert("worker_status".to_owned(), Value::String(state.as_str().to_owned()));
         patch.insert(
             "requires_action_details".to_owned(),
             details.map_or(Value::Null, RequiresActionDetails::to_json),
         );
         patch.insert(
             "internal_metadata".to_owned(),
-            json!({"reply_degraded": held.reply_degraded}),
+            Value::Object(reply_degraded_metadata(held.reply_degraded)),
         );
         held.queue.enqueue(patch);
         true
@@ -944,8 +931,8 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         let mut made = 0_u32;
         loop {
             let capped = attempts.is_some_and(|cap| made >= cap);
-            let jitter = self.pacing.jitter();
-            let next = self.lock().queue.poll(jitter);
+            let pacing = &self.pacing;
+            let next = self.lock().queue.poll_with(&mut || pacing.jitter());
             match next {
                 Next::Idle => return Ok(true),
                 Next::Pause(_) | Next::Send(_) if capped => return Ok(false),
@@ -953,7 +940,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 Next::Send(patch) => {
                     made += 1;
                     let mut body = Patch::new();
-                    body.insert("worker_epoch".to_owned(), json!(self.epoch()));
+                    body.insert("worker_epoch".to_owned(), Value::from(self.epoch()));
                     for (key, value) in &patch {
                         body.insert(key.clone(), value.clone());
                     }
@@ -1249,7 +1236,10 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             }
             held.epoch
         };
-        let body = json!({"worker_epoch": epoch, "connection_status": "disconnected"});
+        let body = GoodbyeBody {
+            worker_epoch: epoch,
+            connection_status: "disconnected",
+        };
         let _ = self
             .request(Method::PUT, "/worker", &body, GOODBYE_TIMEOUT, false)
             .await;
@@ -1262,7 +1252,10 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             let held = self.lock();
             (held.epoch, held.heartbeat_interval_ms)
         };
-        let body = json!({"session_id": self.session_id, "worker_epoch": epoch});
+        let body = HeartbeatBody {
+            session_id: &self.session_id,
+            worker_epoch: epoch,
+        };
         let timeout = heartbeat_timeout(interval);
         let outcome = self
             .request(Method::POST, "/worker/heartbeat", &body, timeout, true)
@@ -1282,7 +1275,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         &self,
         method: Method,
         path: &str,
-        body: &Value,
+        body: &impl Serialize,
         timeout: Duration,
         parse_body: bool,
     ) -> Result<RequestOutcome, MismatchReason> {
@@ -1295,7 +1288,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         &self,
         method: Method,
         path: &str,
-        body: &Value,
+        body: &impl Serialize,
         timeout: Duration,
         parse_body: bool,
         upload_attempt: Option<&'static str>,
@@ -1333,7 +1326,12 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             headers.insert("x-ccr-upload-attempt", HeaderValue::from_static(attempt));
         }
         headers.insert("accept", HeaderValue::from_static("*/*"));
-        *request.body_mut() = Some(js_stringify(body).into_bytes().into());
+        // The bodies are plain data, so this cannot fail; if it ever did, the request is not sent and is reported as
+        // one that got no answer.
+        let Ok(body) = serde_json::to_value(body) else {
+            return unanswered("fetch_failed:TypeError");
+        };
+        *request.body_mut() = Some(js_stringify(&body).into_bytes().into());
         let reply = match exchange(&*self.http, request, timeout).await {
             Ok(reply) => reply,
             Err(Fault::TimedOut) => return unanswered("fetch_failed:TimeoutError"),
@@ -1405,6 +1403,59 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             non_origin_refusal,
         }))
     }
+}
+
+/// The first `PUT /worker`: the worker is idle and holds no pending action.
+#[derive(Serialize)]
+struct RegisterBody {
+    worker_status: &'static str,
+    worker_epoch: i64,
+    external_metadata: ClearedActions,
+}
+
+/// The `external_metadata` the registration sends: every action key is reset to `null`.
+#[derive(Serialize)]
+struct ClearedActions {
+    pending_action: (),
+    pending_actions: (),
+    task_summary: (),
+}
+
+/// The body of a state report.
+#[derive(Serialize)]
+struct StateReport {
+    worker_epoch: i64,
+    worker_status: &'static str,
+    requires_action_details: Value,
+    internal_metadata: Map<String, Value>,
+}
+
+/// The body of a metadata report.
+#[derive(Serialize)]
+struct MetadataReport {
+    worker_epoch: i64,
+    external_metadata: Map<String, Value>,
+}
+
+/// The goodbye of a closing worker.
+#[derive(Serialize)]
+struct GoodbyeBody {
+    worker_epoch: i64,
+    connection_status: &'static str,
+}
+
+/// The body of one heartbeat.
+#[derive(Serialize)]
+struct HeartbeatBody<'a> {
+    session_id: &'a str,
+    worker_epoch: i64,
+}
+
+/// The `internal_metadata` every state report carries.
+fn reply_degraded_metadata(degraded: bool) -> Map<String, Value> {
+    let mut metadata = Map::new();
+    metadata.insert("reply_degraded".to_owned(), Value::Bool(degraded));
+    metadata
 }
 
 /// `withoutRepeatsOfRecord`: the metadata without the keys that were first reported now and equal what the record

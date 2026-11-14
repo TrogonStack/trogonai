@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    CallbackResult, ControlCallbacks, ControlReply, ControlSession, DeferredControl, answer_control_request,
-    clean_control_text, is_pending_prompt,
+    BridgeControlReply, CallbackResult, ControlCallbacks, ControlSession, DeferredControl, HostError, PendingControl,
+    answer_control_request, clean_control_text, is_pending_prompt,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -167,7 +167,7 @@ fn control_requests_are_answered_as_the_recorded_session_answered() -> TestResul
             .as_object_mut()
             .ok_or_else(|| format!("{name}: frame is not an object"))?
             .shift_remove("uuid");
-        let ControlReply::Frame(frame) = reply else {
+        let BridgeControlReply::Frame(frame) = reply else {
             return Err(format!("{name}: expected a frame").into());
         };
         assert_eq!(
@@ -198,8 +198,8 @@ fn deferred(request: &Value, callbacks: &mut ControlCallbacks) -> Option<Deferre
         pending_prompts: &[],
     };
     match answer_control_request(request, &session, callbacks) {
-        ControlReply::Deferred(work) => Some(work),
-        ControlReply::Frame(_) | ControlReply::Pending(_) => None,
+        BridgeControlReply::Deferred(work) => Some(work),
+        BridgeControlReply::Frame(_) | BridgeControlReply::Pending(_) => None,
     }
 }
 
@@ -250,4 +250,14 @@ fn only_permission_and_dialog_requests_stay_pending() {
     assert!(is_pending_prompt(&request("request_user_dialog", json!({}))));
     assert!(!is_pending_prompt(&request("interrupt", json!({}))));
     assert!(!is_pending_prompt(&json!({ "type": "control_request" })));
+}
+
+#[test]
+fn host_errors_and_pending_replies_describe_themselves() {
+    assert_eq!(HostError::Aborted("stopped".to_owned()).message(), "stopped");
+    assert_eq!(HostError::Failed("broke".to_owned()).message(), "broke");
+    let model = PendingControl::SetModel(Box::pin(async { Ok::<_, HostError>(None) }));
+    assert_eq!(format!("{model:?}"), "PendingControl::SetModel");
+    let tokens = PendingControl::SetMaxThinkingTokens(Box::pin(async { Ok::<_, HostError>(None) }));
+    assert_eq!(format!("{tokens:?}"), "PendingControl::SetMaxThinkingTokens");
 }

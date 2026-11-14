@@ -5,6 +5,10 @@ use crate::{
 use indexmap::IndexMap;
 use serde_json::{Number, Value};
 
+mod constants;
+
+use constants::{PYTHON_ORDER, TYPESCRIPT_ORDER};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentExecution {
     Foreground,
@@ -70,46 +74,11 @@ pub struct AgentDefinition {
     /// a field above also sets replaces that value in place. Ignored with [`ArgvStyle::Python`], whose
     /// dataclass cannot carry undeclared keys.
     pub extra: JsonObject,
+    /// TypeScript wire names of the declared keys in the order the caller's object literal lists them, since
+    /// `sdk.mjs` forwards that object as is. Keys it leaves out follow in declaration order, so the default sends
+    /// every key in declaration order. Ignored with [`ArgvStyle::Python`], whose dataclass fixes the order.
+    pub key_order: Vec<String>,
 }
-
-/// The declaration order of TypeScript `AgentDefinition`, which a caller writing every field in order sends.
-const TYPESCRIPT_ORDER: &[&str] = &[
-    "description",
-    "tools",
-    "disallowedTools",
-    "prompt",
-    "model",
-    "mcpServers",
-    "criticalSystemReminder_EXPERIMENTAL",
-    "skills",
-    "initialPrompt",
-    "maxTurns",
-    "autoCompactWindow",
-    "background",
-    "omitClaudeMd",
-    "memory",
-    "effort",
-    "permissionMode",
-    "observer",
-    "observerMessage",
-];
-
-/// The field order of the Python dataclass, which `asdict` keeps when it drops the `None` values.
-const PYTHON_ORDER: &[&str] = &[
-    "description",
-    "prompt",
-    "tools",
-    "disallowedTools",
-    "model",
-    "skills",
-    "memory",
-    "mcpServers",
-    "initialPrompt",
-    "maxTurns",
-    "background",
-    "effort",
-    "permissionMode",
-];
 
 fn tool_list(tools: Option<&Vec<ToolName>>) -> Option<Value> {
     tools.map(|tools| tools.iter().map(|tool| Value::from(tool.as_str())).collect())
@@ -141,6 +110,7 @@ impl AgentDefinition {
             observer: None,
             observer_message: None,
             extra: JsonObject::new(),
+            key_order: Vec::new(),
         }
     }
 
@@ -210,18 +180,23 @@ impl AgentDefinition {
             ("observer", text(self.observer.as_deref())),
             ("observerMessage", text(self.observer_message.as_deref())),
         ];
-        let order = match style {
-            ArgvStyle::TypeScript => TYPESCRIPT_ORDER,
-            ArgvStyle::Python => PYTHON_ORDER,
+        let order: Vec<&str> = match style {
+            ArgvStyle::TypeScript => self
+                .key_order
+                .iter()
+                .map(String::as_str)
+                .chain(TYPESCRIPT_ORDER.iter().copied())
+                .collect(),
+            ArgvStyle::Python => PYTHON_ORDER.to_vec(),
         };
         let mut wire = JsonObject::new();
         for key in order {
             if let Some(value) = fields
                 .iter_mut()
-                .find(|(field, _)| field == key)
+                .find(|(field, _)| *field == key)
                 .and_then(|(_, value)| value.take())
             {
-                wire.insert((*key).to_owned(), value);
+                wire.insert(key.to_owned(), value);
             }
         }
         if style == ArgvStyle::TypeScript {

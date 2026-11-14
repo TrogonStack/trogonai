@@ -320,6 +320,8 @@ async fn injected_session_adapters_resolve_resume_and_clean_up() -> Result<(), B
     Ok(())
 }
 
+/// Python's `build_mirror_batcher` resolves the projects directory at connect, so `Path.home()` raises before the
+/// child starts.
 #[tokio::test]
 async fn missing_injected_config_stops_before_process_creation() -> Result<(), Box<dyn std::error::Error>> {
     let filesystem = RecordingFileSystem::new()?;
@@ -327,7 +329,7 @@ async fn missing_injected_config_stops_before_process_creation() -> Result<(), B
     let (process, _harness) = ScriptedProcessSpawner::new();
     let observer = process.observer();
     let options = ClaudeAgentOptions {
-        session_store: Some(session_options(SummaryDialect::default())),
+        session_store: Some(session_options(SummaryDialect::Python)),
         ..ClaudeAgentOptions::default()
     };
     let result = ClaudeSdkClient::connect_with_adapters(
@@ -354,6 +356,26 @@ async fn missing_injected_config_stops_before_process_creation() -> Result<(), B
             EnvironmentAccess::Variable("HOME".into()),
         ]
     );
+    Ok(())
+}
+
+/// TypeScript resolves `CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")` only when a mirror frame arrives,
+/// so a session without a resume starts the child with no home to find.
+#[tokio::test]
+async fn missing_injected_config_still_starts_a_typescript_session_without_a_resume() -> TestResult {
+    let filesystem = RecordingFileSystem::new()?;
+    let environment = TrackedEnvironment::new(&filesystem);
+    let command = connect_with_tracked_environment(
+        &filesystem,
+        ClaudeAgentOptions {
+            cwd: Some(filesystem.path("project")),
+            session_store: Some(session_options(SummaryDialect::TypeScript)),
+            ..ClaudeAgentOptions::default()
+        },
+        environment,
+    )
+    .await?;
+    assert_eq!(command.directory, Some(filesystem.path("project")));
     Ok(())
 }
 
@@ -606,14 +628,19 @@ fn variable(name: &str) -> EnvironmentAccess {
 /// TypeScript `Wn(directory, undefined)` reads `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_PROJECT_DIR_NAME` from the process
 /// to name the project; Python derives the name from the directory alone. A configured `env` replaces the child
 /// environment by default, so TypeScript then reads those settings from it alone and nothing from the process.
-fn project_name_lookups(dialect: SummaryDialect) -> Vec<EnvironmentAccess> {
-    match dialect {
-        SummaryDialect::TypeScript => ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROJECT_DIR_NAME"]
-            .into_iter()
-            .map(variable)
-            .collect(),
-        SummaryDialect::Python => Vec::new(),
-    }
+/// Connecting then reads the run-end ceiling, `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, from the process in both
+/// dialects, since `options.env` does not set it.
+fn connect_lookups(dialect: SummaryDialect) -> Vec<EnvironmentAccess> {
+    let project_name: &[&str] = match dialect {
+        SummaryDialect::TypeScript => &["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROJECT_DIR_NAME"],
+        SummaryDialect::Python => &[],
+    };
+    project_name
+        .iter()
+        .copied()
+        .chain(["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"])
+        .map(variable)
+        .collect()
 }
 
 const DIALECTS: [SummaryDialect; 2] = [SummaryDialect::TypeScript, SummaryDialect::Python];
@@ -642,7 +669,7 @@ async fn explicit_store_config_and_working_directory_short_circuit_environment_l
             environment.clone(),
         )
         .await?;
-        assert_eq!(environment.accesses()?, project_name_lookups(dialect));
+        assert_eq!(environment.accesses()?, connect_lookups(dialect));
         assert_eq!(command.directory, Some(filesystem.path("project")));
         assert_eq!(
             command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
@@ -740,7 +767,7 @@ async fn injected_config_short_circuits_home_and_resolves_current_directory_once
         )
         .await?;
         let mut expected = vec![EnvironmentAccess::CurrentDirectory, variable("CLAUDE_CONFIG_DIR")];
-        expected.extend(project_name_lookups(dialect));
+        expected.extend(connect_lookups(dialect));
         assert_eq!(environment.accesses()?, expected);
         assert_eq!(
             command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
@@ -748,9 +775,8 @@ async fn injected_config_short_circuits_home_and_resolves_current_directory_once
             "the child inherits the caller configuration directory"
         );
         assert_eq!(
-            command.directory,
-            Some(filesystem.path("project")),
-            "the child runs in the directory the session key was derived from"
+            command.directory, None,
+            "the child inherits the working directory the session key was derived from"
         );
     }
     Ok(())
@@ -779,14 +805,14 @@ async fn missing_config_variable_falls_back_to_injected_home_in_order() -> TestR
             variable("CLAUDE_CONFIG_DIR"),
             variable("HOME"),
         ];
-        expected.extend(project_name_lookups(dialect));
+        expected.extend(connect_lookups(dialect));
         assert_eq!(environment.accesses()?, expected);
         assert_eq!(
             command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
             None,
             "the child inherits the default configuration directory"
         );
-        assert_eq!(command.directory, Some(filesystem.path("project")));
+        assert_eq!(command.directory, None, "the child inherits the working directory");
     }
     Ok(())
 }
@@ -814,7 +840,7 @@ async fn explicit_working_directory_skips_failing_current_directory_provider() -
         )
         .await?;
         let mut expected = vec![variable("CLAUDE_CONFIG_DIR")];
-        expected.extend(project_name_lookups(dialect));
+        expected.extend(connect_lookups(dialect));
         assert_eq!(environment.accesses()?, expected);
         assert_eq!(command.directory, Some(filesystem.path("project")));
     }
@@ -858,7 +884,11 @@ async fn ordinary_connection_never_reads_session_environment_or_current_director
         ..TrackedEnvironment::new(&filesystem)
     };
     connect_with_tracked_environment(&filesystem, ClaudeAgentOptions::default(), environment.clone()).await?;
-    assert!(environment.accesses()?.is_empty());
+    // The run-end ceiling is the one process variable every connection reads.
+    assert_eq!(
+        environment.accesses()?,
+        [variable("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")]
+    );
     Ok(())
 }
 

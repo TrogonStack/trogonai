@@ -30,15 +30,10 @@ use crate::{
     },
 };
 
-/// TypeScript `d4`: the text envelope arm of the browser transport is ported.
-pub const G4_TEXT_ENVELOPE_ARM_PORTED: bool = true;
+mod constants;
 
-/// TypeScript `s4`: lines waiting to be written before a writer has to wait.
-const QUEUE_LIMIT: usize = 1_000;
-/// TypeScript `i4`: failed attempts in a row after which a line is dropped.
-const UPLOAD_ATTEMPTS: u32 = 3;
-/// How much of an error response is read to find its reason.
-const REASON_BYTES: usize = 4_096;
+pub use constants::G4_TEXT_ENVELOPE_ARM_PORTED;
+use constants::{QUEUE_LIMIT, REASON_BYTES, UPLOAD_ATTEMPTS};
 
 type Delivery = JsonObject;
 
@@ -128,14 +123,14 @@ async fn cancelled(token: Option<&CancellationToken>) {
 
 fn log(record: &SseLogRecord) {
     match record.level {
-        SseLogLevel::Debug => tracing::debug!("{}", record.text),
-        SseLogLevel::Warn => tracing::warn!("{}", record.text),
+        SseLogLevel::Debug => tracing::debug!(message = %record.text),
+        SseLogLevel::Warn => tracing::warn!(message = %record.text),
     }
 }
 
 fn call_handler(name: &str, handler: impl FnOnce()) {
     if catch_unwind(AssertUnwindSafe(handler)).is_err() {
-        tracing::warn!("[BrowserSSETransport] {name} handler threw");
+        tracing::warn!(handler = name, "[BrowserSSETransport] handler threw");
     }
 }
 
@@ -766,6 +761,12 @@ impl Transport for SseTransport {
 
     fn is_ready(&self) -> bool {
         self.shared.state().ready && !self.shared.is_closed()
+    }
+
+    /// TypeScript `write` awaits the first readiness instead of failing, and the browser query never checks
+    /// `isReady()`, so a document written before the stream opens waits for it.
+    fn accepts_writes(&self) -> bool {
+        !self.shared.is_closed()
     }
 
     async fn end_input(&mut self) -> Result<(), Error> {

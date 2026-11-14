@@ -118,7 +118,7 @@ async fn rename_tag_and_delete_go_through_the_store() -> TestResult {
     assert!(matches!(
         delete_session_via_store(&store, "bad", Some(tmp.path())).await,
         Err(SessionStoreHelperError::Mutation(
-            SessionMutationError::InvalidSessionId(_)
+            SessionMutationError::InvalidSessionIdError(_)
         ))
     ));
 
@@ -378,7 +378,7 @@ async fn import_replays_the_transcript_subagents_and_sidecars() -> TestResult {
     assert!(matches!(
         import_session_to_store(&files, "bad", &skipped, &ImportOptions::default()).await,
         Err(SessionStoreHelperError::Mutation(
-            SessionMutationError::InvalidSessionId(_)
+            SessionMutationError::InvalidSessionIdError(_)
         ))
     ));
     Ok(())

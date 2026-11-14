@@ -3,3 +3,4 @@
 status-level = "fail"
 final-status-level = "fail"
 failure-output = "immediate-final"
+fail-fast = false

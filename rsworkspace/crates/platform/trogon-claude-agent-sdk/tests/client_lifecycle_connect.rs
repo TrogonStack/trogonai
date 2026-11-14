@@ -317,3 +317,41 @@ async fn scope_reports_a_failed_disconnect_beside_the_body_error() -> TestResult
     server.await??;
     Ok(())
 }
+
+/// Python `ClaudeSDKClient.connect(str)` with the prompt given as an owned string or as a prompt value.
+#[tokio::test]
+async fn connect_takes_an_owned_string_or_a_prompt() -> TestResult {
+    let owned = record(ArgvStyle::Python, |_| {}, String::from("owned"), nothing).await?;
+    assert_eq!(owned, [python_user("owned", "default")]);
+    let prompt = record(ArgvStyle::Python, |_| {}, Prompt::from("prompt"), nothing).await?;
+    assert_eq!(prompt, [python_user("prompt", "default")]);
+    Ok(())
+}
+
+/// When only the disconnect fails, Python's `__aexit__` raises its exception even though the body returned; the
+/// scope returns the disconnect's error.
+#[tokio::test]
+async fn scope_reports_a_failed_disconnect_after_a_body_that_succeeded() -> TestResult {
+    let short = |options: &mut ClaudeAgentOptions| {
+        options.limits.control_timeout = Some(Timeout::new(Duration::from_millis(100)));
+    };
+    let (client, server) = unconnected(ArgvStyle::TypeScript, short, &["interrupt"]);
+    let outcome = client
+        .scope(async |client| -> Result<(), Error> {
+            let interrupted = client.handle().interrupt().await;
+            assert!(interrupted.is_err(), "the silent CLI never answers the interrupt");
+            Ok(())
+        })
+        .await;
+    assert!(
+        matches!(
+            &outcome,
+            Err(Error::ControlTimeout {
+                operation: ControlOperation::Interrupt
+            })
+        ),
+        "{outcome:?}"
+    );
+    server.await??;
+    Ok(())
+}

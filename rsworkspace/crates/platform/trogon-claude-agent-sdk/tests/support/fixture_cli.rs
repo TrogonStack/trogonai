@@ -1,5 +1,6 @@
 use std::{
     error::Error,
+    ffi::OsStr,
     io::{self, BufRead, Write},
     sync::{
         Arc,
@@ -9,6 +10,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
+use trogon_claude_agent_sdk::adapters::{EnvironmentVariable, SystemEnvironment};
 
 fn emit(value: Value) -> io::Result<()> {
     let stdout = io::stdout();
@@ -23,6 +25,21 @@ fn field<'a>(value: &'a Value, key: &str) -> io::Result<&'a str> {
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| io::Error::other("fixture expected string field"))
+}
+
+/// The CLI takes a prompt as a string, which Python and the client write, or as content blocks, which `sdk.mjs`
+/// writes for a string given to `query()`.
+fn prompt_text(content: &Value) -> io::Result<&str> {
+    match content {
+        Value::Array(blocks) => blocks
+            .first()
+            .map_or(Err(io::Error::other("fixture expected a text block")), |block| {
+                field(block, "text")
+            }),
+        other => other
+            .as_str()
+            .ok_or_else(|| io::Error::other("fixture expected string field")),
+    }
 }
 
 fn result(text: &str) -> Value {
@@ -81,9 +98,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .next()
         .ok_or_else(|| io::Error::other("fixture missing initialize"))??;
     let initialize: Value = serde_json::from_str(&first)?;
-    // The TypeScript argv shape delivers the system prompt inside `initialize`.
+    // The TypeScript argv shape delivers the system prompt inside `initialize`, the Python one on the command line.
     let custom_prompt = initialize["request"]["systemPrompt"][0]
         .as_str()
+        .or_else(|| {
+            args.windows(2)
+                .find_map(|pair| (pair[0] == "--system-prompt").then_some(pair[1].as_str()))
+        })
         .filter(|prompt| !prompt.is_empty());
     assert_eq!(initialize["type"], "control_request");
     assert_eq!(initialize["request"]["subtype"], "initialize");
@@ -134,7 +155,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         json!({"type":"control_response","response":{"subtype":"success","request_id":initialize_id,"response":initialization}}),
     )?;
     emit(
-        json!({"type":"system","subtype":"init","session_id":"fixture-session","arguments":args,"cwd":std::env::current_dir()?,"initialize_request":initialize["request"],"config_dir":std::env::var_os("CLAUDE_CONFIG_DIR")}),
+        json!({"type":"system","subtype":"init","session_id":"fixture-session","arguments":args,"cwd":std::env::current_dir()?,"initialize_request":initialize["request"],"config_dir":SystemEnvironment.var_os(OsStr::new("CLAUDE_CONFIG_DIR"))}),
     )?;
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -163,7 +184,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     continue;
                 }
-                let prompt = field(&value["message"], "content")?;
+                let prompt = prompt_text(&value["message"]["content"])?;
                 match mode {
                     "normal" | "argv" | "connection-info" => {
                         emit(assistant(prompt))?;
@@ -307,7 +328,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         emit(result(field(&response["result"]["content"][0], "text")?))?;
                     }
                     "mirror" | "mirror-two" | "mirror-close" => {
-                        let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+                        let config = SystemEnvironment
+                            .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
                             .ok_or_else(|| io::Error::other("missing config root"))?;
                         let path =
                             std::path::PathBuf::from(config).join("projects/fixture-project/fixture-session.jsonl");
