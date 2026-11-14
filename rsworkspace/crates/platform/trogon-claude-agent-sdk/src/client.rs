@@ -495,12 +495,13 @@ impl ClaudeSdkClient {
             }
             None => crate::StoreResume::None,
         };
+        // The project key comes from `cwd ?? process.cwd()` in both upstream SDKs, which never hand that directory
+        // to the spawn: the child keeps `options.cwd`, and with none it inherits the working directory and gets no
+        // `PWD`.
         let cwd = match options.cwd.clone() {
             Some(cwd) => cwd,
             None => environment.current_dir().map_err(Error::Io)?,
         };
-        // The CLI must run in the directory the session project key was derived from.
-        options.cwd = Some(cwd.clone());
         let runtime = crate::SessionRuntime::prepare_with_adapters(crate::SessionPreparationOptions {
             store_options: &store_options,
             resume,

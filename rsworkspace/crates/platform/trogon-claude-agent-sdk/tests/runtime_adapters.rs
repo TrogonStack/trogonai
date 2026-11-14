@@ -775,9 +775,8 @@ async fn injected_config_short_circuits_home_and_resolves_current_directory_once
             "the child inherits the caller configuration directory"
         );
         assert_eq!(
-            command.directory,
-            Some(filesystem.path("project")),
-            "the child runs in the directory the session key was derived from"
+            command.directory, None,
+            "the child inherits the working directory the session key was derived from"
         );
     }
     Ok(())
@@ -813,7 +812,7 @@ async fn missing_config_variable_falls_back_to_injected_home_in_order() -> TestR
             None,
             "the child inherits the default configuration directory"
         );
-        assert_eq!(command.directory, Some(filesystem.path("project")));
+        assert_eq!(command.directory, None, "the child inherits the working directory");
     }
     Ok(())
 }
