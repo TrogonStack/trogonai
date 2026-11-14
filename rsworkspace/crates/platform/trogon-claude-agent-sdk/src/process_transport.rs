@@ -298,9 +298,14 @@ impl ProcessTransport {
         };
         let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
         let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
-        let stderr_tail = SharedTail::new(options.limits.stderr_tail, options.argv_style == ArgvStyle::TypeScript);
-        // A process from `spawn_claude_code_process` may come without a stderr pipe, as in TypeScript.
+        // A process from `spawn_claude_code_process` may come without a stderr pipe, as in TypeScript. The SDK's own
+        // spawn always pipes stderr, like `sdk.mjs`, so a process adapter that drops it fails like a missing pipe.
         let stderr = match child.stderr.take() {
+            None if options.spawn_claude_code_process.is_none() => return Err(Error::PipeUnavailable),
+            stderr => stderr,
+        };
+        let stderr_tail = SharedTail::new(options.limits.stderr_tail, options.argv_style == ArgvStyle::TypeScript);
+        let stderr = match stderr {
             Some(stderr) => tokio::spawn(drain_stderr_with(
                 stderr,
                 stderr_tail.clone(),
