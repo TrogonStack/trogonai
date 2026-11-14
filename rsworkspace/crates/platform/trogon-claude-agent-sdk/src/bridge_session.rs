@@ -463,15 +463,21 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
 
     /// Sends what is queued: the state and metadata reports, the events and the acknowledgements.
     pub async fn pump(&mut self) {
+        self.pump_attempts(None).await;
+    }
+
+    /// [`BridgeSession::pump`] that makes at most `attempts` requests for each queue, so a failed upload leaves its
+    /// retry wait for the caller to see; see [`WorkerClient::pump_events`].
+    pub async fn pump_attempts(&mut self, attempts: Option<u32>) {
         if self.ended || self.is_closed() {
             return;
         }
         self.drain_outbox().await;
-        let reports = self.worker.flush().await;
+        let reports = self.worker.pump(attempts).await;
         self.settle(reports);
-        let events = self.worker.flush_events().await;
+        let events = self.worker.pump_events(attempts).await;
         self.settle(events);
-        let deliveries = self.worker.pump_deliveries(None).await;
+        let deliveries = self.worker.pump_deliveries(attempts).await;
         self.settle(deliveries);
     }
 

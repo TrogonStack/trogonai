@@ -15,6 +15,7 @@ mod bridge_client;
 mod bridge_git;
 mod bridge_js;
 mod bridge_session;
+mod bridge_session_handle;
 mod bridge_types;
 mod bridge_worker;
 mod bridge_worker_control;
@@ -193,6 +194,7 @@ pub use bridge_session::{
     AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, CloseCallback,
     EnvironmentLookup, InboundMessageCallback, PermissionResponseCallback, attach_bridge_session,
 };
+pub use bridge_session_handle::ReconnectOptions;
 pub use bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
     DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,

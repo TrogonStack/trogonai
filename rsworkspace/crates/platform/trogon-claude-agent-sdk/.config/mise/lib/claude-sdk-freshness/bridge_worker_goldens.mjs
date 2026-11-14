@@ -323,7 +323,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [], handle: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -929,6 +929,10 @@ async function run(spec) {
   for (const [key, behaviour] of Object.entries(spec.callbacks ?? {})) options[key] = callback(key, behaviour);
   if (spec.version !== undefined) options.claudeCodeVersion = spec.version;
   for (const [key, value] of Object.entries(spec.env ?? {})) process.env[key] = value;
+  const emit = (item) => {
+    if (item.via === undefined) handle.write(item);
+    else handle[item.via](item.via === 'sendControlCancelRequest' ? item.payload.request_id : item.payload);
+  };
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
   const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, ...(spec.sessionId !== undefined && { session_id: spec.sessionId }), ...(spec.initialSequenceNum !== undefined && { initial_sequence_num: spec.initialSequenceNum }), interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), ...(spec.stream !== undefined && { stream: spec.stream }), ...(spec.clock !== undefined && { clock: spec.clock }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
@@ -947,14 +951,35 @@ async function run(spec) {
         const seen = () => requests.filter((r) => r.path.endsWith('/worker/events')).length;
         const start = seen();
         const wroteAt = realNow();
-        for (const item of step.writes) {
-          if (item.via === undefined) handle.write(item);
-          else handle[item.via](item.via === 'sendControlCancelRequest' ? item.payload.request_id : item.payload);
-        }
+        for (const item of step.writes) emit(item);
         await until(() => seen() >= start + step.expect, 12000);
         if (spec.prompt && realNow() - wroteAt > 600) throw new Error(`${spec.name}: a post was held for ${realNow() - wroteAt} ms`);
         if (seen() < start + step.expect) throw new Error(`${spec.name}: expected ${step.expect} event posts`);
         await sleep(250);
+        continue;
+      }
+      if (step.op === 'result') {
+        const seen = () => requests.filter((r) => r.path.endsWith('/worker/events')).length;
+        const start = seen();
+        handle.sendResult();
+        await until(() => seen() >= start + step.expect, 12000);
+        if (seen() < start + step.expect) throw new Error(`${spec.name}: expected ${step.expect} event posts`);
+        await sleep(250);
+        continue;
+      }
+      if (step.op === 'flush') {
+        for (const item of step.writes ?? []) emit(item);
+        await handle.flush();
+        await sleep(250);
+        continue;
+      }
+      if (step.op === 'reconnect') {
+        for (const item of step.writes ?? []) emit(item);
+        if (step.afterMs) await sleep(step.afterMs);
+        const options = { apiBaseUrl: base, ingressToken: step.token ?? 'tok2' };
+        if (step.epoch !== undefined) options.epoch = step.epoch;
+        await handle.reconnectTransport(options);
+        await sleep(step.settleMs ?? 400);
         continue;
       }
       if (step.op === 'write') {
@@ -1168,6 +1193,31 @@ attached('closing_a_running_worker_says_nothing', { steps: [running, { op: 'clos
 attached('writes_after_closing_are_dropped', { steps: [{ op: 'close', sends: true }, post(0, [note('a', 'u1')])] });
 attached('closing_after_the_epoch_was_taken_over_says_nothing', { puts: [json(200, {}), conflict('superseded_by_worker')], steps: [{ op: 'metadata', value: { task_summary: 's1' }, sends: true }, { op: 'close', sends: false }], waitClose: true });
 
+// ---- the handle `attachBridgeSession` returns: each public call (the worker, delivery and state calls are the same
+// calls the sections above make; these are the ones only the handle has) ----
+const handled = (name, spec) => add('handle', name, { epoch: 6, ...spec });
+const via = (method, payload) => ({ via: method, payload });
+const prompt = (id, subtype, extra = {}) => ({ type: 'control_request', request_id: id, request: { subtype, ...extra } });
+const reply = (id, extra = {}) => ({ type: 'control_response', response: { subtype: 'success', request_id: id, response: {} }, ...extra });
+handled('a_uuid_is_written_once', { steps: [post(1, [note('a', 'u1')]), post(0, [note('b', 'u1')])] });
+handled('a_write_without_a_uuid_is_posted', { steps: [post(1, [note('a')])] });
+handled('a_result_is_the_empty_success_of_a_turn', { steps: [{ op: 'result', expect: 1 }] });
+handled('a_tool_permission_prompt_is_posted_with_the_session_id', { steps: [post(1, [via('sendControlRequest', prompt('r1', 'can_use_tool', { tool_name: 'Bash', input: {}, tool_use_id: 't1' }))])] });
+handled('a_dialog_prompt_is_posted_with_the_session_id', { steps: [post(1, [via('sendControlRequest', prompt('r2', 'request_user_dialog', { dialog_kind: 'x', payload: {} }))])] });
+handled('another_control_request_is_posted_with_the_session_id', { steps: [post(1, [via('sendControlRequest', prompt('r3', 'interrupt'))])] });
+handled('a_control_response_is_posted_with_the_session_id', { steps: [post(1, [via('sendControlResponse', reply('r1'))])] });
+handled('a_live_only_control_response_is_posted', { steps: [post(1, [via('sendControlResponse', reply('r1', { live_only: true }))])] });
+handled('a_cancel_is_posted_with_the_session_id', { steps: [post(1, [via('sendControlCancelRequest', { request_id: 'r1' })])] });
+handled('a_prompt_is_answered_after_it_was_asked', { steps: [post(1, [via('sendControlRequest', prompt('r1', 'can_use_tool', { tool_name: 'Bash', input: {}, tool_use_id: 't1' }))]), post(1, [via('sendControlResponse', reply('r1'))]), post(1, [via('sendControlCancelRequest', { request_id: 'r1' })])] });
+handled('calls_after_closing_send_nothing', { steps: [{ op: 'close', sends: true }, post(0, [note('a', 'u1'), via('sendControlRequest', prompt('r1', 'can_use_tool', { tool_name: 'Bash', input: {}, tool_use_id: 't1' })), via('sendControlResponse', reply('r1')), via('sendControlCancelRequest', { request_id: 'r1' })]), { op: 'state', state: 'running', sends: false }, { op: 'metadata', value: { task_summary: 's1' }, sends: false }, { op: 'delivery', expect: 0, reports: [['u1', 'received']] }, { op: 'result', expect: 0 }, { op: 'flush' }] });
+handled('flush_sends_what_is_held', { steps: [{ op: 'flush', writes: [note('a', 'u1')] }] });
+handled('flush_waits_for_a_failed_batch_to_be_resent', { events: [raw(500, ''), json(200, {})], eventGaps: [500], steps: [{ op: 'flush', writes: [note('a', 'u1')] }] });
+handled('reconnecting_starts_a_new_worker_under_the_given_epoch', { steps: [post(1, [note('a', 'u1')]), { op: 'reconnect', epoch: 7 }, post(1, [note('b', 'u2')])] });
+handled('reconnecting_without_an_epoch_keeps_the_epoch', { steps: [{ op: 'reconnect' }, post(1, [note('b', 'u2')])] });
+handled('reconnecting_after_closing_does_nothing', { steps: [{ op: 'close', sends: true }, { op: 'reconnect', epoch: 7 }] });
+handled('what_the_old_worker_did_not_deliver_moves_to_the_new_one', { events: [raw(500, ''), json(200, {})], steps: [{ op: 'reconnect', epoch: 7, writes: [note('a', 'u1'), via('sendControlRequest', prompt('r1', 'can_use_tool', { tool_name: 'Bash', input: {}, tool_use_id: 't1' }))], afterMs: 200 }], waitFor: [['=/worker/events', 2]] });
+handled('a_carried_write_is_not_delivered_back_by_the_new_stream', { stream: [connection([]), connection([clientEvent(1, 'e1', plainUser('u1')), clientEvent(2, 'e2', plainUser('u2'))])], events: [raw(500, ''), json(200, {})], steps: [{ op: 'reconnect', epoch: 7, writes: [note('a', 'u1')], afterMs: 200 }], waitFor: [['=/worker/events', 2], delivered(4)] });
+
 // `--only=<case name>` records just that case, as many times as `--times=<n>` says, and prints the results.
 const only = flags.find((flag) => flag.startsWith('--only='))?.slice('--only='.length);
 if (only !== undefined) {
@@ -1182,11 +1232,11 @@ if (only !== undefined) {
   process.exit(0);
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [], network: [], fetch_failures: [] };
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [], handle: [], network: [], fetch_failures: [] };
 // `--section=<name>` records only that section and keeps every other part of the existing goldens file as it is.
 const sectionOnly = flags.find((flag) => flag.startsWith('--section='))?.slice('--section='.length);
 const existing = sectionOnly === undefined ? null : JSON.parse(fs.readFileSync(out, 'utf8'));
-for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'delivery', 'served', 'stream', 'attach']) {
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'delivery', 'served', 'stream', 'attach', 'handle']) {
   if (sectionOnly !== undefined && section !== sectionOnly) {
     goldens[section] = existing[section];
     continue;
