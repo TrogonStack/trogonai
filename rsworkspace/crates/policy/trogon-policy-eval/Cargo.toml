@@ -13,12 +13,22 @@ workspace = true
 # `CommandAuthorizer` seam. Off by default so the core carries neither the
 # decider runtime nor a clock abstraction.
 decider = ["dep:trogon-decider-runtime", "dep:trogon-std"]
+# Adds `TryFrom` conversions from the generated `policy` messages into the
+# evaluator's value objects, so a projection can build a `PolicySnapshot` from
+# decider state without hand-mapping. Off by default so the core links no
+# generated code.
+proto = ["dep:trogonai-proto"]
 
 [dependencies]
 thiserror = { workspace = true }
 trogon-decider-runtime = { workspace = true, optional = true }
 trogon-std = { workspace = true, optional = true }
+trogonai-proto = { workspace = true, optional = true, features = ["policy"] }
 
 [[test]]
 name = "decider_adapter"
 required-features = ["decider"]
+
+[[test]]
+name = "proto_conversions"
+required-features = ["proto"]

@@ -7,9 +7,7 @@ use crate::subject::Subject;
 /// A reference to one policy history at the revision that was read: the kind,
 /// the subject, and the stream revision (ADR#0071 Decision 7).
 ///
-/// Shaped to convert to and from the `PolicyRuleRef` message once the generated
-/// types are available to this crate. The conversion is intentionally not
-/// written yet.
+/// With the `proto` feature it converts from the `PolicyRuleRef` message.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RuleRef {
     kind: RuleKind,
