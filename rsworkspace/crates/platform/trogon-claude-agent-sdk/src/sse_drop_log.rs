@@ -27,7 +27,7 @@ impl SseDropLog {
         *count += 1;
         let text = if *count <= LOGGED_IN_FULL {
             text
-        } else if *count % SAMPLE_EVERY == 0 {
+        } else if count.is_multiple_of(SAMPLE_EVERY) {
             format!("{text} ({count} total \u{2014} sampling 1/{SAMPLE_EVERY})")
         } else {
             return None;

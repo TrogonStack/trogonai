@@ -428,11 +428,10 @@ impl Matcher<'_> {
         if done < repeat.min {
             return self.repeat_more(repeat, done, position, captures, next);
         }
-        if repeat.greedy {
-            self.repeat_more(repeat, done, position, captures, next) || next(position, captures)
-        } else {
-            next(position, captures) || self.repeat_more(repeat, done, position, captures, next)
+        if !repeat.greedy && next(position, captures) {
+            return true;
         }
+        self.repeat_more(repeat, done, position, captures, next) || (repeat.greedy && next(position, captures))
     }
 
     fn repeat_more(

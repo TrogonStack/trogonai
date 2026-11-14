@@ -111,11 +111,10 @@ async fn dispatch(
     signal: CancellationToken,
 ) -> Result<JsonObject, McpServerError> {
     let tools = state.tools.as_ref().filter(|tools| !tools.is_empty());
-    let registered = match (method, tools) {
-        ("initialize" | "ping", _) => true,
-        ("tools/list" | "tools/call", Some(_)) => true,
-        _ => false,
-    };
+    let registered = matches!(
+        (method, tools),
+        ("initialize" | "ping", _) | ("tools/list" | "tools/call", Some(_))
+    );
     if !registered {
         return Ok(error(id, -32601, "Method not found".into()));
     }

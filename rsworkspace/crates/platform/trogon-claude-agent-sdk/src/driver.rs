@@ -217,7 +217,9 @@ pub(crate) enum McpTransportEvent {
 
 /// `pendingMcpResponses`: shared with the manifest capture, whose per-server handshakes register waiters too.
 #[derive(Clone, Default)]
-pub(crate) struct WaiterTable(Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<Result<JsonObject, ()>>>>>);
+pub(crate) struct WaiterTable(Arc<std::sync::Mutex<HashMap<String, Waiter>>>);
+
+type Waiter = oneshot::Sender<Result<JsonObject, ()>>;
 
 impl WaiterTable {
     /// Replacing an entry drops the earlier waiter, which is then never answered.

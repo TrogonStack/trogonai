@@ -12,6 +12,7 @@ use crate::{
     sdk_mcp_zod_issue::{Issue, aborted},
 };
 use serde_json::Value;
+use std::cmp::Ordering;
 use std::collections::HashSet;
 
 /// A JavaScript value the parse reads: JSON, `undefined`, or the function an absent key named like a member of
@@ -356,7 +357,7 @@ fn length_check(
     match kind {
         StringCheckKind::Minimum => {
             if let Some(bound) = min
-                && !(measured >= bound.value)
+                && measured.partial_cmp(&bound.value).is_none_or(Ordering::is_lt)
             {
                 issues.push(Issue::new(
                     [
@@ -371,7 +372,7 @@ fn length_check(
         }
         StringCheckKind::Maximum => {
             if let Some(bound) = max
-                && !(measured <= bound.value)
+                && measured.partial_cmp(&bound.value).is_none_or(Ordering::is_gt)
             {
                 issues.push(Issue::new(
                     [
@@ -562,25 +563,25 @@ fn numeric(node: &NumberNode, input: Input<'_>) -> Outcome {
     };
     if let Some(bound) = &node.min
         && !aborted(&issues)
-        && !(value >= bound.value)
+        && value.partial_cmp(&bound.value).is_none_or(Ordering::is_lt)
     {
         issues.push(small(bound, true));
     }
     if let Some(bound) = &node.exclusive_min
         && !aborted(&issues)
-        && !(value > bound.value)
+        && value.partial_cmp(&bound.value).is_none_or(Ordering::is_le)
     {
         issues.push(small(bound, false));
     }
     if let Some(bound) = &node.max
         && !aborted(&issues)
-        && !(value <= bound.value)
+        && value.partial_cmp(&bound.value).is_none_or(Ordering::is_gt)
     {
         issues.push(big(bound, true));
     }
     if let Some(bound) = &node.exclusive_max
         && !aborted(&issues)
-        && !(value < bound.value)
+        && value.partial_cmp(&bound.value).is_none_or(Ordering::is_ge)
     {
         issues.push(big(bound, false));
     }

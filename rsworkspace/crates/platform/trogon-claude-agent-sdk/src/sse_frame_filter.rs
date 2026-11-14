@@ -212,11 +212,11 @@ impl SseFrameFilter {
                     }
                 }
             }
-            Some(kind @ ("client_event" | "ephemeral_event")) => {
-                if self.handle_payload(kind, cursor, data, &mut events).is_err() {
-                    let text = format!("{PREFIX} Dropping unparseable {kind} frame");
-                    self.drop_frame(&mut events, SseDropCategory::UnparseableFrame, SseLogLevel::Debug, text);
-                }
+            Some(kind @ ("client_event" | "ephemeral_event"))
+                if self.handle_payload(kind, cursor, data, &mut events).is_err() =>
+            {
+                let text = format!("{PREFIX} Dropping unparseable {kind} frame");
+                self.drop_frame(&mut events, SseDropCategory::UnparseableFrame, SseLogLevel::Debug, text);
             }
             _ => {}
         }

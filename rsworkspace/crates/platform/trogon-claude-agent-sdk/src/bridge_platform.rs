@@ -190,7 +190,7 @@ impl PlatformProbe for HostProbe {
         // SAFETY: `c_path` is a valid NUL terminated string and `stats` is a valid out pointer.
         let status = unsafe { libc::statfs(c_path.as_ptr(), &mut stats) };
         if status == 0 {
-            Ok(i64::from(stats.f_type))
+            Ok(widen_fs_type(stats.f_type))
         } else {
             Err(probe_error(&io::Error::last_os_error()))
         }
@@ -235,3 +235,9 @@ impl PlatformProbe for HostProbe {
 #[cfg(test)]
 #[path = "bridge_platform_tests.rs"]
 mod tests;
+
+/// `f_type` is `i64` on Linux and `u32` on macOS; a generic widening keeps one call site for both.
+#[cfg(unix)]
+fn widen_fs_type<T: Into<i64>>(fs_type: T) -> i64 {
+    fs_type.into()
+}

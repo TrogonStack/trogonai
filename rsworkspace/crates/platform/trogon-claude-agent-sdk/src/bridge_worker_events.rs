@@ -388,7 +388,7 @@ impl EventQueue {
 pub fn retry_delay(failures: u32, retry_after_ms: Option<f64>, jitter: f64) -> Duration {
     let extra = jitter * JITTER_MS;
     let ms = match retry_after_ms {
-        Some(asked) if asked.is_finite() => asked.min(MAX_DELAY_MS).max(BASE_DELAY_MS) + extra,
+        Some(asked) if asked.is_finite() => asked.clamp(BASE_DELAY_MS, MAX_DELAY_MS) + extra,
         _ => {
             (BASE_DELAY_MS * 2_f64.powi(i32::try_from(failures.saturating_sub(1)).unwrap_or(i32::MAX)))
                 .min(MAX_DELAY_MS)
