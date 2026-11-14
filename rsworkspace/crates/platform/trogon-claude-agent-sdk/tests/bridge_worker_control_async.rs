@@ -270,10 +270,10 @@ async fn host_promises_are_answered_as_the_recorded_session_answered() -> TestRe
         }
         let mut expected = case["frames"].as_array().ok_or("no frames")?.clone();
         for frame in &mut expected {
-            if frame["type"] == "control_response" {
-                if let Some(frame) = frame.as_object_mut() {
-                    frame.shift_remove("uuid");
-                }
+            if frame["type"] == "control_response"
+                && let Some(frame) = frame.as_object_mut()
+            {
+                frame.shift_remove("uuid");
             }
         }
         assert_eq!(

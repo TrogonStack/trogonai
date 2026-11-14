@@ -236,9 +236,17 @@ async fn startup_marks_are_kept_up_to_sixty_four_characters() -> Outcome {
     Ok(())
 }
 
+/// Started hooks as `(id, event)`, the ids that answered, the expected message tail and how many hooks stay open.
+type TimeoutCase = (
+    &'static [(&'static str, &'static str)],
+    &'static [&'static str],
+    String,
+    usize,
+);
+
 #[tokio::test]
 async fn the_timeout_says_what_the_reported_hooks_did() -> Outcome {
-    let cases: [(&[(&str, &str)], &[&str], String, usize); 6] = [
+    let cases: [TimeoutCase; 6] = [
         (
             &[("h1", "SessionStart"), ("h2", "Setup")],
             &[],
