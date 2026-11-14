@@ -308,8 +308,8 @@ impl ProcessTransport {
         }
     }
 
-    /// TypeScript's close: wait 2 seconds, then SIGTERM (none on Windows), and SIGKILL 5 seconds later without
-    /// waiting for it. Stderr gets 200 ms after the exit. Nothing here fails.
+    /// TypeScript's close: wait 2 seconds, then SIGTERM (none on Windows), and SIGKILL 5 seconds later if the process
+    /// is still running, without waiting for it. Stderr gets 200 ms after the exit. Nothing here fails.
     async fn reap_typescript(&mut self) -> Option<(ExitStatus, StderrTail)> {
         let mut child = self.child.take()?;
         if let Ok(Ok(status)) = timeout(TYPESCRIPT_CLOSE_GRACE, child.wait()).await {
@@ -320,10 +320,8 @@ impl ProcessTransport {
         if let Err(error) = Self::terminate(&mut child).await {
             tracing::debug!(%error, "could not send SIGTERM to Claude Code");
         }
-        // SIGKILL after the delay whether or not the process has gone: a signal to an exited child that was never
-        // waited for lands on its zombie, and dropping the child hands it to tokio's reaper. One line, because a test
-        // ends long before the delay and the task never resumes.
-        tokio::spawn(sleep(TYPESCRIPT_KILL_DELAY).map(move |()| child.start_kill().unwrap_or_default()));
+        // One line, because a test ends long before the delay and the task never resumes.
+        tokio::spawn(sleep(TYPESCRIPT_KILL_DELAY).map(move |()| kill_if_running(&mut child)));
         None
     }
 
@@ -487,6 +485,13 @@ impl Transport for ProcessTransport {
             .flatten();
         OptionFuture::from(running.map(Self::terminate)).await.unwrap_or(Ok(()))
     }
+}
+
+/// The delayed half of TypeScript's close: SIGKILL only a process that has not exited (`exitCode === null`
+/// upstream, where an exited child has no handle left and the kill does nothing). Whether the signal was sent.
+fn kill_if_running(child: &mut Child) -> bool {
+    let running = matches!(child.try_wait(), Ok(None));
+    running && child.start_kill().is_ok()
 }
 
 #[cfg(test)]

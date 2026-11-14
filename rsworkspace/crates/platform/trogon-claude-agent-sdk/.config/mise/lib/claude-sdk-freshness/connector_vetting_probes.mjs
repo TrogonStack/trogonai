@@ -223,6 +223,9 @@ function loadNodePath(release, sandboxProcess) {
   return module.exports;
 }
 
+// The links realpath(3) follows before it gives up with ELOOP (glibc's MAXSYMLINKS).
+const LINK_BUDGET = 40;
+
 function sandbox(probe) {
   const trace = [];
   const raise = (code) => Object.assign(new Error(code), { code });
@@ -244,6 +247,35 @@ function sandbox(probe) {
       if (tree[above]?.kind === 'file') return raise('ENOTDIR');
     }
     return raise('ENOENT');
+  };
+  // realpath(3) over the fake tree: every component must exist, a link is replaced by its target (relative to the
+  // folder holding it) up to LINK_BUDGET times before ELOOP, and only a folder may have a component below it.
+  const components = (path) => path.split('/').filter((part) => part !== '' && part !== '.');
+  const followLinks = (key) => {
+    let rest = components(key);
+    let resolved = '';
+    let hops = 0;
+    while (rest.length > 0) {
+      const part = rest.shift();
+      if (part === '..') {
+        resolved = parent(resolved);
+        continue;
+      }
+      const next = `${resolved}/${part}`;
+      const found = tree[next];
+      if (found === undefined) throw missing(next);
+      if (found.errno) throw raise(found.errno);
+      if (found.kind === 'symlink') {
+        hops += 1;
+        if (hops > LINK_BUDGET) throw raise('ELOOP');
+        if (found.target.startsWith('/')) resolved = '';
+        rest = [...components(found.target), ...rest];
+        continue;
+      }
+      if (rest.length > 0 && found.kind !== 'dir') throw raise('ENOTDIR');
+      resolved = next;
+    }
+    return resolved === '' ? '/' : resolved;
   };
   const environment = probe.env ?? {};
   const findVariable = (key) =>
@@ -361,7 +393,8 @@ function sandbox(probe) {
       openFile = Buffer.from(found.content ?? '');
       return 3;
     },
-    // `realpathSync.native` answers the path itself unless a probe forces another answer with `realpath`.
+    // `realpathSync.native` follows every link on the way to an absolute POSIX path the way realpath(3) does, and
+    // answers any other path itself; a probe forces another answer with `realpath`.
     OYe: {
       native(key) {
         trace.push(['realpath', key]);
@@ -370,6 +403,7 @@ function sandbox(probe) {
           if (forced.errno) throw raise(forced.errno);
           return forced.path;
         }
+        if (platform !== 'win32' && key.startsWith('/')) return followLinks(key);
         const found = tree[fsKey(key)];
         if (found === undefined) throw missing(key);
         if (found.errno) throw raise(found.errno);

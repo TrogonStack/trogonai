@@ -4,7 +4,9 @@ mod host;
 mod process;
 mod wall_clock;
 
-pub use environment::{CurrentDirectory, EnvironmentVariable, SystemEnvironment, TemporaryDirectory};
+pub use environment::{
+    CurrentDirectory, EnvironmentVariable, SystemEnvironment, TemporaryDirectory, capture_launch_directory,
+};
 pub use filesystem::*;
 pub use host::*;
 pub use process::{SpawnProcess, TokioProcessSpawner};

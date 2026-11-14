@@ -354,8 +354,8 @@ upstream SDKs).
   (`ResultError`): Python's text always, TypeScript's text when it is non-empty.
   `abort()` stops the process and ends the run with `Error::Aborted`
   (`AbortError`). Closing follows `limits.shutdown`: TypeScript's ladder by
-  default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later without
-  waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
+  default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later if the
+  process is still running, without waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
   `Error::ShutdownTimeout` and `Error::StderrDrainTimeout`.
 - Writes fail with distinct errors in upstream's order: `Error::NotReadyForWriting`
   after stdin is closed (and, in the TypeScript style, after the process exited,
@@ -506,7 +506,10 @@ parent process). The result carries per-key provenance and `machinePolicy.didNot
 `resolve_settings_with` runs it against any `SettingsHost`, so tests inject files, variables and
 command output. A `ResolverState` holds what upstream keeps between calls;
 `ResolverState::with_rereads(PolicyRereads::Inline)` runs machine policy re-reads on the calling
-thread, so the host's clock alone decides when one has ended. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+thread, so the host's clock alone decides when one has ended. Upstream reads the launch directory
+when the SDK module is imported; nothing here runs at load time, so `resolve_settings` reads it on
+its first call unless the binary calls `adapters::capture_launch_directory()` at the top of `main`,
+which gives the upstream timing. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
 byte for byte. Numbers read as `JSON.parse` reads them: integers above 2^53 round, and a number
 past the double range reads as `Infinity`. A typed setting refuses `Infinity`, an `env` value spells

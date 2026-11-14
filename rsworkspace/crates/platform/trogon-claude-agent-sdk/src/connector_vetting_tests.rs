@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::VecDeque};
 
 use serde_json::{Map, Value, json};
 
@@ -31,6 +31,14 @@ pub(crate) struct FakeHost {
 
 fn errno(code: &str) -> Option<String> {
     Some(code.to_owned())
+}
+
+/// The links the harness's realpath follows before it gives up with ELOOP (glibc's MAXSYMLINKS).
+const LINK_BUDGET: usize = 40;
+
+/// The harness's `components`: the names of a POSIX path, without empty and `.` ones.
+fn components(path: &str) -> impl DoubleEndedIterator<Item = &str> {
+    path.split('/').filter(|part| !part.is_empty() && *part != ".")
 }
 
 /// A truthy JS string.
@@ -282,11 +290,53 @@ impl VettingHost for FakeHost {
             }
             return forced.get("path").and_then(Value::as_str).map(js).ok_or(None);
         }
+        if !self.win32 && path.starts_with('/') {
+            return self.follow_links(&path);
+        }
         let found = self.entry(&path).ok_or_else(|| self.missing(&path))?;
         if let Some(code) = truthy(found.get("errno")) {
             return Err(errno(code));
         }
         Ok(js(&path))
+    }
+}
+
+impl FakeHost {
+    /// The harness's `followLinks`: realpath(3) over the fake tree.
+    fn follow_links(&self, path: &str) -> Result<JsString, Option<String>> {
+        let mut rest: VecDeque<String> = components(path).map(str::to_owned).collect();
+        let mut resolved = String::new();
+        let mut hops = 0;
+        while let Some(part) = rest.pop_front() {
+            if part == ".." {
+                resolved = parent(&resolved).to_owned();
+                continue;
+            }
+            let next = format!("{resolved}/{part}");
+            let found = Self::find(&self.tree, &next).ok_or_else(|| self.missing(&next))?;
+            if let Some(code) = truthy(found.get("errno")) {
+                return Err(errno(code));
+            }
+            if kind(found) == Some("symlink") {
+                hops += 1;
+                if hops > LINK_BUDGET {
+                    return Err(errno("ELOOP"));
+                }
+                let target = found.get("target").and_then(Value::as_str).unwrap_or_default();
+                if target.starts_with('/') {
+                    resolved.clear();
+                }
+                for name in components(target).rev() {
+                    rest.push_front(name.to_owned());
+                }
+                continue;
+            }
+            if !rest.is_empty() && kind(found) != Some("dir") {
+                return Err(errno("ENOTDIR"));
+            }
+            resolved = next;
+        }
+        Ok(js(if resolved.is_empty() { "/" } else { &resolved }))
     }
 }
 

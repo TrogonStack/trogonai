@@ -5,7 +5,7 @@ use tokio::{
     time::timeout,
 };
 
-use super::{Closed, ProcessSpawn, ProcessTransport};
+use super::{Closed, ProcessSpawn, ProcessTransport, kill_if_running};
 use crate::{
     ArgvStyle, ClaudeAgentOptions, Error, Transport,
     adapters::{SpawnProcess, TokioProcessSpawner},
@@ -82,5 +82,24 @@ async fn kill_stops_a_running_process() -> TestResult {
     .await??;
     assert!(!status.success());
     assert!(transport.forced);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_delayed_kill_signals_a_process_that_is_still_running() -> TestResult {
+    let mut child = Command::new("sleep").arg("30").kill_on_drop(true).spawn()?;
+
+    assert!(kill_if_running(&mut child));
+    let status = timeout(Duration::from_secs(5), child.wait()).await??;
+    assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(9));
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_delayed_kill_leaves_a_process_that_already_exited() -> TestResult {
+    let mut child = Command::new("true").spawn()?;
+    timeout(Duration::from_secs(5), child.wait()).await??;
+
+    assert!(!kill_if_running(&mut child));
     Ok(())
 }

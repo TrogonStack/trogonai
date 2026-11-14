@@ -1,6 +1,7 @@
 use std::{
     ffi::{OsStr, OsString},
     path::PathBuf,
+    sync::OnceLock,
 };
 
 pub trait EnvironmentVariable {
@@ -74,3 +75,27 @@ impl TemporaryDirectory for SystemEnvironment {
         std::env::temp_dir()
     }
 }
+
+/// The working directory the SDK module reads once (`XE` upstream); `None` inside stands for a directory that could
+/// not be read.
+static LAUNCH_DIRECTORY: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Reads the working directory the settings resolver treats as the launch directory, once per process.
+///
+/// Upstream reads it when the SDK module is imported, before the caller can change directory. Nothing in this crate
+/// runs at load time, so the read happens the first time the SDK needs it unless a binary calls this at the top of
+/// `main`, which gives the upstream timing. Later calls return the first reading.
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    allow(
+        std_env_access,
+        reason = "The launch directory is the process working directory, read at the process-environment boundary."
+    )
+)]
+pub fn capture_launch_directory() -> Option<PathBuf> {
+    LAUNCH_DIRECTORY.get_or_init(|| std::env::current_dir().ok()).clone()
+}
+
+#[cfg(test)]
+#[path = "environment_tests.rs"]
+mod tests;

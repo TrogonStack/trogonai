@@ -2,7 +2,7 @@
 
 use std::{fs, io};
 
-use super::{Bridge, errno, locate_document, node_code, node_error, os_code, platform};
+use super::{Bridge, errno, libuv_final_path, locate_document, node_code, node_error, os_code, platform, windows_code};
 use crate::{
     adapters::{NativeHost, OperatingSystem},
     connector_vetting::{Located, Platform, VettingHost},
@@ -14,6 +14,45 @@ const MISSING: &str = "/trogon-claude-sdk-no-such-folder";
 
 fn code(text: &str) -> Option<String> {
     Some(text.to_owned())
+}
+
+#[test]
+fn a_windows_final_path_reads_the_way_libuv_shortens_it() {
+    let lone: Vec<u16> = [js("\\\\?\\C:\\a"), vec![0xD800], js("b")].concat();
+    let pair: Vec<u16> = [js("\\\\?\\C:\\"), "\u{1F600}".encode_utf16().collect()].concat();
+
+    assert_eq!(libuv_final_path(&js("\\\\?\\C:\\work")), Ok(js("C:\\work")));
+    assert_eq!(
+        libuv_final_path(&js("\\\\?\\UNC\\server\\share\\x")),
+        Ok(js("\\\\server\\share\\x"))
+    );
+    assert_eq!(libuv_final_path(&js("\\\\?\\Volume{1}\\x")), Ok(js("Volume{1}\\x")));
+    assert_eq!(libuv_final_path(&js("C:\\work")), Err(code("EBADF")));
+    assert_eq!(libuv_final_path(&lone), Ok(js("C:\\a\u{FFFD}\u{FFFD}\u{FFFD}b")));
+    assert_eq!(
+        libuv_final_path(&pair),
+        Ok([js("C:\\"), "\u{1F600}".encode_utf16().collect()].concat())
+    );
+}
+
+#[test]
+fn windows_system_errors_take_the_code_libuv_translates_them_to() {
+    for (raw, name) in [
+        (2, "ENOENT"),
+        (3, "ENOENT"),
+        (123, "ENOENT"),
+        (267, "ENOENT"),
+        (5, "EPERM"),
+        (1920, "EACCES"),
+        (206, "ENAMETOOLONG"),
+        (1921, "ELOOP"),
+        (1, "EISDIR"),
+        (32, "EBUSY"),
+        (87, "EINVAL"),
+        (4390, "UNKNOWN"),
+    ] {
+        assert_eq!(windows_code(raw), name, "{raw}");
+    }
 }
 
 #[test]

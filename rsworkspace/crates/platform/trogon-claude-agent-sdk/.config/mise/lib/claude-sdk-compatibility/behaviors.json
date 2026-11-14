@@ -3556,6 +3556,266 @@
         "src/driver.rs",
         "src/wire.rs"
       ]
+    },
+    {
+      "id": "c19-connector-real-path",
+      "concept": "Canonical path of a connector folder link target",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "case\"realpath\":return es(OYe.native(n))",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "783e3dd556760fd71f71a0a219d78434796460bfdc296b10885d02d7d11ee0e6"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "TypeScript asks fs.realpathSync.native, which is libuv realpath: realpath(3) on Unix, decoded lossily, and GetFinalPathNameByHandleW on Windows with the \\\\?\\UNC\\ prefix turned into \\\\ and the \\\\?\\ prefix dropped, lone surrogates read as three U+FFFD; es then drops a remaining \\\\?\\ drive or UNC prefix."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve_connector.rs",
+        "src/connector_vetting.rs",
+        "src/constants.rs"
+      ]
+    },
+    {
+      "id": "c20-connector-real-path-errors",
+      "concept": "Error codes a failed realpath reports to the connector check",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "return n===\"ENOENT\"||n===\"ENOTDIR\"?\"gone\":\"unverified\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "a3fb87c76ecaf2e021e763ffe1ccfefd124fc598d16ed4723321a6e27ae55c09"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A realpath failure is gone for ENOENT or ENOTDIR and unverified otherwise; on Windows the code is the one uv_translate_sys_error gives the system error, UNKNOWN for a code libuv does not list."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve_connector.rs",
+        "src/constants.rs"
+      ]
+    },
+    {
+      "id": "c21-connector-link-target-writable",
+      "concept": "Writability of an outside link target",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "targetWritable",
+        "occurrence": 0,
+        "occurrences": 2,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "5759fed3dce5b49e840acb4284f22afdee5419636dd753ba56050317bf949509"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The linkage result carries targetWritable, but the connector check only reads whether a link exists and its kind, so the field never changes which folders load."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve_writable.rs"
+      ]
+    },
+    {
+      "id": "c22-windows-drive-working-directory",
+      "concept": "Resolving a drive-relative path on Windows",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "resolve as Nx,sep as f4}from\"path\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "92489e31741ee16dc15c992cff4485fb4c475ffdc4c9d0a571cfa31d6ec38237"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "path.win32.resolve takes the working directory of another drive from the =X: environment variable, matched without regard to case, and falls back to the process working directory when it is unset or empty, then to the drive root when that is on another drive."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/node_path.rs"
+      ]
+    },
+    {
+      "id": "c23-connector-home-directory",
+      "concept": "Home directory the connector check compares /home folders against",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function HQ(){let e;try{e=FI()}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "2b4c41fdec43a6122d787d5a9b3af026182c5e7f26fdb147cc59a84bdd51873b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The connector check reads the home directory only in HQ, which FQ reaches on darwin alone, so HOME then the password database is the whole lookup; the Windows readers of FI (the WindowsApps alias folders) belong to executable lookup, not to the connector check, so the GetUserProfileDirectory fallback is never reached here."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/connector_vetting.rs",
+        "src/adapters/host.rs"
+      ]
+    },
+    {
+      "id": "c24-launch-directory",
+      "concept": "Working directory captured at launch",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "XE=(()=>{if(typeof process>\"u\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "32772bb1b6497fcff3da79d27b1dd7b6464a0bc6273658f3089432366b588142"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Rust runs nothing at load time: capture_launch_directory reads the directory once into a OnceLock the first time the settings resolver needs it, and a binary that calls it at the top of main gets the upstream import-time reading."
+      },
+      "contracts": [],
+      "rust": [
+        "src/adapters/environment.rs",
+        "src/settings_resolve_state.rs",
+        "src/settings_resolve.rs"
+      ]
+    },
+    {
+      "id": "c25-local-settings-root",
+      "concept": "Folder that holds local settings",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "return wX(oE(t),t.canonicalGitRoot)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "54e17471686c6a9eaf7904bfb88ff2fe3f33d7cd0fc8c88da7b71c50ccb246d0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "With no launch store root and no project config dir, the local settings live under the working directory, and the SDK never sets a canonical git root."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve_sources.rs"
+      ]
+    },
+    {
+      "id": "c26-settings-working-directory",
+      "concept": "Working directory the settings resolver starts from",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python sources do not vet connector folders."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "n={store:new Bs,cwd:Eet(",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "0b4320e2103b5343876d1bbc84bdb26355566097a79b12bbf6ab40327ab37487"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The SDK resolver makes the working directory absolute before it reads any source and sets no project config dir, so the resolve error for a relative working directory cannot be reached."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/settings_resolve.rs",
+        "src/settings_resolve_sources.rs"
+      ]
+    },
+    {
+      "id": "c27-delayed-kill",
+      "concept": "SIGKILL after SIGTERM when the CLI process is closed",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python transport closes the process its own way."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "setTimeout((a)=>{if(a.exitCode===null)a.kill(\"SIGKILL\")},5000,s).unref()",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 240,
+        "sha256": "a4af33e29c7574aa5cd8fd29f761efcbc45c0680b3ee15e42a422c65e180ba55"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "After SIGTERM the transport schedules SIGKILL 5 seconds later without waiting for it, and sends it only when the process has not exited by then."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [],
+      "rust": [
+        "src/process_transport.rs"
+      ]
     }
   ]
 }

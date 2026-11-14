@@ -328,7 +328,7 @@ fn resolve_core<H: SettingsHost>(
     Ok(Value::Object(result))
 }
 
-static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::new);
+static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::for_process);
 
 /// `resolveSettings` upstream: reads the real host once and merges every enabled source.
 pub async fn resolve_settings(options: &ResolveSettingsOptions) -> Result<ResolvedSettings, ResolveSettingsError> {
