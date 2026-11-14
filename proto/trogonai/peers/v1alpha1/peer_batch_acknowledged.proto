@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+message PeerBatchAcknowledged {
+  string batch_id = 1;
+  google.protobuf.Timestamp acknowledged_at = 2;
+}

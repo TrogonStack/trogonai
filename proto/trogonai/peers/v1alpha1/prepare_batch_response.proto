@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/content_availability.proto";
+import "trogonai/peers/v1alpha1/peer_batch.proto";
+import "trogonai/peers/v1alpha1/prepared_message.proto";
+
+// A missing batch means no assignment is pending. An unavailable body retains
+// the original batch identity and preparation fact instead of fabricating expiry.
+message PrepareBatchResponse {
+  PeerBatch batch = 1;
+  repeated PreparedMessage messages = 2;
+  ContentAvailability content_availability = 3;
+}

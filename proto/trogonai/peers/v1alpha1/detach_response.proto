@@ -1,0 +1,5 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+message DetachResponse {}

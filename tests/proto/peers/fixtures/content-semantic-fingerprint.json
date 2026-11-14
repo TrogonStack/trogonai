@@ -1,0 +1,55 @@
+[
+  {
+    "name": "semantic_fingerprint_is_a_purpose_specific_byte_value",
+    "type": "trogonai.peers.v1alpha1.ContentSemanticFingerprint",
+    "valid": true,
+    "message": {
+      "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+    }
+  },
+  {
+    "name": "message_metadata_keeps_integrity_and_semantic_fingerprint_distinct",
+    "type": "trogonai.peers.v1alpha1.MessageMetadata",
+    "valid": true,
+    "message": {
+      "contentRef": {
+        "storageRef": {
+          "value": "content_outgoing"
+        },
+        "digest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      },
+      "semanticFingerprint": {
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+      }
+    }
+  },
+  {
+    "name": "integrity_reference_does_not_require_or_infer_a_semantic_fingerprint",
+    "type": "trogonai.peers.v1alpha1.MessageMetadata",
+    "valid": true,
+    "message": {
+      "contentRef": {
+        "storageRef": {
+          "value": "content_outgoing"
+        },
+        "digest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      }
+    }
+  },
+  {
+    "name": "semantic_fingerprint_does_not_require_or_infer_a_claim_check",
+    "type": "trogonai.peers.v1alpha1.MessageMetadata",
+    "valid": true,
+    "message": {
+      "semanticFingerprint": {
+        "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+      }
+    }
+  }
+]

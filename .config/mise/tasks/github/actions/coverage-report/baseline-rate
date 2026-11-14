@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+if [[ -f "${COVERAGE_STORAGE_BRANCH}/data/${COVERAGE_DIFF_BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}/coverage.xml" ]]
+then {
+  # Generate a text report for the diff-branch coverage
+  pycobertura show "${COVERAGE_STORAGE_BRANCH}"/data/"${COVERAGE_DIFF_BRANCH}"/"${COVERAGE_STORAGE_SUBDIRECTORY}"/coverage.xml --output .coverage-output.diff-branch
+  # Extract the total coverage percentage
+  grep -E "^TOTAL " .coverage-output.diff-branch | \
+    awk '{printf "%.8f", (1 - $3/$2) * 100}' > .coverage-total.diff-branch
+  echo "Diff-branch coverage: $(cat .coverage-total.diff-branch)%"
+} else {
+  echo "Diff-branch coverage file not found, cannot compare coverage rates."
+  echo "0" > .coverage-total.diff-branch
+}
+fi

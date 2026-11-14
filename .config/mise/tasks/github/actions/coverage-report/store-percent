@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+echo "coverage_total=$(cat .coverage-total)" >> "$GITHUB_OUTPUT"
+BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+echo "diff_storage_branch=$BRANCH" >> "$GITHUB_ENV"
+mkdir -p "${COVERAGE_STORAGE_BRANCH}/data/${BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}"
+artifact_suffix=$(printf '%s' "$COVERAGE_PATH" | sha256sum | cut -c1-12)
+printf 'artifact_name=coverage-report-%s-%s-%s-%s\n' "$GITHUB_JOB" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$artifact_suffix" >> "$GITHUB_OUTPUT"

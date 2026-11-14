@@ -321,6 +321,22 @@ async fn dispatch_sets_dedup_id_for_message_create() {
 }
 
 #[tokio::test]
+async fn dispatch_preserves_events_with_non_numeric_guild_ids_without_fabricating_a_guild_header() {
+    for guild_id in [serde_json::json!(true), serde_json::json!([]), serde_json::json!({})] {
+        let (bridge, mock) = bridge_with_mock();
+        let frame = serde_json::json!({
+            "op": 0, "t": "MESSAGE_CREATE", "s": 1,
+            "d": {"id": "message", "guild_id": guild_id}
+        });
+        bridge.dispatch(&frame.to_string()).await;
+        assert_eq!(mock.published_subjects(), vec!["discord.message_create"]);
+        let messages = mock.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].headers.get(NATS_HEADER_GUILD_ID).is_none());
+    }
+}
+
+#[tokio::test]
 async fn dispatch_no_dedup_for_member_events() {
     let (b, mock) = bridge_with_mock();
     b.dispatch(r#"{"op":0,"t":"GUILD_MEMBER_ADD","s":1,"d":{"guild_id":"1","user":{"id":"2"}}}"#)

@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+// Owner fields are stamped from the authenticated subject, never request data.
+// The installation and native session identify one stable communication inbox.
+message PeerEnrollment {
+  string peer_id = 1;
+  string tenant_id = 2;
+  string caller_id = 3;
+  string installation_id = 4;
+  string native_session_id = 5;
+  string collaboration_ref = 6;
+  string display_name = 7;
+  google.protobuf.Timestamp enrolled_at = 8;
+}

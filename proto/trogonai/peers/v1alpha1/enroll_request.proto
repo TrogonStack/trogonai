@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+// Tenant and caller come from the authenticated subject, not this request.
+message EnrollRequest {
+  string installation_id = 1;
+  string native_session_id = 2;
+  string connector_id = 3;
+  string collaboration_ref = 4;
+  string display_name = 5;
+}

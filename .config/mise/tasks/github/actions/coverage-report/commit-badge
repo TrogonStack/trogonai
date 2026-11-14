@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+git switch "${COVERAGE_STORAGE_BRANCH}"
+git add "${COVERAGE_REPORT_BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}/badge.svg"
+if ! git diff --cached --quiet; then
+  git commit -m "Add/Update badge: ${GITHUB_SHA}"
+fi

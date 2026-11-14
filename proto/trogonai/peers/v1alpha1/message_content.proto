@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+// Erasable content-store payload. Production storage seals this value before
+// persisting it; the reference and digest do not authorize a read.
+message MessageContent {
+  string text = 1;
+}

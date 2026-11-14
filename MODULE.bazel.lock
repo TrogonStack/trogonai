@@ -802,7 +802,7 @@
           "FILE:@@//rsworkspace/crates/a2a/a2a-gateway/Cargo.toml ec2d8d40b71dee6bc95d3c27bb92fd29880e740eab9779c745a3b45c1e5cca1f",
           "FILE:@@//rsworkspace/crates/a2a/a2a-redaction/Cargo.toml 799a5a9746d45e9190ce0e13290743cc7c21e21d4e159e7f11c269a50fb186bd",
           "FILE:@@//rsworkspace/crates/platform/trogon-audit/Cargo.toml e2d68b496918c7cbb9e460e20466c5b4585cc3ae2248c8342a8963a34d70820c",
-          "FILE:@@//rsworkspace/crates/platform/trogonai-proto/Cargo.toml 5f0e98b84a22ab85d8069f988d448a450838b8d5394739f372d2df369a79bf3e",
+          "FILE:@@//rsworkspace/crates/platform/trogonai-proto/Cargo.toml ba7438f4e682dba484a3d164e26230c8f131548a125175687866b96caf913bdc",
           "FILE:@@//rsworkspace/crates/decider/trogon-decider/Cargo.toml e1a15e25416ae61a029a73d8e2e406694309d6c59ed8a345be8b8aaef86db1d4",
           "FILE:@@//rsworkspace/crates/decider/trogon-decider-runtime/Cargo.toml 52eabe656e88fb0fc35ab149a8d3db653c0162ec8dd9affc52be15e894304505",
           "FILE:@@//rsworkspace/crates/platform/trogon-telemetry/Cargo.toml 6f0dc28f74d470d51751121d8617dc5da4760d6593483b38223573b2a610b568",

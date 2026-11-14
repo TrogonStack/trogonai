@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/storage.py" fetch
+unset COVERAGE_TOKEN
+git switch --force-create "$COVERAGE_STORAGE_BRANCH" FETCH_HEAD
+python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/publish.py" init
+python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/provenance.py" baseline
+mkdir -p data
+touch README.md data/.gitkeep
+git add -f -- README.md data/.gitkeep
+if ! git diff --cached --quiet; then
+  git commit -m "Initialize coverage storage"
+fi

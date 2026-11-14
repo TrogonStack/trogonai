@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/attachment_ref.proto";
+
+// The bound attachment supplies sender identity. The service chooses message
+// identity, content reference and acceptance/expiry times.
+message SendRequest {
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
+  string recipient_peer_id = 2;
+  string idempotency_key = 3;
+  string text = 4;
+  string reply_to_message_id = 5;
+}

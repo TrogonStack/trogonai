@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+#MISE dir = "{{cwd}}"
+import os
+with open('.coverage-total', 'r') as t:
+  total = float(t.read().rstrip())
+min = float(os.environ['COVERAGE_THRESHOLD'])
+if total < min:
+  raise SystemExit(
+    f"Total Coverage of {total}% falls below minimum threshold of {min}%."
+  )

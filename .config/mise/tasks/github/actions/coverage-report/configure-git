@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+name="${COVERAGE_GIT_NAME}"
+email="${COVERAGE_GIT_EMAIL}"
+
+cat >> "$GITHUB_ENV" << EOF
+GIT_AUTHOR_NAME=$name
+GIT_AUTHOR_EMAIL=$email
+GIT_COMMITTER_NAME=$name
+GIT_COMMITTER_EMAIL=$email
+EOF

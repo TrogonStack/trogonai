@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+if [[ -n "${GITHUB_WORKSPACE:-}" && "${COVERAGE_SKIP_STORAGE:-false}" != 'true' ]]; then
+  python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/storage.py" cleanup
+fi
+rm -rf .coverage-output.comment .coverage-comparison-status coverage-action .coverage-output.final .coverage-output \
+  .coverage-total .coverage-output.diff \
+  .coverage-output.diff-branch .coverage-total.diff-branch \
+  "${COVERAGE_STORAGE_BRANCH}"-not-found

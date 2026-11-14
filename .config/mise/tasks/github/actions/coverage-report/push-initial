@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/publish.py" push

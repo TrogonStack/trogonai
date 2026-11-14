@@ -75,28 +75,34 @@ async fn refuses_a_weakened_stream_and_leaves_it_as_it_found_it() {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;
     type Weaken = fn(&mut Config);
-    let cases: [(Weaken, AuditStreamMismatchError); 6] = [
+    let cases: [(&str, Weaken, AuditStreamMismatchError); 6] = [
         (
+            "discard_old",
             |c| c.discard = DiscardPolicy::Old,
             AuditStreamMismatchError::Discard { stream: "AUDIT" },
         ),
         (
+            "allow_delete",
             |c| c.deny_delete = false,
             AuditStreamMismatchError::DenyDelete { stream: "AUDIT" },
         ),
         (
+            "allow_purge",
             |c| c.deny_purge = false,
             AuditStreamMismatchError::DenyPurge { stream: "AUDIT" },
         ),
         (
+            "max_age_one_hour",
             |c| c.max_age = Duration::from_secs(3600),
             AuditStreamMismatchError::MaxAge { stream: "AUDIT" },
         ),
         (
+            "memory_storage",
             |c| c.storage = StorageType::Memory,
             AuditStreamMismatchError::Storage { stream: "AUDIT" },
         ),
         (
+            "missing_credential_subject",
             |c| c.subjects.truncate(1),
             AuditStreamMismatchError::MissingSubject {
                 stream: "AUDIT",
@@ -104,10 +110,22 @@ async fn refuses_a_weakened_stream_and_leaves_it_as_it_found_it() {
             },
         ),
     ];
-    for (weaken, expected) in cases {
+    for (case, weaken, expected) in cases {
         let mut weakened = AuditStream::Audit.config(one());
         weaken(&mut weakened);
-        js.create_stream(weakened.clone()).await.unwrap();
+        if let Err(error) = js.create_stream(weakened.clone()).await {
+            let diagnostics = server.failure_diagnostics().await;
+            let status = match error.kind() {
+                CreateStreamErrorKind::JetStream(error) => {
+                    format!("status={} jetstream_code={}", error.code(), error.error_code().0)
+                }
+                CreateStreamErrorKind::TimedOut => "request_timeout".to_owned(),
+                _ => "other_create_error".to_owned(),
+            };
+            panic!(
+                "weakened audit stream fixture create failed: case={case} {status}; ensure_audit_stream_not_attempted\n{diagnostics}"
+            );
+        }
 
         let error = ensure_audit_stream(&js, AuditStream::Audit, one()).await.unwrap_err();
 

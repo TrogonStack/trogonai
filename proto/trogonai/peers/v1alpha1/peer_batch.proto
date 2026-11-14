@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+// The recipient replays this assignment until application acknowledgment.
+// Acknowledgment proves neither host-context insertion nor task completion.
+message PeerBatch {
+  string batch_id = 1;
+  repeated string message_ids = 2;
+  google.protobuf.Timestamp prepared_at = 3;
+  google.protobuf.Timestamp acknowledged_at = 4;
+}

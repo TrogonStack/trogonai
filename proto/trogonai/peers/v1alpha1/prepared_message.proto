@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/message_metadata.proto";
+
+// Text appears only at the authorized delivery boundary, not in stream facts.
+message PreparedMessage {
+  MessageMetadata metadata = 1;
+  string text = 2;
+}
