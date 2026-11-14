@@ -58,7 +58,13 @@ pub struct WarmQuery {
 impl WarmQuery {
     /// TypeScript `WarmQuery.query(prompt)`. Taking `self` is how Rust says the call "can only be called once".
     pub async fn query(self, prompt: impl Into<UserInput>) -> Result<Query, Error> {
-        crate::client::start_query(self.client, prompt.into(), Completion::Run).await
+        crate::client::start_query(
+            self.client,
+            prompt.into(),
+            Completion::Run,
+            crate::client::PromptShape::SdkMjs,
+        )
+        .await
     }
 
     /// TypeScript `WarmQuery.close()`: discards the process without sending a prompt.
@@ -730,7 +736,8 @@ impl SpareProcess {
             None => None,
         };
         let held_prompt = settings.is_some();
-        let prompt = prompt.into();
+        // `claim` hands the prompt to `WarmQuery.query`, which writes a string prompt as `query()` does.
+        let prompt = prompt.into().into_sdk_mjs_prompt();
         let (now, later) = if held_prompt {
             (None, Some(prompt))
         } else {

@@ -1737,7 +1737,7 @@ where
     F: crate::adapters::SessionFileSystem,
 {
     let client = ClaudeSdkClient::connect_with_adapters(options, adapters).await?;
-    start_query(client, prompt.into(), completion).await
+    start_query(client, prompt.into(), completion, PromptShape::SdkMjs).await
 }
 
 /// Python `query(prompt, transport=...)`.
@@ -1747,7 +1747,7 @@ pub async fn query_with_transport<T: crate::Transport>(
     transport: T,
 ) -> Result<Query, Error> {
     let client = ClaudeSdkClient::connect_with_transport(options, transport).await?;
-    start_query(client, prompt.into(), Completion::Run).await
+    start_query(client, prompt.into(), Completion::Run, PromptShape::Python).await
 }
 
 /// [`query_with_transport`] that ends after the first result.
@@ -1757,13 +1757,24 @@ pub async fn query_turn_with_transport<T: crate::Transport>(
     transport: T,
 ) -> Result<Query, Error> {
     let client = ClaudeSdkClient::connect_with_transport(options, transport).await?;
-    start_query(client, prompt.into(), Completion::Turn).await
+    start_query(client, prompt.into(), Completion::Turn, PromptShape::Python).await
+}
+
+/// Whose `query()` a one-shot prompt comes from, which decides how a text prompt is written under the TypeScript
+/// style.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PromptShape {
+    /// `query()` and `WarmQuery.query()` in `sdk.mjs`, which wrap a string prompt in a single text block.
+    SdkMjs,
+    /// Python `query(prompt, transport=...)`, which writes a string prompt as is.
+    Python,
 }
 
 pub(crate) async fn start_query(
     client: ClaudeSdkClient,
     prompt: crate::UserInput,
     completion: Completion,
+    shape: PromptShape,
 ) -> Result<Query, Error> {
     // `sdk.mjs` treats a prompt as a single user turn: stdin closes at the result, or at session idle when
     // something needs the CLI to keep asking. Python closes it once the prompt was written, which the run rule
@@ -1776,6 +1787,10 @@ pub(crate) async fn start_query(
         // `sdk.mjs` writes the prompt and ends the input without waiting for the initialize response, which a
         // blocking hook or managed settings can delay. Both are queued, so they follow the initialize request.
         crate::ArgvStyle::TypeScript => {
+            let prompt = match shape {
+                PromptShape::SdkMjs => prompt.into_sdk_mjs_prompt(),
+                PromptShape::Python => prompt,
+            };
             async {
                 client.runtime.handle.queue_input(prompt).await?;
                 client.runtime.handle.queue_finish(settle).await
