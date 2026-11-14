@@ -16,12 +16,14 @@ def workspace_crate(
         compile_data = [],
         data = [],
         rustc_env = {},
+        aliases = {},
         unit_test_args = [],
         deps = [],
         proc_macro_deps = [],
         dev_deps = [],
         examples = {},
         integration_tests = {},
+        library_tags = [],
         unit_test_tags = []):
     """Declares a library, its unit tests, doctests, integration tests, and examples.
 
@@ -44,11 +46,13 @@ def workspace_crate(
         data: Files read at test runtime.
         rustc_env: Environment for compiling the library, which its unit tests
             inherit.
+        aliases: Maps dependency labels to the crate names Cargo renames them to.
         deps: Workspace crate labels the library depends on.
         proc_macro_deps: Workspace procedural macro crate labels the library uses.
         dev_deps: Workspace crate labels only the tests and examples depend on.
         examples: Maps each `examples/<name>.rs` to extra `rust_binary` attributes.
         integration_tests: Maps each `tests/<name>.rs` to extra `rust_test` attributes.
+        library_tags: Tags for the library target.
         unit_test_args: Arguments for the unit test binary, such as `--skip` filters.
         unit_test_tags: Tags for the unit test target.
     """
@@ -68,6 +72,7 @@ def workspace_crate(
         rust_binary(
             name = target,
             srcs = native.glob(["src/**/*.rs"]),
+            aliases = aliases,
             compile_data = compile_data,
             crate_features = crate_features,
             crate_name = binary.replace("-", "_"),
@@ -81,6 +86,7 @@ def workspace_crate(
         )
         rust_test(
             name = target + "_unit_test",
+            aliases = aliases,
             args = binary_test_args,
             crate = ":" + target,
             compile_data = compile_data,
@@ -95,6 +101,7 @@ def workspace_crate(
     for test, attrs in integration_tests.items():
         rust_test(
             name = name + "_" + test + "_test",
+            aliases = aliases,
             srcs = native.glob(["tests/" + test + ".rs", "tests/" + test + "/**/*.rs"], allow_empty = True),
             crate_features = crate_features,
             crate_root = "tests/" + test + ".rs",
@@ -108,6 +115,7 @@ def workspace_crate(
     for example, attrs in examples.items():
         rust_binary(
             name = name + "_" + example + "_example",
+            aliases = aliases,
             srcs = native.glob(["examples/" + example + ".rs", "examples/" + example + "/**/*.rs"], allow_empty = True),
             crate_features = crate_features,
             crate_root = "examples/" + example + ".rs",
@@ -125,6 +133,7 @@ def workspace_crate(
 
     library_rule(
         name = name,
+        aliases = aliases,
         srcs = native.glob(["src/**/*.rs"]),
         compile_data = compile_data,
         crate_features = crate_features,
@@ -134,6 +143,7 @@ def workspace_crate(
         proc_macro_deps = all_crate_deps(proc_macro = True) + proc_macro_deps,
         rustc_env = rustc_env,
         rustc_flags = _RUSTC_FLAGS,
+        tags = library_tags,
         version = version,
         visibility = ["//visibility:public"],
         deps = all_crate_deps(normal = True) + deps,
@@ -141,6 +151,7 @@ def workspace_crate(
 
     rust_test(
         name = name + "_test",
+        aliases = aliases,
         args = unit_test_args,
         crate = ":" + name,
         compile_data = compile_data,

@@ -44,6 +44,21 @@ crate.from_cargo(
         "x86_64-unknown-linux-gnu",
     ],
 )
+
+# crate_universe resolves only the features some workspace member enables, and
+# none enables a2a's spicedb feature, which Bazel builds. These pin its optional
+# dependencies to the workspace Cargo.toml versions so they exist in @crates.
+crate.spec(
+    package = "spicedb-grpc-tonic",
+    repositories = ["crates"],
+    version = "=1.0.0",
+)
+crate.spec(
+    features = ["future"],
+    package = "moka",
+    repositories = ["crates"],
+    version = "=0.12.16",
+)
 use_repo(crate, "crates")
 
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
