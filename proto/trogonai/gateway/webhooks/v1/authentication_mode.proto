@@ -7,4 +7,3 @@ enum AuthenticationMode {
   AUTHENTICATION_MODE_BEARER = 1;
   AUTHENTICATION_MODE_HMAC_SHA256 = 2;
 }
-

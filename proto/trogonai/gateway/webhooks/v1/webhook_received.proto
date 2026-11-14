@@ -13,4 +13,3 @@ message WebhookReceived {
   bytes body = 6 [features.field_presence = LEGACY_REQUIRED];
   string content_type = 7;
 }
-

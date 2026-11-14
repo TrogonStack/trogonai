@@ -1,4 +1,4 @@
-pub const MAX_BODY_BYTES: usize = 1_048_576;
+use crate::constants::MAX_BODY_BYTES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WebhookBodySize(usize);

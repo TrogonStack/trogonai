@@ -7,4 +7,3 @@ enum EndpointStatus {
   ENDPOINT_STATUS_ENABLED = 1;
   ENDPOINT_STATUS_DISABLED = 2;
 }
-

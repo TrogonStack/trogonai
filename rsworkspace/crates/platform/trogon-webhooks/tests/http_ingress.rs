@@ -157,7 +157,14 @@ async fn authenticated_delivery_publishes_raw_body_with_registry_owned_identity(
     assert!(event.received_at.as_option().is_some());
     assert!(messages[0].headers.get("authorization").is_none());
     assert!(messages[0].headers.get("x-tenant-id").is_none());
-    assert_ne!(messages[0].headers.get("nats-msg-id").unwrap().as_str(), "attacker-id");
+    assert_ne!(
+        messages[0]
+            .headers
+            .get(async_nats::header::NATS_MESSAGE_ID)
+            .unwrap()
+            .as_str(),
+        "attacker-id"
+    );
 }
 
 #[tokio::test]
@@ -392,7 +399,13 @@ async fn broker_deduplication_identity_is_stable_and_endpoint_scoped() {
     let messages = publisher.published_messages();
     let ids: Vec<_> = messages
         .iter()
-        .map(|message| message.headers.get("nats-msg-id").unwrap().as_str())
+        .map(|message| {
+            message
+                .headers
+                .get(async_nats::header::NATS_MESSAGE_ID)
+                .unwrap()
+                .as_str()
+        })
         .collect();
     assert_eq!(ids[0], ids[1]);
     assert_ne!(ids[0], ids[2]);

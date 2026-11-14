@@ -3,7 +3,7 @@ use std::future::Future;
 use axum::http::HeaderMap;
 use trogon_std::SecretString;
 
-use crate::{EndpointId, RegisteredEndpoint};
+use crate::{ConfigurationRevisionError, EndpointId, EndpointRegistrationError, RegisteredEndpoint};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthenticationError {
@@ -19,6 +19,18 @@ pub enum RegistryError {
     Unavailable,
     #[error("webhook registration is invalid")]
     Invalid,
+    #[error("webhook registry read failed")]
+    Read(#[source] async_nats::jetstream::kv::EntryError),
+    #[error("webhook registry record cannot be decoded")]
+    Decode(#[source] buffa::DecodeError),
+    #[error("webhook registry record is invalid")]
+    Registration(#[source] EndpointRegistrationError),
+    #[error("webhook registry revision is invalid")]
+    Revision(#[source] ConfigurationRevisionError),
+    #[error("webhook registry record exceeds the size limit")]
+    Oversized,
+    #[error("webhook registry record names a different endpoint")]
+    IdentityMismatch,
 }
 
 pub trait EndpointLookup: Clone + Send + Sync + 'static {

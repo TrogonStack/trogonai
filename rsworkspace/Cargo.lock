@@ -7583,6 +7583,7 @@ dependencies = [
  "trogon-service-config",
  "trogon-std",
  "trogon-telemetry",
+ "trogon-webhooks",
  "trogonai-proto",
  "twilight-gateway",
  "twilight-model",

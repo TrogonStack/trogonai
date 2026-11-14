@@ -13,4 +13,3 @@ message EndpointRegistration {
   uint32 max_body_bytes = 5 [features.field_presence = LEGACY_REQUIRED];
   uint32 timestamp_tolerance_seconds = 6 [features.field_presence = LEGACY_REQUIRED];
 }
-

@@ -4,7 +4,10 @@ use async_nats::jetstream::kv::Operation;
 use buffa::Message as _;
 use bytes::Bytes;
 use trogon_nats::jetstream::MockJetStreamKvStore;
-use trogon_webhooks::{AuthenticationMode, EndpointId, EndpointLookup, EndpointStatus, NatsEndpointRegistry};
+use trogon_webhooks::{
+    AuthenticationMode, EndpointId, EndpointLookup, EndpointRegistration, EndpointStatus, NatsEndpointRegistry,
+    ProjectId, TimestampTolerance, WebhookBodySize,
+};
 use trogonai_proto::gateway::webhooks::v1;
 
 const ENDPOINT: &str = "67b82e3f-5c99-486b-b8a0-acdad9548e3d";
@@ -71,6 +74,10 @@ async fn registry_rejects_unknown_enum_values_invalid_domains_and_identity_misma
     zero_limit.max_body_bytes = 0;
     let mut invalid_tolerance = record();
     invalid_tolerance.timestamp_tolerance_seconds = 0;
+    let mut unknown_mode = record();
+    unknown_mode.authentication_mode = buffa::EnumValue::from(999);
+    let mut unknown_status = record();
+    unknown_status.status = buffa::EnumValue::from(999);
     for record in [
         missing_mode,
         missing_status,
@@ -79,6 +86,8 @@ async fn registry_rejects_unknown_enum_values_invalid_domains_and_identity_misma
         oversized_limit,
         zero_limit,
         invalid_tolerance,
+        unknown_mode,
+        unknown_status,
     ] {
         let store = MockJetStreamKvStore::new();
         store.enqueue_entry(Bytes::from(record.encode_to_vec()), 1, Operation::Put);
@@ -117,4 +126,22 @@ fn domain_values_bound_endpoint_project_payload_and_clock_inputs() {
     assert!(trogon_webhooks::TimestampTolerance::new(0).is_err());
     assert!(trogon_webhooks::TimestampTolerance::new(3601).is_err());
     assert!(trogon_webhooks::ConfigurationRevision::new(0).is_err());
+}
+
+#[test]
+fn registration_encoding_round_trips_validated_authentication_and_status() {
+    for mode in [AuthenticationMode::Bearer, AuthenticationMode::HmacSha256] {
+        for status in [EndpointStatus::Enabled, EndpointStatus::Disabled] {
+            let registration = EndpointRegistration::new(
+                EndpointId::new(ENDPOINT).unwrap(),
+                ProjectId::new("project-1").unwrap(),
+                status,
+                mode,
+                WebhookBodySize::new(4096).unwrap(),
+                TimestampTolerance::new(300).unwrap(),
+            );
+            let wire = v1::EndpointRegistration::decode_from_slice(&registration.encode()).unwrap();
+            assert_eq!(EndpointRegistration::try_from(wire).unwrap(), registration);
+        }
+    }
 }

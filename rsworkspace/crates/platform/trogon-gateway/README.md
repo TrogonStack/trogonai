@@ -12,7 +12,12 @@ How to run the unified ingress gateway that receives source events and publishes
 - JetStream stream provisioning for every enabled source
 - Health probes at `GET /-/liveness` and `GET /-/readiness`
 
-If no source is configured, startup fails.
+The gateway can also receive dynamically registered generic webhooks. Enable
+`[webhooks]` and use `POST /webhooks/{endpoint_id}`; endpoint records are loaded
+from the registry for each request. See the
+[generic webhook reference](../../../../docs/reference/gateway-webhooks.md).
+
+With no sources configured, the gateway still serves its health routes.
 
 ## Quick start
 

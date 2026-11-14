@@ -4,6 +4,12 @@ Browse the [documentation home](./index.md) for the full project navigation.
 Documents distinguish proposed architecture, normative contract reference and
 runtime acceptance evidence.
 
+## Generic webhooks
+
+The [gateway webhook reference](./reference/gateway-webhooks.md) describes
+dynamic endpoint registration, request authentication, and the durable delivery
+contract that other systems consume.
+
 ## Workload identity
 
 The proposed [workload identity profile](./reference/workload-identity.md)
