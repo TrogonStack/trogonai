@@ -3554,10 +3554,11 @@
         "behavior": "Python passes a str or Path mcp_servers value to --mcp-config as given, instead of the generated config. TypeScript has no such form."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "The form exists only in Python. ClaudeAgentOptions::mcp_config carries the str or Path value verbatim as its own --mcp-config value, text or path alike."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and takes only the server map, ClaudeAgentOptions::mcp_servers; ClaudeAgentOptions::mcp_config selects the str or Path form only Python has, carried verbatim as its own --mcp-config value, text or path alike."
       },
       "contracts": [
+        "golden_argv_env::typescript_mcp_config_matches_upstream_bytes",
         "golden_argv_env::python_mcp_config_path_is_passed_verbatim",
         "golden_argv_env::python_mcp_config_json_text_is_passed_verbatim"
       ],
