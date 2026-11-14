@@ -435,7 +435,10 @@ fn format_check(node: &StringNode, text: &str, issues: &mut Vec<Issue>, value: &
                         ("origin", "string".into()),
                         ("code", "invalid_format".into()),
                         ("format", format.as_str().into()),
-                        ("pattern", format!("/{source}/{flags}").into()),
+                        (
+                            "pattern",
+                            format!("/{source}/{}", sdk_mcp_regexp::canonical_flags(flags)).into(),
+                        ),
                     ],
                     true,
                 ));

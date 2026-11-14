@@ -24,6 +24,11 @@ pub(crate) fn compile(source: &str, flags: &str) -> Result<Regex, String> {
     })
 }
 
+/// `regexp.flags`: the flags in the order the getter reads them, whatever order the constructor was given.
+pub(crate) fn canonical_flags(flags: &str) -> String {
+    "dgimsuvy".chars().filter(|flag| flags.contains(*flag)).collect()
+}
+
 /// `regexp.test(text)` with `lastIndex` at zero. A regular expression with the `u` or `v` flag reads the
 /// UTF-16 code units of `text` as code points, one without reads them as they are; a sticky one has to match
 /// at the start.
