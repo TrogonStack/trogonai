@@ -78,6 +78,14 @@ impl<T> Receiver<T> {
         }
     }
 
+    /// [`Self::recv`] for a `Stream`: registers `cx` to be woken when a value arrives or the queue closes.
+    pub(crate) fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<T>> {
+        match self {
+            Self::Bounded(receiver) => receiver.poll_recv(cx),
+            Self::Unbounded(receiver) => receiver.poll_recv(cx),
+        }
+    }
+
     pub(crate) fn close(&mut self) {
         match self {
             Self::Bounded(receiver) => receiver.close(),

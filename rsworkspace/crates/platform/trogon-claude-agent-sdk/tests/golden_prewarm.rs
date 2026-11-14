@@ -61,7 +61,7 @@ async fn claimed_initialization(script: Script, js_runtime: JsRuntime) -> Outcom
         Err(error) => error.to_string(),
     };
     let models = handle.supported_models().await.err().map(|error| error.to_string());
-    query.close().await?;
+    query.disconnect().await?;
     run.lines().await?;
     Ok((result, models))
 }
@@ -76,7 +76,7 @@ async fn claimed(script: Script, claim: ClaimOptions) -> Outcome<Claimed> {
     let (spare, run) = spare(script).await?;
     let query = spare.claim(Prompt::from("hello"), claim).await?;
     let outcome = spare.claimed().await;
-    let _ = query.close().await;
+    let _ = query.disconnect().await;
     Ok(Claimed {
         outcome,
         lines: run.lines().await?,
@@ -185,7 +185,7 @@ async fn a_plain_claim_writes_the_claim_and_the_prompt_before_any_answer() -> Ou
             sdk_mcp_settled: true,
         }
     );
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(
         run.lines().await?,
         vec![INIT.to_owned(), claim_line(SPARE), user("hello")]
@@ -366,7 +366,7 @@ async fn a_refused_claim_carries_the_cli_text_and_still_gets_a_result() -> Outco
         Some("Claude Code control request failed (claim_session)")
     );
     assert!(matches!(query.next_message().await, Ok(Some(_))));
-    let _ = query.close().await;
+    let _ = query.disconnect().await;
     assert_eq!(
         run.lines().await?,
         vec![INIT.to_owned(), claim_line(SPARE), user("hello")]
@@ -398,7 +398,7 @@ async fn hook_settings_are_refused_without_sending_anything_and_the_spare_stays_
     );
     let query = spare.claim(Prompt::from("hello"), ClaimOptions::new(SPARE)).await?;
     spare.claimed().await?;
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(
         run.lines().await?,
         vec![INIT.to_owned(), claim_line(SPARE), user("hello")]
@@ -420,7 +420,7 @@ async fn a_spare_can_be_claimed_only_once_and_not_after_it_closed() -> Outcome {
         .err()
         .ok_or("a second claim was expected to fail")?;
     assert_eq!(second.to_string(), "SpareProcess.claim() can only be called once");
-    query.close().await?;
+    query.disconnect().await?;
     run.lines().await?;
 
     let (closed, run) = self::spare(Script::default()).await?;
@@ -487,7 +487,7 @@ async fn the_claim_answer_replaces_the_initialization_result_and_keeps_the_appli
     assert_eq!(info.hooks_applied, FeatureSupport::Supported);
     assert_eq!(info.plugins_applied, FeatureSupport::Supported);
     assert_eq!(info.managed_settings_applied, FeatureSupport::Supported);
-    query.close().await?;
+    query.disconnect().await?;
     run.lines().await?;
     Ok(())
 }
@@ -641,7 +641,7 @@ async fn a_spare_without_a_directory_parks_under_the_config_home_until_it_is_cla
     let query = spare.claim(Prompt::from("hello"), ClaimOptions::new(SPARE)).await?;
     spare.claimed().await?;
     assert_eq!(std::fs::read_dir(&spares)?.count(), 0);
-    query.close().await?;
+    query.disconnect().await?;
     run.lines().await?;
     Ok(())
 }

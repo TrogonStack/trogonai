@@ -111,8 +111,10 @@ integrity-verified published `0.3.319` declaration archive.
 | `Error::Process { .. }`, `exit_code()`, `typescript_message()` | `ProcessError` | exit-code error text |
 | `Error::Result(ResultError)` | `ResultError` | error result text |
 | `Error::Aborted(AbortError)`, `abort()` | not applicable | `AbortError`, `abortController.abort()` |
-| `close()` on `ClaudeSdkClient` or `ClientHandle` | `close()` without waiting | `Query.close()` |
-| `disconnect(self)` | `disconnect()` | `close()` plus waiting for the process |
+| `close()` on `Query`, `ClaudeSdkClient` or `ClientHandle` | `close()` without waiting | `Query.close()` |
+| `disconnect(self)` on `Query` or `ClaudeSdkClient` | `disconnect()` | `close()` plus waiting for the process; the iterator's `return()`, `Symbol.asyncDispose` and a `for await` that breaks, which discard messages not read yet |
+| `Stream` for `Query` and `ClaudeSdkClient`, `ClaudeSdkClient::receive_messages` | `receive_messages()` | `for await (const message of query)` |
+| `ClaudeSdkClient::receive_response` | `receive_response()` (through the next `ResultMessage`) | not applicable |
 | `Error::QueryClosed` | a waiting control request runs out its timeout | "Query closed before response received" |
 | `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
 | `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |

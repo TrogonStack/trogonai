@@ -3584,14 +3584,16 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "close() rejects waiting control requests with Error::QueryClosed by default; ArgvStyle::Python leaves each to its control timeout as Python does. disconnect(self) closes and waits for the process in both styles."
+        "reason": "close() on a Query, the client or a handle takes &self, so it can be called while the stream is read, and rejects waiting control requests with Error::QueryClosed by default while the messages already received stay readable before the stream ends; ArgvStyle::Python leaves each to its control timeout as Python does. disconnect(self) on the query or the client closes and waits for the process in both styles."
       },
       "contracts": [
         "shutdown_errors::close_rejects_a_waiting_control_like_typescript_and_ends_the_run_cleanly",
-        "shutdown_errors::close_leaves_a_waiting_control_to_its_timeout_like_python"
+        "shutdown_errors::close_leaves_a_waiting_control_to_its_timeout_like_python",
+        "client_lifecycle_stream::close_while_iterating_keeps_received_messages_and_ends_the_stream_like_sdk_mjs"
       ],
       "rust": [
         "src/client.rs",
+        "src/client_stream.rs",
         "src/driver.rs",
         "src/error.rs"
       ]

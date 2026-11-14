@@ -54,6 +54,12 @@ information.
 
 For interactive use, create a `ClaudeSdkClient`, send a prompt and receive
 through `Message::Result`. The next prompt reuses the process.
+`receive_response()` is Python's `receive_response()`: a `Stream` that yields
+messages through the next `Message::Result` and then ends, leaving later
+messages queued. `receive_messages()` streams on without stopping. `Query` and
+`ClaudeSdkClient` are themselves `futures_util::Stream`s of
+`Result<Message, Error>`, TypeScript's `for await`, ending where `next_message`
+returns `None`.
 `send_input(UserInput)` accepts structured content and message identity.
 `InputBlock` is a transparent JSON-object wrapper forwarded verbatim, with a
 `text` convenience constructor; the CLI and the Messages API validate block shapes.
@@ -63,14 +69,19 @@ queued input or `stream_input`, and receive on the owner concurrently. Call
 `finish_input()` when no more user messages will be sent. Reported queue counts
 handle CLIs that coalesce queued sends into a turn.
 
-`close()` on the client or any `ClientHandle` is TypeScript's `Query.close()`: it
-shuts the process down without waiting and is idempotent. Messages already
+`close()` on a `Query`, the client or any `ClientHandle` is TypeScript's
+`Query.close()`: it takes `&self`, so it can be called while the stream is being
+read, shuts the process down without waiting and is idempotent. Messages already
 received stay readable before `next_message` returns `None`, and a control
 request still waiting fails with `Error::QueryClosed` ("Query closed before
 response received"); under `ArgvStyle::Python` it runs out its timeout instead,
-as Python's `close()` leaves it. Call `disconnect().await` to close and wait for
-shutdown and cleanup errors. Dropping the owner closes even when a handle
-survives, but does not await cleanup. Cleanup needs a running Tokio runtime; the
+as Python's `close()` leaves it. Call `disconnect().await` on the query or the
+client to close and wait for shutdown and cleanup errors. A TypeScript
+`for await` that breaks, the iterator's `return()` and `Symbol.asyncDispose`
+are `disconnect().await`, which discards messages not read yet; `throw(error)`
+is `disconnect().await` followed by returning the caller's own error, or
+`abort()` to stop the process at once. Dropping the owner closes even when a
+handle survives, but does not await cleanup. Cleanup needs a running Tokio runtime; the
 child also has a `kill_on_drop` fallback.
 
 ## Pre-warming with startup
@@ -548,7 +559,8 @@ and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/22
 on an existing client; Rust's `connect` is the async factory that returns the
 connected client, and `disconnect(self)` consumes it, so a second disconnect
 cannot be written rather than being a no-op. TypeScript's `Query.close()` is
-`close()` on the client or a handle.
+`close()` on the query, the client or a handle. Python's `get_server_info()` is
+`ClientHandle::initialization_result()`.
 
 Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.

@@ -65,6 +65,14 @@ workspace_crate(
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
+        "client_lifecycle_stream": {
+            "compile_data": glob([
+                "tests/fixtures/client_lifecycle/*.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "control_request_id": {},
         "control_values": {},
         "core_options_golden": {

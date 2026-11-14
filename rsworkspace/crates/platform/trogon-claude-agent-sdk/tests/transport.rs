@@ -243,7 +243,7 @@ async fn q01_query_with_a_transport_writes_the_prompt_after_initialize_and_ends_
     assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
     drop(peer.incoming);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(peer.calls.count("connect"), 1);
     assert_eq!(peer.calls.count("end_input"), 1);
     assert_eq!(peer.calls.count("close"), 1);
@@ -260,7 +260,7 @@ async fn q01_a_one_turn_query_stops_after_the_first_result() -> TestResult {
     peer.send(result("first"))?;
     assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(peer.calls.count("close"), 1);
     Ok(())
 }

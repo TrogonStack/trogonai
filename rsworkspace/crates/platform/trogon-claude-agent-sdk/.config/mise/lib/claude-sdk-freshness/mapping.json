@@ -315,7 +315,9 @@
         "ClaudeSdkClient.connect",
         "ClaudeSdkClient.close",
         "ClientHandle.close",
+        "Query.close",
         "ClaudeSdkClient.disconnect",
+        "Query.disconnect",
         "Error.QueryClosed"
       ],
       "tests": [
@@ -334,16 +336,27 @@
         {
           "path": "tests/shutdown_errors.rs",
           "name": "close_leaves_a_waiting_control_to_its_timeout_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "close_while_iterating_keeps_received_messages_and_ends_the_stream_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "breaking_out_and_return_map_to_disconnect_like_sdk_mjs"
         }
       ],
       "status": "supported",
-      "rationale": "connect is an async factory: under the TypeScript style it returns once the initialize request is queued, as the Query constructor does, and the initialize outcome is read through the async metadata getters; under the Python style it returns only after initialization is answered, as Python's connect does. close(&self) on the client or any handle is TypeScript Query.close: idempotent, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) is Python's awaitable disconnect: it closes and waits for the process to stop; consuming the owner makes a second disconnect unrepresentable instead of a no-op."
+      "rationale": "connect is an async factory: under the TypeScript style it returns once the initialize request is queued, as the Query constructor does, and the initialize outcome is read through the async metadata getters; under the Python style it returns only after initialization is answered, as Python's connect does. close(&self) on a Query, the client or any handle is TypeScript Query.close: idempotent and callable while the stream is read, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) on the query or the client is Python's awaitable disconnect and what the TypeScript iterator's return(), Symbol.asyncDispose and a for await that breaks await: it closes, waits for the process to stop and discards messages not read yet; consuming the owner makes a second disconnect or a read after it unrepresentable instead of a no-op."
     },
     {
       "id": "interactive-client",
       "upstream": {
         "python": {
-          "symbols": [],
+          "symbols": [
+            "ClaudeSDKClient.receive_messages",
+            "ClaudeSDKClient.receive_response"
+          ],
           "prefixes": [
             "ClaudeSDKClient"
           ]
@@ -358,16 +371,28 @@
       },
       "rust_api": [
         "ClaudeSdkClient",
-        "ClientHandle"
+        "ClientHandle",
+        "ClaudeSdkClient.receive_messages",
+        "ClaudeSdkClient.receive_response",
+        "ClaudeSdkClient.next_message",
+        "Query.next_message"
       ],
       "tests": [
         {
           "path": "tests/subprocess.rs",
           "name": "interactive_client_reuses_one_process_for_multiple_turns"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "receive_response_stops_after_the_result_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "receive_response_ends_with_the_stream_like_python"
         }
       ],
       "status": "partial",
-      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Only explicitly mapped operations have focused evidence."
+      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Query and ClaudeSdkClient are futures_util Streams of Result<Message, Error>, the TypeScript async iterator, ending where next_message returns None; receive_messages() and receive_response() are Python's, the latter yielding through the next result and leaving later messages queued. Python's get_server_info() is ClientHandle::initialization_result, mapped under initialization. Every other ClaudeSDKClient and Query method is mapped by its own row. Still partial: Python __init__, __aenter__, __aexit__ and query(prompt, session_id) have no mapped Rust counterpart or evidence yet, Query.streamInput is partial under queued-input, and when the CLI exits in the middle of a turn Rust ends receive_response with Error::UnexpectedEof where Python ends quietly."
     },
     {
       "id": "full-run-query",

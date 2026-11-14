@@ -354,9 +354,9 @@ async fn query_facades_expose_handles_and_cleanup_after_completion_or_early_clos
             assert!(query.next_message().await?.is_none());
             assert!(query.next_message().await?.is_none());
             assert!(query.handle().is_none());
-            query.close().await?;
+            query.disconnect().await?;
         } else {
-            let closing = tokio::spawn(query.close());
+            let closing = tokio::spawn(query.disconnect());
             assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
             cli.end(0);
             closing.await??;
@@ -1730,7 +1730,7 @@ async fn a_turn_keeps_stdin_open_until_an_in_flight_callback_answers() -> TestRe
     assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
     cli.end(0);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     Ok(())
 }
 
@@ -1775,7 +1775,7 @@ async fn a_callback_answered_after_the_run_settled_is_dropped_without_stopping_t
     timeout(Duration::from_secs(2), dropped.notified()).await?;
     cli.end(0);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     Ok(())
 }
 

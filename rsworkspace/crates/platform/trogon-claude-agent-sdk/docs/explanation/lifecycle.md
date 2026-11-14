@@ -42,7 +42,7 @@ and error boundaries.
 | Interactive ownership | Reusable `ClaudeSDKClient` | A streaming `Query` also has controls and streamed input | Reusable `ClaudeSdkClient` owns one CLI process |
 | Readiness | Await `connect()` or enter `async with` | Ordinary `query()` starts asynchronously; `startup()` awaits readiness | Await `connect()` before receiving a client |
 | Simple queries | `query()` async iterator | `query()` returns an async generator with controls | `query()` returns an owned query over the same driver |
-| Cleanup | Await `disconnect()` or leave the context | `Query.close()` starts cleanup; generator return/disposal can await it | Consuming `disconnect().await` observes cleanup and errors |
+| Cleanup | Await `disconnect()` or leave the context | `Query.close()` starts cleanup; generator return/disposal can await it | `close(&self)` starts cleanup while the stream is read; consuming `disconnect().await` observes cleanup and errors |
 
 Rust avoids exposing a usable but disconnected client. The constructor future
 can report startup errors before the caller sends input. Consuming the owner

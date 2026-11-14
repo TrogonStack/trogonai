@@ -225,7 +225,7 @@ async fn turn(needs: bool, steps: Vec<Step>) -> Result<&'static str, Box<dyn std
     let server = tokio::spawn(serve(harness, steps, Arc::new(AtomicBool::new(false))));
     let query = query_turn_with_adapters(Prompt::from("hi"), options(needs), adapters(process)).await?;
     tokio::time::sleep(Duration::from_millis(1200)).await;
-    query.close().await?;
+    query.disconnect().await?;
     Ok(server.await?.map_err(|error| error.to_string())?)
 }
 
@@ -358,7 +358,7 @@ async fn query_to_the_end(options: ClaudeAgentOptions, steps: Vec<Step>) -> Resu
         Err(_) => false,
     };
     closing.store(true, Ordering::SeqCst);
-    query.close().await?;
+    query.disconnect().await?;
     let closed_after = server.await?.map_err(|error| error.to_string())?;
     Ok(Seen {
         closed_after,

@@ -42,7 +42,7 @@ async fn startup_writes_the_handshake_then_the_prompt() -> Outcome {
         Some(&Some(OsString::from("1")))
     );
     let query = warm.query(Prompt::from("hi")).await?;
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(run.lines().await?, vec![INIT.to_owned(), user("hi")]);
     Ok(())
 }

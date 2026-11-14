@@ -36,6 +36,8 @@ struct ClientRuntime {
     terminal: Option<oneshot::Receiver<Result<(), Error>>>,
     driver: Option<JoinHandle<()>>,
     process_id: Option<u32>,
+    /// What the terminal reported, kept while `finish` still waits for the driver task.
+    outcome: Option<Result<(), Error>>,
 }
 
 /// What the first initialize came to: its response, or the error it failed with, shared by every reader the way a
@@ -511,6 +513,7 @@ impl ClaudeSdkClient {
             terminal: Some(terminal_rx),
             driver: Some(driver),
             process_id,
+            outcome: None,
         };
         let receiver = match runtime.handle.start_initialize().await {
             Ok(receiver) => receiver,
@@ -616,22 +619,12 @@ impl ClaudeSdkClient {
 
     /// Cancellation-safe: cancelling this wait does not discard a message.
     pub async fn next_message(&mut self) -> Result<Option<Message>, Error> {
-        match self.runtime.messages.recv().await {
-            Some(message) => Ok(Some(message)),
-            None => {
-                self.finish().await?;
-                Ok(None)
-            }
-        }
+        std::future::poll_fn(|cx| self.poll_next_message(cx)).await
     }
 
     /// Waits for process shutdown and final storage work, reporting cleanup errors.
     pub async fn disconnect(self) -> Result<(), Error> {
         self.runtime.close().await
-    }
-
-    async fn finish(&mut self) -> Result<(), Error> {
-        self.runtime.finish().await
     }
 }
 
@@ -660,17 +653,7 @@ impl ClientRuntime {
     }
 
     async fn finish(&mut self) -> Result<(), Error> {
-        let outcome = if let Some(terminal) = self.terminal.as_mut() {
-            let outcome = terminal.await.map_err(|_| Error::DriverStopped)?;
-            self.terminal = None;
-            outcome
-        } else {
-            Ok(())
-        };
-        if let Some(driver) = self.driver.take() {
-            driver.await.map_err(Error::DriverTask)?;
-        }
-        outcome
+        std::future::poll_fn(|cx| self.poll_finish(cx)).await
     }
 }
 
@@ -1656,32 +1639,32 @@ impl Query {
         self.client.as_ref().map(ClaudeSdkClient::handle)
     }
 
+    /// Cancellation-safe: cancelling this wait does not discard a message.
     pub async fn next_message(&mut self) -> Result<Option<Message>, Error> {
-        let Some(client) = self.client.as_mut() else {
-            return Ok(None);
-        };
-        if self.one_turn && self.result_received {
-            self.disconnect_client().await?;
-            return Ok(None);
-        }
-        let message = client.next_message().await?;
-        if matches!(message, Some(Message::Result(_))) {
-            self.result_received = true;
-        }
-        Ok(message)
+        std::future::poll_fn(|cx| self.poll_next_message(cx)).await
     }
 
-    pub async fn close(mut self) -> Result<(), Error> {
-        self.disconnect_client().await
+    /// TypeScript `Query.close()`: shuts the process down without waiting, and may be called while another task
+    /// reads. Idempotent. Messages already received stay readable, after which the query ends; control requests
+    /// still waiting fail with `Error::QueryClosed`. [`Query::disconnect`] closes and also waits for cleanup.
+    pub fn close(&self) {
+        if let Some(client) = &self.client {
+            client.close();
+        }
     }
 
-    async fn disconnect_client(&mut self) -> Result<(), Error> {
-        if let Some(client) = self.client.take() {
-            client.disconnect().await?;
+    /// Closes the process and waits for shutdown and final storage work, reporting cleanup errors. What the
+    /// TypeScript iterator's `return()` awaits; messages not read yet are discarded.
+    pub async fn disconnect(mut self) -> Result<(), Error> {
+        match self.client.take() {
+            Some(client) => client.disconnect().await,
+            None => Ok(()),
         }
-        Ok(())
     }
 }
+
+#[path = "client_stream.rs"]
+mod stream;
 
 #[cfg(test)]
 #[path = "client_tests.rs"]
