@@ -41,7 +41,21 @@ pub const NOT_FOUND_BEFORE_EXIT: u32 = 3;
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const INIT_ATTEMPTS: u32 = 10;
+const GET_ATTEMPTS: u32 = 10;
+const GET_TIMEOUT: Duration = Duration::from_secs(30);
+/// `initStateGetOrderingBoundMs` (bridge.mjs offset 1133 region, `dHe`): how long `initialize` waits for the stored
+/// record before it registers.
+const INIT_STATE_GET_ORDERING_BOUND: Duration = Duration::from_secs(10);
 const INIT_BACKOFF_CEILING_MS: u64 = 30_000;
+/// `qHe` (bridge.mjs offset 1019297): the metadata keys that are not sent again when the stored record holds them.
+const RECORDED_KEYS: [&str; 6] = [
+    "context_usage",
+    "cross_session_inbound",
+    "is_ultraplan_mode",
+    "last_served_model",
+    "permission_mode",
+    "rate_limit_info",
+];
 const SESSION_TICKET_HEADER: &str = "x-ccr-ticket-session";
 const TICKET_HEADERS: [&str; 3] = ["x-ccr-ticket-rev", SESSION_TICKET_HEADER, "x-ccr-ticket-seq"];
 
@@ -494,6 +508,9 @@ pub struct WorkerClient<H, P = TokioPacing> {
     session_access_token: Option<SensitiveString>,
     non_origin_403: NonOrigin403,
     queue: PatchQueue,
+    record_at_start: Option<Map<String, Value>>,
+    reported_keys: Vec<String>,
+    reply_degraded: bool,
 }
 
 impl<H, P> WorkerClient<H, P> {
@@ -516,6 +533,9 @@ impl<H, P> WorkerClient<H, P> {
             session_access_token: config.session_access_token,
             non_origin_403: config.non_origin_403,
             queue: PatchQueue::new(),
+            record_at_start: None,
+            reported_keys: Vec::new(),
+            reply_degraded: false,
         })
     }
 
@@ -608,6 +628,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// The first `PUT /worker`: registers the worker as idle and retries what is worth retrying.
     pub async fn initialize(&mut self, epoch: i64) -> Result<(), InitError> {
         self.epoch = epoch;
+        let record = self.read_worker_record().await.map_err(InitError::Mismatch)?;
         let body = json!({
             "worker_status": "idle",
             "worker_epoch": epoch,
@@ -622,6 +643,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 .map_err(InitError::Mismatch)?;
             let RequestOutcome::Failed(failure) = outcome else {
                 self.state = SessionState::Idle;
+                self.record_at_start = record;
                 return Ok(());
             };
             if matches!(failure.status, Some(400 | 413 | 422)) || attempt >= INIT_ATTEMPTS {
@@ -636,6 +658,65 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             http_status: failure.status,
             no_answer: failure.fetch_failed,
         }))
+    }
+
+    /// `getWorkerState` as `initialize` runs it: `GET /worker` with up to ten attempts, bridge.mjs offset 1049109. The
+    /// answer is the `external_metadata` the stored record holds, or `None` when the read failed. The read is not
+    /// waited on past `initStateGetOrderingBoundMs`; upstream lets it finish behind the first `PUT /worker`, which a
+    /// single borrow of the client cannot do, so a read that takes longer is given up.
+    async fn read_worker_record(&mut self) -> Result<Option<Map<String, Value>>, MismatchReason> {
+        let read = self.read_worker_record_with_retry();
+        match tokio::time::timeout(INIT_STATE_GET_ORDERING_BOUND, read).await {
+            Ok(result) => result,
+            Err(_) => Ok(None),
+        }
+    }
+
+    async fn read_worker_record_with_retry(&mut self) -> Result<Option<Map<String, Value>>, MismatchReason> {
+        let (Some(authorization), Ok(url)) = (
+            self.authorization(true),
+            reqwest::Url::parse(&format!("{}/worker", self.session_url)),
+        ) else {
+            return Ok(None);
+        };
+        for attempt in 1..=GET_ATTEMPTS {
+            let mut request = reqwest::Request::new(Method::GET, url.clone());
+            let headers = request.headers_mut();
+            headers.insert("authorization", authorization.clone());
+            headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+            headers.insert("anthropic-client-platform", HeaderValue::from_static(self.platform));
+            headers.insert("user-agent", HeaderValue::from_static(USER_AGENT));
+            if let Ok(reply) = exchange(&self.http, request, GET_TIMEOUT).await {
+                let status = reply.status;
+                if (200..300).contains(&status) {
+                    let data = reply
+                        .body
+                        .as_deref()
+                        .and_then(|bytes| parse_json(&decode_text(bytes)).ok());
+                    if let Some(data) = data {
+                        let record = data
+                            .get("worker")
+                            .and_then(|worker| worker.get("external_metadata"))
+                            .and_then(Value::as_object)
+                            .cloned();
+                        return Ok(Some(record.unwrap_or_default()));
+                    }
+                } else if status == 409 {
+                    return Err(
+                        conflict_reason(&reply.headers, reply.body.as_deref()).unwrap_or(MismatchReason::EpochConflict)
+                    );
+                } else if matches!(status, 400 | 413 | 422) {
+                    return Ok(None);
+                }
+            }
+            if attempt < GET_ATTEMPTS {
+                let backoff = (500_u64 << (attempt - 1)).min(INIT_BACKOFF_CEILING_MS);
+                self.pacing
+                    .pause(Duration::from_millis(backoff) + Duration::from_secs_f64(self.pacing.jitter() * 0.5))
+                    .await;
+            }
+        }
+        Ok(None)
     }
 
     /// Reports the worker state. Nothing is sent when the state is the one already reported and no details ride
@@ -653,21 +734,29 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             "worker_epoch": self.epoch,
             "worker_status": state.as_str(),
             "requires_action_details": details.map_or(Value::Null, RequiresActionDetails::to_json),
-            "internal_metadata": {"reply_degraded": false},
+            "internal_metadata": {"reply_degraded": self.reply_degraded},
         });
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
             .map(Some)
     }
 
-    /// Reports `external_metadata` for the worker.
-    pub async fn report_metadata(&mut self, metadata: &Map<String, Value>) -> Result<RequestOutcome, MismatchReason> {
+    /// Reports `external_metadata` for the worker. The keys the stored record already holds are left out the first
+    /// time they are reported (`withoutRepeatsOfRecord`); the outcome is `None` when nothing is left to send.
+    pub async fn report_metadata(
+        &mut self,
+        metadata: &Map<String, Value>,
+    ) -> Result<Option<RequestOutcome>, MismatchReason> {
+        let Some(metadata) = self.without_repeats_of_record(metadata) else {
+            return Ok(None);
+        };
         let body = json!({
             "worker_epoch": self.epoch,
-            "external_metadata": external_metadata_patch(metadata),
+            "external_metadata": external_metadata_patch(&metadata),
         });
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
+            .map(Some)
     }
 
     /// Queues a state report the way `reportState` does: nothing is queued when the state is the one already
@@ -683,19 +772,52 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             "requires_action_details".to_owned(),
             details.map_or(Value::Null, RequiresActionDetails::to_json),
         );
-        patch.insert("internal_metadata".to_owned(), json!({"reply_degraded": false}));
+        patch.insert(
+            "internal_metadata".to_owned(),
+            json!({"reply_degraded": self.reply_degraded}),
+        );
         self.queue.enqueue(patch);
         true
     }
 
-    /// Queues `external_metadata` the way `reportMetadata` does. [`WorkerClient::flush`] sends it.
-    pub fn submit_metadata(&mut self, metadata: &Map<String, Value>) {
+    /// Queues `external_metadata` the way `reportMetadata` does, leaving out the keys the stored record already
+    /// holds the first time they are reported. Returns whether a patch was queued. [`WorkerClient::flush`] sends it.
+    pub fn submit_metadata(&mut self, metadata: &Map<String, Value>) -> bool {
+        let Some(metadata) = self.without_repeats_of_record(metadata) else {
+            return false;
+        };
         let mut patch = Patch::new();
         patch.insert(
             "external_metadata".to_owned(),
-            Value::Object(external_metadata_patch(metadata)),
+            Value::Object(external_metadata_patch(&metadata)),
         );
         self.queue.enqueue(patch);
+        true
+    }
+
+    /// `withoutRepeatsOfRecord`: the metadata without the keys that were first reported now and equal what the
+    /// record held at the start. `None` when that leaves nothing of a non-empty report.
+    fn without_repeats_of_record(&mut self, metadata: &Map<String, Value>) -> Option<Map<String, Value>> {
+        let mut repeated: Vec<&str> = Vec::new();
+        for key in metadata.keys() {
+            if !RECORDED_KEYS.contains(&key.as_str()) || self.reported_keys.iter().any(|seen| seen == key) {
+                continue;
+            }
+            self.reported_keys.push(key.clone());
+            let stored = self.record_at_start.as_ref().and_then(|record| record.get(key));
+            if self.record_at_start.is_some() && js_equal(metadata.get(key), stored) {
+                repeated.push(key);
+            }
+        }
+        if repeated.is_empty() {
+            return Some(metadata.clone());
+        }
+        let left: Map<String, Value> = metadata
+            .iter()
+            .filter(|(key, _)| !repeated.contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        (!left.is_empty()).then_some(left)
     }
 
     /// Stops the queue from taking new patches; see [`PatchQueue::close_to_new_patches`].
@@ -709,6 +831,16 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     }
 
     /// The queue behind [`WorkerClient::submit_state`] and [`WorkerClient::submit_metadata`].
+    /// Sets the `external_metadata` the stored record held when the session started (`recordAtStart`).
+    pub fn set_record_at_start(&mut self, record: Option<Map<String, Value>>) {
+        self.record_at_start = record;
+    }
+
+    /// Sets the `reply_degraded` value every status report carries (`e3()`, bridge.mjs offset 856241).
+    pub fn set_reply_degraded(&mut self, degraded: bool) {
+        self.reply_degraded = degraded;
+    }
+
     pub fn queue(&self) -> &PatchQueue {
         &self.queue
     }
@@ -882,4 +1014,25 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
 fn decode_text(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
     text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned()
+}
+
+/// `Jb(a ?? void 0, b ?? void 0)`: bridge.mjs offset 837828 compares deeply, with a missing top-level value and
+/// null alike.
+fn js_equal(left: Option<&Value>, right: Option<&Value>) -> bool {
+    match (left.filter(|v| !v.is_null()), right.filter(|v| !v.is_null())) {
+        (None, None) => true,
+        (Some(a), Some(b)) => deep_equal(a, b),
+        _ => false,
+    }
+}
+
+fn deep_equal(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
+        (Value::Array(a), Value::Array(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| deep_equal(x, y)),
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len() && a.iter().all(|(key, x)| b.get(key).is_some_and(|y| deep_equal(x, y)))
+        }
+        (a, b) => a == b,
+    }
 }
