@@ -332,6 +332,16 @@ upstream SDKs).
   argument list and no store-backed resume materialization, while the session
   store mirror still runs, as in Python. `read_message` must be cancel safe, and
   an `Err` from any method ends the run as `Error::Transport` surfaces it.
+- `extract_from_bunfs` ports the TypeScript `extract` entrypoint. A path with
+  neither `$bunfs` nor `~BUN` comes back unchanged; any other is read, hashed
+  (first 16 hex digits of SHA-256) and copied to
+  `{tmpdir}/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/<name>` (root
+  `claude-agent-sdk` on Windows, tmpdir from `CLAUDE_CODE_TMPDIR`, `/tmp` on macOS
+  or the OS temp dir). An existing copy is reused only when it is a plain,
+  singly linked file with the same bytes. Failures are `tracing` warnings with the
+  upstream text and the input path is returned. `extract_from_bunfs_with` takes an
+  `ExtractHost` for tests. Warning texts name errnos from a fixed table, and
+  hard link counts and file ids are only read on Unix.
 - Bundled executables are caller-driven lookups, not part of `connect`.
   `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check.
   `bundled_cli_derives_client_app` and `meets_derived_client_app_minimum` port

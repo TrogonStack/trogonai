@@ -33,6 +33,7 @@ mod effort_level;
 mod environment;
 mod environment_plan;
 mod error;
+mod extract_from_bunfs;
 mod float_digits;
 mod framing;
 mod hooks;
@@ -66,6 +67,7 @@ mod model_name;
     )
 )]
 mod node_path;
+mod node_path_join;
 mod option_error;
 mod options;
 mod output_schema;
@@ -207,6 +209,7 @@ pub use error::{
     AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, JsonDecodeSourceError,
     MessageParseError, ProtocolError, ResultError, python_cli_not_found_text, python_process_error_text,
 };
+pub use extract_from_bunfs::{extract_from_bunfs, extract_from_bunfs_with};
 pub use hooks::{
     CallbackError, HookContinuation, HookEvent, HookFailureMode, HookFuture, HookHandler, HookOutput,
     HookOutputVisibility, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, SyncHookOutput,
