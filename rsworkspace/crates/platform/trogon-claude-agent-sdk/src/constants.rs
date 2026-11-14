@@ -1383,3 +1383,6 @@ pub(crate) const CLAIM_FOLLOWING_SETTINGS: [&str; 6] = [
 
 /// The session id Python's `ClaudeSDKClient.connect(str)` and `query` write when the caller names none.
 pub(crate) const PYTHON_DEFAULT_SESSION: &str = "default";
+
+/// The keyword a schema `pattern` takes in the TypeScript call check.
+pub(crate) const ECMA_PATTERN: &str = "x-trogon-pattern";

@@ -236,21 +236,18 @@ fn listed_input_schema(tool: &SdkTool) -> JsonObject {
     input_schema
 }
 
-/// The keyword a schema `pattern` takes in the call check.
-const ECMA_PATTERN: &str = "x-trogon-pattern";
-
 /// The listed input schema compiled for the call check. `McpServer` checks the arguments with zod alone, where
 /// a `pattern` is an ECMAScript `RegExp`; the `jsonschema` regex engine rejects ECMAScript syntax such as a
 /// named backreference, and the draft-07 meta-schema asserts `format: regex` on every `pattern`. So each
 /// `pattern` moves to a keyword that runs the ECMAScript engine, and the rest compiles as before.
 fn call_validator(schema: &JsonObject) -> Result<jsonschema::Validator, String> {
     jsonschema::options()
-        .with_keyword(ECMA_PATTERN, ecma_pattern)
+        .with_keyword(constants::ECMA_PATTERN, ecma_pattern)
         .build(&Value::Object(ecma_patterns(schema)))
         .map_err(|error| error.to_string())
 }
 
-/// `schema` with each string `pattern` in a schema position renamed to `ECMA_PATTERN`, keys in order.
+/// `schema` with each string `pattern` in a schema position renamed to `constants::ECMA_PATTERN`, keys in order.
 fn ecma_patterns(schema: &JsonObject) -> JsonObject {
     fn subschema(value: &Value) -> Value {
         match value {
@@ -292,7 +289,7 @@ fn ecma_patterns(schema: &JsonObject) -> JsonObject {
                 (_, value) => value.clone(),
             };
             let key = if key == "pattern" && value.is_string() {
-                ECMA_PATTERN.to_owned()
+                constants::ECMA_PATTERN.to_owned()
             } else {
                 key.clone()
             };
