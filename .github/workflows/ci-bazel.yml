@@ -18,6 +18,7 @@ on:
       - '.config/mise/tasks/github/workflows/ci-bazel/**'
       - 'rsworkspace/Cargo.lock'
       - 'rsworkspace/**/Cargo.toml'
+      - 'rsworkspace/rustfmt.toml'
       - 'rsworkspace/crates/**'
       - 'goworkspace/**'
       - 'proto/trogonai/scheduler/schedules/v1/**'
@@ -76,6 +77,12 @@ jobs:
 
       - name: Build Bazel targets
         run: mise run --skip-tools github:workflows:ci-bazel:build
+
+      # Lint even when tests or the build fail, so their findings are not
+      # hidden behind an unrelated failure.
+      - name: Lint Bazel targets
+        if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' }}
+        run: mise run --skip-tools github:workflows:ci-bazel:lint
 
       # Bazel's disk cache is keyed by action inputs, so what a failing run
       # cached is still valid; saving only on success left main without a
