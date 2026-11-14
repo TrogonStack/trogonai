@@ -12,6 +12,10 @@ impl GitContextProbe for Guessing {
     }
 }
 
+fn probe() -> DefaultGitProbe {
+    DefaultGitProbe::with_directory("/nonexistent-bridge-test")
+}
+
 fn context(branch: Option<&str>, default_branch: Option<&str>) -> CodeSessionGitContext {
     CodeSessionGitContext {
         git_repo_url: "https://github.com/acme/widgets".to_owned(),
@@ -66,13 +70,23 @@ fn parses_repository_addresses() {
     ];
     for (input, expected) in cases {
         assert_eq!(parse_repository(input), expected, "{input}");
-        assert_eq!(DefaultGitProbe.parse_repository(input), expected, "{input}");
+        assert_eq!(probe().parse_repository(input), expected, "{input}");
     }
 }
 
 #[tokio::test]
-async fn the_default_probe_never_guesses() {
-    assert_eq!(DefaultGitProbe.guess_default_branch().await, None);
+async fn the_default_probe_guesses_main_outside_a_repository() {
+    assert_eq!(probe().guess_default_branch().await, Some("main".to_owned()));
+    let here = DefaultGitProbe::new();
+    assert!(
+        here.guess_default_branch()
+            .await
+            .is_some_and(|branch| !branch.is_empty())
+    );
+    let guessed = DefaultGitProbe::default().guess_default_branch().await;
+    assert!(guessed.is_some_and(|branch| !branch.is_empty()));
+    let nowhere = DefaultGitProbe { directory: None };
+    assert_eq!(nowhere.guess_default_branch().await, Some("main".to_owned()));
 }
 
 #[tokio::test]
@@ -94,7 +108,7 @@ async fn guesses_the_revision_when_nothing_else_names_one() {
 
 #[tokio::test]
 async fn sends_a_branch_that_differs_from_the_default() {
-    let (source, outcome) = git_entries(&DefaultGitProbe, &context(Some("feat"), Some("main")), None)
+    let (source, outcome) = git_entries(&probe(), &context(Some("feat"), Some("main")), None)
         .await
         .unwrap_or_default();
     assert_eq!(source["revision"], "feat");
@@ -107,35 +121,35 @@ async fn drops_log_lines_that_repeat() {
     assert_eq!(dedup.last_key(), None);
     assert_eq!(BranchDropLogDedup::with_last_key("k").last_key(), Some("k"));
     let same = context(Some("main"), Some("main"));
-    git_entries(&DefaultGitProbe, &same, Some(&mut dedup)).await;
+    git_entries(&probe(), &same, Some(&mut dedup)).await;
     assert_eq!(
         dedup.last_key(),
         Some("is_default:https://github.com/acme/widgets:main")
     );
-    git_entries(&DefaultGitProbe, &same, Some(&mut dedup)).await;
+    git_entries(&probe(), &same, Some(&mut dedup)).await;
     assert_eq!(
         dedup.last_key(),
         Some("is_default:https://github.com/acme/widgets:main")
     );
-    git_entries(&DefaultGitProbe, &context(Some("feat"), None), Some(&mut dedup)).await;
+    git_entries(&probe(), &context(Some("feat"), None), Some(&mut dedup)).await;
     assert_eq!(
         dedup.last_key(),
         Some("no_evidence:https://github.com/acme/widgets:feat")
     );
-    git_entries(&DefaultGitProbe, &context(Some("feat"), Some("main")), Some(&mut dedup)).await;
+    git_entries(&probe(), &context(Some("feat"), Some("main")), Some(&mut dedup)).await;
     assert_eq!(dedup.last_key(), None);
-    git_entries(&DefaultGitProbe, &same, None).await;
+    git_entries(&probe(), &same, None).await;
 }
 
 #[tokio::test]
 async fn clears_the_dedup_when_the_address_is_unusable() {
     let mut dedup = BranchDropLogDedup::new();
-    git_entries(&DefaultGitProbe, &context(Some("main"), Some("main")), Some(&mut dedup)).await;
+    git_entries(&probe(), &context(Some("main"), Some("main")), Some(&mut dedup)).await;
     let mut empty = context(Some("main"), Some("main"));
     empty.git_repo_url.clear();
-    assert!(git_entries(&DefaultGitProbe, &empty, Some(&mut dedup)).await.is_none());
+    assert!(git_entries(&probe(), &empty, Some(&mut dedup)).await.is_none());
     assert_eq!(dedup.last_key(), None);
     let mut bad = empty.clone();
     bad.git_repo_url = "nonsense".to_owned();
-    assert!(git_entries(&DefaultGitProbe, &bad, None).await.is_none());
+    assert!(git_entries(&probe(), &bad, None).await.is_none());
 }

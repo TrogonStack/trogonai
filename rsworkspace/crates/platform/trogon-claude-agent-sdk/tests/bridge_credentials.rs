@@ -350,7 +350,7 @@ async fn fetch_remote_credentials_matches_the_upstream_client() -> TestResult {
             Environment {
                 entrypoint: text(field(args, "entrypoint")),
             },
-            DefaultGitProbe,
+            DefaultGitProbe::with_directory("/nonexistent-bridge-test"),
         );
         let options = FetchRemoteCredentialsOptions {
             session_id: text(field(args, "sessionId")).unwrap_or_else(|| "cse_abc123".to_owned()),
@@ -376,7 +376,11 @@ async fn create_code_session_matches_the_upstream_client() -> TestResult {
         let args = &case["args"];
         let ok_body = serde_json::to_string(&json!({"session": {"id": case["result"]}}))?;
         let (base, log) = base_for(case, ok_body).await?;
-        let client = BridgeClient::new(http()?, Environment { entrypoint: None }, DefaultGitProbe);
+        let client = BridgeClient::new(
+            http()?,
+            Environment { entrypoint: None },
+            DefaultGitProbe::with_directory("/nonexistent-bridge-test"),
+        );
         let git_context = field(args, "gitContext")
             .as_object()
             .and_then(|context| context.get("gitRepoUrl"))

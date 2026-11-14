@@ -39,7 +39,7 @@ fn client() -> BridgeClient<Stalled, Environment, DefaultGitProbe> {
             entrypoint: Some("sdk-ts"),
             cwd: None,
         },
-        DefaultGitProbe,
+        DefaultGitProbe::with_directory("/nonexistent-bridge-test"),
     )
 }
 
@@ -146,7 +146,11 @@ async fn asks_the_environment_for_the_working_directory() {
         entrypoint: None,
         cwd: Some("/work"),
     };
-    let client = BridgeClient::new(Stalled, environment, DefaultGitProbe);
+    let client = BridgeClient::new(
+        Stalled,
+        environment,
+        DefaultGitProbe::with_directory("/nonexistent-bridge-test"),
+    );
     let outcome = client
         .create_code_session(&create("http://127.0.0.1:1", "t", None), None)
         .await;

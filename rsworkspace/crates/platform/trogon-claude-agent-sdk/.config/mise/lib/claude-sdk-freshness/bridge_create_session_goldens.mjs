@@ -1,18 +1,26 @@
 #!/usr/bin/env node
 // Records what the pinned TypeScript package's bridge.mjs does that the Rust `createCodeSession` port has to match
 // exactly: how Node's ICU classifies and case maps characters, which repository addresses the host and path rejectors
-// refuse.
+// refuse, and which default branch is guessed from the working directory repository.
 //
 // usage: node bridge_create_session_goldens.mjs <path to bridge.mjs> <fixtures dir> <tables .rs file> [--check]
 //
-// Writes `unicode.json`, `urls.json` and `details.json` into the fixtures dir (one case per line) and
+// Writes `unicode.json`, `urls.json`, `details.json` and `guesses.json` into the fixtures dir (one case per line) and
 // the generated Rust range tables into the .rs file. Every table is swept from Node itself with the very regular
 // expression sources the bridge uses, so the Rust side never depends on the Unicode version of a Rust crate.
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const self = fileURLToPath(import.meta.url);
+
+if (process.argv[2] === '--child') {
+  await child(JSON.parse(process.argv[3]));
+  process.exit(0);
+}
 
 const [bridgeArg, fixturesArg, tablesArg, ...flags] = process.argv.slice(2);
 if (!bridgeArg || !fixturesArg || !tablesArg) {
@@ -191,6 +199,105 @@ for (const message of uniqueDetails) {
 outputs.set(path.join(fixturesDir, 'details.json'), compact(detailCases));
 server.close();
 
+// ---- guesses.json: the default branch guessed from the repository of the working directory ----
+const sha = 'a'.repeat(40);
+const sha64 = 'b'.repeat(64);
+const gitWith = (extra, prefix = 'work/.git') => {
+  const files = { [`${prefix}/HEAD`]: 'ref: refs/heads/feat\n' };
+  for (const [name, content] of Object.entries(extra)) files[`${prefix}/${name}`] = content;
+  return files;
+};
+const head = (name) => ({ 'refs/remotes/origin/HEAD': `ref: refs/remotes/origin/${name}\n` });
+const remote = (name, content = `${sha}\n`) => ({ [`refs/remotes/origin/${name}`]: content });
+const scenarios = [
+  { name: 'not_a_repository', files: {}, dirs: ['work'] },
+  { name: 'empty_git_directory', files: gitWith({}) },
+  { name: 'origin_head_develop', files: gitWith({ ...head('develop'), ...remote('develop') }) },
+  { name: 'origin_head_with_crlf_and_padding', files: gitWith({ 'refs/remotes/origin/HEAD': '  ref:   refs/remotes/origin/develop \r\n', ...remote('develop') }) },
+  { name: 'origin_head_without_space', files: gitWith({ 'refs/remotes/origin/HEAD': 'ref:refs/remotes/origin/develop', ...remote('develop') }) },
+  { name: 'origin_head_branch_missing_falls_to_master', files: gitWith({ ...head('develop'), ...remote('master') }) },
+  { name: 'origin_head_branch_missing_prefers_main', files: gitWith({ ...head('develop'), ...remote('master'), ...remote('main') }) },
+  { name: 'no_origin_head_main', files: gitWith({ ...remote('main') }) },
+  { name: 'no_origin_head_master', files: gitWith({ ...remote('master') }) },
+  { name: 'no_origin_head_trunk_only', files: gitWith({ ...remote('trunk') }) },
+  { name: 'origin_head_is_a_sha', files: gitWith({ 'refs/remotes/origin/HEAD': `${sha}\n`, ...remote('develop'), ...remote('main') }) },
+  { name: 'origin_head_other_remote', files: gitWith({ 'refs/remotes/origin/HEAD': 'ref: refs/remotes/upstream/develop\n', ...remote('develop') }) },
+  { name: 'origin_head_traversal_name', files: gitWith({ ...head('../x'), ...remote('main') }) },
+  { name: 'origin_head_leading_dash_name', files: gitWith({ ...head('-x'), ...remote('-x') }) },
+  { name: 'origin_head_double_slash_name', files: gitWith({ ...head('a//b'), ...remote('a/b') }) },
+  { name: 'origin_head_nested_name', files: gitWith({ ...head('release/1.0'), ...remote('release/1.0') }) },
+  { name: 'origin_head_bad_character', files: gitWith({ ...head('de$ev'), ...remote('de$ev') }) },
+  { name: 'origin_head_empty_name', files: gitWith({ 'refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/\n' }) },
+  { name: 'origin_ref_is_sha256', files: gitWith({ ...head('develop'), ...remote('develop', `${sha64}\n`) }) },
+  { name: 'origin_ref_is_not_a_sha', files: gitWith({ ...head('develop'), ...remote('develop', 'nope\n'), ...remote('main') }) },
+  { name: 'origin_ref_uppercase_sha', files: gitWith({ ...head('develop'), ...remote('develop', `${sha.toUpperCase()}\n`) }) },
+  { name: 'origin_ref_is_symbolic', files: gitWith({ ...head('develop'), ...remote('develop', 'ref: refs/remotes/origin/main\n'), ...remote('main') }) },
+  { name: 'origin_ref_symbolic_loop', files: gitWith({ ...head('develop'), ...remote('develop', 'ref: refs/remotes/origin/develop\n') }) },
+  { name: 'origin_ref_symbolic_bad_target', files: gitWith({ ...head('develop'), ...remote('develop', 'ref: ../../x\n') }) },
+  { name: 'packed_refs_branch', files: gitWith({ ...head('develop'), 'packed-refs': `# pack-refs with: peeled fully-peeled sorted\n${sha} refs/remotes/origin/develop\n` }) },
+  { name: 'packed_refs_main_and_peeled', files: gitWith({ 'packed-refs': `# pack-refs with: peeled fully-peeled sorted\n${sha} refs/remotes/origin/main\n^${sha}\n${sha} refs/remotes/origin/master\n` }) },
+  { name: 'packed_refs_other_name_prefix', files: gitWith({ ...head('dev'), 'packed-refs': `${sha} refs/remotes/origin/develop\n` }) },
+  { name: 'packed_refs_bad_hash', files: gitWith({ ...head('develop'), 'packed-refs': 'zzzz refs/remotes/origin/develop\n' }) },
+  { name: 'packed_refs_sha256', files: gitWith({ ...head('develop'), 'packed-refs': `${sha64} refs/remotes/origin/develop\n` }) },
+  { name: 'packed_refs_crlf', files: gitWith({ ...head('develop'), 'packed-refs': `${sha} refs/remotes/origin/develop\r\n` }) },
+  { name: 'subdirectory_of_the_repository', files: gitWith({ ...head('develop'), ...remote('develop') }), dirs: ['work/a/b'], cwd: 'work/a/b' },
+  { name: 'git_file_to_worktree_gitdir', files: { 'work/.git': 'gitdir: ../real/worktrees/wt\n', 'real/worktrees/wt/HEAD': 'ref: refs/heads/feat\n', 'real/worktrees/wt/commondir': '../..\n', 'real/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'real/refs/remotes/origin/develop': `${sha}\n` } },
+  { name: 'git_file_absolute_gitdir', files: { 'work/.git': 'gitdir: <root>/real\n', 'real/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'real/refs/remotes/origin/develop': `${sha}\n` } },
+  { name: 'git_file_without_gitdir_prefix', files: { 'work/.git': 'not a gitdir\n' } },
+  { name: 'git_file_unc_gitdir', files: { 'work/.git': 'gitdir: //server/share/x\n', 'real/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n' } },
+  { name: 'git_file_windows_namespace_gitdir', files: { 'work/.git': 'gitdir: \\\\?\\C:\\x\n' } },
+  { name: 'git_file_device_namespace_gitdir', files: { 'work/.git': 'gitdir: \\??\\C:\\x\n' } },
+  { name: 'git_file_network_gitdir', files: { 'work/.git': 'gitdir: /network/servers/x\n' } },
+  { name: 'git_file_net_gitdir', files: { 'work/.git': 'gitdir: /net\n' } },
+  { name: 'git_file_vol_gitdir', files: { 'work/.git': 'gitdir: /.vol/1/2\n' } },
+  { name: 'git_file_empty_gitdir', files: { 'work/.git': 'gitdir:\n', 'work/HEAD': 'x' } },
+  { name: 'git_file_gitdir_relative_to_root', files: { 'work/.git': 'gitdir: gd\n', 'work/gd/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'work/gd/refs/remotes/origin/develop': `${sha}\n` } },
+  { name: 'commondir_absolute', files: { 'work/.git/commondir': '<root>/common\n', 'work/.git/HEAD': 'ref: refs/heads/feat\n', 'common/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'common/refs/remotes/origin/develop': `${sha}\n` } },
+  { name: 'commondir_unc_is_ignored', files: { 'work/.git/commondir': '//server/x\n', 'work/.git/refs/remotes/origin/main': `${sha}\n` } },
+  { name: 'commondir_empty', files: { 'work/.git/commondir': '\n', 'work/.git/refs/remotes/origin/main': `${sha}\n` } },
+  { name: 'commondir_missing_directory', files: { 'work/.git/commondir': '../nope\n', 'work/.git/refs/remotes/origin/main': `${sha}\n` } },
+  { name: 'commondir_equal_falls_back_to_gitdir', files: { 'work/.git/commondir': '.\n', 'work/.git/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'work/.git/refs/remotes/origin/develop': `${sha}\n` } },
+  { name: 'commondir_without_the_ref_falls_back_to_gitdir', files: { 'work/.git/commondir': '../../common\n', 'common/x': '', 'work/.git/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'work/.git/refs/remotes/origin/develop': `${sha}\n` } },
+  { name: 'git_directory_is_a_symlink', files: { 'real/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'real/refs/remotes/origin/develop': `${sha}\n` }, links: { 'work/.git': '../real' }, dirs: ['work'] },
+  { name: 'git_directory_is_an_absolute_symlink', files: { 'real/refs/remotes/origin/main': `${sha}\n` }, links: { 'work/.git': '<root>/real' }, dirs: ['work'] },
+  { name: 'git_directory_is_a_dangling_symlink', files: {}, links: { 'work/.git': '../missing' }, dirs: ['work'] },
+  { name: 'git_directory_is_a_unc_symlink', files: {}, links: { 'work/.git': '//server/share' }, dirs: ['work'] },
+  { name: 'git_directory_symlink_to_network', files: {}, links: { 'work/.git': '/network/x' }, dirs: ['work'] },
+  { name: 'branch_ref_is_a_symlink_inside', files: { 'work/.git/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'work/.git/store/dev': `${sha}\n` }, links: { 'work/.git/refs/remotes/origin/develop': '../../../store/dev' } },
+  { name: 'branch_ref_is_a_symlink_outside', files: { 'outside': `${sha}\n`, 'work/.git/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n' }, links: { 'work/.git/refs/remotes/origin/develop': '<root>/outside' } },
+  { name: 'branch_ref_is_a_dangling_symlink', files: { 'work/.git/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'work/.git/refs/remotes/origin/main': `${sha}\n` }, links: { 'work/.git/refs/remotes/origin/develop': 'missing' } },
+  { name: 'branch_ref_symlink_to_unc', files: { 'work/.git/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'work/.git/refs/remotes/origin/main': `${sha}\n` }, links: { 'work/.git/refs/remotes/origin/develop': '//server/x' } },
+  { name: 'origin_directory_is_a_symlink', files: { 'work/.git/other/HEAD': 'ref: refs/remotes/origin/develop\n', 'work/.git/other/develop': `${sha}\n` }, links: { 'work/.git/refs/remotes/origin': '../other' } },
+  { name: 'origin_head_is_a_symlink', files: { 'work/.git/h': 'ref: refs/remotes/origin/develop\n', 'work/.git/refs/remotes/origin/develop': `${sha}\n` }, links: { 'work/.git/refs/remotes/origin/HEAD': '../../../h' } },
+  { name: 'ref_symlink_loop', files: { 'work/.git/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'work/.git/refs/remotes/origin/main': `${sha}\n` }, links: { 'work/.git/refs/remotes/origin/develop': 'l1', 'work/.git/refs/remotes/origin/l1': 'develop' } },
+  { name: 'reftable_marker_without_a_usable_repository', files: { 'work/.git/HEAD': 'ref: refs/heads/.invalid\n', 'work/.git/refs/remotes/origin/main': `${sha}\n` } },
+  { name: 'head_marker_lookalike_is_not_reftable', files: { 'work/.git/HEAD': 'ref: refs/heads/.invalid2\n', 'work/.git/refs/remotes/origin/main': `${sha}\n` } },
+  { name: 'repository_above_a_file_cwd_is_not_searched', files: { 'work/.git/refs/remotes/origin/main': `${sha}\n`, 'work/file': '' }, cwd: 'work' },
+  { name: 'nearest_repository_wins', files: { 'work/.git/refs/remotes/origin/main': `${sha}\n`, 'work/inner/.git/refs/remotes/origin/master': `${sha}\n` }, dirs: ['work/inner/deep'], cwd: 'work/inner/deep' },
+  { name: 'oversized_git_file_is_ignored', files: { 'work/.git': `gitdir: ${'a/'.repeat(40000)}\n` } },
+];
+function materialize(root, scenario) {
+  for (const dir of scenario.dirs ?? ['work']) fs.mkdirSync(path.join(root, dir), { recursive: true });
+  for (const [rel, content] of Object.entries(scenario.files)) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), content.split('<root>').join(root));
+  }
+  for (const [rel, target] of Object.entries(scenario.links ?? {})) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.symlinkSync(target.split('<root>').join(root), path.join(root, rel));
+  }
+}
+const guessCases = [];
+for (const scenario of scenarios) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-guess-')));
+  materialize(root, scenario);
+  const cwd = path.join(root, scenario.cwd ?? 'work');
+  const run = spawnSync(process.execPath, [self, '--child', JSON.stringify({ bridgePath, cwd })], { encoding: 'utf8', timeout: 60000 });
+  if (run.status !== 0) throw new Error(`${scenario.name}: ${run.stderr}`);
+  fs.rmSync(root, { recursive: true, force: true });
+  guessCases.push({ ...scenario, guess: run.stdout.trim() });
+}
+outputs.set(path.join(fixturesDir, 'guesses.json'), compact(guessCases));
 fs.rmSync(cwdForRun, { recursive: true, force: true });
 
 let stale = false;
@@ -206,3 +313,23 @@ for (const [file, text] of outputs) {
   }
 }
 process.exit(stale ? 1 : 0);
+
+// Runs one guess in its own process: the bridge reads the working directory once, when it is loaded.
+async function child({ bridgePath: bridge, cwd }) {
+  process.chdir(cwd);
+  delete process.env.CLAUDE_CODE_ENTRYPOINT;
+  const module = await import(pathToFileURL(bridge).href);
+  let body = '';
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      body = Buffer.concat(chunks).toString('utf8');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"session":{"id":"cse_abc"}}');
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await module.createCodeSession(`http://127.0.0.1:${server.address().port}`, 't', 'T', 5000, undefined, { gitRepoUrl: 'https://github.com/acme/widgets', branch: '' }, '/w');
+  process.stdout.write(JSON.parse(body).config.sources[0].revision);
+}

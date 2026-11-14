@@ -3547,12 +3547,16 @@
           "name": "parses_addresses_like_the_upstream_bridge"
         },
         {
+          "path": "src/bridge_refs_tests.rs",
+          "name": "guesses_the_default_branch_like_the_upstream_bridge"
+        },
+        {
           "path": "src/bridge_unicode_tests.rs",
           "name": "lowercases_like_the_javascript_runtime"
         }
       ],
       "status": "partial",
-      "rationale": "createCodeSession is replayed against goldens recorded from the real bridge.mjs: the request body key order, the repository source and outcome entries, the branch drop log dedup state, grouping_rejected taking precedence over 401, 408 and 429, the cse_ session id check, and the error detail that is kept only when it is one plain line under the upstream sanitizer. Repository addresses go through ports of both upstream rejectors (bracket forms and the host differential across the ways an address can be read) and 594 recorded address cases. The default branch guess that inspects the local repository stays behind GitContextProbe with a default that never guesses. Character classes and lower casing use tables swept out of Node, proven by recorded cases covering the whole non-ASCII range and about 10,000 detail messages. Still open: the default branch is never guessed from the local repository, and a lone surrogate cannot reach a Rust string. attachBridgeSession and the session handle stay under the bridge entrypoint's out of scope row."
+      "rationale": "createCodeSession is replayed against goldens recorded from the real bridge.mjs: the request body key order, the repository source and outcome entries, the branch drop log dedup state, grouping_rejected taking precedence over 401, 408 and 429, the cse_ session id check, and the error detail that is kept only when it is one plain line under the upstream sanitizer. Repository addresses go through ports of both upstream rejectors (bracket forms and the host differential across the ways an address can be read) and 594 recorded address cases. The default branch guess reads the repository files exactly as upstream does by default: nearest .git, gitdir files, commondir, origin/HEAD, loose and packed refs, then main, master and a main fallback, replayed against recorded repository layouts including link and network path refusals. Character classes and lower casing use tables swept out of Node, proven by recorded cases covering the whole non-ASCII range and about 10,000 detail messages. Still open: repositories using the reftable format answer main instead of asking Git with the upstream trust gating, the macOS, Linux automount and Windows path checks are not ported, packed references are searched linearly where upstream bisects (results differ only for unsorted files), and a lone surrogate cannot reach a Rust string. The guess is computed on every call instead of cached per host, which only saves work. attachBridgeSession and the session handle stay under the bridge entrypoint's out of scope row."
     },
     {
       "id": "extract-entrypoint",

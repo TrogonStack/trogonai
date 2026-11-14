@@ -1,10 +1,12 @@
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::bridge_js::js_trim;
+use crate::bridge_refs::guess_default_branch;
 use crate::bridge_url::rejected;
 
 static SCP: LazyLock<Option<Regex>> =
@@ -77,9 +79,34 @@ pub trait GitContextProbe {
     fn guess_default_branch(&self) -> impl Future<Output = Option<String>> + Send;
 }
 
-/// Parses repository addresses the way the upstream bridge does and never guesses a default branch.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DefaultGitProbe;
+/// Parses repository addresses the way the upstream bridge does and guesses the default branch from the repository
+/// around a directory, as the upstream bridge does from the directory it was started in.
+#[derive(Clone, Debug)]
+pub struct DefaultGitProbe {
+    directory: Option<PathBuf>,
+}
+
+impl DefaultGitProbe {
+    /// A probe that reads the repository around the current directory, which upstream captures once at startup.
+    pub fn new() -> Self {
+        Self {
+            directory: std::env::current_dir().ok(),
+        }
+    }
+
+    /// A probe that reads the repository around `directory`.
+    pub fn with_directory(directory: impl Into<PathBuf>) -> Self {
+        Self {
+            directory: Some(directory.into()),
+        }
+    }
+}
+
+impl Default for DefaultGitProbe {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GitContextProbe for DefaultGitProbe {
     fn parse_repository(&self, url: &str) -> Option<GitRepository> {
@@ -87,7 +114,11 @@ impl GitContextProbe for DefaultGitProbe {
     }
 
     async fn guess_default_branch(&self) -> Option<String> {
-        None
+        Some(
+            self.directory
+                .as_deref()
+                .map_or_else(|| "main".to_owned(), guess_default_branch),
+        )
     }
 }
 

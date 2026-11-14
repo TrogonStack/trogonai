@@ -47,7 +47,7 @@ impl BridgeClient {
             .redirect(reqwest::redirect::Policy::limited(21))
             .referer(false)
             .build()?;
-        Ok(Self::new(http, SystemEnvironment, DefaultGitProbe))
+        Ok(Self::new(http, SystemEnvironment, DefaultGitProbe::new()))
     }
 }
 
