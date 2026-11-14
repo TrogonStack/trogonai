@@ -98,9 +98,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .next()
         .ok_or_else(|| io::Error::other("fixture missing initialize"))??;
     let initialize: Value = serde_json::from_str(&first)?;
-    // The TypeScript argv shape delivers the system prompt inside `initialize`.
+    // The TypeScript argv shape delivers the system prompt inside `initialize`, the Python one on the command line.
     let custom_prompt = initialize["request"]["systemPrompt"][0]
         .as_str()
+        .or_else(|| {
+            args.windows(2)
+                .find_map(|pair| (pair[0] == "--system-prompt").then_some(pair[1].as_str()))
+        })
         .filter(|prompt| !prompt.is_empty());
     assert_eq!(initialize["type"], "control_request");
     assert_eq!(initialize["request"]["subtype"], "initialize");
