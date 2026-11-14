@@ -61,7 +61,6 @@ pub(crate) enum IncomingControl {
     Unsupported {
         subtype: String,
     },
-    Malformed(ProtocolError),
 }
 
 pub(crate) enum ControlResponse {
@@ -84,32 +83,6 @@ struct IncomingRequestWire {
     subtype: String,
     #[serde(flatten)]
     data: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct PermissionRequestWire {
-    tool_name: String,
-    input: JsonObject,
-    tool_use_id: Option<String>,
-    blocked_path: Option<String>,
-    decision_reason: Option<String>,
-    permission_suggestions: Option<Vec<JsonObject>>,
-    agent_id: Option<String>,
-    mcp_server: Option<McpProvenanceWire>,
-    title: Option<String>,
-    display_name: Option<String>,
-    description: Option<String>,
-    default_to_no: Option<bool>,
-    suppress_always_allow_rule: Option<bool>,
-    requires_user_interaction: Option<bool>,
-    #[serde(flatten)]
-    additional_fields: JsonObject,
-}
-
-#[derive(Deserialize)]
-struct McpProvenanceWire {
-    name: String,
-    source: String,
 }
 
 #[derive(Deserialize)]
@@ -211,6 +184,26 @@ fn string(value: &Value) -> Option<String> {
     value.as_str().map(str::to_owned)
 }
 
+/// Takes a key serde would read as an `Option`: a `null` is taken as nothing, any value `accept` refuses stays.
+fn take_nullable<T>(fields: &mut JsonObject, key: &str, accept: impl FnOnce(&Value) -> Option<T>) -> Option<T> {
+    take(fields, key, |value| {
+        if value.is_null() {
+            Some(None)
+        } else {
+            accept(value).map(Some)
+        }
+    })
+    .flatten()
+}
+
+/// The `mcp_server` provenance: an object with a string `name` and `source`.
+fn mcp_provenance(value: &Value) -> Option<crate::McpServerProvenance> {
+    Some(crate::McpServerProvenance {
+        name: string(value.get("name")?)?,
+        source: string(value.get("source")?)?,
+    })
+}
+
 /// TypeScript `computerFolder`: an object with a string `path` and `computer_name`, or nothing.
 fn computer_folder(value: &Value) -> Option<crate::ComputerFolder> {
     Some(crate::ComputerFolder {
@@ -232,9 +225,32 @@ fn matched_ask_rule(value: &Value) -> Option<crate::MatchedAskRule> {
     })
 }
 
-fn permission_request(data: JsonObject, id: &ControlRequestId) -> Result<ToolPermissionRequest, ProtocolError> {
-    let mut wire: PermissionRequestWire = decode(data)?;
-    let fields = &mut wire.additional_fields;
+/// Reads a `can_use_tool` request the way `sdk.mjs` hands it to `canUseTool`: nothing in it can fail the
+/// request. A field the typed view cannot hold stays in `additional_fields`, and `raw_request` keeps every
+/// field as sent.
+fn permission_request(data: JsonObject, id: &ControlRequestId) -> ToolPermissionRequest {
+    let raw_request = data.clone();
+    let mut fields = data;
+    let fields = &mut fields;
+    let tool_name = take(fields, "tool_name", string);
+    let input = take(fields, "input", |value| value.as_object().cloned());
+    let tool_use_id = take_nullable(fields, "tool_use_id", string);
+    let blocked_path = take_nullable(fields, "blocked_path", string);
+    let decision_reason = take_nullable(fields, "decision_reason", string);
+    let suggestions = take_nullable(fields, "permission_suggestions", |value| {
+        value
+            .as_array()
+            .map(Vec::as_slice)
+            .map(crate::permission_suggestions::typescript)
+    });
+    let agent_id = take_nullable(fields, "agent_id", string);
+    let mcp_server = take_nullable(fields, "mcp_server", mcp_provenance);
+    let title = take_nullable(fields, "title", string);
+    let display_name = take_nullable(fields, "display_name", string);
+    let description = take_nullable(fields, "description", string);
+    let default_to_no = take_nullable(fields, "default_to_no", Value::as_bool);
+    let suppress_always_allow_rule = take_nullable(fields, "suppress_always_allow_rule", Value::as_bool);
+    let requires_user_interaction = take_nullable(fields, "requires_user_interaction", Value::as_bool);
     let decision_reason_type = take(fields, "decision_reason_type", string);
     let decision_reason_code = take(fields, "decision_reason_code", string);
     let server_policy_ask_only = take(fields, "server_policy_ask_only", Value::as_bool);
@@ -242,31 +258,23 @@ fn permission_request(data: JsonObject, id: &ControlRequestId) -> Result<ToolPer
     let server_prompt = take(fields, "server_prompt", string);
     let computer_folder = take(fields, "computer_folder", computer_folder);
     let matched_ask_rule = take(fields, "matched_ask_rule", matched_ask_rule);
-    Ok(ToolPermissionRequest {
-        tool_name: ToolName::from(wire.tool_name),
-        input: wire.input,
-        tool_use_id: optional_tool_id(wire.tool_use_id)?,
-        blocked_path: wire.blocked_path,
-        decision_reason: wire.decision_reason,
+    ToolPermissionRequest {
+        tool_name: ToolName::from(tool_name.unwrap_or_default()),
+        input: input.unwrap_or_default(),
+        tool_use_id: tool_use_id.map(ToolUseId::from),
+        blocked_path,
+        decision_reason,
         request_id: id.clone(),
         signal: crate::CancellationToken::new(),
-        suggestions: wire
-            .permission_suggestions
-            .unwrap_or_default()
-            .into_iter()
-            .map(crate::PermissionUpdate::from_wire_json)
-            .collect::<Result<_, _>>()?,
-        agent_id: wire.agent_id,
-        mcp_server: wire.mcp_server.map(|value| crate::McpServerProvenance {
-            name: value.name,
-            source: value.source,
-        }),
-        title: wire.title,
-        display_name: wire.display_name,
-        description: wire.description,
-        default_to_no: wire.default_to_no.into(),
-        suppress_always_allow_rule: wire.suppress_always_allow_rule.into(),
-        requires_user_interaction: wire.requires_user_interaction.into(),
+        suggestions: suggestions.unwrap_or_default(),
+        agent_id,
+        mcp_server,
+        title,
+        display_name,
+        description,
+        default_to_no: default_to_no.into(),
+        suppress_always_allow_rule: suppress_always_allow_rule.into(),
+        requires_user_interaction: requires_user_interaction.into(),
         decision_reason_type,
         decision_reason_code,
         server_policy_ask_only: server_policy_ask_only.into(),
@@ -274,8 +282,9 @@ fn permission_request(data: JsonObject, id: &ControlRequestId) -> Result<ToolPer
         server_prompt,
         computer_folder,
         matched_ask_rule,
-        additional_fields: wire.additional_fields,
-    })
+        additional_fields: std::mem::take(fields),
+        raw_request,
+    }
 }
 
 #[cfg(test)]
@@ -291,10 +300,7 @@ pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<
             let wire: IncomingControlWire = decode(data())?;
             let id = ControlRequestId::from(wire.request_id);
             let request = if wire.request.subtype == "can_use_tool" {
-                match permission_request(wire.request.data, &id) {
-                    Ok(request) => IncomingControl::Permission(Box::new(request)),
-                    Err(error) => IncomingControl::Malformed(error),
-                }
+                IncomingControl::Permission(Box::new(permission_request(wire.request.data, &id)))
             } else if wire.request.subtype == "hook_callback" {
                 let wire: HookRequestWire = decode(wire.request.data)?;
                 IncomingControl::Hook {
@@ -406,9 +412,10 @@ pub(crate) fn mcp_forward(id: &ControlRequestId, request: Value) -> Result<Value
 ///
 /// TypeScript writes `{...result, toolUseID}` with `updatedInput` only when the handler set it. Python sends the
 /// original input when the handler left it unset and never adds `toolUseID`.
+/// `input` is the wire `input` Python echoes as `updatedInput` when the handler leaves it unset.
 pub(crate) fn permission_response(
     id: &ControlRequestId,
-    input: JsonObject,
+    input: Value,
     tool_use_id: Option<&ToolUseId>,
     decision: PermissionDecision,
     style: crate::ArgvStyle,
@@ -422,9 +429,9 @@ pub(crate) fn permission_response(
             decision_classification,
         } => runtime_payload::PermissionResponsePayload::Allow {
             updated_input: if typescript {
-                updated_input
+                updated_input.map(Value::Object)
             } else {
-                Some(updated_input.unwrap_or(input))
+                Some(updated_input.map_or(input, Value::Object))
             },
             updated_permissions: updated_permissions
                 .map(|updates| {
@@ -553,10 +560,6 @@ fn error_frame(id: &ControlRequestId, message: &str, error_code: Option<&str>) -
 
 pub(crate) fn callback_error_response(id: &ControlRequestId, message: &str) -> Result<Value, ProtocolError> {
     error_frame(id, message, None)
-}
-
-pub(crate) fn malformed_response(id: &ControlRequestId) -> Result<Value, ProtocolError> {
-    callback_error_response(id, "Malformed SDK permission request")
 }
 
 #[cfg(test)]

@@ -162,7 +162,7 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 
 | Rust | Python | TypeScript |
 | --- | --- | --- |
-| `ToolPermissionRequest` | `ToolPermissionContext` (suggestions, tool use, agent, blocked path, decision reason, title, display name, description) | `canUseTool` options; `decisionReasonType`, `decisionReasonCode`, `serverPolicyAskOnly`, `plugin`, `serverPrompt`, `computerFolder` and `matchedAskRule` only when well typed, otherwise kept in `additional_fields` |
+| `ToolPermissionRequest` | `ToolPermissionContext` (suggestions, tool use, agent, blocked path, decision reason, title, display name, description) | `canUseTool` options; `decisionReasonType`, `decisionReasonCode`, `serverPolicyAskOnly`, `plugin`, `serverPrompt`, `computerFolder` and `matchedAskRule` only when well typed, otherwise kept in `additional_fields`; `raw_request` holds the request exactly as sent, and `ArgvStyle::Python` rebuilds `suggestions` with `PermissionUpdate.from_dict` |
 | `PermissionDecision::Allow` | `PermissionResultAllow` (`updatedInput` falls back to the original input) | result written as returned with `toolUseID` appended |
 | `PermissionDecision::Deny`, `DenialDisposition` | `PermissionResultDeny` (`interrupt` only when true) | result written as returned with `toolUseID` appended |
 | `PermissionDecisionClassification` | not applicable | `decisionClassification` |

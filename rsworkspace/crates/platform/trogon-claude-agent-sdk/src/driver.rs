@@ -1064,23 +1064,33 @@ where
                     self.write_response(response).await?;
                 }
             }
-            IncomingControl::Malformed(error) => {
-                tracing::warn!(
-                    ?error,
-                    "answering a malformed permission request with an error response"
-                );
-                self.write_response(wire::malformed_response(&id)).await?;
-            }
-            IncomingControl::Permission(request) => {
+            IncomingControl::Permission(mut request) => {
+                // `claude_agent_sdk` reads `input`, then checks for a callback, then rebuilds the suggestions,
+                // then reads `tool_name`, answering the first `KeyError` or `from_dict` failure with its message.
+                let input = request.raw_request.get("input").cloned();
+                if python && input.is_none() {
+                    return self.write_response(wire::callback_error_response(&id, "'input'")).await;
+                }
                 let Some(handler) = self.handler.clone() else {
                     return self
                         .write_response(wire::missing_permission_handler_response(&id, style))
                         .await;
                 };
+                if python {
+                    match crate::permission_suggestions::python(request.raw_request.get("permission_suggestions")) {
+                        Ok(suggestions) => request.suggestions = suggestions,
+                        Err(message) => return self.write_response(wire::callback_error_response(&id, &message)).await,
+                    }
+                    if !request.raw_request.contains_key("tool_name") {
+                        return self
+                            .write_response(wire::callback_error_response(&id, "'tool_name'"))
+                            .await;
+                    }
+                }
                 if !self.admit_capacity(&id).await? {
                     return Ok(());
                 }
-                let input = request.input.clone();
+                let input = input.unwrap_or(serde_json::Value::Null);
                 let tool_use_id = request.tool_use_id.clone();
                 let signal = request.signal.clone();
                 let callback_id = id.clone();
