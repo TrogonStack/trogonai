@@ -43,6 +43,7 @@ use crate::bridge_types::SessionState;
 use crate::bridge_worker_delivery::{DeliveryAck, DeliveryNext, DeliveryQueue, DeliveryStatus, delivery_body};
 use crate::bridge_worker_events::{ClientEvent, EventNext, EventQueue, refused_for_good, upload_body, upload_timeout};
 use crate::bridge_worker_queue::{Next, Patch, PatchQueue, requeue_after_refusal, without_status};
+use crate::bridge_worker_stream::StreamRequest;
 use crate::bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
 };
@@ -643,6 +644,39 @@ impl<H, P> WorkerClient<H, P> {
     /// What the worker waits with, for the timers that run beside it.
     pub fn pacing(&self) -> &P {
         &self.pacing
+    }
+
+    /// What sends the requests, for the read stream that streams the body of its answer itself.
+    pub(crate) fn http(&self) -> &H {
+        &self.http
+    }
+
+    /// The request for the read stream (`openStream`, bridge.mjs offset 1162854): a `GET` with the current token. A
+    /// token the fetch call would refuse as a header value gives no request, which the stream retries like any
+    /// other failed open.
+    pub(crate) fn stream_request(&self, wanted: &StreamRequest) -> Option<reqwest::Request> {
+        let authorization = self.authorization(true)?;
+        let query = wanted
+            .query
+            .as_deref()
+            .map(|query| format!("?{query}"))
+            .unwrap_or_default();
+        let url = reqwest::Url::parse(&format!("{}/worker/events/stream{query}", self.session_url)).ok()?;
+        let mut request = reqwest::Request::new(Method::GET, url);
+        let headers = request.headers_mut();
+        headers.insert("authorization", authorization);
+        headers.insert("accept", HeaderValue::from_static("text/event-stream"));
+        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+        headers.insert("anthropic-client-platform", HeaderValue::from_static(self.platform));
+        headers.insert("user-agent", HeaderValue::from_static(USER_AGENT));
+        if let Some(id) = wanted
+            .last_event_id
+            .as_deref()
+            .and_then(|id| HeaderValue::from_str(id).ok())
+        {
+            headers.insert("last-event-id", id);
+        }
+        Some(request)
     }
 
     fn authorization(&self, for_fetch: bool) -> Option<HeaderValue> {

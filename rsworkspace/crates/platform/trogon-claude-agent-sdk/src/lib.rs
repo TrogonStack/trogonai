@@ -29,6 +29,7 @@ mod bridge_worker_inbound;
 mod bridge_worker_queue;
 mod bridge_worker_stream;
 mod bridge_worker_stream_driver;
+mod bridge_worker_stream_http;
 mod bridge_worker_types;
 mod builtin_tool_name;
 mod bundled_cli;
@@ -244,6 +245,7 @@ pub use bridge_worker_stream_driver::{
     CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector, StreamFailure,
     StreamResponse, run_stream,
 };
+pub use bridge_worker_stream_http::{HttpStreamBody, HttpStreamConnector};
 pub use bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
 };
