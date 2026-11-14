@@ -447,7 +447,8 @@ fn format_check(node: &StringNode, text: &str, issues: &mut Vec<Issue>, value: &
         StringCheck::Url => {
             let trimmed = trim(text);
             if url::Url::parse(trimmed).is_ok() {
-                *value = Out::Json(Value::from(trimmed));
+                // `$ZodURL` hands back the trimmed text without the tabs and line breaks the URL parser skips.
+                *value = Out::Json(Value::from(trimmed.replace(['\t', '\n', '\r'], "")));
             } else {
                 issues.push(Issue::new(
                     [("code", "invalid_format".into()), ("format", "url".into())],
