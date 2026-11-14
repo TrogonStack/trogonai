@@ -826,6 +826,12 @@ where
             Err(Error::ShutdownRequested) => Ok(()),
             outcome => outcome,
         };
+        // Kept unanswered until the run ends, as they were while they waited in the queue.
+        let _unapplied = if self.shutdown_seen && primary.is_ok() {
+            Box::pin(self.write_queued_prompts()).await
+        } else {
+            Vec::new()
+        };
         self.callbacks.abort_all();
         self.mcp.tasks.abort_all();
         for signal in self.callback_signals.values().chain(self.detached_callbacks.values()) {
@@ -872,6 +878,24 @@ where
         self.commands.close();
         drop(self.messages);
         let _ = terminal.send(outcome);
+    }
+
+    /// `sdk.mjs` writes a prompt to stdin as `query()` takes it, so one taken before `close()` is on stdin when the
+    /// input ends. The close can reach the driver ahead of a prompt queued before it, so those prompts are written
+    /// now; the other commands are handed back untouched.
+    async fn write_queued_prompts(&mut self) -> Vec<Command> {
+        let mut unapplied = Vec::new();
+        while let Some(command) = self.commands.try_recv() {
+            if !matches!(command, Command::Prompt { .. }) {
+                unapplied.push(command);
+                continue;
+            }
+            if let Err(error) = Box::pin(self.command(command)).await {
+                tracing::debug!(%error, "a prompt queued before the close could not be written");
+                break;
+            }
+        }
+        unapplied
     }
 
     /// Writes the connect-time initialize request. `sdk.mjs` writes it while it constructs the Query, before the
