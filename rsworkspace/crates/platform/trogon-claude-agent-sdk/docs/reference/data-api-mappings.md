@@ -99,7 +99,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `host_auth_token_handler: Option<Arc<dyn HostAuthTokenHandler>>` | not applicable | `getHostAuthToken`; sets `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`, except under `ArgvStyle::Python`, which answers like Python. A handler returns a string or none, never the bare number the bundle would forward. Both token callbacks use `limits.callback_timeout` when that opt-in limit is set. |
 | `tool_config: ToolConfig` | not applicable | `toolConfig.askUserQuestion` as `CLAUDE_CODE_QUESTION_*` variables; ignored under the Python dialect |
 | `workload: Option<String>` | not applicable | `workload`, merged into the extra arguments in place; an empty value is skipped |
-| `SessionStoreOptions::load_timeout`, `dialect` | `load_timeout_ms` (resume materialization wording) | `loadTimeoutMs` (default wording) |
+| `SessionStoreOptions::load_timeout`, `dialect` | `load_timeout_ms` (resume materialization wording, and a failing store call wrapped as `SessionError::ResumeStore`) | `loadTimeoutMs` (default wording, store failures unchanged) |
 | `ClaudeSdkClient::connect_with_adapters` | not applicable | `spawnClaudeCodeProcess`: the spawner receives the program, arguments, directory and environment overrides; the CLI is never discovered |
 | `user: Option<String>` | `user` | not applicable |
 | `run_as_uid: Option<u32>` | `user` as an int | `spawn` `uid` |
@@ -152,7 +152,7 @@ TypeScript returns `undefined`, `decode()` reads the generated type).
 | `reload_plugins`, `ReloadPluginsOptions`, `reload_skills`, `reload_output_styles` | not applicable | `reloadPlugins`, `reloadSkills`, `reloadOutputStyles` |
 | `seed_read_state(&str, f64)` | not applicable | `seedReadState` (`mtime` spelled like `JSON.stringify`) |
 | `stop_task` | `stop_task` | `stopTask` |
-| `background_tasks(Option<ToolUseId>) -> bool` | not applicable | `backgroundTasks` (`true` for an absent `backgrounded`; a non-boolean is `Error::Protocol` here) |
+| `background_tasks(Option<ToolUseId>) -> Backgrounded` | not applicable | `backgroundTasks` (`backgrounded` as sent, `true` when it is null or absent; `Backgrounded::into_bool` is the opt-in boolean check) |
 | `Error::ControlRejected`, `ControlRejectionError::error_code` | `Exception(error)` (no code) | `error_code` kept when it matches `/^[a-z][a-z0-9_]{0,63}$/` |
 
 ## Inbound control requests

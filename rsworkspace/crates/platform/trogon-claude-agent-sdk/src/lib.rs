@@ -11,6 +11,7 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod auth_token;
+mod backgrounded;
 mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
@@ -173,6 +174,7 @@ pub use auth_token::{
     HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
     OAuthTokenFuture, OAuthTokenHandler, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
 };
+pub use backgrounded::{Backgrounded, BackgroundedError};
 pub use builtin_tool_name::BuiltinToolName;
 pub use bundled_cli::{
     NativeCliNotFoundError, NativePackageTarget, NodeModuleLookup, NodeModuleNotFoundError, ResolveNodeModule,

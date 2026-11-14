@@ -18,10 +18,10 @@ use std::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
-    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, ContextUsageDetail, ControlOperation, Error, InterruptReceipt,
-    JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, McpServers, MessageId,
-    ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RewindMode, SdkMcpServers, SettingsUpdateSource, TaskId,
-    ToolUseId,
+    ArgvStyle, Backgrounded, ClaudeAgentOptions, ClaudeSdkClient, ContextUsageDetail, ControlOperation, Error,
+    InterruptReceipt, JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName,
+    McpServers, MessageId, ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RewindMode, SdkMcpServers,
+    SettingsUpdateSource, TaskId, ToolUseId,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -296,7 +296,7 @@ async fn typescript_controls_match_sdk_mjs_bytes_and_returns() -> TestResult {
     handle.rewind_files(MessageId::from("u1"), None).await?;
     handle.rewind_files(MessageId::from("u1"), RewindMode::DryRun).await?;
     handle.rewind_files(MessageId::from("u1"), None).await?;
-    assert!(handle.background_tasks(None).await?);
+    assert_eq!(handle.background_tasks(None).await?, Backgrounded::Bool(true));
     handle.background_tasks(Some(ToolUseId::from("tu1"))).await?;
     let servers = handle.mcp_server_status().await?;
     assert_eq!(servers.as_json(), Some(&json!([{"name":"s","status":"connected"}])));
@@ -341,30 +341,49 @@ async fn typescript_rejections_keep_a_well_formed_error_code() -> TestResult {
     };
     assert_eq!(rejection.message(), "no model");
     assert_eq!(rejection.error_code(), None);
-    assert!(!handle.background_tasks(None).await?);
+    assert!(!handle.background_tasks(None).await?.into_bool()?);
     client.disconnect().await?;
     server.await??;
     Ok(())
 }
 
+const BACKGROUND_TASKS_GOLDENS: &str = include_str!("fixtures/background_tasks/goldens.json");
+
+/// Each reply `sdk.mjs` was given and what `backgroundTasks` returned or threw for it: `backgrounded` of any
+/// type comes back as sent, and only a reply without a `response` object to read it from fails.
 #[tokio::test]
 async fn background_tasks_reads_backgrounded_like_typescript() -> TestResult {
-    let (client, server) = connect(
-        ArgvStyle::TypeScript,
-        script([(
-            "background_tasks",
-            vec![
-                Reply::Success(json!({"backgrounded":null})),
-                Reply::Omitted,
-                Reply::Success(json!({"backgrounded":"yes"})),
-            ],
-        )]),
-    )
-    .await?;
+    let goldens: Value = serde_json::from_str(BACKGROUND_TASKS_GOLDENS)?;
+    let cases = goldens["cases"].as_array().ok_or("cases")?;
+    let replies: Vec<Reply> = cases
+        .iter()
+        .map(|case| match case["reply"].get("response") {
+            Some(response) => Reply::Success(response.clone()),
+            None => Reply::Omitted,
+        })
+        .collect();
+    let (client, server) = connect(ArgvStyle::TypeScript, script([("background_tasks", replies)])).await?;
     let handle = client.handle();
-    assert!(handle.background_tasks(None).await?);
-    assert!(matches!(handle.background_tasks(None).await, Err(Error::Protocol(_))));
-    assert!(matches!(handle.background_tasks(None).await, Err(Error::Protocol(_))));
+    for case in cases {
+        let name = case["name"].as_str().ok_or("name")?;
+        let outcome = handle.background_tasks(Some(ToolUseId::from("toolu_1"))).await;
+        match (case["typescript"].get("value"), outcome) {
+            (None, Err(Error::Protocol(_))) => {}
+            (Some(Value::Bool(expected)), Ok(Backgrounded::Bool(backgrounded))) => {
+                assert_eq!(backgrounded, *expected, "{name}");
+            }
+            (Some(Value::Bool(_)), outcome) => return Err(format!("{name}: {outcome:?}").into()),
+            (Some(expected), Ok(backgrounded)) => {
+                assert_eq!(backgrounded, Backgrounded::Other(expected.clone()), "{name}");
+                assert_eq!(backgrounded.as_bool(), None, "{name}");
+                let Err(error) = backgrounded.into_bool() else {
+                    return Err(format!("{name}: the opt-in check accepted a non-boolean").into());
+                };
+                assert_eq!(error.value(), expected, "{name}");
+            }
+            (_, outcome) => return Err(format!("{name}: {outcome:?}").into()),
+        }
+    }
     client.disconnect().await?;
     server.await??;
     Ok(())

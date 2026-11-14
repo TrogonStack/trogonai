@@ -515,11 +515,21 @@ async fn python_resume_joins_relative_configuration_and_requires_listing_for_lat
     options.require_absolute_config_paths = false;
     options.dialect = SummaryDialect::Python;
     options.config_directory = Some(config.clone());
+    // `_with_timeout` wraps the `NotImplementedError` of the missing `list_sessions`, whose text is empty.
+    let outcome = prepare(&options, StoreResume::Latest, filesystem.clone()).await;
+    let Err(error) = outcome else {
+        return Err("expected the missing listing to fail".into());
+    };
+    assert_eq!(
+        error.to_string(),
+        "SessionStore.list_sessions() failed during resume materialization: "
+    );
     assert!(matches!(
-        prepare(&options, StoreResume::Latest, filesystem.clone()).await,
-        Err(SessionError::Store(SessionStoreError::Unsupported(
-            SessionStoreOperation::List
-        )))
+        error,
+        SessionError::ResumeStore {
+            source: SessionStoreError::Unsupported(SessionStoreOperation::List),
+            ..
+        }
     ));
     assert!(resume_directories(&filesystem)?.is_empty());
     Ok(())

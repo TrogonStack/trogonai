@@ -952,10 +952,11 @@ impl ClientHandle {
         Ok(())
     }
 
-    /// TypeScript `backgroundTasks(toolUseId)`: `backgrounded`, `true` when the CLI leaves it out. A response
-    /// without an object, or a `backgrounded` that is not a boolean, is a protocol error here, where TypeScript
-    /// throws or returns the value untyped.
-    pub async fn background_tasks(&self, tool_use_id: Option<crate::ToolUseId>) -> Result<bool, Error> {
+    /// TypeScript `backgroundTasks(toolUseId)`: `response.backgrounded ?? true`, of whatever type the CLI sent;
+    /// [`Backgrounded::into_bool`](crate::Backgrounded::into_bool) is the opt-in boolean check. A reply with no
+    /// `response`, or a null one, is a protocol error where TypeScript throws reading `backgrounded` from it, and any
+    /// other response that is not an object reads as `true`, like the property of a primitive.
+    pub async fn background_tasks(&self, tool_use_id: Option<crate::ToolUseId>) -> Result<crate::Backgrounded, Error> {
         let response = self
             .control(
                 ControlOperation::BackgroundTasks,
@@ -965,16 +966,12 @@ impl ClientHandle {
                 .to_value()?,
             )
             .await?;
-        let Some(serde_json::Value::Object(response)) = response else {
-            return Err(missing_response(ControlOperation::BackgroundTasks));
-        };
-        match response.get("backgrounded") {
-            None | Some(serde_json::Value::Null) => Ok(true),
-            Some(serde_json::Value::Bool(backgrounded)) => Ok(*backgrounded),
-            Some(_) => Err(ProtocolError::from(<serde_json::Error as serde::de::Error>::custom(
-                "background_tasks answered a backgrounded that is not a boolean",
-            ))
-            .into()),
+        match response {
+            None | Some(serde_json::Value::Null) => Err(missing_response(ControlOperation::BackgroundTasks)),
+            Some(serde_json::Value::Object(response)) => {
+                Ok(crate::Backgrounded::from_response(response.get("backgrounded")))
+            }
+            Some(_) => Ok(crate::Backgrounded::Bool(true)),
         }
     }
 
