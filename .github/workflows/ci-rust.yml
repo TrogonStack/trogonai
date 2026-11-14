@@ -67,7 +67,7 @@ jobs:
 
       - name: Cache dependencies
         id: rust-cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
@@ -119,7 +119,7 @@ jobs:
 
       - name: Cache dependencies
         id: rust-cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # Bumped with cache-workspace-crates: rust-cache leaves it out of the key
           # and skips saving after an exact hit, so main would keep the old cache.
@@ -134,7 +134,7 @@ jobs:
           CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Install coverage tools
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-llvm-cov,nextest
 
@@ -158,7 +158,7 @@ jobs:
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
         # _xml_coverage_reports, but fork PR tokens cannot push to the base repo.
-        uses: TrogonStack/github-actions/actions/coverage-report@8d32cdde455b381daffbea5133a0319f374989ee
+        uses: TrogonStack/github-actions/actions/coverage-report@000736ee712e6be6b5e5df95bed69a31d6b667c3
         with:
           path: rsworkspace/coverage.xml
           source-root: rsworkspace
@@ -198,7 +198,7 @@ jobs:
 
       - name: Cache dependencies
         id: rust-cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
@@ -231,7 +231,7 @@ jobs:
 
       - name: Cache dependencies
         id: rust-cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v1-rust
           workspaces: rsworkspace -> target
@@ -278,7 +278,7 @@ jobs:
           persist-credentials: false
 
       - name: Install mise
-        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install: false
           cache: false
