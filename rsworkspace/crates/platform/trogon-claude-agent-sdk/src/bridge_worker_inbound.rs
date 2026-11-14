@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 mod constants;
 
@@ -135,7 +135,7 @@ impl InboundRouter {
                     return None;
                 }
                 let mut buffered = Map::new();
-                buffered.insert("type".to_owned(), json!("queued_notification"));
+                buffered.insert("type".to_owned(), Value::String("queued_notification".to_owned()));
                 if let Some(notification) = message.get("notification") {
                     buffered.insert("notification".to_owned(), notification.clone());
                 }
@@ -237,12 +237,18 @@ fn notification_as_user(notification: Option<&Value>) -> Option<Value> {
         return None;
     }
     let content = notification.get("content")?.as_str()?;
-    Some(json!({
-        "type": "user",
-        "uuid": id,
-        "message": { "role": "user", "content": content },
-        "parent_tool_use_id": null,
-        "isSynthetic": true,
-        "inbound_origin": NOTIFICATION_ORIGIN,
-    }))
+    let mut inner = Map::new();
+    inner.insert("role".to_owned(), Value::String("user".to_owned()));
+    inner.insert("content".to_owned(), Value::String(content.to_owned()));
+    let mut user = Map::new();
+    user.insert("type".to_owned(), Value::String("user".to_owned()));
+    user.insert("uuid".to_owned(), Value::String(id.to_owned()));
+    user.insert("message".to_owned(), Value::Object(inner));
+    user.insert("parent_tool_use_id".to_owned(), Value::Null);
+    user.insert("isSynthetic".to_owned(), Value::Bool(true));
+    user.insert(
+        "inbound_origin".to_owned(),
+        Value::String(NOTIFICATION_ORIGIN.to_owned()),
+    );
+    Some(Value::Object(user))
 }

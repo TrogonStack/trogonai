@@ -127,7 +127,7 @@ pub enum Error {
     #[error("the CLI path cannot be started safely")]
     CliPath(#[from] crate::CliPathError),
     #[error(transparent)]
-    CliNotFound(#[from] crate::CliNotFoundError),
+    CliNotFound(#[from] crate::cli_not_found_error::CliNotFoundError),
     /// Node `os.homedir()` or Python `Path.home()` found no home directory where the dialect needs one.
     #[error(transparent)]
     HomeDirectory(#[from] crate::HomeDirectoryError),
@@ -455,7 +455,7 @@ pub(crate) fn launch_failure(path: &std::path::Path, error: io::Error) -> io::Er
 /// TypeScript's text for a path that could not be started, which depends on whether it names a native binary and
 /// whether it exists.
 fn launch_message(path: &std::path::Path) -> String {
-    let native = !crate::process_transport::is_script(path, crate::ArgvStyle::TypeScript);
+    let native = !crate::process_options::is_script(path, crate::ArgvStyle::TypeScript);
     let shown = crate::stderr_redaction::redact(&path.to_string_lossy());
     match (native, path.exists()) {
         (true, true) => format!(

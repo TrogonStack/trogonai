@@ -8,7 +8,7 @@ use crate::{
         trim, utf16_length,
     },
     sdk_mcp_regexp,
-    sdk_mcp_zod::{Affix, ArrayNode, Bound, Node, NumberNode, ObjectMode, ObjectNode, StringCheck, StringNode},
+    sdk_mcp_zod::{Affix, ArrayNode, Bound, Node, NumberNode, ObjectMode, ObjectNode, Parsed, StringCheck, StringNode},
     sdk_mcp_zod_issue::{Issue, aborted},
 };
 use serde_json::Value;
@@ -126,6 +126,17 @@ fn has(object: &JsonObject, key: &str) -> bool {
 
 fn reports(issues: &[Issue]) -> Value {
     Value::Array(issues.iter().map(|issue| Value::Object(issue.report())).collect())
+}
+
+impl Node {
+    /// `schema.safeParse(input)`.
+    pub(crate) fn parse(&self, input: Input<'_>) -> Parsed {
+        let outcome = run(self, input);
+        Parsed {
+            issues: outcome.issues.iter().map(Issue::report).collect(),
+            value: outcome.value.into_json(),
+        }
+    }
 }
 
 pub(crate) fn run(node: &Node, input: Input<'_>) -> Outcome {

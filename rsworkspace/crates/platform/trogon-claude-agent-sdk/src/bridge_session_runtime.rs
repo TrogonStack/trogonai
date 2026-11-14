@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use crate::adapters::HttpExecute;
-use crate::bridge_session::CloseCallback;
+use crate::bridge_session_callbacks::CloseCallback;
 use crate::bridge_session_stream_events::StreamEvents;
 use crate::bridge_worker::{WorkerClient, WorkerPacing};
 use crate::bridge_worker_events::ClientEvent;

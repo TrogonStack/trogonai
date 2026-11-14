@@ -4,8 +4,13 @@
 //! The upstream bridge reads those answers from process globals and the real file system. Here they are the methods of
 //! [`PlatformProbe`], so the checks can be replayed against scripted answers; [`HostProbe`] is the real host.
 
+use std::ffi::OsStr;
 use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+
+use crate::adapters::{EnvironmentVariable, SystemEnvironment};
 
 /// A platform the upstream checks tell apart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,8 +154,12 @@ impl PlatformProbe for HostProbe {
         if platform != Platform::Linux {
             return platform;
         }
-        let subsystem = std::env::var_os("WSL_DISTRO_NAME").is_some_and(|value| !value.is_empty())
-            || std::env::var_os("WSL_INTEROP").is_some_and(|value| !value.is_empty())
+        let subsystem = SystemEnvironment
+            .var_os(OsStr::new("WSL_DISTRO_NAME"))
+            .is_some_and(|value| !value.is_empty())
+            || SystemEnvironment
+                .var_os(OsStr::new("WSL_INTEROP"))
+                .is_some_and(|value| !value.is_empty())
             || std::fs::read_to_string("/proc/version").is_ok_and(|text| {
                 let text = text.to_lowercase();
                 text.contains("microsoft") || text.contains("wsl")
@@ -197,7 +206,10 @@ impl PlatformProbe for HostProbe {
 
     fn home_dir(&self) -> Option<String> {
         let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-        std::env::var(variable).ok().filter(|home| !home.is_empty())
+        SystemEnvironment
+            .var_os(OsStr::new(variable))
+            .and_then(|home| home.into_string().ok())
+            .filter(|home| !home.is_empty())
     }
 
     fn read_text(&self, path: &str) -> Result<String, ProbeError> {
@@ -210,7 +222,6 @@ impl PlatformProbe for HostProbe {
         let meta = std::fs::metadata(Path::new(path)).map_err(|error| probe_error(&error))?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::MetadataExt;
             Ok(meta.dev())
         }
         #[cfg(not(unix))]

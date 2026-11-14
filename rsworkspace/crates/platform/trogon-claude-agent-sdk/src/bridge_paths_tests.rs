@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use super::*;
 use crate::bridge_fake_probe::FakeProbe;
+use crate::bridge_flavor::{join, resolve, split_runs};
 
 const PLATFORM_GOLDENS: &str = include_str!("../tests/fixtures/bridge_create_session/platform.json");
 

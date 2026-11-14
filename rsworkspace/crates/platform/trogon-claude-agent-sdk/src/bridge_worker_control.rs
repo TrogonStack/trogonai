@@ -21,7 +21,8 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use serde_json::{Map, Value, json};
+use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::bridge_js::{clean_label, clean_reply_text};
 
@@ -180,6 +181,29 @@ fn js_string(value: Option<&Value>) -> String {
     }
 }
 
+/// The `mcp_status` answer: no servers are attached.
+#[derive(Serialize)]
+struct McpStatus {
+    #[serde(rename = "mcpServers")]
+    mcp_servers: Vec<Value>,
+}
+
+/// The `fork_conversation` answer: forking needs the remote control server.
+#[derive(Serialize)]
+struct ForkConversation {
+    forked: bool,
+    error: &'static str,
+    reason: &'static str,
+}
+
+/// The `mcp_set_servers` answer for a hint-only request: nothing changed.
+#[derive(Serialize)]
+struct McpSetServers {
+    added: Vec<Value>,
+    removed: Vec<Value>,
+    errors: Map<String, Value>,
+}
+
 pub(crate) struct Replier<'a> {
     pub(crate) session_id: &'a str,
     pub(crate) id: Option<&'a Value>,
@@ -193,7 +217,7 @@ impl Replier<'_> {
     /// The `control_response` frame with the request id after the subtype and `tail` after it.
     pub(crate) fn frame_value(&self, subtype: &str, tail: Vec<(&str, Value)>) -> Value {
         let mut response = Map::new();
-        response.insert("subtype".to_owned(), json!(subtype));
+        response.insert("subtype".to_owned(), Value::from(subtype));
         if let Some(id) = self.id {
             response.insert("request_id".to_owned(), id.clone());
         }
@@ -201,9 +225,9 @@ impl Replier<'_> {
             response.insert(key.to_owned(), value);
         }
         let mut frame = Map::new();
-        frame.insert("type".to_owned(), json!("control_response"));
+        frame.insert("type".to_owned(), Value::from("control_response"));
         frame.insert("response".to_owned(), Value::Object(response));
-        frame.insert("session_id".to_owned(), json!(self.session_id));
+        frame.insert("session_id".to_owned(), Value::from(self.session_id));
         Value::Object(frame)
     }
 
@@ -211,18 +235,22 @@ impl Replier<'_> {
         self.frame("success", Vec::new())
     }
 
-    fn success_with(&self, response: Value) -> BridgeControlReply {
-        self.frame("success", vec![("response", response)])
+    /// A serialization failure answers as an error reply, the one path this reply already has.
+    fn success_with(&self, response: &impl Serialize) -> BridgeControlReply {
+        match serde_json::to_value(response) {
+            Ok(response) => self.frame("success", vec![("response", response)]),
+            Err(error) => self.error(&error.to_string()),
+        }
     }
 
     fn error(&self, text: &str) -> BridgeControlReply {
-        self.frame("error", vec![("error", json!(text))])
+        self.frame("error", vec![("error", Value::from(text))])
     }
 
     fn cleaned_error(&self, text: Option<&str>, code: Option<&str>) -> BridgeControlReply {
-        let mut tail = vec![("error", json!(clean_control_text(text.unwrap_or_default())))];
+        let mut tail = vec![("error", Value::String(clean_control_text(text.unwrap_or_default())))];
         if let Some(code) = code {
-            tail.push(("error_code", json!(code)));
+            tail.push(("error_code", Value::from(code)));
         }
         self.frame("error", tail)
     }
@@ -230,7 +258,10 @@ impl Replier<'_> {
     fn unsupported(&self, text: &str) -> BridgeControlReply {
         self.frame(
             "error",
-            vec![("error", json!(text)), ("error_code", json!(ERROR_CODE_UNSUPPORTED))],
+            vec![
+                ("error", Value::from(text)),
+                ("error_code", Value::from(ERROR_CODE_UNSUPPORTED)),
+            ],
         )
     }
 
@@ -296,7 +327,9 @@ pub fn answer_control_request(
             "get_context_usage is not supported in this context (onGetContextUsage callback not registered)",
         ),
         Some("get_usage") => replier.unsupported("get_usage is not supported in this context"),
-        Some("mcp_status") => replier.success_with(json!({ "mcpServers": [] })),
+        Some("mcp_status") => replier.success_with(&McpStatus {
+            mcp_servers: Vec::new(),
+        }),
         Some(name @ ("mcp_authenticate" | "mcp_oauth_callback_url" | "mcp_reconnect")) => missing(name),
         Some("interrupt") => {
             if let Some(callback) = callbacks.on_interrupt.as_mut() {
@@ -350,11 +383,11 @@ pub fn answer_control_request(
                 request: body.cloned().unwrap_or(Value::Null),
             })
         }
-        Some("fork_conversation") => replier.success_with(json!({
-            "forked": false,
-            "error": "unsupported",
-            "reason": "requires_remote_control_server",
-        })),
+        Some("fork_conversation") => replier.success_with(&ForkConversation {
+            forked: false,
+            error: "unsupported",
+            reason: "requires_remote_control_server",
+        }),
         _ => replier.unsupported(&format!(
             "REPL bridge does not handle control_request subtype: {}",
             clean_control_text(&js_string(subtype_value))
@@ -372,15 +405,18 @@ fn initialize(replier: &Replier<'_>, session: &ControlSession<'_>) -> BridgeCont
             .collect()
     };
     let mut inner = Map::new();
-    inner.insert("commands".to_owned(), json!([]));
-    inner.insert("agents".to_owned(), json!([]));
-    inner.insert("output_style".to_owned(), json!("normal"));
-    inner.insert("available_output_styles".to_owned(), json!(["normal"]));
-    inner.insert("models".to_owned(), json!([]));
-    inner.insert("account".to_owned(), json!({}));
-    inner.insert("pid".to_owned(), json!(session.pid));
+    inner.insert("commands".to_owned(), Value::Array(Vec::new()));
+    inner.insert("agents".to_owned(), Value::Array(Vec::new()));
+    inner.insert("output_style".to_owned(), Value::from("normal"));
+    inner.insert(
+        "available_output_styles".to_owned(),
+        Value::Array(vec![Value::from("normal")]),
+    );
+    inner.insert("models".to_owned(), Value::Array(Vec::new()));
+    inner.insert("account".to_owned(), Value::Object(Map::new()));
+    inner.insert("pid".to_owned(), Value::from(session.pid));
     if let Some(version) = session.claude_code_version {
-        inner.insert("claude_code_version".to_owned(), json!(version));
+        inner.insert("claude_code_version".to_owned(), Value::from(version));
     }
     replier.frame(
         "success",
@@ -558,7 +594,11 @@ fn mcp_set_servers(replier: &Replier<'_>, body: Option<&Value>) -> BridgeControl
     let servers = body.and_then(|body| body.get("servers"));
     let hint = body.and_then(|body| body.get("hint"));
     if servers.is_none() && hint.is_some_and(Value::is_string) {
-        return replier.success_with(json!({ "added": [], "removed": [], "errors": {} }));
+        return replier.success_with(&McpSetServers {
+            added: Vec::new(),
+            removed: Vec::new(),
+            errors: Map::new(),
+        });
     }
     if !servers.is_some_and(Value::is_object) {
         return replier.cleaned_error(Some("mcp_set_servers: servers must be an object"), None);

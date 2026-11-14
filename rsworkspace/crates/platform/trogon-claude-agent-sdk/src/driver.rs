@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    ffi::OsStr,
     future::{Future, pending},
     sync::Arc,
     time::Duration,
@@ -14,6 +15,7 @@ use tokio::{
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
+    adapters::{EnvironmentVariable, SystemEnvironment},
     constants::{
         self, PYTHON_INITIALIZE_TIMEOUT_SECONDS, PYTHON_INT_LITERAL_REPR_CHARS, TYPESCRIPT_INITIALIZE_TIMEOUT,
     },
@@ -726,7 +728,10 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
     } = input;
     transport.connect().await?;
     let capture_manifests = options.argv_style == crate::ArgvStyle::TypeScript
-        && options.captures_sdk_mcp_manifests(std::env::var_os("CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS").as_deref());
+        && options.captures_sdk_mcp_manifests(
+            EnvironmentVariable::var_os(&SystemEnvironment, OsStr::new("CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS"))
+                .as_deref(),
+        );
     let initialize_hold = options.argv_style == crate::ArgvStyle::TypeScript
         && (initialization.expectations.blocking_hooks || initialization.expectations.managed_settings);
     if initialize_hold {
@@ -2158,8 +2163,8 @@ where
             tracing::warn!(
                 captured = captured.len(),
                 servers,
-                "in-process MCP servers captured within {} ms; the rest will handshake over the control channel",
-                constants::MCP_MANIFEST_CAPTURE_DEADLINE.as_millis()
+                deadline_ms = constants::MCP_MANIFEST_CAPTURE_DEADLINE.as_millis(),
+                "in-process MCP servers captured within the deadline; the rest will handshake over the control channel"
             );
         }
         if captured.is_empty() {

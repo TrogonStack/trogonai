@@ -5,6 +5,7 @@ use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlReply, Error, JsonObject, Message, Prompt, ProtocolError,
     driver::{self, Command, Completion},
+    js_runtime::Nullish,
     process_options::EnvironmentMode,
     process_transport::{Closed, ProcessSpawn, ProcessTransport},
     startup_timeout::{StartupEvent, StartupTimer},
@@ -821,7 +822,7 @@ impl ClientHandle {
     /// answered without a response or with `null`.
     async fn initialization_field<T>(&self, key: &str) -> Result<ControlReply<T>, Error> {
         let value = self.initialization_value().await?;
-        if let Some(nothing) = crate::js_runtime::Nullish::of(value.as_ref()) {
+        if let Some(nothing) = Nullish::of(value.as_ref()) {
             let expression = format!("(await this.initialization).{key}");
             return Err(self.js_runtime.read_error(nothing, key, &expression));
         }
@@ -842,7 +843,7 @@ impl ClientHandle {
     /// a response or with `null`, throws even after `commands_changed`.
     pub async fn supported_commands(&self) -> Result<ControlReply<Vec<wire_types::SlashCommand>>, Error> {
         let value = self.initialization_value().await?;
-        if let Some(nothing) = crate::js_runtime::Nullish::of(value.as_ref()) {
+        if let Some(nothing) = Nullish::of(value.as_ref()) {
             return Err(self.js_runtime.destructure_error(nothing, "commands"));
         }
         let latest = self
@@ -1585,7 +1586,6 @@ fn claim_initialization(
     update: &serde_json::Value,
     runtime: crate::JsRuntime,
 ) -> InitializationOutcome {
-    use crate::js_runtime::Nullish;
     let earlier = match previous {
         Some(Ok(value)) => {
             if let Some(nothing) = Nullish::of(value.as_ref()) {

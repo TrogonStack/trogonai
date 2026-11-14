@@ -33,7 +33,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Method;
 use reqwest::header::{HeaderMap, HeaderValue};
-use serde_json::{Map, Value, json};
+use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::SensitiveString;
 use crate::adapters::HttpExecute;
@@ -320,13 +321,6 @@ fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailur
     }
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(current) = source {
-        let shown = current.to_string();
-        if shown.contains("dns error") || shown.contains("failed to lookup address information") {
-            return named(format!("getaddrinfo ENOTFOUND {host}"), "ENOTFOUND");
-        }
-        if shown.contains("connection closed before message completed") {
-            return named("socket hang up".to_owned(), "ECONNRESET");
-        }
         if let Some(io) = current.downcast_ref::<std::io::Error>() {
             match io.kind() {
                 std::io::ErrorKind::ConnectionRefused if host.eq_ignore_ascii_case("localhost") => {
@@ -340,10 +334,25 @@ fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailur
                 std::io::ErrorKind::ConnectionReset
                 | std::io::ErrorKind::ConnectionAborted
                 | std::io::ErrorKind::UnexpectedEof => return named("socket hang up".to_owned(), "ECONNRESET"),
+                // A failed name lookup is a connect failure whose io error carries no OS code and a kind of its
+                // own that none of the arms here or the usual transport kinds name.
+                std::io::ErrorKind::InvalidData
+                | std::io::ErrorKind::InvalidInput
+                | std::io::ErrorKind::Other
+                | std::io::ErrorKind::TimedOut
+                | std::io::ErrorKind::PermissionDenied => {}
+                _ if error.is_connect() && io.raw_os_error().is_none() => {
+                    return named(format!("getaddrinfo ENOTFOUND {host}"), "ENOTFOUND");
+                }
                 _ => {}
             }
         }
         source = current.source();
+    }
+    // The connection was dropped mid-request without an io error to say so: the peer closed before the message
+    // completed.
+    if error.is_request() && !error.is_connect() && !error.is_timeout() {
+        return named("socket hang up".to_owned(), "ECONNRESET");
     }
     named("Network Error".to_owned(), "ERR_NETWORK")
 }
@@ -729,11 +738,15 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         if let Some(Err(reason)) = answered {
             return Err(InitError::Mismatch(reason));
         }
-        let body = json!({
-            "worker_status": "idle",
-            "worker_epoch": epoch,
-            "external_metadata": {"pending_action": null, "pending_actions": null, "task_summary": null},
-        });
+        let body = RegisterBody {
+            worker_status: "idle",
+            worker_epoch: epoch,
+            external_metadata: ClearedActions {
+                pending_action: (),
+                pending_actions: (),
+                task_summary: (),
+            },
+        };
         let registered = {
             let registration = self.register_idle(&body);
             tokio::pin!(registration);
@@ -753,7 +766,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         Ok(())
     }
 
-    async fn register_idle(&self, body: &Value) -> Result<(), InitError> {
+    async fn register_idle(&self, body: &impl Serialize) -> Result<(), InitError> {
         let mut attempt = 0;
         let failure = loop {
             attempt += 1;
@@ -792,12 +805,12 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 return Ok(None);
             }
             held.state = state;
-            json!({
-                "worker_epoch": held.epoch,
-                "worker_status": state.as_str(),
-                "requires_action_details": details.map_or(Value::Null, RequiresActionDetails::to_json),
-                "internal_metadata": {"reply_degraded": held.reply_degraded},
-            })
+            StateReport {
+                worker_epoch: held.epoch,
+                worker_status: state.as_str(),
+                requires_action_details: details.map_or(Value::Null, RequiresActionDetails::to_json),
+                internal_metadata: reply_degraded_metadata(held.reply_degraded),
+            }
         };
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
@@ -815,10 +828,10 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             let Some(metadata) = without_repeats_of_record(&mut held, metadata) else {
                 return Ok(None);
             };
-            json!({
-                "worker_epoch": held.epoch,
-                "external_metadata": external_metadata_patch(&metadata),
-            })
+            MetadataReport {
+                worker_epoch: held.epoch,
+                external_metadata: external_metadata_patch(&metadata),
+            }
         };
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
@@ -834,14 +847,14 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         }
         held.state = state;
         let mut patch = Patch::new();
-        patch.insert("worker_status".to_owned(), json!(state.as_str()));
+        patch.insert("worker_status".to_owned(), Value::String(state.as_str().to_owned()));
         patch.insert(
             "requires_action_details".to_owned(),
             details.map_or(Value::Null, RequiresActionDetails::to_json),
         );
         patch.insert(
             "internal_metadata".to_owned(),
-            json!({"reply_degraded": held.reply_degraded}),
+            Value::Object(reply_degraded_metadata(held.reply_degraded)),
         );
         held.queue.enqueue(patch);
         true
@@ -927,7 +940,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 Next::Send(patch) => {
                     made += 1;
                     let mut body = Patch::new();
-                    body.insert("worker_epoch".to_owned(), json!(self.epoch()));
+                    body.insert("worker_epoch".to_owned(), Value::from(self.epoch()));
                     for (key, value) in &patch {
                         body.insert(key.clone(), value.clone());
                     }
@@ -1223,7 +1236,10 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             }
             held.epoch
         };
-        let body = json!({"worker_epoch": epoch, "connection_status": "disconnected"});
+        let body = GoodbyeBody {
+            worker_epoch: epoch,
+            connection_status: "disconnected",
+        };
         let _ = self
             .request(Method::PUT, "/worker", &body, GOODBYE_TIMEOUT, false)
             .await;
@@ -1236,7 +1252,10 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             let held = self.lock();
             (held.epoch, held.heartbeat_interval_ms)
         };
-        let body = json!({"session_id": self.session_id, "worker_epoch": epoch});
+        let body = HeartbeatBody {
+            session_id: &self.session_id,
+            worker_epoch: epoch,
+        };
         let timeout = heartbeat_timeout(interval);
         let outcome = self
             .request(Method::POST, "/worker/heartbeat", &body, timeout, true)
@@ -1256,7 +1275,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         &self,
         method: Method,
         path: &str,
-        body: &Value,
+        body: &impl Serialize,
         timeout: Duration,
         parse_body: bool,
     ) -> Result<RequestOutcome, MismatchReason> {
@@ -1269,7 +1288,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         &self,
         method: Method,
         path: &str,
-        body: &Value,
+        body: &impl Serialize,
         timeout: Duration,
         parse_body: bool,
         upload_attempt: Option<&'static str>,
@@ -1307,7 +1326,12 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             headers.insert("x-ccr-upload-attempt", HeaderValue::from_static(attempt));
         }
         headers.insert("accept", HeaderValue::from_static("*/*"));
-        *request.body_mut() = Some(js_stringify(body).into_bytes().into());
+        // The bodies are plain data, so this cannot fail; if it ever did, the request is not sent and is reported as
+        // one that got no answer.
+        let Ok(body) = serde_json::to_value(body) else {
+            return unanswered("fetch_failed:TypeError");
+        };
+        *request.body_mut() = Some(js_stringify(&body).into_bytes().into());
         let reply = match exchange(&*self.http, request, timeout).await {
             Ok(reply) => reply,
             Err(Fault::TimedOut) => return unanswered("fetch_failed:TimeoutError"),
@@ -1379,6 +1403,59 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             non_origin_refusal,
         }))
     }
+}
+
+/// The first `PUT /worker`: the worker is idle and holds no pending action.
+#[derive(Serialize)]
+struct RegisterBody {
+    worker_status: &'static str,
+    worker_epoch: i64,
+    external_metadata: ClearedActions,
+}
+
+/// The `external_metadata` the registration sends: every action key is reset to `null`.
+#[derive(Serialize)]
+struct ClearedActions {
+    pending_action: (),
+    pending_actions: (),
+    task_summary: (),
+}
+
+/// The body of a state report.
+#[derive(Serialize)]
+struct StateReport {
+    worker_epoch: i64,
+    worker_status: &'static str,
+    requires_action_details: Value,
+    internal_metadata: Map<String, Value>,
+}
+
+/// The body of a metadata report.
+#[derive(Serialize)]
+struct MetadataReport {
+    worker_epoch: i64,
+    external_metadata: Map<String, Value>,
+}
+
+/// The goodbye of a closing worker.
+#[derive(Serialize)]
+struct GoodbyeBody {
+    worker_epoch: i64,
+    connection_status: &'static str,
+}
+
+/// The body of one heartbeat.
+#[derive(Serialize)]
+struct HeartbeatBody<'a> {
+    session_id: &'a str,
+    worker_epoch: i64,
+}
+
+/// The `internal_metadata` every state report carries.
+fn reply_degraded_metadata(degraded: bool) -> Map<String, Value> {
+    let mut metadata = Map::new();
+    metadata.insert("reply_degraded".to_owned(), Value::Bool(degraded));
+    metadata
 }
 
 /// `withoutRepeatsOfRecord`: the metadata without the keys that were first reported now and equal what the record

@@ -123,14 +123,14 @@ async fn cancelled(token: Option<&CancellationToken>) {
 
 fn log(record: &SseLogRecord) {
     match record.level {
-        SseLogLevel::Debug => tracing::debug!("{}", record.text),
-        SseLogLevel::Warn => tracing::warn!("{}", record.text),
+        SseLogLevel::Debug => tracing::debug!(message = %record.text),
+        SseLogLevel::Warn => tracing::warn!(message = %record.text),
     }
 }
 
 fn call_handler(name: &str, handler: impl FnOnce()) {
     if catch_unwind(AssertUnwindSafe(handler)).is_err() {
-        tracing::warn!("[BrowserSSETransport] {name} handler threw");
+        tracing::warn!(handler = name, "[BrowserSSETransport] handler threw");
     }
 }
 

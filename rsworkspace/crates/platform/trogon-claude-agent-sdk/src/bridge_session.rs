@@ -12,21 +12,22 @@
 //! arrives to be refused (`FPe`, offset 1190500), and the refusal of a process that is exiting (`G4`) has no way to
 //! be set from the attach options.
 
+use std::ffi::OsStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::SensitiveString;
-use crate::adapters::HttpExecute;
+use crate::adapters::{EnvironmentVariable, HttpExecute, SystemEnvironment};
+use crate::bridge_session_callbacks::{CloseCallback, InboundMessageCallback, PermissionResponseCallback};
 use crate::bridge_session_core::{Core, Runtime};
 use crate::bridge_session_runtime::{Lifecycle, Uploads, spawn_uploads, wind_down};
 use crate::bridge_worker::{InvalidSessionIdError, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing};
 use crate::bridge_worker_control::ControlCallbacks;
 use crate::bridge_worker_control_async::{AsyncControl, AsyncControlCallbacks, background_tasks_disabled};
-use crate::bridge_worker_events::ClientEvent;
 use crate::bridge_worker_heartbeat::HeartbeatDriver;
 use crate::bridge_worker_inbound::InboundRouter;
 use crate::bridge_worker_stream::{Reopen, StreamOpen, StreamRequest, StreamSession};
@@ -37,18 +38,9 @@ use crate::bridge_worker_types::{InitError, MismatchReason, RegisterFailureError
 mod constants;
 
 pub use constants::CLOSE_INIT_FAILED;
-use constants::{LIVE_ONLY_LIMIT, OVERSIZED_REPLY};
 
 /// What the host reads the environment with (`process.env`).
 pub type EnvironmentLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-/// `onInboundMessage`.
-pub type InboundMessageCallback = Box<dyn FnMut(Value) + Send>;
-/// `onPermissionResponse`: `Some(false)` keeps the pending prompt, anything else settles it (the upstream test is
-/// `!== false`).
-pub type PermissionResponseCallback = Box<dyn FnMut(&Value) -> Option<bool> + Send>;
-/// `onClose`.
-pub type CloseCallback = Box<dyn FnMut(u16) + Send>;
 
 /// The host callbacks of `AttachBridgeSessionOptions`.
 #[derive(Default)]
@@ -135,13 +127,10 @@ pub enum AttachError {
 pub(crate) fn lookup_environment(lookup: &Option<EnvironmentLookup>, name: &str) -> Option<String> {
     match lookup {
         Some(lookup) => lookup(name),
-        None => std::env::var(name).ok(),
+        None => SystemEnvironment
+            .var_os(OsStr::new(name))
+            .and_then(|value| value.into_string().ok()),
     }
-}
-
-/// The key a request id has in the table of pending prompts: ids are strings or numbers, which print distinctly.
-pub(crate) fn request_key(id: Option<&Value>) -> String {
-    id.map_or_else(|| "undefined".to_owned(), Value::to_string)
 }
 
 /// An attached session (`BridgeSessionHandle`).
@@ -557,44 +546,4 @@ impl<H, P> Drop for BridgeSession<H, P> {
             task.abort();
         }
     }
-}
-
-/// `toClientEvent`: the row as it is uploaded. Thinking-token rows and `live_only` control responses are live-view
-/// rows. A live-only control response that would not fit is replaced by an error that says so (`rF`).
-pub(crate) fn client_event(frame: Value) -> Option<ClientEvent> {
-    let Value::Object(mut payload) = frame else {
-        return None;
-    };
-    let live_only = payload.get("type").is_some_and(|kind| kind == "control_response")
-        && payload.get("live_only").is_some_and(|flag| flag == true);
-    if live_only && serde_json::to_string(&payload).map_or(0, |text| text.len()) > LIVE_ONLY_LIMIT {
-        payload = oversized_reply(&payload);
-    }
-    let thinking = payload.get("type").is_some_and(|kind| kind == "system")
-        && payload
-            .get("subtype")
-            .is_some_and(|subtype| subtype == "thinking_tokens");
-    let historical = payload.get("historical").is_some_and(|flag| flag == true);
-    Some(ClientEvent {
-        payload,
-        historical,
-        ephemeral: live_only || thinking,
-    })
-}
-
-fn oversized_reply(payload: &Map<String, Value>) -> Map<String, Value> {
-    let mut replaced = Map::new();
-    replaced.insert("type".to_owned(), Value::String("control_response".to_owned()));
-    replaced.insert("live_only".to_owned(), Value::Bool(true));
-    if let Some(uuid) = payload.get("uuid").filter(|uuid| uuid.is_string()) {
-        replaced.insert("uuid".to_owned(), uuid.clone());
-    }
-    let mut response = Map::new();
-    response.insert("subtype".to_owned(), Value::String("error".to_owned()));
-    if let Some(id) = payload.get("response").and_then(|response| response.get("request_id")) {
-        response.insert("request_id".to_owned(), id.clone());
-    }
-    response.insert("error".to_owned(), Value::String(OVERSIZED_REPLY.to_owned()));
-    replaced.insert("response".to_owned(), Value::Object(response));
-    replaced
 }

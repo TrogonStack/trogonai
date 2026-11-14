@@ -10,7 +10,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::adapters::HttpExecute;
-use crate::bridge_session::{InboundMessageCallback, PermissionResponseCallback, request_key};
+use crate::bridge_session_callbacks::{InboundMessageCallback, PermissionResponseCallback, request_key};
 use crate::bridge_session_runtime::{Lifecycle, Uploads, wind_down};
 use crate::bridge_worker::{WorkerClient, WorkerPacing};
 use crate::bridge_worker_control::{BridgeControlReply, ControlCallbacks, ControlSession, answer_control_request};

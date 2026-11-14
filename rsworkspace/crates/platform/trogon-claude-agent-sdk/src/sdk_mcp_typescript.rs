@@ -6,7 +6,8 @@ use crate::{
     CallbackError, CancellationToken, JsonObject, McpToolRequest, SdkTool, SdkTools,
     constants::{self, SUPPORTED_PROTOCOL_VERSIONS},
     sdk_mcp_js::stringify_primitive,
-    sdk_mcp_zod::{self, Input},
+    sdk_mcp_zod,
+    sdk_mcp_zod_run::Input,
     settings_json::js_stringify_pretty,
 };
 use serde_json::Value;

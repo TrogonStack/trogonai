@@ -5,6 +5,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
 use super::{
     CreateDirectory, EnvironmentVariable, HostIdentity, NativeFileSystem, NativeHost, OpenFile, OperatingSystem,
     ReadFile, RealUserId, RemoveFile, SystemEnvironment, TemporaryDirectory,
@@ -139,15 +142,11 @@ impl RenamePath for NativeExtractHost {
 impl ChangeMode for NativeExtractHost {
     #[cfg(unix)]
     fn change_mode(&self, path: &Path, mode: u32) -> io::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
-
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
     }
 
     #[cfg(unix)]
     fn change_file_mode(&self, file: &File, mode: u32) -> io::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
-
         file.set_permissions(std::fs::Permissions::from_mode(mode))
     }
 
@@ -182,8 +181,6 @@ impl RandomBytes for NativeExtractHost {
 impl FileIdentity for NativeExtractHost {
     #[cfg(unix)]
     fn file_id(&self, metadata: &Metadata) -> i128 {
-        use std::os::unix::fs::MetadataExt;
-
         i128::from(metadata.ino())
     }
 
@@ -195,7 +192,7 @@ impl FileIdentity for NativeExtractHost {
 
 impl EmitWarning for NativeExtractHost {
     fn emit_warning(&self, message: &str) {
-        tracing::warn!("{message}");
+        tracing::warn!(message = %message);
     }
 }
 

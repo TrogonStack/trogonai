@@ -5,7 +5,6 @@
 //! where drive letters, backslashes and UNC roots count. The share, device and dot segment checks below do not depend
 //! on the platform: upstream applies them to every path text it is given.
 
-use crate::bridge_paths::{dirname, join, resolve, split_runs};
 use crate::bridge_platform::Platform;
 use crate::node_path::{JsString, NodeError, NodePath, NodePathDialect, NodeProcess, js, rust};
 
@@ -243,6 +242,69 @@ pub(crate) fn share_refused(text: &str, base: &str) -> bool {
     }
     let name = server_name(text);
     name.is_none() || name != server_name(base)
+}
+
+/// `path.posix.dirname` for the paths the walker builds.
+pub(crate) fn dirname(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    match trimmed.rfind('/') {
+        None if path.starts_with('/') => "/".to_owned(),
+        None => ".".to_owned(),
+        Some(0) => "/".to_owned(),
+        Some(index) => trimmed[..index].trim_end_matches('/').to_owned(),
+    }
+}
+
+/// `path.posix.join(base, name)` for a plain `name`.
+pub(crate) fn join(base: &str, name: &str) -> String {
+    match base {
+        "" | "." => name.to_owned(),
+        "/" => format!("/{name}"),
+        other => format!("{}/{name}", other.trim_end_matches('/')),
+    }
+}
+
+/// `path.posix.resolve(base, text)` for an absolute `base`.
+pub(crate) fn resolve(base: &str, text: &str) -> String {
+    let combined = if text.starts_with('/') {
+        text.to_owned()
+    } else {
+        format!("{base}/{text}")
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for part in combined.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    format!("/{}", parts.join("/"))
+}
+
+/// `text.split(/\/+/)`, or `text.split(/[/\\]+/)` on Windows: runs of separators split, and a trailing run leaves one
+/// empty piece.
+pub(crate) fn split_runs(text: &str, windows: bool) -> Vec<&str> {
+    let separates = |byte: u8| byte == b'/' || (windows && byte == b'\\');
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if separates(bytes[index]) {
+            pieces.push(&text[start..index]);
+            while index < bytes.len() && separates(bytes[index]) {
+                index += 1;
+            }
+            start = index;
+        } else {
+            index += 1;
+        }
+    }
+    pieces.push(&text[start..]);
+    pieces
 }
 
 #[cfg(test)]

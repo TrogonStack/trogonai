@@ -18,12 +18,14 @@ mod bridge_fake_probe;
 mod bridge_flavor;
 mod bridge_git;
 mod bridge_gitcmd;
+mod bridge_gitdir;
 mod bridge_js;
 mod bridge_packed;
 mod bridge_paths;
 mod bridge_platform;
 mod bridge_refs;
 mod bridge_session;
+mod bridge_session_callbacks;
 mod bridge_session_core;
 mod bridge_session_handle;
 mod bridge_session_runtime;
@@ -49,6 +51,7 @@ mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
 mod cli_discovery;
+mod cli_not_found_error;
 mod cli_path;
 mod client;
 mod client_app;
@@ -193,6 +196,7 @@ mod settings_resolve_state;
 mod settings_resolve_tier;
 mod settings_resolve_values;
 mod settings_resolve_writable;
+mod settings_resolve_writable_document;
 mod settings_sandbox;
 mod settings_sandbox_schema;
 mod settings_schema;
@@ -259,9 +263,10 @@ pub use bridge_gitcmd::GitProbeContext;
 pub use bridge_paths::PathGuard;
 pub use bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe, ProbeError};
 pub use bridge_session::{
-    AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, CloseCallback,
-    EnvironmentLookup, InboundMessageCallback, PermissionResponseCallback, attach_bridge_session,
+    AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, EnvironmentLookup,
+    attach_bridge_session,
 };
+pub use bridge_session_callbacks::{CloseCallback, InboundMessageCallback, PermissionResponseCallback};
 pub use bridge_session_handle::{ReconnectError, ReconnectOptions};
 pub use bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
@@ -322,7 +327,7 @@ pub use bundled_cli::{
     NativeCliNotFoundError, NativePackageTarget, NodeModuleLookup, NodeModuleNotFoundError, ResolveNodeModule,
     bundled_cli_derives_client_app, find_bundled_cli, find_native_cli, meets_derived_client_app_minimum,
 };
-pub use cli_discovery::CliNotFoundError;
+pub use cli_not_found_error::CliNotFoundError;
 pub use cli_path::{CliPathError, WindowsBatchCli};
 pub use client::{
     ClaudeSdkClient, ClientConnector, ClientHandle, ConnectPrompt, CustomTransport, NativeCli, Query,

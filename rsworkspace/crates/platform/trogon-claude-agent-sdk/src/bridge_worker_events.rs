@@ -11,7 +11,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 mod constants;
 
@@ -405,5 +405,11 @@ pub fn refused_for_good(status: u16) -> bool {
 
 /// The body of one `POST /worker/events`.
 pub fn upload_body(epoch: i64, events: &[ClientEvent]) -> Value {
-    json!({"worker_epoch": epoch, "events": events.iter().map(ClientEvent::to_json).collect::<Vec<_>>()})
+    let mut body = Map::new();
+    body.insert("worker_epoch".to_owned(), Value::from(epoch));
+    body.insert(
+        "events".to_owned(),
+        Value::Array(events.iter().map(ClientEvent::to_json).collect()),
+    );
+    Value::Object(body)
 }

@@ -12,7 +12,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use serde_json::{Map, Value, json};
+use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::CancellationToken;
 use crate::bridge_js::js_trim;
@@ -101,14 +102,14 @@ impl SideQuestionContext {
     /// last.
     pub fn report_progress(&self, update: Map<String, Value>) {
         let mut frame = Map::new();
-        frame.insert("type".to_owned(), json!("system"));
-        frame.insert("subtype".to_owned(), json!("control_request_progress"));
+        frame.insert("type".to_owned(), Value::from("system"));
+        frame.insert("subtype".to_owned(), Value::from("control_request_progress"));
         if let Some(id) = &self.request_id {
             frame.insert("request_id".to_owned(), id.clone());
         }
         frame.extend(update);
-        frame.insert("uuid".to_owned(), json!((self.shared.uuid)()));
-        frame.insert("session_id".to_owned(), json!(self.shared.session_id));
+        frame.insert("uuid".to_owned(), Value::String((self.shared.uuid)()));
+        frame.insert("session_id".to_owned(), Value::String(self.shared.session_id.clone()));
         (self.shared.write)(Value::Object(frame));
     }
 }
@@ -173,15 +174,19 @@ impl AsyncControl {
                     return Some(Box::pin(async move {
                         let frame = shared
                             .replier(id.as_ref())
-                            .frame_value("error", vec![("error", json!(BACKGROUND_TASKS_DISABLED))]);
+                            .frame_value("error", vec![("error", Value::from(BACKGROUND_TASKS_DISABLED))]);
                         (shared.write)(frame);
                     }));
                 }
                 let host = self.callbacks.on_background_tasks.as_ref()?(tool_use_id.as_deref());
                 Some(self.respond("background_tasks", id, async move {
                     host.await.map(|answer| match (tool_use_id, answer) {
-                        (Some(_), Some(backgrounded)) => json!({ "backgrounded": backgrounded }),
-                        _ => json!({}),
+                        (Some(_), Some(backgrounded)) => {
+                            let mut reply = Map::new();
+                            reply.insert("backgrounded".to_owned(), backgrounded);
+                            Value::Object(reply)
+                        }
+                        _ => Value::Object(Map::new()),
                     })
                 }))
             }
@@ -235,7 +240,9 @@ impl AsyncControl {
             let replier = shared.replier(id.as_ref());
             let frame = match host.await {
                 Ok(response) => replier.frame_value("success", vec![("response", response)]),
-                Err(error) => replier.frame_value("error", vec![("error", json!(failure_text(subtype, &error)))]),
+                Err(error) => {
+                    replier.frame_value("error", vec![("error", Value::String(failure_text(subtype, &error)))])
+                }
             };
             (shared.write)(frame);
         })
@@ -277,7 +284,7 @@ pub fn background_tasks_disabled(variable: impl Fn(&str) -> Option<String>, argu
 /// `Or`: a host that resolves with nothing answers with an empty object.
 fn object_or_empty(answer: Option<Value>) -> Value {
     match answer {
-        None | Some(Value::Null) => json!({}),
+        None | Some(Value::Null) => Value::Object(Map::new()),
         Some(answer) => answer,
     }
 }
@@ -328,23 +335,35 @@ fn side_answer(answer: Option<Map<String, Value>>) -> Result<Map<String, Value>,
     };
     let answered = answer.get("response").is_none_or(|response| !response.is_null());
     if answered && answer.get("synthetic") != Some(&Value::Bool(false)) {
-        answer.insert("response".to_owned(), json!(SIDE_QUESTION_NO_ANSWER));
-        answer.insert("synthetic".to_owned(), json!(true));
+        answer.insert("response".to_owned(), Value::from(SIDE_QUESTION_NO_ANSWER));
+        answer.insert("synthetic".to_owned(), Value::Bool(true));
     }
     Ok(answer)
 }
 
+/// The `informational` system frame that carries a `set_model` notice.
+#[derive(Serialize)]
+struct InformationalFrame<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    subtype: &'static str,
+    content: String,
+    level: &'static str,
+    uuid: String,
+    session_id: &'a str,
+}
+
 fn write_reply(shared: &Shared, id: Option<&Value>, subtype: &str, tail: Vec<(&str, Value)>) {
     let mut response = Map::new();
-    response.insert("subtype".to_owned(), json!(subtype));
+    response.insert("subtype".to_owned(), Value::from(subtype));
     response.extend(tail.into_iter().map(|(key, value)| (key.to_owned(), value)));
     if let Some(id) = id {
         response.insert("request_id".to_owned(), id.clone());
     }
     let mut frame = Map::new();
-    frame.insert("type".to_owned(), json!("control_response"));
+    frame.insert("type".to_owned(), Value::from("control_response"));
     frame.insert("response".to_owned(), Value::Object(response));
-    frame.insert("session_id".to_owned(), json!(shared.session_id));
+    frame.insert("session_id".to_owned(), Value::String(shared.session_id.clone()));
     (shared.write)(Value::Object(frame));
 }
 
@@ -362,8 +381,8 @@ fn finish_model(shared: &Shared, id: Option<&Value>, outcome: Result<Option<Mode
                 id,
                 "error",
                 vec![
-                    ("error", json!("set_model failed")),
-                    ("error_code", json!("internal_error")),
+                    ("error", Value::from("set_model failed")),
+                    ("error_code", Value::from("internal_error")),
                 ],
             );
             return;
@@ -372,17 +391,28 @@ fn finish_model(shared: &Shared, id: Option<&Value>, outcome: Result<Option<Mode
     let model = verdict.model.as_deref().map(clean_control_text);
     if verdict.ok {
         for notice in verdict.notices.iter().flatten() {
-            (shared.write)(json!({
-                "type": "system",
-                "subtype": "informational",
-                "content": clean_control_text(notice),
-                "level": "notice",
-                "uuid": (shared.uuid)(),
-                "session_id": shared.session_id,
-            }));
+            let frame = InformationalFrame {
+                kind: "system",
+                subtype: "informational",
+                content: clean_control_text(notice),
+                level: "notice",
+                uuid: (shared.uuid)(),
+                session_id: &shared.session_id,
+            };
+            match serde_json::to_value(&frame) {
+                Ok(frame) => (shared.write)(frame),
+                Err(error) => {
+                    write_reply(shared, id, "error", vec![("error", Value::String(error.to_string()))]);
+                    return;
+                }
+            }
         }
         let tail = model
-            .map(|model| ("response", json!({ "model": model })))
+            .map(|model| {
+                let mut reply = Map::new();
+                reply.insert("model".to_owned(), Value::String(model));
+                ("response", Value::Object(reply))
+            })
             .into_iter()
             .collect();
         write_reply(shared, id, "success", tail);
@@ -391,12 +421,12 @@ fn finish_model(shared: &Shared, id: Option<&Value>, outcome: Result<Option<Mode
     let error = verdict.error.as_deref().map_or_else(String::new, |text| {
         text.split('\n').map(clean_control_text).collect::<Vec<_>>().join("\n")
     });
-    let mut tail = vec![("error", json!(error))];
+    let mut tail = vec![("error", Value::String(error))];
     if let Some(code) = verdict.code.as_deref().filter(|code| MODEL_CODES.contains(code)) {
-        tail.push(("error_code", json!(code)));
+        tail.push(("error_code", Value::from(code)));
     }
     if let Some(model) = model {
-        tail.push(("model", json!(model)));
+        tail.push(("model", Value::String(model)));
     }
     write_reply(shared, id, "error", tail);
 }
@@ -407,12 +437,15 @@ fn finish_thinking(shared: &Shared, id: Option<&Value>, outcome: Result<Option<C
     let frame = match outcome {
         Ok(Some(CallbackResult::Failed { error, .. })) => replier.frame_value(
             "error",
-            vec![("error", json!(clean_control_text(error.as_deref().unwrap_or_default())))],
+            vec![(
+                "error",
+                Value::String(clean_control_text(error.as_deref().unwrap_or_default())),
+            )],
         ),
         Ok(_) => replier.frame_value("success", Vec::new()),
         Err(error) => replier.frame_value(
             "error",
-            vec![("error", json!(failure_text("set_max_thinking_tokens", &error)))],
+            vec![("error", Value::String(failure_text("set_max_thinking_tokens", &error)))],
         ),
     };
     (shared.write)(frame);

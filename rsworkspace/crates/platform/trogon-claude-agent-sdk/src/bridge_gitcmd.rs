@@ -12,13 +12,16 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::adapters::{EnvironmentVariable, SystemEnvironment};
+use crate::bridge_gitdir::{common_dir, find_git_dir};
 use crate::bridge_paths::PathGuard;
-use crate::bridge_refs::{common_dir, find_git_dir};
 
 mod constants;
 
@@ -48,7 +51,7 @@ impl GitProbeContext {
         Self {
             blocked: false,
             session_cwd: std::env::current_dir().ok(),
-            environment: std::env::vars_os().collect(),
+            environment: SystemEnvironment.vars_os(),
             git_program: PathBuf::from("git"),
             timeout: RUN_LIMIT,
             paths: PathGuard::host(),
@@ -91,7 +94,6 @@ struct FileId {
 
 #[cfg(unix)]
 fn file_id(meta: &std::fs::Metadata) -> FileId {
-    use std::os::unix::fs::MetadataExt;
     FileId {
         directory: meta.is_dir(),
         device: meta.dev(),

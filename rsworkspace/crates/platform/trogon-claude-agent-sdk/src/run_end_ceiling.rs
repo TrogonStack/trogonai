@@ -16,6 +16,19 @@ use constants::{
     VARIABLE,
 };
 
+impl RunEndTimeout {
+    /// The ceiling this selection applies for the variable's value, with `None` for no limit. Anything that does
+    /// not parse is the 600 second default, as is an unset variable.
+    #[must_use]
+    pub fn for_variable(self, value: Option<&str>) -> Option<Duration> {
+        match self {
+            Self::TypeScript => typescript(value),
+            Self::Python => python(value),
+            Self::Fixed(timeout) => Some(timeout.as_duration()),
+        }
+    }
+}
+
 /// The value the child process would see for the variable, as the selected dialect reads it.
 pub(crate) fn resolve<E: EnvironmentVariable>(options: &ClaudeAgentOptions, environment: &E) -> Option<Duration> {
     let configured = options.env.get(VARIABLE).map(|value| value.expose().to_owned());

@@ -2,6 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use super::*;
+use serde_json::json;
 
 struct Environment {
     entrypoint: Option<&'static str>,

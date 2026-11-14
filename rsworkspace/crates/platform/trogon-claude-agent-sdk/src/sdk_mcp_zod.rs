@@ -20,7 +20,6 @@ use crate::{
     sdk_mcp_choices::{SchemaCallback, StringCheckKind},
     sdk_mcp_js::ordered_keys,
     sdk_mcp_regexp,
-    sdk_mcp_zod_issue::Issue,
 };
 use serde_json::{Number, Value};
 use std::sync::Arc;
@@ -28,8 +27,6 @@ use std::sync::Arc;
 /// The callbacks of a tool's validation choices, indexed by the `x-trogon-callback` keyword of the schema nodes
 /// they belong to.
 pub(crate) type Callbacks<'a> = &'a [Arc<SchemaCallback>];
-
-pub(crate) use crate::sdk_mcp_zod_run::{Input, run};
 
 /// A number from the schema: kept as written for messages, as a float for comparisons.
 #[derive(Clone)]
@@ -170,15 +167,6 @@ impl Node {
     /// The zod schema a JSON Schema document stands for.
     pub(crate) fn from_schema(schema: &Value, callbacks: Callbacks<'_>) -> Self {
         modeled(schema, callbacks)
-    }
-
-    /// `schema.safeParse(input)`.
-    pub(crate) fn parse(&self, input: Input<'_>) -> Parsed {
-        let outcome = run(self, input);
-        Parsed {
-            issues: outcome.issues.iter().map(Issue::report).collect(),
-            value: outcome.value.into_json(),
-        }
     }
 }
 

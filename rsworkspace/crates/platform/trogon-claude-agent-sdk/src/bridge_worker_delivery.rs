@@ -14,7 +14,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 
 use crate::bridge_worker_events::retry_delay;
 
@@ -169,11 +169,17 @@ impl DeliveryQueue {
 
 /// The body of one `POST /worker/events/delivery`.
 pub fn delivery_body(epoch: i64, acks: &[DeliveryAck]) -> Value {
-    json!({
-        "worker_epoch": epoch,
-        "updates": acks
-            .iter()
-            .map(|ack| json!({"event_id": ack.event_id, "status": ack.status.as_str()}))
-            .collect::<Vec<_>>(),
-    })
+    let updates = acks
+        .iter()
+        .map(|ack| {
+            let mut update = Map::new();
+            update.insert("event_id".to_owned(), Value::String(ack.event_id.clone()));
+            update.insert("status".to_owned(), Value::String(ack.status.as_str().to_owned()));
+            Value::Object(update)
+        })
+        .collect();
+    let mut body = Map::new();
+    body.insert("worker_epoch".to_owned(), Value::from(epoch));
+    body.insert("updates".to_owned(), Value::Array(updates));
+    Value::Object(body)
 }

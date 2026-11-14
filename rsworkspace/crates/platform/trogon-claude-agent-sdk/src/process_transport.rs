@@ -23,30 +23,13 @@ use crate::{
     adapters::SpawnProcess,
     argv,
     constants::{
-        CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, PYTHON_CLOSE_WAIT, SCRIPT_EXTENSIONS, STDERR_SETTLE,
-        TYPESCRIPT_CLOSE_GRACE, TYPESCRIPT_KILL_DELAY,
+        CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, PYTHON_CLOSE_WAIT, STDERR_SETTLE, TYPESCRIPT_CLOSE_GRACE,
+        TYPESCRIPT_KILL_DELAY,
     },
     environment_plan::{self, Inherited},
     framing::{FrameReader, SharedTail, drain_stderr_with},
-    process_options::EnvironmentMode,
+    process_options::{EnvironmentMode, is_script},
 };
-
-/// TypeScript's `endsWith` test is case-sensitive and works on the whole path string; Python has no script
-/// runtime, so its dialect keeps the lenient extension check.
-pub(crate) fn is_script(path: &Path, style: ArgvStyle) -> bool {
-    match style {
-        ArgvStyle::TypeScript => {
-            let path = path.to_string_lossy();
-            SCRIPT_EXTENSIONS
-                .iter()
-                .any(|extension| path.ends_with(&format!(".{extension}")))
-        }
-        ArgvStyle::Python => path
-            .extension()
-            .and_then(OsStr::to_str)
-            .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())),
-    }
-}
 
 /// Builds the child command. A script path runs under `script_runtime.executable` (default `node`), as the
 /// TypeScript SDK does; any other path is the program itself.

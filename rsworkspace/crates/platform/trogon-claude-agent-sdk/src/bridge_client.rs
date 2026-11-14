@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::adapters::{CurrentDirectory, EnvironmentVariable, HttpExecute, SystemEnvironment};
 use crate::bridge_git::{DefaultGitProbe, GitContextProbe, git_entries};
@@ -124,15 +124,18 @@ where
         if let Some(context) = options.git_context.as_ref()
             && let Some((source, outcome)) = git_entries(&self.git, context, dedup).await
         {
-            config.insert("sources".to_owned(), json!([source]));
-            config.insert("outcomes".to_owned(), json!([outcome]));
+            config.insert("sources".to_owned(), Value::Array(vec![source]));
+            config.insert("outcomes".to_owned(), Value::Array(vec![outcome]));
             config.insert("reuse_outcome_branches".to_owned(), Value::Bool(true));
         }
         let mut body = Map::new();
         body.insert("title".to_owned(), Value::String(options.title.clone()));
         body.insert("bridge".to_owned(), Value::Object(Map::new()));
         if !options.tags.is_empty() {
-            body.insert("tags".to_owned(), json!(options.tags));
+            body.insert(
+                "tags".to_owned(),
+                Value::Array(options.tags.iter().cloned().map(Value::String).collect()),
+            );
         }
         if let Some(group) = options.session_grouping_id.as_deref().filter(|group| !group.is_empty()) {
             body.insert("session_grouping_id".to_owned(), Value::String(group.to_owned()));

@@ -28,7 +28,7 @@ use crate::{
     settings_resolve_values::{
         SettingsMap, has_authored_value, has_policy_content, in_schema_order, merge_with_union, omit, pick,
     },
-    settings_resolve_writable::{DocumentProbe, user_can_write},
+    settings_resolve_writable_document::{DocumentProbe, user_can_write},
 };
 
 fn is_absent(error: &io::Error) -> bool {
