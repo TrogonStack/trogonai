@@ -15,6 +15,7 @@ mod bridge_client;
 mod bridge_git;
 mod bridge_js;
 mod bridge_session;
+mod bridge_session_core;
 mod bridge_session_handle;
 mod bridge_session_runtime;
 mod bridge_session_stream_events;

@@ -10,7 +10,7 @@
 //! Not reachable from `attachBridgeSession` and so not ported: the sleep notice and its frame wait timer
 //! (`onProcessSlept` is not passed), the long poll mode and the held-for-renewal gate.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::time::{Instant, sleep, timeout, timeout_at};
@@ -70,6 +70,12 @@ impl Default for StreamClocks {
     }
 }
 
+/// The session behind its lock. The lock is never held across an await: the host reads the sequence number and
+/// replaces the session on a reconnect while the loop waits.
+fn held(session: &Mutex<StreamSession>) -> MutexGuard<'_, StreamSession> {
+    session.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// A delay as a Node timer takes it: whole milliseconds, at least one.
 fn whole_milliseconds(delay: Duration) -> Duration {
     Duration::from_millis(u64::try_from(delay.as_millis()).unwrap_or(u64::MAX).max(1))
@@ -79,29 +85,38 @@ fn whole_milliseconds(delay: Duration) -> Duration {
 /// future never ends otherwise: the caller drops it when the session closes.
 pub async fn run_stream<C: StreamConnector>(
     connector: &C,
-    session: &mut StreamSession,
+    session: &Mutex<StreamSession>,
     clocks: &StreamClocks,
     random: &mut (dyn FnMut() -> f64 + Send),
     sink: &mut (dyn FnMut(StreamEffect) + Send),
 ) -> u16 {
     loop {
-        let request = session.request();
-        let wait = match timeout(CONNECT_TIMEOUT, connector.open(&request)).await {
-            Err(_) | Ok(Err(_)) => session.lost(random()),
-            Ok(Ok(response)) => match session.opened(response.status) {
-                StreamOpen::Read => read(response.body, session, clocks, random, sink).await,
-                StreamOpen::Retry => {
-                    drain(response.body).await;
-                    session.lost(random())
+        let request = held(session).request();
+        let opened = timeout(CONNECT_TIMEOUT, connector.open(&request)).await;
+        let wait = match opened {
+            Err(_) | Ok(Err(_)) => lost(session, random),
+            Ok(Ok(response)) => {
+                let open = held(session).opened(response.status);
+                match open {
+                    StreamOpen::Read => read(response.body, session, clocks, random, sink).await,
+                    StreamOpen::Retry => {
+                        drain(response.body).await;
+                        lost(session, random)
+                    }
+                    StreamOpen::Close(code) => {
+                        drain(response.body).await;
+                        return code;
+                    }
                 }
-                StreamOpen::Close(code) => {
-                    drain(response.body).await;
-                    return code;
-                }
-            },
+            }
         };
         sleep(whole_milliseconds(wait)).await;
     }
+}
+
+fn lost(session: &Mutex<StreamSession>, random: &mut (dyn FnMut() -> f64 + Send)) -> Duration {
+    let draw = random();
+    held(session).lost(draw)
 }
 
 /// Reads the body of a refusal for at most [`REFUSAL_BODY_TIMEOUT`].
@@ -132,7 +147,7 @@ impl Evidence {
 /// Reads one body and returns how long to wait before the next request.
 async fn read<B: StreamBody>(
     mut body: B,
-    session: &mut StreamSession,
+    session: &Mutex<StreamSession>,
     clocks: &StreamClocks,
     random: &mut (dyn FnMut() -> f64 + Send),
     sink: &mut (dyn FnMut(StreamEffect) + Send),
@@ -144,7 +159,8 @@ async fn read<B: StreamBody>(
             Err(_) => {
                 let wall = (clocks.wall)().saturating_sub(evidence.wall);
                 let monotonic = (clocks.monotonic)().saturating_sub(evidence.monotonic);
-                return match session.liveness_expired_with(wall, monotonic, random) {
+                let reopen = held(session).liveness_expired_with(wall, monotonic, random);
+                return match reopen {
                     Reopen::AtOnce { .. } => REOPEN_AT_ONCE,
                     Reopen::After(delay) => delay,
                 };
@@ -152,7 +168,7 @@ async fn read<B: StreamBody>(
         };
         match chunk {
             Some(Ok(bytes)) => {
-                let (frames, effects) = session.push_counted(&bytes);
+                let (frames, effects) = held(session).push_counted(&bytes);
                 if frames > 0 {
                     evidence = Evidence::now(clocks);
                 }
@@ -160,7 +176,7 @@ async fn read<B: StreamBody>(
                     sink(effect);
                 }
             }
-            Some(Err(_)) | None => return session.lost(random()),
+            Some(Err(_)) | None => return lost(session, random),
         }
     }
 }

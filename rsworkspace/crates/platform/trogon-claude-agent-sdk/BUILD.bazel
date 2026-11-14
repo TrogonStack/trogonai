@@ -72,6 +72,7 @@ workspace_crate(
                 "tests/support/bridge_session_server.rs",
             ],
         },
+        "bridge_session_attach_timeline": {"compile_data": ["tests/fixtures/bridge_worker/timelines.json"]},
         "bridge_session_stream_events": {"compile_data": ["tests/fixtures/bridge_worker/timelines.json"]},
         "bridge_worker": {"compile_data": ["tests/fixtures/bridge_worker/goldens.json"]},
         "bridge_worker_concurrency": {"compile_data": ["tests/fixtures/bridge_worker/goldens.json"]},

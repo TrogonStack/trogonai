@@ -262,10 +262,10 @@ async fn replay(name: &str) {
     let probes = Arc::clone(&heartbeat);
     let closing = Arc::clone(&log);
     let stream = tokio::spawn(async move {
-        let mut session = StreamSession::seeded(None);
+        let session = std::sync::Mutex::new(StreamSession::seeded(None));
         let code = run_stream(
             &connector,
-            &mut session,
+            &session,
             &clocks,
             &mut || {
                 stream_draws

@@ -1074,6 +1074,9 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// offset 1036000 to 1040000).
     async fn take_event_answer(&self, outcome: RequestOutcome) -> Result<(), MismatchReason> {
         let RequestOutcome::Failed(failure) = outcome else {
+            // The `has_subscribers` field of the answer is only stored upstream (`setHasSubscribers`, row
+            // `bw-subscriber-report-is-stored-only`): nothing reads it for a client that passes no hold option, so
+            // there is no state to keep and no row is parked on it.
             self.lock().events.done();
             return Ok(());
         };

@@ -116,6 +116,7 @@ async fn replay(name: &str) {
     options.epoch = Some(2);
     options.outbound_only = true;
     options.arguments = Some(Vec::new());
+    options.caller_driven = true;
     options.environment = Some(Arc::new(|_| None));
     let mut session = attach_bridge_session(
         Service {
@@ -210,5 +211,11 @@ replayed!(
     escaped_characters_count_as_their_escapes,
     flushing_sends_the_window_at_once,
     closing_drops_the_window,
+    closing_sends_the_row_that_waits_behind_the_ready_one,
     reconnecting_sends_the_waiting_rows_and_drops_the_deltas,
 );
+
+#[tokio::test(start_paused = true)]
+async fn closing_sends_the_row_that_is_ready() {
+    replay("closing_sends_the_row_that_is_ready").await;
+}

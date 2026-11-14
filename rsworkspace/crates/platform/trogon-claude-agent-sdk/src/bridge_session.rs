@@ -21,14 +21,17 @@ use tokio::task::JoinHandle;
 
 use crate::SensitiveString;
 use crate::adapters::HttpExecute;
+use crate::bridge_session_core::{Core, Runtime};
 use crate::bridge_session_runtime::{Lifecycle, Uploads, spawn_uploads, wind_down};
 use crate::bridge_worker::{InvalidSessionId, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing};
-use crate::bridge_worker_control::{ControlCallbacks, ControlReply, ControlSession, answer_control_request};
+use crate::bridge_worker_control::ControlCallbacks;
 use crate::bridge_worker_control_async::{AsyncControl, AsyncControlCallbacks, background_tasks_disabled};
-use crate::bridge_worker_delivery::DeliveryStatus;
 use crate::bridge_worker_events::ClientEvent;
-use crate::bridge_worker_inbound::{Inbound, InboundRouter};
-use crate::bridge_worker_stream::{Reopen, StreamEffect, StreamOpen, StreamRequest, StreamSession};
+use crate::bridge_worker_heartbeat::HeartbeatDriver;
+use crate::bridge_worker_inbound::InboundRouter;
+use crate::bridge_worker_stream::{Reopen, StreamOpen, StreamRequest, StreamSession};
+use crate::bridge_worker_stream_driver::{StreamClocks, run_stream};
+use crate::bridge_worker_stream_http::HttpStreamConnector;
 use crate::bridge_worker_types::{InitError, MismatchReason, RegisterFailure};
 
 /// `onClose` when the worker could not be initialised for good (`4091`).
@@ -77,6 +80,10 @@ pub struct AttachBridgeSessionOptions {
     pub environment: Option<EnvironmentLookup>,
     /// The process arguments `--bare` is looked for in; the process arguments when absent.
     pub arguments: Option<Vec<String>>,
+    /// The caller runs the steps itself ([`BridgeSession::pump`], [`BridgeSession::stream_push`] and the others)
+    /// instead of the session starting the heartbeat timer, the upload task and the read stream the way the upstream
+    /// entrypoint does. The recorded goldens that replay one request at a time use it.
+    pub caller_driven: bool,
 }
 
 impl AttachBridgeSessionOptions {
@@ -99,6 +106,7 @@ impl AttachBridgeSessionOptions {
             callbacks: AttachCallbacks::default(),
             environment: None,
             arguments: None,
+            caller_driven: false,
         }
     }
 }
@@ -141,17 +149,13 @@ pub struct BridgeSession<H, P = TokioPacing> {
     pub(crate) worker: Arc<WorkerClient<H, P>>,
     /// Tells the upload task which worker is current after a rebuild.
     pub(crate) worker_tx: watch::Sender<Arc<WorkerClient<H, P>>>,
-    pub(crate) stream: StreamSession,
-    pub(crate) router: InboundRouter,
     pub(crate) lifecycle: Arc<Lifecycle>,
-    pub(crate) pending_prompts: Vec<(String, Value)>,
     pub(crate) uploads: Arc<Uploads>,
     pub(crate) upload_task: Option<JoinHandle<()>>,
-    pub(crate) tasks: Vec<JoinHandle<()>>,
-    on_inbound_message: Option<InboundMessageCallback>,
-    on_permission_response: Option<PermissionResponseCallback>,
-    control: ControlCallbacks,
-    async_control: AsyncControl,
+    pub(crate) stream_task: Option<JoinHandle<()>>,
+    /// What the read stream, the host and the tasks share.
+    pub(crate) shared: Arc<Runtime<H, P>>,
+    pub(crate) scheduled: bool,
 }
 
 /// `attachBridgeSession`: registers the worker when no epoch is given, and starts it (`connect`).
@@ -161,8 +165,8 @@ pub async fn attach_bridge_session<H, P>(
     options: AttachBridgeSessionOptions,
 ) -> Result<BridgeSession<H, P>, AttachError>
 where
-    H: HttpExecute + Clone,
-    P: WorkerPacing + Clone,
+    H: HttpExecute + Clone + Send + Sync + 'static,
+    P: WorkerPacing + Clone + Send + Sync + 'static,
 {
     let AttachBridgeSessionOptions {
         session_id,
@@ -176,6 +180,7 @@ where
         mut callbacks,
         environment,
         arguments,
+        caller_driven,
     } = options;
     let entrypoint = lookup_environment(&environment, "CLAUDE_CODE_ENTRYPOINT");
     let session_access_token =
@@ -220,6 +225,26 @@ where
         callbacks.asynchronous,
         Box::new(move || background_tasks_disabled(|name| lookup_environment(&switch_environment, name), &arguments)),
     );
+    let (worker_tx, worker_rx) = watch::channel(Arc::clone(&worker));
+    let shared = Arc::new(Runtime::new(
+        Core {
+            router: InboundRouter::default(),
+            pending_prompts: Vec::new(),
+            on_inbound_message: callbacks.on_inbound_message,
+            on_permission_response: callbacks.on_permission_response,
+            control: callbacks.control,
+            async_control,
+            tasks: Vec::new(),
+        },
+        StreamSession::seeded(initial_sequence_num),
+        Arc::clone(&lifecycle),
+        Arc::clone(&uploads),
+        worker_rx,
+        session_id.clone(),
+        claude_code_version.clone(),
+        outbound_only,
+        !caller_driven,
+    ));
     let mut session = BridgeSession {
         http,
         pacing,
@@ -231,25 +256,25 @@ where
         heartbeat_interval_ms,
         outbound_only,
         claude_code_version,
-        worker_tx: watch::channel(Arc::clone(&worker)).0,
+        worker_tx,
         worker,
-        stream: StreamSession::seeded(initial_sequence_num),
-        router: InboundRouter::default(),
         lifecycle,
-        pending_prompts: Vec::new(),
         uploads,
         upload_task: None,
-        tasks: Vec::new(),
-        on_inbound_message: callbacks.on_inbound_message,
-        on_permission_response: callbacks.on_permission_response,
-        control: callbacks.control,
-        async_control,
+        stream_task: None,
+        shared,
+        scheduled: !caller_driven,
     };
     session.connect(epoch).await;
+    session.start_runtime();
     Ok(session)
 }
 
-impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
+impl<H, P> BridgeSession<H, P>
+where
+    H: HttpExecute + Send + Sync + 'static,
+    P: WorkerPacing + Send + Sync + 'static,
+{
     /// `sessionId`.
     #[must_use]
     pub fn session_id(&self) -> &str {
@@ -259,7 +284,7 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
     /// `getSequenceNum`: the highest sequence number of a durable event the read stream saw.
     #[must_use]
     pub fn sequence_num(&self) -> i64 {
-        self.stream.last_sequence()
+        self.shared.stream().last_sequence()
     }
 
     /// `getEpoch`.
@@ -290,30 +315,24 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
 
     /// The transport closing itself: the host hears about it once, unless it closed the handle first.
     pub(crate) fn end(&self, code: u16) {
-        self.lifecycle.end(code, || wind_down(self.worker.as_ref()));
+        self.shared.end(code);
     }
 
     /// Ends the session when a request hit a terminal condition.
     pub(crate) fn settle<T>(&mut self, result: Result<T, MismatchReason>) -> Option<T> {
-        match result {
-            Ok(value) => Some(value),
-            Err(reason) => {
-                self.end(reason.close_code(false));
-                None
-            }
-        }
+        self.shared.settle(result)
     }
 
     /// The request to open the read stream with. `None` for an upload-only or a finished session.
     #[must_use]
     pub fn stream_request(&self) -> Option<StreamRequest> {
-        (!self.outbound_only && !self.lifecycle.is_ended() && !self.is_closed()).then(|| self.stream.request())
+        (!self.outbound_only && !self.lifecycle.is_ended() && !self.is_closed()).then(|| self.shared.stream().request())
     }
 
     /// The answer to the request for the read stream. A status that closes the session ends it with the status as
     /// the close code.
     pub fn stream_opened(&mut self, status: u16) -> StreamOpen {
-        let open = self.stream.opened(status);
+        let open = self.shared.stream().opened(status);
         if let StreamOpen::Close(code) = open {
             self.end(code);
         }
@@ -322,137 +341,48 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
 
     /// The read stream was lost; how long to wait before asking again.
     pub fn stream_lost(&mut self, random: f64) -> Duration {
-        self.stream.lost(random)
+        self.shared.stream().lost(random)
     }
 
     /// The read stream went silent; see [`StreamSession::liveness_expired`].
     pub fn stream_silent(&mut self, wall_silent: Duration, monotonic_silent: Duration, random: f64) -> Reopen {
-        self.stream.liveness_expired(wall_silent, monotonic_silent, random)
+        self.shared
+            .stream()
+            .liveness_expired(wall_silent, monotonic_silent, random)
     }
 
     /// Hands the bytes read from the stream to the session: every event is acknowledged as received and processed,
     /// a heartbeat probe beats at once, and the lines the stream carries go through [`BridgeSession::deliver_line`].
     pub async fn stream_push(&mut self, bytes: &[u8]) {
-        for effect in self.stream.push(bytes) {
-            match effect {
-                StreamEffect::Deliver(line) => self.deliver_line(&line).await,
-                StreamEffect::Acknowledge { event_id } => {
-                    let received = self.worker.report_delivery(&event_id, DeliveryStatus::Received).await;
-                    self.settle(received);
-                    let processed = self.worker.report_delivery(&event_id, DeliveryStatus::Processed).await;
-                    self.settle(processed);
-                }
-                StreamEffect::HeartbeatProbe => {
-                    self.heartbeat().await;
-                }
-            }
+        let effects = self.shared.stream().push(bytes);
+        for effect in effects {
+            self.shared.apply(effect).await;
         }
     }
 
     /// One heartbeat; a terminal answer ends the session.
     pub async fn heartbeat(&mut self) -> bool {
-        if self.lifecycle.is_ended() || self.is_closed() {
-            return false;
-        }
-        let outcome = self.worker.heartbeat().await;
-        self.settle(outcome).is_some()
+        self.shared.beat().await
     }
 
     /// What the inbound reader does with one line (`onData`): a control response settles its pending prompt, a
     /// control request is answered, a cancel aborts the work it names and a user message goes to the host.
     pub async fn deliver_line(&mut self, line: &str) {
-        let Some(inbound) = self.router.route(line) else {
-            return;
-        };
-        match inbound {
-            Inbound::ControlResponse(message) => self.permission_response(&message),
-            Inbound::ControlRequest(request) => self.answer(&request),
-            Inbound::ControlCancel(request_id) => self.async_control.cancel(&Value::String(request_id)),
-            Inbound::QueuedNotification(_) => {}
-            Inbound::User(message) => {
-                if !self.outbound_only
-                    && let Some(callback) = self.on_inbound_message.as_mut()
-                {
-                    callback(message);
-                }
-            }
-        }
-        self.drain_outbox().await;
-    }
-
-    fn permission_response(&mut self, message: &Value) {
-        let keep = self
-            .on_permission_response
-            .as_mut()
-            .and_then(|callback| callback(message))
-            == Some(false);
-        let response = message.get("response");
-        let key = request_key(response.and_then(|response| response.get("request_id")));
-        let dialog_refused = response
-            .and_then(|response| response.get("subtype"))
-            .is_some_and(|subtype| subtype == "error")
-            && self
-                .pending_prompts
-                .iter()
-                .find(|(pending, _)| *pending == key)
-                .is_some_and(|(_, request)| request["request"]["subtype"] == "request_user_dialog");
-        if !keep && !dialog_refused {
-            self.pending_prompts.retain(|(pending, _)| *pending != key);
-        }
-    }
-
-    fn answer(&mut self, request: &Value) {
-        let prompts: Vec<Value> = self
-            .pending_prompts
-            .iter()
-            .map(|(_, request)| request.clone())
-            .collect();
-        let reply = answer_control_request(
-            request,
-            &ControlSession {
-                session_id: &self.session_id,
-                claude_code_version: self.claude_code_version.as_deref(),
-                pid: std::process::id(),
-                pending_prompts: &prompts,
-            },
-            &mut self.control,
-        );
-        let task = match reply {
-            ControlReply::Frame(frame) => {
-                self.queue_frame(frame);
-                None
-            }
-            ControlReply::Deferred(work) => self.async_control.start(request, work),
-            ControlReply::Pending(pending) => Some(self.async_control.finish_pending(request, pending)),
-        };
-        if let Some(task) = task {
-            self.tasks.push(tokio::spawn(task));
-        }
+        self.shared.deliver_line(line).await;
     }
 
     pub(crate) fn queue_frame(&self, frame: Value) {
-        if !self.is_closed() {
-            self.uploads.push(frame);
-        }
+        self.shared.queue_frame(frame);
     }
 
     /// Moves the frames the control dispatch wrote into the upload queue.
     pub(crate) async fn drain_outbox(&mut self) {
-        self.uploads.fire();
-        let events = self.uploads.take();
-        if events.is_empty() || self.is_closed() {
-            return;
-        }
-        let submitted = self.worker.submit_events(events).await;
-        self.settle(submitted);
+        self.shared.drain_outbox().await;
     }
 
     /// Waits for the host calls the control dispatch started and queues their replies.
     pub async fn settle_control(&mut self) {
-        for task in std::mem::take(&mut self.tasks) {
-            let _ = task.await;
-        }
-        self.drain_outbox().await;
+        self.shared.settle_control().await;
     }
 
     /// Sends what is queued: the state and metadata reports, the events and the acknowledgements.
@@ -480,7 +410,10 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
         if !self.lifecycle.mark_closed() {
             return false;
         }
-        self.async_control.cancel_all();
+        self.shared.core().async_control.cancel_all();
+        if let Some(task) = self.stream_task.take() {
+            task.abort();
+        }
         true
     }
 
@@ -489,11 +422,16 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
         if !self.mark_closed() {
             return;
         }
+        // Rows the host wrote that the upload task has not taken yet go out first, then the ones that waited for a
+        // window, each in its own post, the way the upstream uploader sends what is queued before it says goodbye.
+        let ready = self.uploads.take();
         let waiting = self.uploads.close_window();
         if !self.lifecycle.is_ended() {
-            if !waiting.is_empty() {
-                let _held = self.worker.submit_events(waiting).await;
-                let _sent = self.worker.pump_events(Some(1)).await;
+            for rows in [ready, waiting] {
+                if !rows.is_empty() {
+                    let _held = self.worker.submit_events(rows).await;
+                    let _sent = self.worker.pump_events(Some(1)).await;
+                }
             }
             self.worker.goodbye().await;
         }
@@ -508,6 +446,35 @@ where
     H: HttpExecute + Send + Sync + 'static,
     P: WorkerPacing + Send + Sync + 'static,
 {
+    /// Starts what the upstream entrypoint starts once the worker is registered (`startHeartbeat`, the upload
+    /// flush and `openStream`): the heartbeat timer, the upload task and the read stream, unless the caller drives
+    /// the steps itself or the session already ended. A rebuilt transport starts them again for its new worker.
+    pub(crate) fn start_runtime(&mut self) {
+        if !self.scheduled || self.lifecycle.is_ended() || self.is_closed() {
+            return;
+        }
+        let weak = Arc::downgrade(&self.shared);
+        self.shared.set_heartbeat(Some(HeartbeatDriver::start(
+            Arc::clone(&self.worker),
+            self.lifecycle.closed_flag(),
+            move |reason| {
+                if let Some(shared) = weak.upgrade() {
+                    shared.end(reason.close_code(false));
+                }
+            },
+        )));
+        self.spawn_uploads();
+        if let Some(task) = self.stream_task.take() {
+            task.abort();
+        }
+        if !self.outbound_only {
+            self.stream_task = Some(tokio::spawn(read_stream(
+                Arc::clone(&self.shared),
+                Arc::clone(&self.worker),
+            )));
+        }
+    }
+
     /// Starts the task that uploads in the background, the way the upstream handle does: every write wakes it, it
     /// moves the frames into the worker and sends what is queued until the service has taken it, and it ends the
     /// session when the service refuses for good. Starting it twice does nothing. [`BridgeSession::pump`] stays
@@ -536,8 +503,44 @@ where
     }
 }
 
+/// The read stream of one worker: the loop that opens and reads it, and the loop that applies what it carries, one
+/// effect after the other. When the service refuses the stream for good the session ends with the status.
+async fn read_stream<H, P>(shared: Arc<Runtime<H, P>>, worker: Arc<WorkerClient<H, P>>)
+where
+    H: HttpExecute + Send + Sync + 'static,
+    P: WorkerPacing + Send + Sync + 'static,
+{
+    let connector = HttpStreamConnector::new(Arc::clone(&worker));
+    let clocks = StreamClocks::default();
+    let (send, mut arrived) = tokio::sync::mpsc::unbounded_channel();
+    let reading = async {
+        let code = run_stream(
+            &connector,
+            shared.stream_cell(),
+            &clocks,
+            &mut || worker.pacing().jitter(),
+            &mut |effect| {
+                let _ = send.send(effect);
+            },
+        )
+        .await;
+        drop(send);
+        code
+    };
+    let applying = async {
+        while let Some(effect) = arrived.recv().await {
+            shared.apply(effect).await;
+        }
+    };
+    let (code, ()) = tokio::join!(reading, applying);
+    shared.end(code);
+}
+
 impl<H, P> Drop for BridgeSession<H, P> {
     fn drop(&mut self) {
+        if let Some(task) = self.stream_task.take() {
+            task.abort();
+        }
         if let Some(task) = self.upload_task.take() {
             task.abort();
         }

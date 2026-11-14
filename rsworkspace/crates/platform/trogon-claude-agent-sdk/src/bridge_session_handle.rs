@@ -62,7 +62,11 @@ fn zero_usage() -> Value {
     })
 }
 
-impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
+impl<H, P> BridgeSession<H, P>
+where
+    H: HttpExecute + Send + Sync + 'static,
+    P: WorkerPacing + Send + Sync + 'static,
+{
     fn with_session_id(&self, mut frame: Map<String, Value>) -> Value {
         frame.insert("session_id".to_owned(), Value::String(self.session_id.clone()));
         Value::Object(frame)
@@ -78,7 +82,7 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
             .get("uuid")
             .and_then(Value::as_str)
             .filter(|uuid| !uuid.is_empty())
-            && !self.router.remember_echo(uuid)
+            && !self.shared.core().router.remember_echo(uuid)
         {
             return;
         }
@@ -124,9 +128,10 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
         if waits {
             let key = request_key(request.get("request_id"));
             let prompt = Value::Object(request.clone());
-            match self.pending_prompts.iter_mut().find(|(pending, _)| *pending == key) {
+            let mut core = self.shared.core();
+            match core.pending_prompts.iter_mut().find(|(pending, _)| *pending == key) {
                 Some(entry) => entry.1 = prompt,
-                None => self.pending_prompts.push((key, prompt)),
+                None => core.pending_prompts.push((key, prompt)),
             }
         }
         let frame = self.with_session_id(request);
@@ -136,7 +141,10 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
     /// `sendControlResponse`: the prompt it answers is no longer pending, closed session or not.
     pub fn send_control_response(&mut self, response: Map<String, Value>) {
         let key = request_key(response.get("response").and_then(|inner| inner.get("request_id")));
-        self.pending_prompts.retain(|(pending, _)| *pending != key);
+        self.shared
+            .core()
+            .pending_prompts
+            .retain(|(pending, _)| *pending != key);
         if self.is_closed() {
             return;
         }
@@ -147,7 +155,10 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
     /// `sendControlCancelRequest`.
     pub fn send_control_cancel_request(&mut self, request_id: &str) {
         let key = request_key(Some(&Value::String(request_id.to_owned())));
-        self.pending_prompts.retain(|(pending, _)| *pending != key);
+        self.shared
+            .core()
+            .pending_prompts
+            .retain(|(pending, _)| *pending != key);
         if self.is_closed() {
             return;
         }
@@ -195,8 +206,8 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
 
 impl<H, P> BridgeSession<H, P>
 where
-    H: HttpExecute + Clone,
-    P: WorkerPacing + Clone,
+    H: HttpExecute + Clone + Send + Sync + 'static,
+    P: WorkerPacing + Clone + Send + Sync + 'static,
 {
     /// `reconnectTransport`: the old worker is left without a goodbye and a new one takes over from the sequence
     /// number the old read stream reached. What the old one had not delivered moves to the new one, and the writes
@@ -235,7 +246,11 @@ where
             waiting.clear();
         }
         self.token = options.ingress_token.clone();
-        let sequence = self.stream.last_sequence();
+        let sequence = self.shared.stream().last_sequence();
+        if let Some(task) = self.stream_task.take() {
+            task.abort();
+        }
+        self.shared.set_heartbeat(None);
         let epoch = options.epoch.unwrap_or_else(|| self.worker.epoch());
         self.worker.close_queue();
         self.worker.close_events(true);
@@ -269,9 +284,10 @@ where
             self.uploads.wake();
             return Ok(());
         }
-        self.stream = StreamSession::seeded(Some(sequence));
+        *self.shared.stream() = StreamSession::seeded(Some(sequence));
         self.lifecycle.revive();
         self.connect(epoch).await;
+        self.start_runtime();
         let mut carried: Vec<ClientEvent> = previous
             .take_undelivered_events()
             .into_iter()
@@ -284,7 +300,7 @@ where
                 continue;
             }
             if let Some(uuid) = event.payload.get("uuid").and_then(Value::as_str) {
-                self.router.remember_echo(uuid);
+                self.shared.core().router.remember_echo(uuid);
             }
         }
         let adopted = self.worker.submit_events(carried).await;

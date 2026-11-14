@@ -285,6 +285,7 @@ pub fn options(case: &Value, base: &str) -> Result<(AttachBridgeSessionOptions, 
     options.heartbeat_interval_ms = Some(number(case, "interval_ms")?);
     options.outbound_only = case.get("stream").is_none();
     options.arguments = Some(Vec::new());
+    options.caller_driven = true;
     let token = field(case, "session_token").as_str().map(str::to_owned);
     let environment: EnvironmentLookup = Arc::new(move |name| {
         (name == "CLAUDE_CODE_SESSION_ACCESS_TOKEN")

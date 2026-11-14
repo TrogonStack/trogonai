@@ -184,6 +184,9 @@ add('escaped_characters_count_as_their_escapes', { until: 300, writes: writes(at
 add('flushing_sends_the_window_at_once', { until: 300, flushAt: 40, writes: writes(at(0, say('a')), at(10, assistant([{ type: 'text', text: 'hi' }])), at(60, say('b'))) });
 add('closing_drops_the_window', { until: 400, closeAt: 50, writes: writes(at(0, say('a')), at(10, assistant([{ type: 'text', text: 'hi' }]))) });
 add('reconnecting_sends_the_waiting_rows_and_drops_the_deltas', { until: 400, reconnectAt: 50, writes: writes(at(0, say('a')), at(10, assistant([{ type: 'text', text: 'hi' }])), at(60, say('b'))) });
+const tool = (id) => assistant([{ type: 'text', text: 'hi' }, { type: 'tool_use', id, name: 'Bash', input: {} }]);
+add('closing_sends_the_row_that_is_ready', { until: 400, closeAt: 0, writes: writes(at(0, tool('t1'))) });
+add('closing_sends_the_row_that_waits_behind_the_ready_one', { until: 400, closeAt: 0, writes: writes(at(0, tool('t1')), at(0, assistant([{ type: 'text', text: 'wait' }]))) });
 const evt = (id) => `id: ${id}\nevent: client_event\ndata: ${JSON.stringify({ event_id: `e${id}`, sequence_num: id, event_type: 'user', source: 'client', payload: { type: 'user', uuid: `u${id}`, message: { role: 'user', content: 'hi' } } })}\n\n`;
 const probe = 'event: ephemeral_event\ndata: {"event_type":"heartbeat_probe"}\n\n';
 const ping = ': ka\n\n';
@@ -209,6 +212,10 @@ streamed('a_probe_sends_a_beat_at_once', [{ chunks: [[100, probe]] }], { until: 
 streamed('a_second_probe_waits_for_the_beat_spacing', [{ chunks: [[100, probe], [600, probe]] }], { until: 20000 });
 streamed('a_third_probe_does_not_add_a_second_wait', [{ chunks: [[100, probe], [600, probe], [900, probe]] }], { until: 20000 });
 streamed('a_probe_during_an_unanswered_beat_is_sent_after_it', [{ chunks: [[100, probe], [600, probe]] }], { until: 60000, answers: ['hang'] });
+streamed('closing_stops_the_liveness_timer', [{}, {}], { until: 120000, closeAt: 10000 });
+streamed('closing_stops_a_waiting_reconnect', ['reset', {}], { until: 20000, closeAt: 500 });
+streamed('closing_stops_a_pending_open', ['hang', {}], { until: 100000, closeAt: 5000 });
+streamed('closing_stops_a_stream_that_delivers', [{ chunks: [[100, evt(1)]] }, {}], { until: 120000, closeAt: 20000 });
 add('closing_stops_the_timer', { until: 100000, closeAt: 25000 });
 add('a_terminal_answer_stops_the_timer', { until: 90000, answers: [{ status: 409, body: {} }] });
 
