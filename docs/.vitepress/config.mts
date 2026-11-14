@@ -217,12 +217,15 @@ export default async () => {
                   { text: "Connect a Provider", link: "/how-to/connect-a-provider" },
                   { text: "Integrate Connector HTTP", link: "/how-to/integrate-connector-http" },
                   { text: "Operate Connectors", link: "/how-to/operate-connectors" },
+                  { text: "Operate Workload Registration", link: "/how-to/operate-workload-registration" },
+                  { text: "Integrate Workload Identity", link: "/how-to/integrate-workload-identity" },
                 ],
               },
               {
                 text: "Reference",
                 items: [
                   { text: "Key States", link: "/architecture/key-states" },
+                  { text: "Key Wrapping", link: "/reference/key-wrapping" },
                   {
                     text: "Supplied Credential Material",
                     link: "/reference/supplied-credential-material",
@@ -231,6 +234,7 @@ export default async () => {
                   { text: "Connector Resource Parents", link: "/reference/connector-resource-parents" },
                   { text: "Connector Security Profile", link: "/reference/connector-security-profile" },
                   { text: "Workload Identity", link: "/reference/workload-identity" },
+                  { text: "Workload Identity Configuration", link: "/reference/workload-identity-configuration" },
                   { text: "Connector Account Identity", link: "/reference/connector-account-identity" },
                   { text: "Connector MCP Authorization", link: "/reference/connector-mcp-authorization" },
                   { text: "Connector Control API", link: "/reference/connector-control-api" },
@@ -244,6 +248,7 @@ export default async () => {
               {
                 text: "Explanation",
                 items: [
+                  { text: "Workload Identity & Trust", link: "/architecture/workload-identity" },
                   { text: "Key Custody", link: "/architecture/key-custody" },
                   { text: "Key Management", link: "/architecture/key-management" },
                   { text: "Secret Management", link: "/architecture/secret-management" },
@@ -252,6 +257,14 @@ export default async () => {
                     text: "Provider Credential Custody",
                     link: "/architecture/provider-credential-custody",
                   },
+                ],
+              },
+              {
+                text: "Research Proposals",
+                items: [
+                  { text: "Portable Workload Identity", link: "/research/workload-identity/README" },
+                  { text: "Workload Federation", link: "/research/workload-identity/federation" },
+                  { text: "Identity & KMS Adapter Roadmap", link: "/research/workload-identity/adapter-roadmap" },
                 ],
               },
             ],

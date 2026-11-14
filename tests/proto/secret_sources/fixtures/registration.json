@@ -1,0 +1,552 @@
+{
+  "templates": {
+    "reg": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceRegistration",
+      "payload": {
+        "sourceRef": {
+          "scope": {
+            "tenantId": {
+              "value": "tenant_1"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "project_1"
+              }
+            }
+          },
+          "sourceId": {
+            "value": "source_1"
+          },
+          "definitionRevision": "1",
+          "recoveryFence": "1",
+          "definitionDigest": {
+            "algorithm": "sha256",
+            "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+          }
+        },
+        "provider": 1,
+        "bindings": [
+          {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "secretRef": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        ],
+        "metadataValidationRef": {
+          "validationId": {
+            "value": "metadata_1"
+          },
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceState",
+      "payload": {
+        "registration": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "provider": 1,
+          "bindings": [
+            {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            }
+          ],
+          "metadataValidationRef": {
+            "validationId": {
+              "value": "metadata_1"
+            },
+            "sourceRef": {
+              "scope": {
+                "tenantId": {
+                  "value": "tenant_1"
+                },
+                "resourceParent": {
+                  "projectId": {
+                    "value": "project_1"
+                  }
+                }
+              },
+              "sourceId": {
+                "value": "source_1"
+              },
+              "definitionRevision": "1",
+              "recoveryFence": "1",
+              "definitionDigest": {
+                "algorithm": "sha256",
+                "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+              }
+            }
+          }
+        },
+        "lifecycle": 1,
+        "entries": [
+          {
+            "binding": {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            },
+            "lifecycle": 1
+          }
+        ]
+      }
+    },
+    "request": {
+      "type": "trogonai.secrets.sources.v1alpha1.RegisterSecretSourceRequest",
+      "payload": {
+        "requestId": {
+          "value": "register_1"
+        },
+        "definition": {
+          "scope": {
+            "tenantId": {
+              "value": "tenant_1"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "project_1"
+              }
+            }
+          },
+          "aws": {
+            "accountId": {
+              "value": "123456789012"
+            },
+            "region": {
+              "value": "us-east-1"
+            },
+            "assumeRole": {
+              "role": {
+                "value": "arn:aws:iam::123456789012:role/secret-reader"
+              },
+              "externalId": {
+                "value": "external_1"
+              }
+            }
+          },
+          "entries": [
+            {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "selection": 1,
+              "aws": {
+                "secretArn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:credential-abcdef"
+              }
+            }
+          ],
+          "contractVersion": 1
+        },
+        "artifact": {
+          "definitionBytes": "ChsKCgoIdGVuYW50XzESDQoLCglwcm9qZWN0XzEqVwoJCgdlbnRyeV8xEAEaSApGYXJuOmF3czpzZWNyZXRzbWFuYWdlcjp1cy1lYXN0LTE6MTIzNDU2Nzg5MDEyOnNlY3JldDpjcmVkZW50aWFsLWFiY2RlZjABEl0KDgoMMTIzNDU2Nzg5MDEyEgsKCXVzLWVhc3QtMRo+Ci4KLGFybjphd3M6aWFtOjoxMjM0NTY3ODkwMTI6cm9sZS9zZWNyZXQtcmVhZGVyEgwKCmV4dGVybmFsXzE="
+        }
+      }
+    },
+    "response": {
+      "type": "trogonai.secrets.sources.v1alpha1.RegisterSecretSourceResponse",
+      "payload": {
+        "requestId": {
+          "value": "register_1"
+        },
+        "registration": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "provider": 1,
+          "bindings": [
+            {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            }
+          ],
+          "metadataValidationRef": {
+            "validationId": {
+              "value": "metadata_1"
+            },
+            "sourceRef": {
+              "scope": {
+                "tenantId": {
+                  "value": "tenant_1"
+                },
+                "resourceParent": {
+                  "projectId": {
+                    "value": "project_1"
+                  }
+                }
+              },
+              "sourceId": {
+                "value": "source_1"
+              },
+              "definitionRevision": "1",
+              "recoveryFence": "1",
+              "definitionDigest": {
+                "algorithm": "sha256",
+                "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+              }
+            }
+          }
+        }
+      }
+    },
+    "source-revoke": {
+      "type": "trogonai.secrets.sources.v1alpha1.RevokeSecretSource",
+      "payload": {
+        "sourceRef": {
+          "scope": {
+            "tenantId": {
+              "value": "tenant_1"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "project_1"
+              }
+            }
+          },
+          "sourceId": {
+            "value": "source_1"
+          },
+          "definitionRevision": "1",
+          "recoveryFence": "1",
+          "definitionDigest": {
+            "algorithm": "sha256",
+            "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+          }
+        },
+        "reason": 1
+      }
+    },
+    "entry-revoke": {
+      "type": "trogonai.secrets.sources.v1alpha1.RevokeSecretSourceEntry",
+      "payload": {
+        "sourceEntryRef": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "binding": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "secretRef": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        },
+        "reason": 1
+      }
+    },
+    "revoked": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceState",
+      "payload": {
+        "registration": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "provider": 1,
+          "bindings": [
+            {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            }
+          ],
+          "metadataValidationRef": {
+            "validationId": {
+              "value": "metadata_1"
+            },
+            "sourceRef": {
+              "scope": {
+                "tenantId": {
+                  "value": "tenant_1"
+                },
+                "resourceParent": {
+                  "projectId": {
+                    "value": "project_1"
+                  }
+                }
+              },
+              "sourceId": {
+                "value": "source_1"
+              },
+              "definitionRevision": "1",
+              "recoveryFence": "1",
+              "definitionDigest": {
+                "algorithm": "sha256",
+                "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+              }
+            }
+          }
+        },
+        "lifecycle": 2,
+        "entries": [
+          {
+            "binding": {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            },
+            "lifecycle": 2
+          }
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "reg metadata-only contract",
+      "template": "reg"
+    },
+    {
+      "name": "state metadata-only contract",
+      "template": "state"
+    },
+    {
+      "name": "request metadata-only contract",
+      "template": "request"
+    },
+    {
+      "name": "response metadata-only contract",
+      "template": "response"
+    },
+    {
+      "name": "source-revoke metadata-only contract",
+      "template": "source-revoke"
+    },
+    {
+      "name": "entry-revoke metadata-only contract",
+      "template": "entry-revoke"
+    },
+    {
+      "name": "metadata validation cannot claim another source",
+      "template": "reg",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/metadataValidationRef/sourceRef/sourceId/value",
+          "value": "source_2"
+        }
+      ],
+      "violations": [
+        "metadata validation must name the exact source definition"
+      ]
+    },
+    {
+      "name": "returned SecretRefs cannot be reused for another entry",
+      "template": "reg",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/bindings/1",
+          "value": {
+            "entryId": {
+              "value": "entry_2"
+            },
+            "secretRef": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "source entries and returned SecretRefs must be unique"
+      ]
+    },
+    {
+      "name": "registered entry IDs cannot repeat under different refs",
+      "template": "reg",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/bindings/1",
+          "value": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "secretRef": {
+              "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "source entries and returned SecretRefs must be unique"
+      ]
+    },
+    {
+      "name": "metadata cannot expose provider-shaped SecretRef",
+      "template": "reg",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/secretRef/id",
+          "value": "openbao:customer/path"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "source state cannot retarget immutable entry reference",
+      "template": "state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/binding/secretRef",
+          "value": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          }
+        }
+      ],
+      "violations": [
+        "source state must retain exactly its registered immutable entry bindings"
+      ]
+    },
+    {
+      "name": "source revocation must retain all entries as revoked",
+      "template": "state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/lifecycle",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "a revoked source must retain every entry as revoked"
+      ]
+    },
+    {
+      "name": "terminal source state keeps original immutable references",
+      "template": "revoked"
+    },
+    {
+      "name": "revocation reason cannot be unspecified",
+      "template": "source-revoke",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must not be in"
+      ]
+    }
+  ]
+}

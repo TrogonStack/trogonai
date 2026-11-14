@@ -11,6 +11,8 @@ import "trogonai/workflows/runs/v1alpha1/occurrence.proto";
 import "trogonai/workflows/runs/v1alpha1/receipt.proto";
 import "trogonai/workflows/runs/v1alpha1/run.proto";
 import "trogonai/workflows/runs/v1alpha1/wait.proto";
+import "trogonai/workflows/runs/v1alpha1/workload_identity.proto";
+import "trogonai/workflows/runs/v1alpha1/workload_identity_control.proto";
 
 // The fold retains exact admission, dispatch, receipts, and decisions needed to
 // recover pending work. It never reconstructs execution from a progress label.
@@ -213,6 +215,39 @@ message CancellationState {
 }
 
 message PresentRun {
+  // Initial provenance is never replaced by the latest identity admission.
+  // Missing current admission denies identity-aware dispatch. Restore cannot
+  // reactivate it without independent current owner/fence validation.
+  option (buf.validate.message).cel = {
+    id: "present_run.identity_history"
+    message: "identity renewals retain the original run authority and authority deadline"
+    expression: "this.identity_admissions.size() == 0 || (has(this.configuration.identity_admission) && this.identity_admissions.map(a, a.admission_id).unique() && this.identity_admissions.all(a, a.run_id.value == this.configuration.run_id && a.authority == this.configuration.authority && a.original_authority_expires_at == this.configuration.identity_admission.original_authority_expires_at && a.admission_id != this.configuration.identity_admission.admission_id && a.admitted_at >= this.configuration.identity_admission.admitted_at))"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.identity_selection"
+    message: "selected identity admission must be the latest admitted record and cannot coexist with withdrawal"
+    expression: "!has(this.current_identity_admission_id) || (has(this.configuration.identity_admission) && !has(this.identity_withdrawal) && this.current_identity_admission_id.value == (this.identity_admissions.size() == 0 ? this.configuration.identity_admission.admission_id : this.identity_admissions[this.identity_admissions.size() - 1].admission_id))"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.identity_plan_contract"
+    message: "remaining plans cannot silently change the run identity contract version"
+    expression: "this.plan_revisions.all(r, has(r.plan.identity_requirement) == has(this.configuration.plan.identity_requirement))"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.identity_current_plan"
+    message: "selected identity admission must bind the current exact plan and profile"
+    expression: "!has(this.current_identity_admission_id) || (has(this.configuration.identity_admission) ? [this.configuration.identity_admission] + this.identity_admissions : this.identity_admissions).filter(a, a.admission_id == this.current_identity_admission_id.value).all(a, a.valid_until <= this.effective_limits.deadline && a.plan_revision_id.value == this.current_plan_revision_id && (a.plan_revision_id.value == this.configuration.plan.plan_revision_id ? (a.definition_digest == this.configuration.plan.digest && a.execution_profile.execution_profile_ref == this.configuration.plan.identity_requirement.execution_profile_ref) : this.plan_revisions.exists(r, r.plan.plan_revision_id == a.plan_revision_id.value && r.plan.digest == a.definition_digest && r.plan.identity_requirement.execution_profile_ref == a.execution_profile.execution_profile_ref)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.identity_withdrawal"
+    message: "identity withdrawal must name a retained admission of this run"
+    expression: "!has(this.identity_withdrawal) || (has(this.configuration.identity_admission) && this.identity_withdrawal.run_id.value == this.configuration.run_id && (this.identity_withdrawal.admission_id.value == this.configuration.identity_admission.admission_id || this.identity_admissions.exists(a, a.admission_id == this.identity_withdrawal.admission_id.value)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "present_run.identity_dispatch"
+    message: "identity-aware dispatch must retain matching run authority plan and exact admission evidence"
+    expression: "this.invocations.all(i, has(i.invocation.launch.admission.run_identity_admission) == has(this.configuration.identity_admission) && (!has(i.invocation.launch.admission.run_identity_admission) || (i.invocation.launch.admission.run_identity_admission.run_id.value == this.configuration.run_id && i.invocation.launch.admission.run_identity_admission.authority == this.configuration.authority && (i.invocation.launch.admission.run_identity_admission == this.configuration.identity_admission || this.identity_admissions.exists(a, a == i.invocation.launch.admission.run_identity_admission)) && (i.invocation.launch.admission.run_identity_admission.plan_revision_id.value == this.configuration.plan.plan_revision_id || this.plan_revisions.exists(r, r.plan.plan_revision_id == i.invocation.launch.admission.run_identity_admission.plan_revision_id.value)))))"
+  };
   option (buf.validate.message).cel = {
     id: "present_run.unique_execution_identity"
     message: "retry, recovery, plan revision, and scoped repeat iteration identities must be unique"
@@ -330,4 +365,7 @@ message PresentRun {
   string current_pause_id = 20 [(buf.validate.field).string.min_len = 1];
   string current_termination_id = 21 [(buf.validate.field).string.min_len = 1];
   string current_recovery_id = 22 [(buf.validate.field).string.min_len = 1];
+  repeated trogonai.workflows.runs.v1alpha1.RunIdentityAdmission identity_admissions = 23 [(buf.validate.field).repeated.max_items = 4096];
+  trogonai.workflows.runs.v1alpha1.RunIdentityAdmissionId current_identity_admission_id = 24;
+  trogonai.workflows.runs.v1alpha1.RunIdentityWithdrawal identity_withdrawal = 25;
 }

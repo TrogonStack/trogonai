@@ -7,6 +7,11 @@ date: 2026-08-15
 
 # ADR#0074: Credential Platform Extraction Boundary
 
+> **Related research:** The [portable identity and adapter roadmap](../research/workload-identity/adapter-roadmap.md)
+> places opaque credential identity, owner extraction and encrypted service
+> admission before adapter support claims. It plans execution of this accepted
+> boundary without introducing another credential owner.
+
 > **Proposed connector refinement:** [ADR#0095](./0095-connection-credential-custody-and-refresh.md) remains a draft. Connector custody adds broker/staging/refresh operations and a dedicated identity operation; no provider token moves into gateway state. This note does not change either ADR's status.
 
 

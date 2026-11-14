@@ -1,0 +1,127 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/workload_federation/v1alpha1/inbound_admission.proto";
+import "trogonai/platform/workload_identity/v1alpha1/credential_activation.proto";
+
+message WorkflowRunId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+message RunPlanRevisionId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+message RunIdentityAdmissionId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+// Matches the existing platform AuditRecord identifier syntax. The protected
+// audit owner still proves record kind, exact scope and durable acknowledgement.
+message WorkloadAuditRecordId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uuid = true
+  ];
+}
+
+message WorkloadCurrentnessReceiptId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+// Public generations observed by the protected consumer's final currentness
+// check. The receipt is resolved against that owner, never trusted from a caller.
+message WorkloadCurrentnessEvidence {
+  WorkloadCurrentnessReceiptId receipt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 recovery_fence = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint64 registration_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint64 trust_revision = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint64 source_revision = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint64 activation_revision = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp observed_at = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}
+
+// Activation is an intent, not evidence that final currentness succeeded. The
+// trusted consumer resolves both receipts and checks live source, registration,
+// roots and scope again before dispatch and after waits. These public metadata
+// fields contain no SVID, private key or Workload API response (ADR#0098).
+message LocalWorkloadAdmissionEvidence {
+  option (buf.validate.message).cel = {
+    id: "local_workload_evidence.currentness"
+    message: "final currentness must match activation registration trust and material generations"
+    expression: "this.currentness.recovery_fence == this.activation.recovery_fence && this.currentness.registration_revision == this.activation.registration_revision && this.currentness.trust_revision == this.activation.trust_revision && this.currentness.source_revision == this.activation.source_revision && this.currentness.activation_revision == this.activation.activation_revision"
+  };
+  option (buf.validate.message).cel = {
+    id: "local_workload_evidence.currentness_interval"
+    message: "final currentness must be observed within original registration and material validity"
+    expression: "this.currentness.observed_at >= this.registration_issued_at && this.currentness.observed_at >= this.activation.not_before && this.currentness.observed_at < this.registration_expires_at && this.currentness.observed_at < this.activation.expires_at"
+  };
+  option (buf.validate.message).cel = {
+    id: "local_workload_evidence.registration_interval"
+    message: "registration evidence has a positive lease no longer than 330 seconds"
+    expression: "this.registration_expires_at > this.registration_issued_at && this.registration_expires_at <= this.registration_issued_at + duration('330s')"
+  };
+  trogonai.platform.workload_identity.v1alpha1.CredentialActivation activation = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp registration_issued_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp registration_expires_at = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  WorkloadAuditRecordId activation_audit_record_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  WorkloadCurrentnessEvidence currentness = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The protected inbound owner supplies source and trust evidence. Reusing its
+// receipt does not enroll a local SVID or prove current run authorization.
+message ExternalWorkloadAdmissionEvidence {
+  trogonai.platform.workload_federation.v1alpha1.InboundAdmissionEvidence admission = 1 [features.field_presence = LEGACY_REQUIRED];
+  WorkloadCurrentnessReceiptId currentness_receipt_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}

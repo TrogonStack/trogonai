@@ -1,0 +1,802 @@
+{
+  "templates": {
+    "recipient": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "source": {
+          "localWorkload": {
+            "spiffeId": "spiffe://example.test/worker",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          }
+        },
+        "purposeId": {
+          "value": "purpose_1"
+        },
+        "recipient": {
+          "awsWebIdentity": {
+            "accountId": "123456789012",
+            "roleArn": "arn:aws:iam::123456789012:role/worker",
+            "issuerProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "issuer_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+              }
+            },
+            "assertionSubject": "spiffe://example.test/worker",
+            "assertionAudience": "sts.amazonaws.com",
+            "requestedSessionDuration": "900s",
+            "rolePolicyOnly": {}
+          }
+        },
+        "operations": [
+          {
+            "operationId": {
+              "value": "read_resource"
+            },
+            "resourceIds": [
+              "resource_1"
+            ],
+            "scopes": [
+              "read"
+            ]
+          }
+        ],
+        "maxLocalUse": "60s",
+        "delivery": 1,
+        "contractVersion": 1
+      }
+    },
+    "recipient-config": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingConfiguration",
+      "payload": {
+        "recipientBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "source": {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/worker",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          },
+          "purposeId": {
+            "value": "purpose_1"
+          },
+          "recipient": {
+            "awsWebIdentity": {
+              "accountId": "123456789012",
+              "roleArn": "arn:aws:iam::123456789012:role/worker",
+              "issuerProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "issuer_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+                }
+              },
+              "assertionSubject": "spiffe://example.test/worker",
+              "assertionAudience": "sts.amazonaws.com",
+              "requestedSessionDuration": "900s",
+              "rolePolicyOnly": {}
+            }
+          },
+          "operations": [
+            {
+              "operationId": {
+                "value": "read_resource"
+              },
+              "resourceIds": [
+                "resource_1"
+              ],
+              "scopes": [
+                "read"
+              ]
+            }
+          ],
+          "maxLocalUse": "60s",
+          "delivery": 1,
+          "contractVersion": 1
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESNwo1ChxzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvd29ya2VyEgh0ZW5hbnRfMRoJcHJvamVjdF8xIAMaCwoJcHVycG9zZV8xIrsBCrgBCgwxMjM0NTY3ODkwMTISJWFybjphd3M6aWFtOjoxMjM0NTY3ODkwMTI6cm9sZS93b3JrZXIaSQoVCgh0ZW5hbnRfMRIJcHJvamVjdF8xEjAKCGlzc3Vlcl8xEAEYASIg4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3VoiHHNwaWZmZTovL2V4YW1wbGUudGVzdC93b3JrZXIqEXN0cy5hbWF6b25hd3MuY29tMgMIhAc6ACojCg8KDXJlYWRfcmVzb3VyY2USCnJlc291cmNlXzEaBHJlYWQyAgg8OAFAAQ=="
+        }
+      }
+    },
+    "roles-anywhere": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "source": {
+          "localWorkload": {
+            "spiffeId": "spiffe://example.test/worker",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          }
+        },
+        "purposeId": {
+          "value": "purpose_1"
+        },
+        "recipient": {
+          "awsRolesAnywhere": {
+            "accountId": "123456789012",
+            "roleArn": "arn:aws:iam::123456789012:role/worker",
+            "trustAnchorArn": "arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/anchor-1",
+            "profileArn": "arn:aws:rolesanywhere:us-east-1:123456789012:profile/profile-1",
+            "certificateSpiffeId": "spiffe://example.test/worker",
+            "requestedSessionDuration": "900s"
+          }
+        },
+        "operations": [
+          {
+            "operationId": {
+              "value": "read_resource"
+            },
+            "resourceIds": [
+              "resource_1"
+            ],
+            "scopes": [
+              "read"
+            ]
+          }
+        ],
+        "maxLocalUse": "60s",
+        "delivery": 1,
+        "contractVersion": 1
+      }
+    },
+    "gcp-oidc": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "source": {
+          "localWorkload": {
+            "spiffeId": "spiffe://example.test/worker",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          }
+        },
+        "purposeId": {
+          "value": "purpose_1"
+        },
+        "recipient": {
+          "googleCloudOidc": {
+            "providerResource": "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/pool-1/providers/provider-1",
+            "issuerProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "issuer_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+              }
+            },
+            "assertionSubject": "spiffe://example.test/worker",
+            "assertionAudience": "https://issuer.example.test/provider-1",
+            "access": {
+              "directResourceAccess": {}
+            }
+          }
+        },
+        "operations": [
+          {
+            "operationId": {
+              "value": "read_resource"
+            },
+            "resourceIds": [
+              "resource_1"
+            ],
+            "scopes": [
+              "read"
+            ]
+          }
+        ],
+        "maxLocalUse": "60s",
+        "delivery": 1,
+        "contractVersion": 1
+      }
+    },
+    "gcp-x509": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "source": {
+          "localWorkload": {
+            "spiffeId": "spiffe://example.test/worker",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          }
+        },
+        "purposeId": {
+          "value": "purpose_1"
+        },
+        "recipient": {
+          "googleCloudX509": {
+            "providerResource": "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/pool-1/providers/provider-1",
+            "certificateSpiffeId": "spiffe://example.test/worker",
+            "access": {
+              "directResourceAccess": {}
+            }
+          }
+        },
+        "operations": [
+          {
+            "operationId": {
+              "value": "read_resource"
+            },
+            "resourceIds": [
+              "resource_1"
+            ],
+            "scopes": [
+              "read"
+            ]
+          }
+        ],
+        "maxLocalUse": "60s",
+        "delivery": 1,
+        "contractVersion": 1
+      }
+    },
+    "gcp-preview": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "source": {
+          "localWorkload": {
+            "spiffeId": "spiffe://example.test/worker",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          }
+        },
+        "purposeId": {
+          "value": "purpose_1"
+        },
+        "recipient": {
+          "googleCloudCertificateBoundOidc": {
+            "oidc": {
+              "providerResource": "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/pool-1/providers/provider-1",
+              "issuerProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "issuer_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+                }
+              },
+              "assertionSubject": "spiffe://example.test/worker",
+              "assertionAudience": "https://issuer.example.test/provider-1",
+              "access": {
+                "directResourceAccess": {}
+              }
+            },
+            "certificateSpiffeId": "spiffe://example.test/worker",
+            "previewApprovalRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "approvalId": {
+                "value": "preview_1"
+              }
+            },
+            "resourceBindingQualificationRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "qualificationId": {
+                "value": "resource_qualification_1"
+              }
+            }
+          }
+        },
+        "operations": [
+          {
+            "operationId": {
+              "value": "read_resource"
+            },
+            "resourceIds": [
+              "resource_1"
+            ],
+            "scopes": [
+              "read"
+            ]
+          }
+        ],
+        "maxLocalUse": "60s",
+        "delivery": 1,
+        "contractVersion": 1
+      }
+    },
+    "entra": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "source": {
+          "localWorkload": {
+            "spiffeId": "spiffe://example.test/worker",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          }
+        },
+        "purposeId": {
+          "value": "purpose_1"
+        },
+        "recipient": {
+          "entra": {
+            "directoryId": "directory_1",
+            "clientId": "client_1",
+            "issuerProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "issuer_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+              }
+            },
+            "assertionSubject": "spiffe://example.test/worker",
+            "assertionAudience": "api://AzureADTokenExchange",
+            "resourceScope": "https://resource.example.test/.default"
+          }
+        },
+        "operations": [
+          {
+            "operationId": {
+              "value": "read_resource"
+            },
+            "resourceIds": [
+              "resource_1"
+            ],
+            "scopes": [
+              "read"
+            ]
+          }
+        ],
+        "maxLocalUse": "60s",
+        "delivery": 1,
+        "contractVersion": 1
+      }
+    },
+    "foreign": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "source": {
+          "subjectBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "subject_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+            }
+          }
+        },
+        "purposeId": {
+          "value": "purpose_1"
+        },
+        "recipient": {
+          "awsWebIdentity": {
+            "accountId": "123456789012",
+            "roleArn": "arn:aws:iam::123456789012:role/worker",
+            "issuerProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "issuer_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+              }
+            },
+            "assertionSubject": "spiffe://example.test/worker",
+            "assertionAudience": "sts.amazonaws.com",
+            "requestedSessionDuration": "900s",
+            "rolePolicyOnly": {}
+          }
+        },
+        "operations": [
+          {
+            "operationId": {
+              "value": "read_resource"
+            },
+            "resourceIds": [
+              "resource_1"
+            ],
+            "scopes": [
+              "read"
+            ]
+          }
+        ],
+        "maxLocalUse": "60s",
+        "delivery": 1,
+        "contractVersion": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "AWS web identity recipient",
+      "template": "recipient",
+      "violations": []
+    },
+    {
+      "name": "stored recipient definition artifact",
+      "template": "recipient-config",
+      "violations": []
+    },
+    {
+      "name": "roles-anywhere explicit qualified profile",
+      "template": "roles-anywhere",
+      "violations": []
+    },
+    {
+      "name": "gcp-oidc explicit qualified profile",
+      "template": "gcp-oidc",
+      "violations": []
+    },
+    {
+      "name": "gcp-x509 explicit qualified profile",
+      "template": "gcp-x509",
+      "violations": []
+    },
+    {
+      "name": "gcp-preview explicit qualified profile",
+      "template": "gcp-preview",
+      "violations": []
+    },
+    {
+      "name": "entra explicit qualified profile",
+      "template": "entra",
+      "violations": []
+    },
+    {
+      "name": "governed external subject can use OIDC recipient",
+      "template": "foreign",
+      "violations": []
+    },
+    {
+      "name": "recipient cannot cross source project",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/source/localWorkload/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "the source identity must share the recipient binding scope"
+      ]
+    },
+    {
+      "name": "recipient cannot cross issuer scope",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsWebIdentity/issuerProfileRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "recipient issuer and Preview qualification references must share the binding scope"
+      ]
+    },
+    {
+      "name": "AWS role must match account",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsWebIdentity/roleArn",
+          "value": "arn:aws:iam::999999999999:role/worker"
+        }
+      ],
+      "violations": [
+        "the AWS role must belong to the configured account"
+      ]
+    },
+    {
+      "name": "AWS web identity cannot request below provider minimum",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsWebIdentity/requestedSessionDuration",
+          "value": "899s"
+        }
+      ],
+      "violations": [
+        "must be greater than or equal to"
+      ]
+    },
+    {
+      "name": "AWS web identity cannot request above documented API maximum",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsWebIdentity/requestedSessionDuration",
+          "value": "43201s"
+        }
+      ],
+      "violations": [
+        "less than or equal to"
+      ]
+    },
+    {
+      "name": "AWS trust subject is exact",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsWebIdentity/assertionSubject",
+          "value": "spiffe://example.test/*"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "session policy profile is explicit",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/recipient/awsWebIdentity/rolePolicyOnly"
+        }
+      ],
+      "violations": [
+        "exactly one field is required"
+      ]
+    },
+    {
+      "name": "recipient cannot use unknown delivery profile",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delivery",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "must be one of"
+      ]
+    },
+    {
+      "name": "recipient must declare an operation",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/operations",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item(s)"
+      ]
+    },
+    {
+      "name": "recipient cannot duplicate operation identity",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/operations/1",
+          "value": {
+            "operationId": {
+              "value": "read_resource"
+            },
+            "resourceIds": [
+              "resource_1"
+            ],
+            "scopes": [
+              "read"
+            ]
+          }
+        }
+      ],
+      "violations": [
+        "recipient operation identities must be unique"
+      ]
+    },
+    {
+      "name": "recipient resources cannot be wildcarded",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/operations/0/resourceIds/0",
+          "value": "resource_*"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "recipient source reference cannot cross scope",
+      "template": "foreign",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/source/subjectBindingRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "the source identity must share the recipient binding scope"
+      ]
+    },
+    {
+      "name": "certificate recipient requires exact SVID",
+      "template": "gcp-x509",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudX509/certificateSpiffeId",
+          "value": "spiffe://example.test/other"
+        }
+      ],
+      "violations": [
+        "certificate exchange requires the exact local workload certificate identity"
+      ]
+    },
+    {
+      "name": "certificate recipient cannot use OIDC-only source",
+      "template": "gcp-x509",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/source",
+          "value": {
+            "subjectBindingRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "subject_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+              }
+            }
+          }
+        }
+      ],
+      "violations": [
+        "certificate exchange requires the exact local workload certificate identity"
+      ]
+    },
+    {
+      "name": "Roles Anywhere trust anchor cannot cross account",
+      "template": "roles-anywhere",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsRolesAnywhere/trustAnchorArn",
+          "value": "arn:aws:rolesanywhere:us-east-1:999999999999:trust-anchor/anchor-1"
+        }
+      ],
+      "violations": [
+        "Roles Anywhere resources must belong to the configured account"
+      ]
+    },
+    {
+      "name": "GCP access mode is explicit",
+      "template": "gcp-oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudOidc/access",
+          "value": {}
+        }
+      ],
+      "violations": [
+        "exactly one field is required"
+      ]
+    },
+    {
+      "name": "GCP Preview review cannot cross scope",
+      "template": "gcp-preview",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudCertificateBoundOidc/previewApprovalRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "recipient issuer and Preview qualification references must share the binding scope"
+      ]
+    },
+    {
+      "name": "Entra client is required",
+      "template": "entra",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/entra/clientId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    }
+  ]
+}

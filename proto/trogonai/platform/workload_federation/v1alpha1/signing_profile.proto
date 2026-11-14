@@ -1,0 +1,130 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+// Signing is provisioned independently of business KeyRef resolution, so keys
+// needed for bootstrap cannot depend on the service they unlock (ADR#0033).
+// A purpose binds an owner-derived input; there is no sign-arbitrary-bytes API.
+enum SigningPurpose {
+  SIGNING_PURPOSE_UNSPECIFIED = 0;
+  SIGNING_PURPOSE_SPIFFE_CA = 1;
+  SIGNING_PURPOSE_REGISTRATION_APPROVAL = 2;
+  SIGNING_PURPOSE_AUDIT_CHECKPOINT = 3;
+  SIGNING_PURPOSE_FEDERATION_ASSERTION = 4;
+  SIGNING_PURPOSE_NATS_CREDENTIAL_ISSUANCE = 5;
+  SIGNING_PURPOSE_AAUTH_OPERATIONAL = 6;
+}
+
+enum SigningAlgorithm {
+  SIGNING_ALGORITHM_UNSPECIFIED = 0;
+  SIGNING_ALGORITHM_ED25519 = 1;
+  SIGNING_ALGORITHM_ECDSA_P256_SHA256 = 2;
+  SIGNING_ALGORITHM_ECDSA_P384_SHA384 = 3;
+  SIGNING_ALGORITHM_RSA_PKCS1_SHA256 = 4;
+}
+
+enum SigningInputProfile {
+  SIGNING_INPUT_PROFILE_UNSPECIFIED = 0;
+  SIGNING_INPUT_PROFILE_X509_TBS_CERTIFICATE = 1;
+  SIGNING_INPUT_PROFILE_REGISTRATION_SNAPSHOT = 2;
+  SIGNING_INPUT_PROFILE_AUDIT_CHECKPOINT = 3;
+  SIGNING_INPUT_PROFILE_JWS_SIGNING_INPUT = 4;
+  SIGNING_INPUT_PROFILE_NATS_JWT_SIGNING_INPUT = 5;
+}
+
+enum SigningProtection {
+  SIGNING_PROTECTION_UNSPECIFIED = 0;
+  SIGNING_PROTECTION_DEVELOPMENT_ONLY = 1;
+  SIGNING_PROTECTION_NON_EXPORTABLE = 2;
+  SIGNING_PROTECTION_HSM_BACKED = 3;
+}
+
+enum SigningDeploymentTier {
+  SIGNING_DEPLOYMENT_TIER_UNSPECIFIED = 0;
+  SIGNING_DEPLOYMENT_TIER_DEVELOPMENT = 1;
+  SIGNING_DEPLOYMENT_TIER_PRODUCTION = 2;
+}
+
+// These bounded opaque identifiers resolve in the independent signer owner.
+// Qualification proves algorithms, input encoding and actual protection level;
+// a provider name or a successful signature is not hardware/FIPS evidence.
+message SigningProfileDefinition {
+  option (buf.validate.message).cel = {
+    id: "signing_profile.input_purpose"
+    message: "signing input must match its owning purpose"
+    expression: "(this.purpose == 1 && this.input_profile == 1) || (this.purpose == 2 && this.input_profile == 2) || (this.purpose == 3 && this.input_profile == 3) || ((this.purpose == 4 || this.purpose == 6) && this.input_profile == 4) || (this.purpose == 5 && this.input_profile == 5)"
+  };
+  option (buf.validate.message).cel = {
+    id: "signing_profile.production_protection"
+    message: "production signing refuses development custody and production CA signing requires HSM custody"
+    expression: "this.deployment_tier != 2 || (this.protection != 1 && (this.purpose != 1 || this.protection == 3))"
+  };
+  option (buf.validate.message).cel = {
+    id: "signing_profile.nats_algorithm"
+    message: "NATS credential signing requires Ed25519"
+    expression: "this.purpose != 5 || this.algorithm == 1"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  SigningPurpose purpose = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SigningAlgorithm algorithm = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SigningInputProfile input_profile = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SignerId signer_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  SigningPublicKeyId public_key_id = 6 [features.field_presence = LEGACY_REQUIRED];
+  SigningProtection protection = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SigningDeploymentTier deployment_tier = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Resolves the independent signer owner's qualification record. Its opaque
+  // identity does not embed this Definition's own configuration digest.
+  SignerQualificationId custody_qualification_id = 9 [features.field_presence = LEGACY_REQUIRED];
+  uint32 contract_version = 10 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+}
+
+// The artifact encodes SigningProfileDefinition and excludes this wrapper.
+// Ingress/replay verify its exact bytes/hash and equality to the projection.
+message SigningProfileConfiguration {
+  option (buf.validate.message).cel = {
+    id: "signing_configuration.scope"
+    message: "signing reference and definition must share the exact scope"
+    expression: "this.signing_profile_ref.scope == this.definition.scope"
+  };
+  SigningProfileRef signing_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  SigningProfileDefinition definition = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationArtifact artifact = 3 [features.field_presence = LEGACY_REQUIRED];
+}

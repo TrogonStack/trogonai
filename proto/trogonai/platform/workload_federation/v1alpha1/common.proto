@@ -1,0 +1,129 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// The exact authenticated scope. A configuration never infers placement from
+// an issuer, a subject path, or an untrusted request (ADR#0098).
+message WorkloadScope {
+  string tenant = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[A-Za-z0-9_.-]+$"
+    }
+  ];
+  string project = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[A-Za-z0-9_.-]+$"
+    }
+  ];
+}
+
+// An immutable exact configuration. Admission verifies the digest and revision
+// against its owner; a copied reference is not permission. configuration_sha256
+// is SHA-256 of the exact ConfigurationArtifact.definition_bytes, excluding the
+// enclosing record and its reference. The owner retains these original bytes;
+// protobuf deterministic serialization is not a canonicalization contract.
+// Restore advances the fence independently of restored state (ADR#0098).
+message ConfigurationVersion {
+  string id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  uint64 revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  uint64 recovery_fence = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  bytes configuration_sha256 = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+// The enclosing owner selects an explicit supported Definition message. Ingress
+// and replay verify its digest before decoding, reject unsupported or unknown
+// behavior, and prove equality with the enclosing typed projection. The artifact
+// excludes its own reference/digest. It contains configuration only, never keys,
+// assertions, provider tokens or executable plugin configuration (ADR#0064).
+message ConfigurationArtifact {
+  bytes definition_bytes = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 262144
+    }
+  ];
+}
+
+message ConfigurationApprovalId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+message ConfigurationValidationId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+message TrustRegistrationId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+message SubjectBindingId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+message PlatformOperationId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+message InboundAdmissionId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}

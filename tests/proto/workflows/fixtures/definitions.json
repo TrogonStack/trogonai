@@ -2228,11 +2228,11 @@
         {
           "op": "replace",
           "path": "/contractVersion",
-          "value": 2
+          "value": 3
         }
       ],
       "violations": [
-        "must equal 1"
+        "must be in"
       ]
     }
   ]

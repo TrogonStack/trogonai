@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+// Explicit recipient/verifier profiles only. A declared algorithm is not proof
+// that an issuer, signer or provider has been qualified for it (ADR#0053).
+enum AssertionAlgorithm {
+  ASSERTION_ALGORITHM_UNSPECIFIED = 0;
+  ASSERTION_ALGORITHM_RS256 = 1;
+  ASSERTION_ALGORITHM_ES256 = 2;
+  ASSERTION_ALGORITHM_ES384 = 3;
+  ASSERTION_ALGORITHM_EDDSA = 4;
+}

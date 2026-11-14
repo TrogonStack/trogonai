@@ -1,0 +1,4004 @@
+{
+  "templates": {
+    "profile-definition": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ExecutionProfileDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "attested": {
+          "issuer": {
+            "implementation": 1,
+            "implementationVersion": "1.15.5",
+            "environment": 1,
+            "deploymentTier": 1,
+            "caSigningProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "ca-signing-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "qualifiedAt": "2030-01-01T00:00:00Z",
+            "validUntil": "2030-01-02T00:00:00Z",
+            "qualificationRef": {
+              "qualificationId": "qualification-1",
+              "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "attestation": {
+            "parentSpiffeId": "spiffe://example.test/node",
+            "nodeSelectors": [
+              {
+                "type": "deployment",
+                "value": "local-development"
+              }
+            ],
+            "workloadSelectors": [
+              {
+                "type": "unit",
+                "value": "supervisor.service"
+              }
+            ],
+            "nodeAttestorRef": {
+              "attestorId": "node-attestor-1"
+            },
+            "workloadAttestorRef": {
+              "attestorId": "workload-attestor-1"
+            }
+          }
+        },
+        "allowedSources": [
+          {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/supervisor",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          }
+        ],
+        "allowedRecipientRefs": [
+          {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "recipient-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        ],
+        "maxAdmissionLease": "120s",
+        "isolation": 1,
+        "contractVersion": 1
+      }
+    },
+    "profile": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ExecutionProfile",
+      "payload": {
+        "executionProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "execution-profile-1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "attested": {
+            "issuer": {
+              "implementation": 1,
+              "implementationVersion": "1.15.5",
+              "environment": 1,
+              "deploymentTier": 1,
+              "caSigningProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "ca-signing-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "qualifiedAt": "2030-01-01T00:00:00Z",
+              "validUntil": "2030-01-02T00:00:00Z",
+              "qualificationRef": {
+                "qualificationId": "qualification-1",
+                "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "attestation": {
+              "parentSpiffeId": "spiffe://example.test/node",
+              "nodeSelectors": [
+                {
+                  "type": "deployment",
+                  "value": "local-development"
+                }
+              ],
+              "workloadSelectors": [
+                {
+                  "type": "unit",
+                  "value": "supervisor.service"
+                }
+              ],
+              "nodeAttestorRef": {
+                "attestorId": "node-attestor-1"
+              },
+              "workloadAttestorRef": {
+                "attestorId": "workload-attestor-1"
+              }
+            }
+          },
+          "allowedSources": [
+            {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            }
+          ],
+          "allowedRecipientRefs": [
+            {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "recipient-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          ],
+          "maxAdmissionLease": "120s",
+          "isolation": 1,
+          "contractVersion": 1
+        }
+      }
+    },
+    "external-profile": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ExecutionProfile",
+      "payload": {
+        "executionProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "external-execution-profile-1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "LJlQy2VcTfofQeFqPF8ViSDAQOfFVLc42mYQzQu/hco="
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiVBJSChUKCHRlbmFudF8xEglwcm9qZWN0XzESOQoRc3ViamVjdC1iaW5kaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACpMChUKCHRlbmFudF8xEglwcm9qZWN0XzESMwoLcmVjaXBpZW50LTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADICCHg4AUABGogBCkgKFQoIdGVuYW50XzESCXByb2plY3RfMRIvCgd0cnVzdC0xEAEYASIgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASPAoYZXh0ZXJuYWwtcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "allowedSources": [
+            {
+              "subjectBindingRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "subject-binding-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              }
+            }
+          ],
+          "allowedRecipientRefs": [
+            {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "recipient-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          ],
+          "maxAdmissionLease": "120s",
+          "isolation": 1,
+          "contractVersion": 1,
+          "external": {
+            "trustRegistrationRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "trust-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "qualificationRef": {
+              "qualificationId": "external-qualification-1",
+              "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        }
+      }
+    },
+    "activate-profile": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ActivateExecutionProfile",
+      "payload": {
+        "executionProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "execution-profile-1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+          }
+        },
+        "approvalRef": {
+          "approvalId": {
+            "value": "approval-1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "execution-profile-1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+          },
+          "ownerKind": 5,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "validationId": {
+            "value": "validation-1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "execution-profile-1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+          },
+          "ownerKind": 5,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "profile-event": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ExecutionProfileEvent",
+      "payload": {
+        "activated": {
+          "executionProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "execution-profile-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+            }
+          },
+          "approvalRef": {
+            "approvalId": {
+              "value": "approval-1"
+            },
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "execution-profile-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+            },
+            "ownerKind": 5,
+            "operationPurpose": 1
+          },
+          "validationRef": {
+            "validationId": {
+              "value": "validation-1"
+            },
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "execution-profile-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+            },
+            "ownerKind": 5,
+            "operationPurpose": 1
+          }
+        }
+      }
+    },
+    "profile-get": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.GetExecutionProfileRequest",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "executionProfileId": {
+          "value": "execution-profile-1"
+        }
+      }
+    },
+    "profile-list-request": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ListExecutionProfilesRequest",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "pageSize": 20
+      }
+    },
+    "profile-list-response": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ListExecutionProfilesResponse",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "profiles": [
+          {
+            "profile": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "attested": {
+                  "issuer": {
+                    "implementation": 1,
+                    "implementationVersion": "1.15.5",
+                    "environment": 1,
+                    "deploymentTier": 1,
+                    "caSigningProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "ca-signing-1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    },
+                    "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "qualifiedAt": "2030-01-01T00:00:00Z",
+                    "validUntil": "2030-01-02T00:00:00Z",
+                    "qualificationRef": {
+                      "qualificationId": "qualification-1",
+                      "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "attestation": {
+                    "parentSpiffeId": "spiffe://example.test/node",
+                    "nodeSelectors": [
+                      {
+                        "type": "deployment",
+                        "value": "local-development"
+                      }
+                    ],
+                    "workloadSelectors": [
+                      {
+                        "type": "unit",
+                        "value": "supervisor.service"
+                      }
+                    ],
+                    "nodeAttestorRef": {
+                      "attestorId": "node-attestor-1"
+                    },
+                    "workloadAttestorRef": {
+                      "attestorId": "workload-attestor-1"
+                    }
+                  }
+                },
+                "allowedSources": [
+                  {
+                    "localWorkload": {
+                      "spiffeId": "spiffe://example.test/supervisor",
+                      "tenant": "tenant_1",
+                      "project": "project_1",
+                      "role": 3
+                    }
+                  }
+                ],
+                "allowedRecipientRefs": [
+                  {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "recipient-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
+                ],
+                "maxAdmissionLease": "120s",
+                "isolation": 1,
+                "contractVersion": 1
+              }
+            },
+            "lifecycle": 2,
+            "admission": 1,
+            "streamRevision": "3"
+          }
+        ],
+        "registryRevision": "3"
+      }
+    },
+    "definition": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowDefinition",
+      "payload": {
+        "root": {
+          "nodeId": "root"
+        },
+        "nodes": [
+          {
+            "reference": {
+              "nodeId": "root"
+            },
+            "timeout": "2s",
+            "wait": {
+              "delay": {
+                "duration": "1s"
+              }
+            }
+          }
+        ],
+        "policy": {
+          "maxDuration": "3600s",
+          "maxConcurrentInvocations": 1,
+          "maxInvocations": "20",
+          "maxControlDepth": 8,
+          "maxValueDepth": 8
+        },
+        "contractVersion": 2,
+        "identityRequirement": {
+          "executionProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "execution-profile-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+            }
+          }
+        }
+      }
+    },
+    "plan": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunPlan",
+      "payload": {
+        "planRevisionId": "plan-1",
+        "definitionBytes": "CgYKBHJvb3QSFAoGCgRyb290MgIIAloGGgQKAggBMg0KAwiQHBABGBQgCCgIOAJCVgpUChUKCHRlbmFudF8xEglwcm9qZWN0XzESOwoTZXhlY3V0aW9uLXByb2ZpbGUtMRABGAEiINC0Eljghc/gJVs/NNAmbfZQ0row79PEAWBESrfBWU98",
+        "digest": {
+          "algorithm": "sha256",
+          "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+        },
+        "savedDefinition": {
+          "workflowId": "workflow-1",
+          "revision": "1",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+          }
+        },
+        "definitionContractVersion": 2,
+        "identityRequirement": {
+          "executionProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "execution-profile-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+            }
+          }
+        }
+      }
+    },
+    "admission": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunIdentityAdmission",
+      "payload": {
+        "admissionId": "identity-admission-1",
+        "runId": {
+          "value": "run-1"
+        },
+        "planRevisionId": {
+          "value": "plan-1"
+        },
+        "definitionDigest": {
+          "algorithm": "sha256",
+          "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+        },
+        "authority": {
+          "requestedBy": {
+            "principalId": "principal-1"
+          },
+          "authorizationId": "authorization-1",
+          "policyRevision": "policy-1"
+        },
+        "executionProfile": {
+          "executionProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "execution-profile-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+            }
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "attested": {
+              "issuer": {
+                "implementation": 1,
+                "implementationVersion": "1.15.5",
+                "environment": 1,
+                "deploymentTier": 1,
+                "caSigningProfileRef": {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "ca-signing-1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "qualifiedAt": "2030-01-01T00:00:00Z",
+                "validUntil": "2030-01-02T00:00:00Z",
+                "qualificationRef": {
+                  "qualificationId": "qualification-1",
+                  "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "attestation": {
+                "parentSpiffeId": "spiffe://example.test/node",
+                "nodeSelectors": [
+                  {
+                    "type": "deployment",
+                    "value": "local-development"
+                  }
+                ],
+                "workloadSelectors": [
+                  {
+                    "type": "unit",
+                    "value": "supervisor.service"
+                  }
+                ],
+                "nodeAttestorRef": {
+                  "attestorId": "node-attestor-1"
+                },
+                "workloadAttestorRef": {
+                  "attestorId": "workload-attestor-1"
+                }
+              }
+            },
+            "allowedSources": [
+              {
+                "localWorkload": {
+                  "spiffeId": "spiffe://example.test/supervisor",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                }
+              }
+            ],
+            "allowedRecipientRefs": [
+              {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "recipient-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              }
+            ],
+            "maxAdmissionLease": "120s",
+            "isolation": 1,
+            "contractVersion": 1
+          }
+        },
+        "source": {
+          "localWorkload": {
+            "spiffeId": "spiffe://example.test/supervisor",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          }
+        },
+        "localWorkload": {
+          "activation": {
+            "binding": {
+              "spiffeId": "spiffe://example.test/supervisor",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            },
+            "recoveryFence": "1",
+            "registrationRevision": "2",
+            "trustRevision": "3",
+            "sourceRevision": "4",
+            "activationRevision": "5",
+            "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "notBefore": "2030-01-01T00:00:00Z",
+            "expiresAt": "2030-01-01T01:00:00Z"
+          },
+          "registrationIssuedAt": "2030-01-01T00:00:00Z",
+          "registrationExpiresAt": "2030-01-01T00:05:00Z",
+          "activationAuditRecordId": {
+            "value": "00000000-0000-4000-8000-000000000001"
+          },
+          "currentness": {
+            "receiptId": {
+              "value": "currentness-1"
+            },
+            "recoveryFence": "1",
+            "registrationRevision": "2",
+            "trustRevision": "3",
+            "sourceRevision": "4",
+            "activationRevision": "5",
+            "observedAt": "2030-01-01T00:00:00Z"
+          }
+        },
+        "admittedAt": "2030-01-01T00:00:01Z",
+        "validUntil": "2030-01-01T00:02:01Z",
+        "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+        "admissionAuditRecordId": {
+          "value": "00000000-0000-4000-8000-000000000002"
+        },
+        "savedDefinitionRef": {
+          "workflowId": "workflow-1",
+          "revision": "1",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+          }
+        }
+      }
+    },
+    "external-admission": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunIdentityAdmission",
+      "payload": {
+        "admissionId": "identity-admission-1",
+        "runId": {
+          "value": "run-external-1"
+        },
+        "planRevisionId": {
+          "value": "plan-external-1"
+        },
+        "definitionDigest": {
+          "algorithm": "sha256",
+          "value": "gDfnvCpKS7RRunCOp1cWZ6o4FzoGJUeqY7PpTJ95mf4="
+        },
+        "authority": {
+          "requestedBy": {
+            "principalId": "principal-1"
+          },
+          "authorizationId": "authorization-1",
+          "policyRevision": "policy-1"
+        },
+        "executionProfile": {
+          "executionProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "external-execution-profile-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "LJlQy2VcTfofQeFqPF8ViSDAQOfFVLc42mYQzQu/hco="
+            }
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiVBJSChUKCHRlbmFudF8xEglwcm9qZWN0XzESOQoRc3ViamVjdC1iaW5kaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACpMChUKCHRlbmFudF8xEglwcm9qZWN0XzESMwoLcmVjaXBpZW50LTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADICCHg4AUABGogBCkgKFQoIdGVuYW50XzESCXByb2plY3RfMRIvCgd0cnVzdC0xEAEYASIgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASPAoYZXh0ZXJuYWwtcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "allowedSources": [
+              {
+                "subjectBindingRef": {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "subject-binding-1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              }
+            ],
+            "allowedRecipientRefs": [
+              {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "recipient-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              }
+            ],
+            "maxAdmissionLease": "120s",
+            "isolation": 1,
+            "contractVersion": 1,
+            "external": {
+              "trustRegistrationRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "trust-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              },
+              "qualificationRef": {
+                "qualificationId": "external-qualification-1",
+                "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          }
+        },
+        "source": {
+          "subjectBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "subject-binding-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        },
+        "admittedAt": "2030-01-01T00:00:01Z",
+        "validUntil": "2030-01-01T00:02:01Z",
+        "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+        "admissionAuditRecordId": {
+          "value": "00000000-0000-4000-8000-000000000002"
+        },
+        "externalWorkload": {
+          "admission": {
+            "admissionId": {
+              "value": "inbound-admission-1"
+            },
+            "subjectBindingRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "subject-binding-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "trustRegistrationRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "trust-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "principalId": {
+              "value": "principal-1"
+            },
+            "admittedAt": "2030-01-01T00:00:00Z",
+            "sourceExpiresAt": "2030-01-01T00:10:00Z",
+            "expiresAt": "2030-01-01T00:05:00Z",
+            "bearer": {}
+          },
+          "currentnessReceiptId": {
+            "value": "external-currentness-1"
+          }
+        },
+        "savedDefinitionRef": {
+          "workflowId": "workflow-external-1",
+          "revision": "1",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "gDfnvCpKS7RRunCOp1cWZ6o4FzoGJUeqY7PpTJ95mf4="
+          }
+        }
+      }
+    },
+    "configuration": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunConfiguration",
+      "payload": {
+        "runId": "run-1",
+        "plan": {
+          "planRevisionId": "plan-1",
+          "definitionBytes": "CgYKBHJvb3QSFAoGCgRyb290MgIIAloGGgQKAggBMg0KAwiQHBABGBQgCCgIOAJCVgpUChUKCHRlbmFudF8xEglwcm9qZWN0XzESOwoTZXhlY3V0aW9uLXByb2ZpbGUtMRABGAEiINC0Eljghc/gJVs/NNAmbfZQ0row79PEAWBESrfBWU98",
+          "digest": {
+            "algorithm": "sha256",
+            "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+          },
+          "savedDefinition": {
+            "workflowId": "workflow-1",
+            "revision": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            }
+          },
+          "definitionContractVersion": 2,
+          "identityRequirement": {
+            "executionProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "execution-profile-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+              }
+            }
+          }
+        },
+        "checkoutRef": {
+          "checkoutId": "checkout-1",
+          "uri": "https://example.test/checkout"
+        },
+        "limits": {
+          "deadline": "2030-01-01T01:00:00Z",
+          "maxInvocations": "20",
+          "maxActiveSessions": 2,
+          "maxControlDepth": 8,
+          "maxValueDepth": 8
+        },
+        "authority": {
+          "requestedBy": {
+            "principalId": "principal-1"
+          },
+          "authorizationId": "authorization-1",
+          "policyRevision": "policy-1"
+        },
+        "identityAdmission": {
+          "admissionId": "identity-admission-1",
+          "runId": {
+            "value": "run-1"
+          },
+          "planRevisionId": {
+            "value": "plan-1"
+          },
+          "definitionDigest": {
+            "algorithm": "sha256",
+            "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "principal-1"
+            },
+            "authorizationId": "authorization-1",
+            "policyRevision": "policy-1"
+          },
+          "executionProfile": {
+            "executionProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "execution-profile-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+              }
+            },
+            "artifact": {
+              "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+            },
+            "definition": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "attested": {
+                "issuer": {
+                  "implementation": 1,
+                  "implementationVersion": "1.15.5",
+                  "environment": 1,
+                  "deploymentTier": 1,
+                  "caSigningProfileRef": {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "ca-signing-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                  "qualifiedAt": "2030-01-01T00:00:00Z",
+                  "validUntil": "2030-01-02T00:00:00Z",
+                  "qualificationRef": {
+                    "qualificationId": "qualification-1",
+                    "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "attestation": {
+                  "parentSpiffeId": "spiffe://example.test/node",
+                  "nodeSelectors": [
+                    {
+                      "type": "deployment",
+                      "value": "local-development"
+                    }
+                  ],
+                  "workloadSelectors": [
+                    {
+                      "type": "unit",
+                      "value": "supervisor.service"
+                    }
+                  ],
+                  "nodeAttestorRef": {
+                    "attestorId": "node-attestor-1"
+                  },
+                  "workloadAttestorRef": {
+                    "attestorId": "workload-attestor-1"
+                  }
+                }
+              },
+              "allowedSources": [
+                {
+                  "localWorkload": {
+                    "spiffeId": "spiffe://example.test/supervisor",
+                    "tenant": "tenant_1",
+                    "project": "project_1",
+                    "role": 3
+                  }
+                }
+              ],
+              "allowedRecipientRefs": [
+                {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "recipient-1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              ],
+              "maxAdmissionLease": "120s",
+              "isolation": 1,
+              "contractVersion": 1
+            }
+          },
+          "source": {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/supervisor",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          },
+          "localWorkload": {
+            "activation": {
+              "binding": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              },
+              "recoveryFence": "1",
+              "registrationRevision": "2",
+              "trustRevision": "3",
+              "sourceRevision": "4",
+              "activationRevision": "5",
+              "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "notBefore": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z"
+            },
+            "registrationIssuedAt": "2030-01-01T00:00:00Z",
+            "registrationExpiresAt": "2030-01-01T00:05:00Z",
+            "activationAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000001"
+            },
+            "currentness": {
+              "receiptId": {
+                "value": "currentness-1"
+              },
+              "recoveryFence": "1",
+              "registrationRevision": "2",
+              "trustRevision": "3",
+              "sourceRevision": "4",
+              "activationRevision": "5",
+              "observedAt": "2030-01-01T00:00:00Z"
+            }
+          },
+          "admittedAt": "2030-01-01T00:00:01Z",
+          "validUntil": "2030-01-01T00:02:01Z",
+          "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+          "admissionAuditRecordId": {
+            "value": "00000000-0000-4000-8000-000000000002"
+          },
+          "savedDefinitionRef": {
+            "workflowId": "workflow-1",
+            "revision": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            }
+          }
+        }
+      }
+    },
+    "launch": {
+      "type": "trogonai.workflows.runs.v1alpha1.LaunchAdmission",
+      "payload": {
+        "agentRevision": {
+          "agentId": "agent-example",
+          "revisionNumber": "1",
+          "configuration": {
+            "configurationDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        },
+        "authority": {
+          "requestedBy": {
+            "principalId": "principal-1"
+          },
+          "authorizationId": "authorization-1",
+          "policyRevision": "policy-1"
+        },
+        "admissionId": "admission-example",
+        "executionPlanDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "admittedAt": "2030-01-01T00:00:02Z",
+        "validUntil": "2030-01-01T00:01:00Z",
+        "definitionContractVersion": 2,
+        "runIdentityAdmission": {
+          "admissionId": "identity-admission-1",
+          "runId": {
+            "value": "run-1"
+          },
+          "planRevisionId": {
+            "value": "plan-1"
+          },
+          "definitionDigest": {
+            "algorithm": "sha256",
+            "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "principal-1"
+            },
+            "authorizationId": "authorization-1",
+            "policyRevision": "policy-1"
+          },
+          "executionProfile": {
+            "executionProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "execution-profile-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+              }
+            },
+            "artifact": {
+              "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+            },
+            "definition": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "attested": {
+                "issuer": {
+                  "implementation": 1,
+                  "implementationVersion": "1.15.5",
+                  "environment": 1,
+                  "deploymentTier": 1,
+                  "caSigningProfileRef": {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "ca-signing-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                  "qualifiedAt": "2030-01-01T00:00:00Z",
+                  "validUntil": "2030-01-02T00:00:00Z",
+                  "qualificationRef": {
+                    "qualificationId": "qualification-1",
+                    "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "attestation": {
+                  "parentSpiffeId": "spiffe://example.test/node",
+                  "nodeSelectors": [
+                    {
+                      "type": "deployment",
+                      "value": "local-development"
+                    }
+                  ],
+                  "workloadSelectors": [
+                    {
+                      "type": "unit",
+                      "value": "supervisor.service"
+                    }
+                  ],
+                  "nodeAttestorRef": {
+                    "attestorId": "node-attestor-1"
+                  },
+                  "workloadAttestorRef": {
+                    "attestorId": "workload-attestor-1"
+                  }
+                }
+              },
+              "allowedSources": [
+                {
+                  "localWorkload": {
+                    "spiffeId": "spiffe://example.test/supervisor",
+                    "tenant": "tenant_1",
+                    "project": "project_1",
+                    "role": 3
+                  }
+                }
+              ],
+              "allowedRecipientRefs": [
+                {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "recipient-1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              ],
+              "maxAdmissionLease": "120s",
+              "isolation": 1,
+              "contractVersion": 1
+            }
+          },
+          "source": {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/supervisor",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          },
+          "localWorkload": {
+            "activation": {
+              "binding": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              },
+              "recoveryFence": "1",
+              "registrationRevision": "2",
+              "trustRevision": "3",
+              "sourceRevision": "4",
+              "activationRevision": "5",
+              "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "notBefore": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z"
+            },
+            "registrationIssuedAt": "2030-01-01T00:00:00Z",
+            "registrationExpiresAt": "2030-01-01T00:05:00Z",
+            "activationAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000001"
+            },
+            "currentness": {
+              "receiptId": {
+                "value": "currentness-1"
+              },
+              "recoveryFence": "1",
+              "registrationRevision": "2",
+              "trustRevision": "3",
+              "sourceRevision": "4",
+              "activationRevision": "5",
+              "observedAt": "2030-01-01T00:00:00Z"
+            }
+          },
+          "admittedAt": "2030-01-01T00:00:01Z",
+          "validUntil": "2030-01-01T00:02:01Z",
+          "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+          "admissionAuditRecordId": {
+            "value": "00000000-0000-4000-8000-000000000002"
+          },
+          "savedDefinitionRef": {
+            "workflowId": "workflow-1",
+            "revision": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            }
+          }
+        }
+      }
+    },
+    "renew-command": {
+      "type": "trogonai.workflows.runs.v1alpha1.RenewRunIdentityAdmission",
+      "payload": {
+        "runId": {
+          "value": "run-1"
+        },
+        "previousAdmissionId": {
+          "value": "identity-admission-1"
+        },
+        "admission": {
+          "admissionId": "identity-admission-2",
+          "runId": {
+            "value": "run-1"
+          },
+          "planRevisionId": {
+            "value": "plan-1"
+          },
+          "definitionDigest": {
+            "algorithm": "sha256",
+            "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "principal-1"
+            },
+            "authorizationId": "authorization-1",
+            "policyRevision": "policy-1"
+          },
+          "executionProfile": {
+            "executionProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "execution-profile-1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+              }
+            },
+            "artifact": {
+              "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+            },
+            "definition": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "attested": {
+                "issuer": {
+                  "implementation": 1,
+                  "implementationVersion": "1.15.5",
+                  "environment": 1,
+                  "deploymentTier": 1,
+                  "caSigningProfileRef": {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "ca-signing-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                  "qualifiedAt": "2030-01-01T00:00:00Z",
+                  "validUntil": "2030-01-02T00:00:00Z",
+                  "qualificationRef": {
+                    "qualificationId": "qualification-1",
+                    "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                },
+                "attestation": {
+                  "parentSpiffeId": "spiffe://example.test/node",
+                  "nodeSelectors": [
+                    {
+                      "type": "deployment",
+                      "value": "local-development"
+                    }
+                  ],
+                  "workloadSelectors": [
+                    {
+                      "type": "unit",
+                      "value": "supervisor.service"
+                    }
+                  ],
+                  "nodeAttestorRef": {
+                    "attestorId": "node-attestor-1"
+                  },
+                  "workloadAttestorRef": {
+                    "attestorId": "workload-attestor-1"
+                  }
+                }
+              },
+              "allowedSources": [
+                {
+                  "localWorkload": {
+                    "spiffeId": "spiffe://example.test/supervisor",
+                    "tenant": "tenant_1",
+                    "project": "project_1",
+                    "role": 3
+                  }
+                }
+              ],
+              "allowedRecipientRefs": [
+                {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "recipient-1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  }
+                }
+              ],
+              "maxAdmissionLease": "120s",
+              "isolation": 1,
+              "contractVersion": 1
+            }
+          },
+          "source": {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/supervisor",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          },
+          "localWorkload": {
+            "activation": {
+              "binding": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              },
+              "recoveryFence": "1",
+              "registrationRevision": "3",
+              "trustRevision": "3",
+              "sourceRevision": "5",
+              "activationRevision": "6",
+              "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "notBefore": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z"
+            },
+            "registrationIssuedAt": "2030-01-01T00:02:00Z",
+            "registrationExpiresAt": "2030-01-01T00:07:00Z",
+            "activationAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000003"
+            },
+            "currentness": {
+              "receiptId": {
+                "value": "currentness-2"
+              },
+              "recoveryFence": "1",
+              "registrationRevision": "3",
+              "trustRevision": "3",
+              "sourceRevision": "5",
+              "activationRevision": "6",
+              "observedAt": "2030-01-01T00:02:30Z"
+            }
+          },
+          "admittedAt": "2030-01-01T00:02:30Z",
+          "validUntil": "2030-01-01T00:04:30Z",
+          "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+          "admissionAuditRecordId": {
+            "value": "00000000-0000-4000-8000-000000000004"
+          },
+          "savedDefinitionRef": {
+            "workflowId": "workflow-1",
+            "revision": "1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            }
+          }
+        }
+      }
+    },
+    "renew-event": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunEvent",
+      "payload": {
+        "runIdentityAdmissionRenewed": {
+          "runId": {
+            "value": "run-1"
+          },
+          "previousAdmissionId": {
+            "value": "identity-admission-1"
+          },
+          "admission": {
+            "admissionId": "identity-admission-2",
+            "runId": {
+              "value": "run-1"
+            },
+            "planRevisionId": {
+              "value": "plan-1"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "principal-1"
+              },
+              "authorizationId": "authorization-1",
+              "policyRevision": "policy-1"
+            },
+            "executionProfile": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "attested": {
+                  "issuer": {
+                    "implementation": 1,
+                    "implementationVersion": "1.15.5",
+                    "environment": 1,
+                    "deploymentTier": 1,
+                    "caSigningProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "ca-signing-1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    },
+                    "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "qualifiedAt": "2030-01-01T00:00:00Z",
+                    "validUntil": "2030-01-02T00:00:00Z",
+                    "qualificationRef": {
+                      "qualificationId": "qualification-1",
+                      "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "attestation": {
+                    "parentSpiffeId": "spiffe://example.test/node",
+                    "nodeSelectors": [
+                      {
+                        "type": "deployment",
+                        "value": "local-development"
+                      }
+                    ],
+                    "workloadSelectors": [
+                      {
+                        "type": "unit",
+                        "value": "supervisor.service"
+                      }
+                    ],
+                    "nodeAttestorRef": {
+                      "attestorId": "node-attestor-1"
+                    },
+                    "workloadAttestorRef": {
+                      "attestorId": "workload-attestor-1"
+                    }
+                  }
+                },
+                "allowedSources": [
+                  {
+                    "localWorkload": {
+                      "spiffeId": "spiffe://example.test/supervisor",
+                      "tenant": "tenant_1",
+                      "project": "project_1",
+                      "role": 3
+                    }
+                  }
+                ],
+                "allowedRecipientRefs": [
+                  {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "recipient-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
+                ],
+                "maxAdmissionLease": "120s",
+                "isolation": 1,
+                "contractVersion": 1
+              }
+            },
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "localWorkload": {
+              "activation": {
+                "binding": {
+                  "spiffeId": "spiffe://example.test/supervisor",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "3",
+                "trustRevision": "3",
+                "sourceRevision": "5",
+                "activationRevision": "6",
+                "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "notBefore": "2030-01-01T00:00:00Z",
+                "expiresAt": "2030-01-01T01:00:00Z"
+              },
+              "registrationIssuedAt": "2030-01-01T00:02:00Z",
+              "registrationExpiresAt": "2030-01-01T00:07:00Z",
+              "activationAuditRecordId": {
+                "value": "00000000-0000-4000-8000-000000000003"
+              },
+              "currentness": {
+                "receiptId": {
+                  "value": "currentness-2"
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "3",
+                "trustRevision": "3",
+                "sourceRevision": "5",
+                "activationRevision": "6",
+                "observedAt": "2030-01-01T00:02:30Z"
+              }
+            },
+            "admittedAt": "2030-01-01T00:02:30Z",
+            "validUntil": "2030-01-01T00:04:30Z",
+            "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+            "admissionAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000004"
+            },
+            "savedDefinitionRef": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            }
+          }
+        }
+      }
+    },
+    "withdraw-event": {
+      "type": "trogonai.workflows.runs.v1alpha1.RunEvent",
+      "payload": {
+        "runIdentityAdmissionWithdrawn": {
+          "withdrawal": {
+            "runId": {
+              "value": "run-1"
+            },
+            "admissionId": {
+              "value": "identity-admission-1"
+            },
+            "reason": 1
+          }
+        }
+      }
+    },
+    "initial-state": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-1",
+          "plan": {
+            "planRevisionId": "plan-1",
+            "definitionBytes": "CgYKBHJvb3QSFAoGCgRyb290MgIIAloGGgQKAggBMg0KAwiQHBABGBQgCCgIOAJCVgpUChUKCHRlbmFudF8xEglwcm9qZWN0XzESOwoTZXhlY3V0aW9uLXByb2ZpbGUtMRABGAEiINC0Eljghc/gJVs/NNAmbfZQ0row79PEAWBESrfBWU98",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            },
+            "definitionContractVersion": 2,
+            "identityRequirement": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              }
+            }
+          },
+          "checkoutRef": {
+            "checkoutId": "checkout-1",
+            "uri": "https://example.test/checkout"
+          },
+          "limits": {
+            "deadline": "2030-01-01T01:00:00Z",
+            "maxInvocations": "20",
+            "maxActiveSessions": 2,
+            "maxControlDepth": 8,
+            "maxValueDepth": 8
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "principal-1"
+            },
+            "authorizationId": "authorization-1",
+            "policyRevision": "policy-1"
+          },
+          "identityAdmission": {
+            "admissionId": "identity-admission-1",
+            "runId": {
+              "value": "run-1"
+            },
+            "planRevisionId": {
+              "value": "plan-1"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "principal-1"
+              },
+              "authorizationId": "authorization-1",
+              "policyRevision": "policy-1"
+            },
+            "executionProfile": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "attested": {
+                  "issuer": {
+                    "implementation": 1,
+                    "implementationVersion": "1.15.5",
+                    "environment": 1,
+                    "deploymentTier": 1,
+                    "caSigningProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "ca-signing-1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    },
+                    "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "qualifiedAt": "2030-01-01T00:00:00Z",
+                    "validUntil": "2030-01-02T00:00:00Z",
+                    "qualificationRef": {
+                      "qualificationId": "qualification-1",
+                      "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "attestation": {
+                    "parentSpiffeId": "spiffe://example.test/node",
+                    "nodeSelectors": [
+                      {
+                        "type": "deployment",
+                        "value": "local-development"
+                      }
+                    ],
+                    "workloadSelectors": [
+                      {
+                        "type": "unit",
+                        "value": "supervisor.service"
+                      }
+                    ],
+                    "nodeAttestorRef": {
+                      "attestorId": "node-attestor-1"
+                    },
+                    "workloadAttestorRef": {
+                      "attestorId": "workload-attestor-1"
+                    }
+                  }
+                },
+                "allowedSources": [
+                  {
+                    "localWorkload": {
+                      "spiffeId": "spiffe://example.test/supervisor",
+                      "tenant": "tenant_1",
+                      "project": "project_1",
+                      "role": 3
+                    }
+                  }
+                ],
+                "allowedRecipientRefs": [
+                  {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "recipient-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
+                ],
+                "maxAdmissionLease": "120s",
+                "isolation": 1,
+                "contractVersion": 1
+              }
+            },
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "localWorkload": {
+              "activation": {
+                "binding": {
+                  "spiffeId": "spiffe://example.test/supervisor",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "2",
+                "trustRevision": "3",
+                "sourceRevision": "4",
+                "activationRevision": "5",
+                "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "notBefore": "2030-01-01T00:00:00Z",
+                "expiresAt": "2030-01-01T01:00:00Z"
+              },
+              "registrationIssuedAt": "2030-01-01T00:00:00Z",
+              "registrationExpiresAt": "2030-01-01T00:05:00Z",
+              "activationAuditRecordId": {
+                "value": "00000000-0000-4000-8000-000000000001"
+              },
+              "currentness": {
+                "receiptId": {
+                  "value": "currentness-1"
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "2",
+                "trustRevision": "3",
+                "sourceRevision": "4",
+                "activationRevision": "5",
+                "observedAt": "2030-01-01T00:00:00Z"
+              }
+            },
+            "admittedAt": "2030-01-01T00:00:01Z",
+            "validUntil": "2030-01-01T00:02:01Z",
+            "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+            "admissionAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000002"
+            },
+            "savedDefinitionRef": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            }
+          }
+        },
+        "status": 1,
+        "currentPlanRevisionId": "plan-1",
+        "effectiveLimits": {
+          "deadline": "2030-01-01T01:00:00Z",
+          "maxInvocations": "20",
+          "maxActiveSessions": 2,
+          "maxControlDepth": 8,
+          "maxValueDepth": 8
+        },
+        "currentIdentityAdmissionId": {
+          "value": "identity-admission-1"
+        }
+      }
+    },
+    "renewed-state": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-1",
+          "plan": {
+            "planRevisionId": "plan-1",
+            "definitionBytes": "CgYKBHJvb3QSFAoGCgRyb290MgIIAloGGgQKAggBMg0KAwiQHBABGBQgCCgIOAJCVgpUChUKCHRlbmFudF8xEglwcm9qZWN0XzESOwoTZXhlY3V0aW9uLXByb2ZpbGUtMRABGAEiINC0Eljghc/gJVs/NNAmbfZQ0row79PEAWBESrfBWU98",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            },
+            "definitionContractVersion": 2,
+            "identityRequirement": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              }
+            }
+          },
+          "checkoutRef": {
+            "checkoutId": "checkout-1",
+            "uri": "https://example.test/checkout"
+          },
+          "limits": {
+            "deadline": "2030-01-01T01:00:00Z",
+            "maxInvocations": "20",
+            "maxActiveSessions": 2,
+            "maxControlDepth": 8,
+            "maxValueDepth": 8
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "principal-1"
+            },
+            "authorizationId": "authorization-1",
+            "policyRevision": "policy-1"
+          },
+          "identityAdmission": {
+            "admissionId": "identity-admission-1",
+            "runId": {
+              "value": "run-1"
+            },
+            "planRevisionId": {
+              "value": "plan-1"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "principal-1"
+              },
+              "authorizationId": "authorization-1",
+              "policyRevision": "policy-1"
+            },
+            "executionProfile": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "attested": {
+                  "issuer": {
+                    "implementation": 1,
+                    "implementationVersion": "1.15.5",
+                    "environment": 1,
+                    "deploymentTier": 1,
+                    "caSigningProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "ca-signing-1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    },
+                    "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "qualifiedAt": "2030-01-01T00:00:00Z",
+                    "validUntil": "2030-01-02T00:00:00Z",
+                    "qualificationRef": {
+                      "qualificationId": "qualification-1",
+                      "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "attestation": {
+                    "parentSpiffeId": "spiffe://example.test/node",
+                    "nodeSelectors": [
+                      {
+                        "type": "deployment",
+                        "value": "local-development"
+                      }
+                    ],
+                    "workloadSelectors": [
+                      {
+                        "type": "unit",
+                        "value": "supervisor.service"
+                      }
+                    ],
+                    "nodeAttestorRef": {
+                      "attestorId": "node-attestor-1"
+                    },
+                    "workloadAttestorRef": {
+                      "attestorId": "workload-attestor-1"
+                    }
+                  }
+                },
+                "allowedSources": [
+                  {
+                    "localWorkload": {
+                      "spiffeId": "spiffe://example.test/supervisor",
+                      "tenant": "tenant_1",
+                      "project": "project_1",
+                      "role": 3
+                    }
+                  }
+                ],
+                "allowedRecipientRefs": [
+                  {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "recipient-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
+                ],
+                "maxAdmissionLease": "120s",
+                "isolation": 1,
+                "contractVersion": 1
+              }
+            },
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "localWorkload": {
+              "activation": {
+                "binding": {
+                  "spiffeId": "spiffe://example.test/supervisor",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "2",
+                "trustRevision": "3",
+                "sourceRevision": "4",
+                "activationRevision": "5",
+                "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "notBefore": "2030-01-01T00:00:00Z",
+                "expiresAt": "2030-01-01T01:00:00Z"
+              },
+              "registrationIssuedAt": "2030-01-01T00:00:00Z",
+              "registrationExpiresAt": "2030-01-01T00:05:00Z",
+              "activationAuditRecordId": {
+                "value": "00000000-0000-4000-8000-000000000001"
+              },
+              "currentness": {
+                "receiptId": {
+                  "value": "currentness-1"
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "2",
+                "trustRevision": "3",
+                "sourceRevision": "4",
+                "activationRevision": "5",
+                "observedAt": "2030-01-01T00:00:00Z"
+              }
+            },
+            "admittedAt": "2030-01-01T00:00:01Z",
+            "validUntil": "2030-01-01T00:02:01Z",
+            "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+            "admissionAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000002"
+            },
+            "savedDefinitionRef": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            }
+          }
+        },
+        "status": 1,
+        "currentPlanRevisionId": "plan-1",
+        "effectiveLimits": {
+          "deadline": "2030-01-01T01:00:00Z",
+          "maxInvocations": "20",
+          "maxActiveSessions": 2,
+          "maxControlDepth": 8,
+          "maxValueDepth": 8
+        },
+        "currentIdentityAdmissionId": {
+          "value": "identity-admission-2"
+        },
+        "identityAdmissions": [
+          {
+            "admissionId": "identity-admission-2",
+            "runId": {
+              "value": "run-1"
+            },
+            "planRevisionId": {
+              "value": "plan-1"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "principal-1"
+              },
+              "authorizationId": "authorization-1",
+              "policyRevision": "policy-1"
+            },
+            "executionProfile": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "attested": {
+                  "issuer": {
+                    "implementation": 1,
+                    "implementationVersion": "1.15.5",
+                    "environment": 1,
+                    "deploymentTier": 1,
+                    "caSigningProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "ca-signing-1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    },
+                    "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "qualifiedAt": "2030-01-01T00:00:00Z",
+                    "validUntil": "2030-01-02T00:00:00Z",
+                    "qualificationRef": {
+                      "qualificationId": "qualification-1",
+                      "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "attestation": {
+                    "parentSpiffeId": "spiffe://example.test/node",
+                    "nodeSelectors": [
+                      {
+                        "type": "deployment",
+                        "value": "local-development"
+                      }
+                    ],
+                    "workloadSelectors": [
+                      {
+                        "type": "unit",
+                        "value": "supervisor.service"
+                      }
+                    ],
+                    "nodeAttestorRef": {
+                      "attestorId": "node-attestor-1"
+                    },
+                    "workloadAttestorRef": {
+                      "attestorId": "workload-attestor-1"
+                    }
+                  }
+                },
+                "allowedSources": [
+                  {
+                    "localWorkload": {
+                      "spiffeId": "spiffe://example.test/supervisor",
+                      "tenant": "tenant_1",
+                      "project": "project_1",
+                      "role": 3
+                    }
+                  }
+                ],
+                "allowedRecipientRefs": [
+                  {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "recipient-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
+                ],
+                "maxAdmissionLease": "120s",
+                "isolation": 1,
+                "contractVersion": 1
+              }
+            },
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "localWorkload": {
+              "activation": {
+                "binding": {
+                  "spiffeId": "spiffe://example.test/supervisor",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "3",
+                "trustRevision": "3",
+                "sourceRevision": "5",
+                "activationRevision": "6",
+                "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "notBefore": "2030-01-01T00:00:00Z",
+                "expiresAt": "2030-01-01T01:00:00Z"
+              },
+              "registrationIssuedAt": "2030-01-01T00:02:00Z",
+              "registrationExpiresAt": "2030-01-01T00:07:00Z",
+              "activationAuditRecordId": {
+                "value": "00000000-0000-4000-8000-000000000003"
+              },
+              "currentness": {
+                "receiptId": {
+                  "value": "currentness-2"
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "3",
+                "trustRevision": "3",
+                "sourceRevision": "5",
+                "activationRevision": "6",
+                "observedAt": "2030-01-01T00:02:30Z"
+              }
+            },
+            "admittedAt": "2030-01-01T00:02:30Z",
+            "validUntil": "2030-01-01T00:04:30Z",
+            "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+            "admissionAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000004"
+            },
+            "savedDefinitionRef": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            }
+          }
+        ]
+      }
+    },
+    "external-definition": {
+      "type": "trogonai.workflows.definitions.v1alpha1.WorkflowDefinition",
+      "payload": {
+        "root": {
+          "nodeId": "root"
+        },
+        "nodes": [
+          {
+            "reference": {
+              "nodeId": "root"
+            },
+            "timeout": "2s",
+            "wait": {
+              "delay": {
+                "duration": "1s"
+              }
+            }
+          }
+        ],
+        "policy": {
+          "maxDuration": "3600s",
+          "maxConcurrentInvocations": 1,
+          "maxInvocations": "20",
+          "maxControlDepth": 8,
+          "maxValueDepth": 8
+        },
+        "contractVersion": 2,
+        "identityRequirement": {
+          "executionProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "external-execution-profile-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "LJlQy2VcTfofQeFqPF8ViSDAQOfFVLc42mYQzQu/hco="
+            }
+          }
+        }
+      }
+    },
+    "retained-historical-dispatch-state": {
+      "type": "trogonai.workflows.runs.state.v1alpha1.PresentRun",
+      "payload": {
+        "configuration": {
+          "runId": "run-1",
+          "plan": {
+            "planRevisionId": "plan-1",
+            "definitionBytes": "CgYKBHJvb3QSFAoGCgRyb290MgIIAloGGgQKAggBMg0KAwiQHBABGBQgCCgIOAJCVgpUChUKCHRlbmFudF8xEglwcm9qZWN0XzESOwoTZXhlY3V0aW9uLXByb2ZpbGUtMRABGAEiINC0Eljghc/gJVs/NNAmbfZQ0row79PEAWBESrfBWU98",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "savedDefinition": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            },
+            "definitionContractVersion": 2,
+            "identityRequirement": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              }
+            }
+          },
+          "checkoutRef": {
+            "checkoutId": "checkout-1",
+            "uri": "https://example.test/checkout"
+          },
+          "limits": {
+            "deadline": "2030-01-01T01:00:00Z",
+            "maxInvocations": "20",
+            "maxActiveSessions": 2,
+            "maxControlDepth": 8,
+            "maxValueDepth": 8
+          },
+          "authority": {
+            "requestedBy": {
+              "principalId": "principal-1"
+            },
+            "authorizationId": "authorization-1",
+            "policyRevision": "policy-1"
+          },
+          "identityAdmission": {
+            "admissionId": "identity-admission-1",
+            "runId": {
+              "value": "run-1"
+            },
+            "planRevisionId": {
+              "value": "plan-1"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "principal-1"
+              },
+              "authorizationId": "authorization-1",
+              "policyRevision": "policy-1"
+            },
+            "executionProfile": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "attested": {
+                  "issuer": {
+                    "implementation": 1,
+                    "implementationVersion": "1.15.5",
+                    "environment": 1,
+                    "deploymentTier": 1,
+                    "caSigningProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "ca-signing-1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    },
+                    "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "qualifiedAt": "2030-01-01T00:00:00Z",
+                    "validUntil": "2030-01-02T00:00:00Z",
+                    "qualificationRef": {
+                      "qualificationId": "qualification-1",
+                      "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "attestation": {
+                    "parentSpiffeId": "spiffe://example.test/node",
+                    "nodeSelectors": [
+                      {
+                        "type": "deployment",
+                        "value": "local-development"
+                      }
+                    ],
+                    "workloadSelectors": [
+                      {
+                        "type": "unit",
+                        "value": "supervisor.service"
+                      }
+                    ],
+                    "nodeAttestorRef": {
+                      "attestorId": "node-attestor-1"
+                    },
+                    "workloadAttestorRef": {
+                      "attestorId": "workload-attestor-1"
+                    }
+                  }
+                },
+                "allowedSources": [
+                  {
+                    "localWorkload": {
+                      "spiffeId": "spiffe://example.test/supervisor",
+                      "tenant": "tenant_1",
+                      "project": "project_1",
+                      "role": 3
+                    }
+                  }
+                ],
+                "allowedRecipientRefs": [
+                  {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "recipient-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
+                ],
+                "maxAdmissionLease": "120s",
+                "isolation": 1,
+                "contractVersion": 1
+              }
+            },
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "localWorkload": {
+              "activation": {
+                "binding": {
+                  "spiffeId": "spiffe://example.test/supervisor",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "2",
+                "trustRevision": "3",
+                "sourceRevision": "4",
+                "activationRevision": "5",
+                "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "notBefore": "2030-01-01T00:00:00Z",
+                "expiresAt": "2030-01-01T01:00:00Z"
+              },
+              "registrationIssuedAt": "2030-01-01T00:00:00Z",
+              "registrationExpiresAt": "2030-01-01T00:05:00Z",
+              "activationAuditRecordId": {
+                "value": "00000000-0000-4000-8000-000000000001"
+              },
+              "currentness": {
+                "receiptId": {
+                  "value": "currentness-1"
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "2",
+                "trustRevision": "3",
+                "sourceRevision": "4",
+                "activationRevision": "5",
+                "observedAt": "2030-01-01T00:00:00Z"
+              }
+            },
+            "admittedAt": "2030-01-01T00:00:01Z",
+            "validUntil": "2030-01-01T00:02:01Z",
+            "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+            "admissionAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000002"
+            },
+            "savedDefinitionRef": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            }
+          }
+        },
+        "status": 1,
+        "currentPlanRevisionId": "plan-1",
+        "effectiveLimits": {
+          "deadline": "2030-01-01T01:00:00Z",
+          "maxInvocations": "20",
+          "maxActiveSessions": 2,
+          "maxControlDepth": 8,
+          "maxValueDepth": 8
+        },
+        "currentIdentityAdmissionId": {
+          "value": "identity-admission-2"
+        },
+        "identityAdmissions": [
+          {
+            "admissionId": "identity-admission-2",
+            "runId": {
+              "value": "run-1"
+            },
+            "planRevisionId": {
+              "value": "plan-1"
+            },
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+            },
+            "authority": {
+              "requestedBy": {
+                "principalId": "principal-1"
+              },
+              "authorizationId": "authorization-1",
+              "policyRevision": "policy-1"
+            },
+            "executionProfile": {
+              "executionProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "execution-profile-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                }
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "attested": {
+                  "issuer": {
+                    "implementation": 1,
+                    "implementationVersion": "1.15.5",
+                    "environment": 1,
+                    "deploymentTier": 1,
+                    "caSigningProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "ca-signing-1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    },
+                    "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "qualifiedAt": "2030-01-01T00:00:00Z",
+                    "validUntil": "2030-01-02T00:00:00Z",
+                    "qualificationRef": {
+                      "qualificationId": "qualification-1",
+                      "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "attestation": {
+                    "parentSpiffeId": "spiffe://example.test/node",
+                    "nodeSelectors": [
+                      {
+                        "type": "deployment",
+                        "value": "local-development"
+                      }
+                    ],
+                    "workloadSelectors": [
+                      {
+                        "type": "unit",
+                        "value": "supervisor.service"
+                      }
+                    ],
+                    "nodeAttestorRef": {
+                      "attestorId": "node-attestor-1"
+                    },
+                    "workloadAttestorRef": {
+                      "attestorId": "workload-attestor-1"
+                    }
+                  }
+                },
+                "allowedSources": [
+                  {
+                    "localWorkload": {
+                      "spiffeId": "spiffe://example.test/supervisor",
+                      "tenant": "tenant_1",
+                      "project": "project_1",
+                      "role": 3
+                    }
+                  }
+                ],
+                "allowedRecipientRefs": [
+                  {
+                    "scope": {
+                      "tenant": "tenant_1",
+                      "project": "project_1"
+                    },
+                    "version": {
+                      "id": "recipient-1",
+                      "revision": "1",
+                      "recoveryFence": "1",
+                      "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
+                ],
+                "maxAdmissionLease": "120s",
+                "isolation": 1,
+                "contractVersion": 1
+              }
+            },
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/supervisor",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "localWorkload": {
+              "activation": {
+                "binding": {
+                  "spiffeId": "spiffe://example.test/supervisor",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "3",
+                "trustRevision": "3",
+                "sourceRevision": "5",
+                "activationRevision": "6",
+                "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "notBefore": "2030-01-01T00:00:00Z",
+                "expiresAt": "2030-01-01T01:00:00Z"
+              },
+              "registrationIssuedAt": "2030-01-01T00:02:00Z",
+              "registrationExpiresAt": "2030-01-01T00:07:00Z",
+              "activationAuditRecordId": {
+                "value": "00000000-0000-4000-8000-000000000003"
+              },
+              "currentness": {
+                "receiptId": {
+                  "value": "currentness-2"
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "3",
+                "trustRevision": "3",
+                "sourceRevision": "5",
+                "activationRevision": "6",
+                "observedAt": "2030-01-01T00:02:30Z"
+              }
+            },
+            "admittedAt": "2030-01-01T00:02:30Z",
+            "validUntil": "2030-01-01T00:04:30Z",
+            "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+            "admissionAuditRecordId": {
+              "value": "00000000-0000-4000-8000-000000000004"
+            },
+            "savedDefinitionRef": {
+              "workflowId": "workflow-1",
+              "revision": "1",
+              "digest": {
+                "algorithm": "sha256",
+                "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+              }
+            }
+          }
+        ],
+        "occurrences": [
+          {
+            "entry": {
+              "occurrence": {
+                "occurrenceId": "occurrence-1",
+                "node": {
+                  "nodeId": "root"
+                },
+                "planRevisionId": "plan-1"
+              }
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "invocation": {
+              "invocationId": "invocation-first",
+              "occurrenceId": "occurrence-1",
+              "attemptNumber": "1",
+              "operationId": "operation-example",
+              "inputs": [
+                {
+                  "name": "task",
+                  "value": {
+                    "stringValue": "Review the result."
+                  },
+                  "sources": [
+                    {
+                      "runInputName": "task"
+                    }
+                  ]
+                }
+              ],
+              "launch": {
+                "commandId": "launch-example",
+                "createSession": {
+                  "sessionId": "session-example",
+                  "executionPlan": {
+                    "planBytes": "AA==",
+                    "planDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  },
+                  "checkoutRef": {
+                    "checkoutId": "checkout-example",
+                    "uri": "https://example.com/checkout"
+                  }
+                },
+                "admission": {
+                  "agentRevision": {
+                    "agentId": "agent-example",
+                    "revisionNumber": "1",
+                    "configuration": {
+                      "configurationDigest": {
+                        "algorithm": "sha256",
+                        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                      }
+                    }
+                  },
+                  "authority": {
+                    "requestedBy": {
+                      "principalId": "principal-1"
+                    },
+                    "authorizationId": "authorization-1",
+                    "policyRevision": "policy-1"
+                  },
+                  "admissionId": "admission-example",
+                  "executionPlanDigest": {
+                    "algorithm": "sha256",
+                    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                  },
+                  "admittedAt": "2030-01-01T00:00:02Z",
+                  "validUntil": "2030-01-01T00:01:00Z",
+                  "definitionContractVersion": 2,
+                  "runIdentityAdmission": {
+                    "admissionId": "identity-admission-1",
+                    "runId": {
+                      "value": "run-1"
+                    },
+                    "planRevisionId": {
+                      "value": "plan-1"
+                    },
+                    "definitionDigest": {
+                      "algorithm": "sha256",
+                      "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+                    },
+                    "authority": {
+                      "requestedBy": {
+                        "principalId": "principal-1"
+                      },
+                      "authorizationId": "authorization-1",
+                      "policyRevision": "policy-1"
+                    },
+                    "executionProfile": {
+                      "executionProfileRef": {
+                        "scope": {
+                          "tenant": "tenant_1",
+                          "project": "project_1"
+                        },
+                        "version": {
+                          "id": "execution-profile-1",
+                          "revision": "1",
+                          "recoveryFence": "1",
+                          "configurationSha256": "0LQSWOCFz+AlWz800CZt9lDSujDv08QBYERKt8FZT3w="
+                        }
+                      },
+                      "artifact": {
+                        "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEiOwo5CiBzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvc3VwZXJ2aXNvchIIdGVuYW50XzEaCXByb2plY3RfMSADKkwKFQoIdGVuYW50XzESCXByb2plY3RfMRIzCgtyZWNpcGllbnQtMRABGAEiIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMgIIeDgBQAESzQIKxAEKMwoPcXVhbGlmaWNhdGlvbi0xEiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABABGgYxLjE1LjUgASgBMk0KFQoIdGVuYW50XzESCXByb2plY3RfMRI0CgxjYS1zaWduaW5nLTEQARgBIiAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADogAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKBgiAse+GB1IGCIDU9IYHEoMBChEKD25vZGUtYXR0ZXN0b3ItMRIVChN3b3JrbG9hZC1hdHRlc3Rvci0xGhpzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvbm9kZSIfCgpkZXBsb3ltZW50EhFsb2NhbC1kZXZlbG9wbWVudCoaCgR1bml0EhJzdXBlcnZpc29yLnNlcnZpY2U="
+                      },
+                      "definition": {
+                        "scope": {
+                          "tenant": "tenant_1",
+                          "project": "project_1"
+                        },
+                        "attested": {
+                          "issuer": {
+                            "implementation": 1,
+                            "implementationVersion": "1.15.5",
+                            "environment": 1,
+                            "deploymentTier": 1,
+                            "caSigningProfileRef": {
+                              "scope": {
+                                "tenant": "tenant_1",
+                                "project": "project_1"
+                              },
+                              "version": {
+                                "id": "ca-signing-1",
+                                "revision": "1",
+                                "recoveryFence": "1",
+                                "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                              }
+                            },
+                            "deploymentArtifactSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                            "qualifiedAt": "2030-01-01T00:00:00Z",
+                            "validUntil": "2030-01-02T00:00:00Z",
+                            "qualificationRef": {
+                              "qualificationId": "qualification-1",
+                              "evidenceSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                            }
+                          },
+                          "attestation": {
+                            "parentSpiffeId": "spiffe://example.test/node",
+                            "nodeSelectors": [
+                              {
+                                "type": "deployment",
+                                "value": "local-development"
+                              }
+                            ],
+                            "workloadSelectors": [
+                              {
+                                "type": "unit",
+                                "value": "supervisor.service"
+                              }
+                            ],
+                            "nodeAttestorRef": {
+                              "attestorId": "node-attestor-1"
+                            },
+                            "workloadAttestorRef": {
+                              "attestorId": "workload-attestor-1"
+                            }
+                          }
+                        },
+                        "allowedSources": [
+                          {
+                            "localWorkload": {
+                              "spiffeId": "spiffe://example.test/supervisor",
+                              "tenant": "tenant_1",
+                              "project": "project_1",
+                              "role": 3
+                            }
+                          }
+                        ],
+                        "allowedRecipientRefs": [
+                          {
+                            "scope": {
+                              "tenant": "tenant_1",
+                              "project": "project_1"
+                            },
+                            "version": {
+                              "id": "recipient-1",
+                              "revision": "1",
+                              "recoveryFence": "1",
+                              "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                            }
+                          }
+                        ],
+                        "maxAdmissionLease": "120s",
+                        "isolation": 1,
+                        "contractVersion": 1
+                      }
+                    },
+                    "source": {
+                      "localWorkload": {
+                        "spiffeId": "spiffe://example.test/supervisor",
+                        "tenant": "tenant_1",
+                        "project": "project_1",
+                        "role": 3
+                      }
+                    },
+                    "localWorkload": {
+                      "activation": {
+                        "binding": {
+                          "spiffeId": "spiffe://example.test/supervisor",
+                          "tenant": "tenant_1",
+                          "project": "project_1",
+                          "role": 3
+                        },
+                        "recoveryFence": "1",
+                        "registrationRevision": "2",
+                        "trustRevision": "3",
+                        "sourceRevision": "4",
+                        "activationRevision": "5",
+                        "leafSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                        "publicKeySha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                        "bundleSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                        "notBefore": "2030-01-01T00:00:00Z",
+                        "expiresAt": "2030-01-01T01:00:00Z"
+                      },
+                      "registrationIssuedAt": "2030-01-01T00:00:00Z",
+                      "registrationExpiresAt": "2030-01-01T00:05:00Z",
+                      "activationAuditRecordId": {
+                        "value": "00000000-0000-4000-8000-000000000001"
+                      },
+                      "currentness": {
+                        "receiptId": {
+                          "value": "currentness-1"
+                        },
+                        "recoveryFence": "1",
+                        "registrationRevision": "2",
+                        "trustRevision": "3",
+                        "sourceRevision": "4",
+                        "activationRevision": "5",
+                        "observedAt": "2030-01-01T00:00:00Z"
+                      }
+                    },
+                    "admittedAt": "2030-01-01T00:00:01Z",
+                    "validUntil": "2030-01-01T00:02:01Z",
+                    "originalAuthorityExpiresAt": "2030-01-01T00:59:00Z",
+                    "admissionAuditRecordId": {
+                      "value": "00000000-0000-4000-8000-000000000002"
+                    },
+                    "savedDefinitionRef": {
+                      "workflowId": "workflow-1",
+                      "revision": "1",
+                      "digest": {
+                        "algorithm": "sha256",
+                        "value": "R3MM0CSxFAyWF+iZGrw1XunSlBTIa/KLlAxYKERXILQ="
+                      }
+                    }
+                  }
+                }
+              },
+              "deadline": "2030-01-01T00:03:00Z"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "workload-identity profile-definition positive",
+      "template": "profile-definition"
+    },
+    {
+      "name": "workload-identity profile positive",
+      "template": "profile"
+    },
+    {
+      "name": "workload-identity external-profile positive",
+      "template": "external-profile"
+    },
+    {
+      "name": "workload-identity activate-profile positive",
+      "template": "activate-profile"
+    },
+    {
+      "name": "workload-identity profile-event positive",
+      "template": "profile-event"
+    },
+    {
+      "name": "workload-identity profile-get positive",
+      "template": "profile-get"
+    },
+    {
+      "name": "workload-identity profile-list-request positive",
+      "template": "profile-list-request"
+    },
+    {
+      "name": "workload-identity profile-list-response positive",
+      "template": "profile-list-response"
+    },
+    {
+      "name": "workload-identity definition positive",
+      "template": "definition"
+    },
+    {
+      "name": "workload-identity plan positive",
+      "template": "plan"
+    },
+    {
+      "name": "workload-identity admission positive",
+      "template": "admission"
+    },
+    {
+      "name": "workload-identity external-admission positive",
+      "template": "external-admission"
+    },
+    {
+      "name": "workload-identity configuration positive",
+      "template": "configuration"
+    },
+    {
+      "name": "workload-identity launch positive",
+      "template": "launch"
+    },
+    {
+      "name": "workload-identity renew-command positive",
+      "template": "renew-command"
+    },
+    {
+      "name": "workload-identity renew-event positive",
+      "template": "renew-event"
+    },
+    {
+      "name": "workload-identity withdraw-event positive",
+      "template": "withdraw-event"
+    },
+    {
+      "name": "workload-identity initial-state positive",
+      "template": "initial-state"
+    },
+    {
+      "name": "workload-identity renewed-state positive",
+      "template": "renewed-state"
+    },
+    {
+      "name": "workload-identity profile cannot cross tenant",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/allowedSources/0/localWorkload/tenant",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "execution identities, recipients and qualification must remain in the profile scope"
+      ]
+    },
+    {
+      "name": "workload-identity profile requires source",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/allowedSources",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item"
+      ]
+    },
+    {
+      "name": "workload-identity profile refuses unknown environment",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/issuer/environment",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "value must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "workload-identity attestation requires workload selectors",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item"
+      ]
+    },
+    {
+      "name": "workload-identity attestation refuses empty selector",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors/0/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1"
+      ]
+    },
+    {
+      "name": "workload-identity attestation refuses wildcard selector",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors/0/value",
+          "value": "*"
+        }
+      ],
+      "violations": [
+        "must not be in"
+      ]
+    },
+    {
+      "name": "workload-identity profile cannot extend lease ceiling",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxAdmissionLease",
+          "value": "331s"
+        }
+      ],
+      "violations": [
+        "less than or equal to 330s"
+      ]
+    },
+    {
+      "name": "workload-identity profile cannot use external source as local attestation",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/allowedSources",
+          "value": [
+            {
+              "subjectBindingRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "subject-binding-1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "attested execution requires local identities and external execution requires governed subject bindings"
+      ]
+    },
+    {
+      "name": "workload-identity profile wrapper cannot cross scope",
+      "template": "profile",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/executionProfileRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "profile reference and definition scopes must match"
+      ]
+    },
+    {
+      "name": "workload-identity profile artifact cannot be empty",
+      "template": "profile",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/artifact/definitionBytes",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1"
+      ]
+    },
+    {
+      "name": "workload-identity activation cannot substitute owner kind",
+      "template": "activate-profile",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvalRef/ownerKind",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "activation evidence must bind the exact scoped profile version"
+      ]
+    },
+    {
+      "name": "workload-identity activation cannot substitute operation",
+      "template": "activate-profile",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validationRef/operationPurpose",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "value must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "workload-identity activation requires exact version",
+      "template": "activate-profile",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validationRef/version/revision",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "activation evidence must bind the exact scoped profile version"
+      ]
+    },
+    {
+      "name": "workload-identity profile query cannot be unbounded",
+      "template": "profile-list-request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageSize",
+          "value": 101
+        }
+      ],
+      "violations": [
+        "less than or equal to 100"
+      ]
+    },
+    {
+      "name": "workload-identity profile list cannot cross scope",
+      "template": "profile-list-response",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/profiles/0/profile/executionProfileRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "listed execution profiles must belong to the response scope"
+      ]
+    },
+    {
+      "name": "workload-identity definition v2 requires profile",
+      "template": "definition",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/identityRequirement"
+        }
+      ],
+      "violations": [
+        "version 2 requires a workload identity profile and version 1 forbids it"
+      ]
+    },
+    {
+      "name": "workload-identity definition v1 forbids identity requirement",
+      "template": "definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/contractVersion",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "version 2 requires a workload identity profile and version 1 forbids it"
+      ]
+    },
+    {
+      "name": "workload-identity definition unknown version fails",
+      "template": "definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/contractVersion",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "must be in"
+      ]
+    },
+    {
+      "name": "workload-identity plan cannot lose identity capability marker",
+      "template": "plan",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/definitionContractVersion"
+        }
+      ],
+      "violations": [
+        "identity-aware plan version 2 requires the exact workload identity requirement"
+      ]
+    },
+    {
+      "name": "workload-identity plan v2 cannot lose profile",
+      "template": "plan",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/identityRequirement"
+        }
+      ],
+      "violations": [
+        "identity-aware plan version 2 requires the exact workload identity requirement"
+      ]
+    },
+    {
+      "name": "workload-identity run requires selected identity admission",
+      "template": "configuration",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/identityAdmission"
+        }
+      ],
+      "violations": [
+        "identity-aware run plans require matching workload admission"
+      ]
+    },
+    {
+      "name": "workload-identity run admission cannot name another run",
+      "template": "configuration",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/identityAdmission/runId/value",
+          "value": "run-2"
+        }
+      ],
+      "violations": [
+        "workload admission must preserve the exact run plan authority profile and deadline"
+      ]
+    },
+    {
+      "name": "workload-identity run admission cannot name another workflow",
+      "template": "configuration",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/identityAdmission/savedDefinitionRef/workflowId",
+          "value": "workflow-2"
+        }
+      ],
+      "violations": [
+        "workload admission must preserve the exact run plan authority profile and deadline"
+      ]
+    },
+    {
+      "name": "workload-identity run admission cannot name another profile revision",
+      "template": "configuration",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/plan/identityRequirement/executionProfileRef/version/revision",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "workload admission must preserve the exact run plan authority profile and deadline"
+      ]
+    },
+    {
+      "name": "workload-identity run admission cannot change plan digest",
+      "template": "configuration",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/plan/digest/value",
+          "value": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      ],
+      "violations": [
+        "workload admission must preserve the exact run plan authority profile and deadline"
+      ]
+    },
+    {
+      "name": "workload-identity run admission cannot change delegated authority",
+      "template": "configuration",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/identityAdmission/authority/policyRevision",
+          "value": "policy-2"
+        }
+      ],
+      "violations": [
+        "workload admission must preserve the exact run plan authority profile and deadline"
+      ]
+    },
+    {
+      "name": "workload-identity identity requires selected source",
+      "template": "admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/source/localWorkload/spiffeId",
+          "value": "spiffe://example.test/other"
+        }
+      ],
+      "violations": [
+        "admitted identity must be an exact source allowed by the execution profile"
+      ]
+    },
+    {
+      "name": "workload-identity identity must match registration",
+      "template": "admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/localWorkload/activation/binding/spiffeId",
+          "value": "spiffe://example.test/other"
+        }
+      ],
+      "violations": [
+        "admitted local or external source must have matching authenticated evidence"
+      ]
+    },
+    {
+      "name": "workload-identity identity cannot use stale registration receipt",
+      "template": "admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/localWorkload/currentness/registrationRevision",
+          "value": "1"
+        }
+      ],
+      "violations": [
+        "final currentness must match activation registration trust and material generations"
+      ]
+    },
+    {
+      "name": "workload-identity identity cannot use stale trust receipt",
+      "template": "admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/localWorkload/currentness/trustRevision",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "final currentness must match activation registration trust and material generations"
+      ]
+    },
+    {
+      "name": "workload-identity identity cannot exceed original grant",
+      "template": "admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/originalAuthorityExpiresAt",
+          "value": "2030-01-01T00:01:00Z"
+        }
+      ],
+      "violations": [
+        "identity admission must fit its original authority and selected finite lease"
+      ]
+    },
+    {
+      "name": "workload-identity identity cannot exceed registration",
+      "template": "admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/localWorkload/registrationExpiresAt",
+          "value": "2030-01-01T00:01:00Z"
+        }
+      ],
+      "violations": [
+        "identity admission must fit the original credential and registration validity"
+      ]
+    },
+    {
+      "name": "workload-identity identity cannot exceed selected lease",
+      "template": "admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validUntil",
+          "value": "2030-01-01T00:02:02Z"
+        }
+      ],
+      "violations": [
+        "identity admission must fit its original authority and selected finite lease"
+      ]
+    },
+    {
+      "name": "workload-identity external identity cannot change trust",
+      "template": "external-admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/externalWorkload/admission/trustRegistrationRef/version/id",
+          "value": "trust-2"
+        }
+      ],
+      "violations": [
+        "admitted local or external source must have matching authenticated evidence"
+      ]
+    },
+    {
+      "name": "workload-identity external identity cannot exceed source admission",
+      "template": "external-admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/externalWorkload/admission/expiresAt",
+          "value": "2030-01-01T00:01:00Z"
+        }
+      ],
+      "violations": [
+        "identity admission must fit the original credential and registration validity"
+      ]
+    },
+    {
+      "name": "workload-identity dispatch v2 cannot omit identity",
+      "template": "launch",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/runIdentityAdmission"
+        }
+      ],
+      "violations": [
+        "version 2 dispatch requires workload run admission and version 1 forbids it"
+      ]
+    },
+    {
+      "name": "workload-identity dispatch v1 cannot carry identity",
+      "template": "launch",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definitionContractVersion",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "version 2 dispatch requires workload run admission and version 1 forbids it"
+      ]
+    },
+    {
+      "name": "workload-identity dispatch cannot outlive run identity",
+      "template": "launch",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validUntil",
+          "value": "2030-01-01T00:03:00Z"
+        }
+      ],
+      "violations": [
+        "dispatch must preserve the run authority and stay within current identity admission"
+      ]
+    },
+    {
+      "name": "workload-identity renewal cannot switch run",
+      "template": "renew-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/admission/runId/value",
+          "value": "run-2"
+        }
+      ],
+      "violations": [
+        "renewal must name this run and a distinct previous admission"
+      ]
+    },
+    {
+      "name": "workload-identity renewal cannot reuse admission id",
+      "template": "renew-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/admission/admissionId",
+          "value": "identity-admission-1"
+        }
+      ],
+      "violations": [
+        "renewal must name this run and a distinct previous admission"
+      ]
+    },
+    {
+      "name": "workload-identity state renewal cannot extend original authority",
+      "template": "renewed-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/identityAdmissions/0/originalAuthorityExpiresAt",
+          "value": "2030-01-01T01:59:00Z"
+        }
+      ],
+      "violations": [
+        "identity renewals retain the original run authority and authority deadline"
+      ]
+    },
+    {
+      "name": "workload-identity state cannot select historical admission",
+      "template": "renewed-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/currentIdentityAdmissionId/value",
+          "value": "identity-admission-1"
+        }
+      ],
+      "violations": [
+        "selected identity admission must be the latest admitted record and cannot coexist with withdrawal"
+      ]
+    },
+    {
+      "name": "workload-identity state selected admission must match plan",
+      "template": "initial-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/currentPlanRevisionId",
+          "value": "plan-2"
+        }
+      ],
+      "violations": [
+        "selected identity admission must bind the current exact plan and profile"
+      ]
+    },
+    {
+      "name": "workload-identity withdrawn state retains provenance without live permit",
+      "template": "initial-state",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/currentIdentityAdmissionId"
+        },
+        {
+          "op": "add",
+          "path": "/identityWithdrawal",
+          "value": {
+            "runId": {
+              "value": "run-1"
+            },
+            "admissionId": {
+              "value": "identity-admission-1"
+            },
+            "reason": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "workload-identity withdrawn state cannot retain live admission",
+      "template": "initial-state",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/identityWithdrawal",
+          "value": {
+            "runId": {
+              "value": "run-1"
+            },
+            "admissionId": {
+              "value": "identity-admission-1"
+            },
+            "reason": 1
+          }
+        }
+      ],
+      "violations": [
+        "selected identity admission must be the latest admitted record and cannot coexist with withdrawal"
+      ]
+    },
+    {
+      "name": "workload-identity missing current admission is a denial state",
+      "template": "initial-state",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/currentIdentityAdmissionId"
+        }
+      ]
+    },
+    {
+      "name": "workload-identity profile source cannot be duplicated",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/allowedSources/-",
+          "value": {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/supervisor",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          }
+        }
+      ],
+      "violations": [
+        "execution source identities and recipient registrations must be unique"
+      ]
+    },
+    {
+      "name": "workload-identity profile recipient cannot be duplicated",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/allowedRecipientRefs/-",
+          "value": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "recipient-1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        }
+      ],
+      "violations": [
+        "execution source identities and recipient registrations must be unique"
+      ]
+    },
+    {
+      "name": "workload-identity qualification cannot outlive its own interval",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/issuer/validUntil",
+          "value": "2030-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "qualification validity must end after qualification"
+      ]
+    },
+    {
+      "name": "workload-identity external definition positive",
+      "template": "external-definition"
+    },
+    {
+      "name": "workload-identity historical launch remains valid after renewal",
+      "template": "retained-historical-dispatch-state"
+    },
+    {
+      "name": "workload-identity same-plan unretained launch admission is refused",
+      "template": "retained-historical-dispatch-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocations/0/invocation/launch/admission/runIdentityAdmission/admissionId",
+          "value": "unretained-admission"
+        }
+      ],
+      "violations": [
+        "identity-aware dispatch must retain matching run authority plan and exact admission evidence"
+      ]
+    },
+    {
+      "name": "workload-identity same-id changed historical admission snapshot is refused",
+      "template": "retained-historical-dispatch-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/invocations/0/invocation/launch/admission/runIdentityAdmission/admissionAuditRecordId/value",
+          "value": "00000000-0000-4000-8000-000000000005"
+        }
+      ],
+      "violations": [
+        "identity-aware dispatch must retain matching run authority plan and exact admission evidence"
+      ]
+    },
+    {
+      "name": "workload-identity audit pointer requires actual record identifier syntax",
+      "template": "admission",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/admissionAuditRecordId/value",
+          "value": "invalid-audit-id"
+        }
+      ],
+      "violations": [
+        "must be a valid UUID"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,145 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/lifecycle.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_configuration_lifecycle.proto";
+import "trogonai/platform/workload_federation/v1alpha1/recipient_binding.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+// Commands use DeciderService.Decide: NoStream for registration, At with
+// command_id/expected_revision for every later transition. Ingress authenticates
+// the owner, verifies exact artifacts and independently resolves approval_ref and
+// qualification receipts. Pure replay never calls a signer or provider. A new
+// security boundary requires a new identity; retired identities are never reused.
+message RegisterRecipientBinding {
+  RecipientBindingConfiguration configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Revision requires withdrawn or pending admission. It cannot change scope,
+// identity or recovery fence; the independently provisioned recovery path owns
+// fence advancement. Current authority is withdrawn before widening takes effect.
+message ReviseRecipientBinding {
+  option (buf.validate.message).cel = {
+    id: "recipient_revision.continuity"
+    message: "configuration revision must preserve owner identity and advance its revision"
+    expression: "this.previous_ref.scope == this.configuration.recipient_binding_ref.scope && this.previous_ref.version.id == this.configuration.recipient_binding_ref.version.id && this.previous_ref.version.recovery_fence == this.configuration.recipient_binding_ref.version.recovery_fence && this.configuration.recipient_binding_ref.version.revision > this.previous_ref.version.revision"
+  };
+  RecipientBindingRef previous_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  RecipientBindingConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Exact references are necessary shape, not proof of valid approval_ref. Ingress
+// resolves their signed/current protected records and verifies an independent
+// approver, all dependencies and actual provider/signer qualification.
+message ActivateRecipientBinding {
+  option (buf.validate.message).cel = {
+    id: "recipient_activation.exact_receipts"
+    message: "activation approval and validation must name the exact configuration"
+    expression: "this.approval_ref.scope == this.recipient_binding_ref.scope && this.approval_ref.version == this.recipient_binding_ref.version && this.validation_ref.scope == this.recipient_binding_ref.scope && this.validation_ref.version == this.recipient_binding_ref.version && this.approval_ref.owner_kind == 3 && this.approval_ref.operation_purpose == 1 && this.validation_ref.owner_kind == 3 && this.validation_ref.operation_purpose == 1"
+  };
+  RecipientBindingRef recipient_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationApprovalRef approval_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationValidationRef validation_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WithdrawRecipientBinding {
+  RecipientBindingRef recipient_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  OutboundWithdrawalReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message RetireRecipientBinding {
+  RecipientBindingRef recipient_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Actor and occurrence time come from the authenticated event envelope. These
+// safe metadata facts carry no assertion, token, signature or private key.
+message RecipientBindingRegistered {
+  RecipientBindingConfiguration configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecipientBindingRevised {
+  option (buf.validate.message).cel = {
+    id: "recipient_revised.continuity"
+    message: "revised configuration must preserve owner identity and advance its revision"
+    expression: "this.previous_ref.scope == this.configuration.recipient_binding_ref.scope && this.previous_ref.version.id == this.configuration.recipient_binding_ref.version.id && this.previous_ref.version.recovery_fence == this.configuration.recipient_binding_ref.version.recovery_fence && this.configuration.recipient_binding_ref.version.revision > this.previous_ref.version.revision"
+  };
+  RecipientBindingRef previous_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  RecipientBindingConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecipientBindingActivated {
+  option (buf.validate.message).cel = {
+    id: "recipient_activated.exact_receipts"
+    message: "activated approval and validation must name the exact configuration"
+    expression: "this.approval_ref.scope == this.recipient_binding_ref.scope && this.approval_ref.version == this.recipient_binding_ref.version && this.validation_ref.scope == this.recipient_binding_ref.scope && this.validation_ref.version == this.recipient_binding_ref.version && this.approval_ref.owner_kind == 3 && this.approval_ref.operation_purpose == 1 && this.validation_ref.owner_kind == 3 && this.validation_ref.operation_purpose == 1"
+  };
+  RecipientBindingRef recipient_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationApprovalRef approval_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationValidationRef validation_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecipientBindingWithdrawn {
+  RecipientBindingRef recipient_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  OutboundWithdrawalReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message RecipientBindingRetired {
+  RecipientBindingRef recipient_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecipientBindingEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    RecipientBindingRegistered registered = 1;
+    RecipientBindingRevised revised = 2;
+    RecipientBindingActivated activated = 3;
+    RecipientBindingWithdrawn withdrawn = 4;
+    RecipientBindingRetired retired = 5;
+  }
+}
+
+// Fold enforces legal history and generation floors. ACTIVE/ENABLED remains
+// subject to live dependencies and operation policy; state is not permission.
+message RecipientBindingState {
+  option (buf.validate.message).cel = {
+    id: "recipient_state.retired"
+    message: "retired configuration must remain withdrawn"
+    expression: "this.lifecycle != 3 || this.admission == 2"
+  };
+  option (buf.validate.message).cel = {
+    id: "recipient_state.activation"
+    message: "active configuration requires exact approval and validation references"
+    expression: "(this.lifecycle != 2 || (has(this.approval_ref) && has(this.validation_ref))) && (!has(this.approval_ref) || (this.approval_ref.scope == this.configuration.recipient_binding_ref.scope && this.approval_ref.version == this.configuration.recipient_binding_ref.version && this.approval_ref.owner_kind == 3 && this.approval_ref.operation_purpose == 1)) && (!has(this.validation_ref) || (this.validation_ref.scope == this.configuration.recipient_binding_ref.scope && this.validation_ref.version == this.configuration.recipient_binding_ref.version && this.validation_ref.owner_kind == 3 && this.validation_ref.operation_purpose == 1))"
+  };
+  RecipientBindingConfiguration configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConfigurationAdmission admission = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConfigurationApprovalRef approval_ref = 4;
+  ConfigurationValidationRef validation_ref = 5;
+}

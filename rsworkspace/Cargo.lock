@@ -7692,6 +7692,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-key-management"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [

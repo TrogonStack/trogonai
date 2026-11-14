@@ -1,0 +1,439 @@
+{
+  "templates": {
+    "signing": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SigningProfileDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "purpose": 4,
+        "algorithm": 4,
+        "inputProfile": 4,
+        "signerId": {
+          "value": "signer_1"
+        },
+        "publicKeyId": {
+          "value": "public_key_1"
+        },
+        "protection": 3,
+        "deploymentTier": 2,
+        "custodyQualificationId": {
+          "value": "custody_qualification_1"
+        },
+        "contractVersion": 1
+      }
+    },
+    "signing-config": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SigningProfileConfiguration",
+      "payload": {
+        "signingProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "purpose": 4,
+          "algorithm": 4,
+          "inputProfile": 4,
+          "signerId": {
+            "value": "signer_1"
+          },
+          "publicKeyId": {
+            "value": "public_key_1"
+          },
+          "protection": 3,
+          "deploymentTier": 2,
+          "custodyQualificationId": {
+            "value": "custody_qualification_1"
+          },
+          "contractVersion": 1
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQBBgEIAQqCgoIc2lnbmVyXzEyDgoMcHVibGljX2tleV8xOANAAkoZChdjdXN0b2R5X3F1YWxpZmljYXRpb25fMVAB"
+        }
+      }
+    },
+    "issuer": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.IssuerProfileDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "issuer": "https://issuer.example.test",
+        "discoveryUri": "https://issuer.example.test/.well-known/openid-configuration",
+        "jwksUri": "https://issuer.example.test/keys",
+        "algorithm": 1,
+        "signingProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          }
+        },
+        "maxAssertionLifetime": "60s",
+        "publishedKeySetProfile": 2,
+        "nativeSpire": {
+          "issuerDeploymentId": {
+            "value": "spire_1"
+          },
+          "oidcHelperArtifactSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        },
+        "contractVersion": 1
+      }
+    },
+    "issuer-config": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.IssuerProfileConfiguration",
+      "payload": {
+        "issuerProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "issuer_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "issuer": "https://issuer.example.test",
+          "discoveryUri": "https://issuer.example.test/.well-known/openid-configuration",
+          "jwksUri": "https://issuer.example.test/keys",
+          "algorithm": 1,
+          "signingProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "signing_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+            }
+          },
+          "maxAssertionLifetime": "60s",
+          "publishedKeySetProfile": 2,
+          "nativeSpire": {
+            "issuerDeploymentId": {
+              "value": "spire_1"
+            },
+            "oidcHelperArtifactSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+          },
+          "contractVersion": 1
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESG2h0dHBzOi8vaXNzdWVyLmV4YW1wbGUudGVzdBo8aHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZS50ZXN0Ly53ZWxsLWtub3duL29wZW5pZC1jb25maWd1cmF0aW9uIiBodHRwczovL2lzc3Vlci5leGFtcGxlLnRlc3Qva2V5cygBMkoKFQoIdGVuYW50XzESCXByb2plY3RfMRIxCglzaWduaW5nXzEQARgBIiBT39ttzvrmEsovMwqw9YoxGFFtl8Vh2wtrNkYzG8Ne2DoCCDxAAlgBSi0KCQoHc3BpcmVfMRIgAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        }
+      }
+    },
+    "ca": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SigningProfileDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "purpose": 1,
+        "algorithm": 4,
+        "inputProfile": 1,
+        "signerId": {
+          "value": "signer_1"
+        },
+        "publicKeyId": {
+          "value": "public_key_1"
+        },
+        "protection": 3,
+        "deploymentTier": 2,
+        "custodyQualificationId": {
+          "value": "custody_qualification_1"
+        },
+        "contractVersion": 1
+      }
+    },
+    "nats": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SigningProfileDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "purpose": 5,
+        "algorithm": 1,
+        "inputProfile": 5,
+        "signerId": {
+          "value": "signer_1"
+        },
+        "publicKeyId": {
+          "value": "public_key_1"
+        },
+        "protection": 3,
+        "deploymentTier": 2,
+        "custodyQualificationId": {
+          "value": "custody_qualification_1"
+        },
+        "contractVersion": 1
+      }
+    },
+    "separate": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.IssuerProfileDefinition",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "issuer": "https://issuer.example.test",
+        "discoveryUri": "https://issuer.example.test/.well-known/openid-configuration",
+        "jwksUri": "https://issuer.example.test/keys",
+        "algorithm": 1,
+        "signingProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          }
+        },
+        "maxAssertionLifetime": "60s",
+        "publishedKeySetProfile": 2,
+        "contractVersion": 1,
+        "separateIssuer": {
+          "incompatibilityDecisionId": {
+            "value": "decision_1"
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "qualified purpose-scoped signer",
+      "template": "signing",
+      "violations": []
+    },
+    {
+      "name": "stored signing definition artifact",
+      "template": "signing-config",
+      "violations": []
+    },
+    {
+      "name": "native SPIRE public assertion issuer",
+      "template": "issuer",
+      "violations": []
+    },
+    {
+      "name": "stored issuer definition artifact",
+      "template": "issuer-config",
+      "violations": []
+    },
+    {
+      "name": "signing input cannot cross purpose",
+      "template": "signing",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/inputProfile",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "signing input must match its owning purpose"
+      ]
+    },
+    {
+      "name": "production cannot use development custody",
+      "template": "signing",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/protection",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "production signing refuses development custody"
+      ]
+    },
+    {
+      "name": "production CA declares HSM qualification",
+      "template": "ca",
+      "violations": []
+    },
+    {
+      "name": "production CA refuses software-only signer",
+      "template": "ca",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/protection",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "production signing refuses development custody"
+      ]
+    },
+    {
+      "name": "NATS credential issuance uses its own Ed25519 purpose",
+      "template": "nats",
+      "violations": []
+    },
+    {
+      "name": "NATS credential issuance refuses RSA",
+      "template": "nats",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/algorithm",
+          "value": 4
+        }
+      ],
+      "violations": [
+        "NATS credential signing requires Ed25519"
+      ]
+    },
+    {
+      "name": "signer ID cannot be empty",
+      "template": "signing",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/signerId/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "signing profile cannot cross scope",
+      "template": "signing-config",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/signingProfileRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "signing reference and definition must share the exact scope"
+      ]
+    },
+    {
+      "name": "issuer refuses RSA-only JWKS with EC assertion",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/algorithm",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "an RSA-only published key set requires RS256 assertions"
+      ]
+    },
+    {
+      "name": "issuer cannot select another project signer",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/signingProfileRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "the issuer signing profile must share its exact scope"
+      ]
+    },
+    {
+      "name": "issuer refuses HTTP discovery",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/discoveryUri",
+          "value": "http://issuer.example.test/discovery"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "issuer refuses credentials in JWKS endpoint",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/jwksUri",
+          "value": "https://user:@issuer.example.test/keys"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "issuer assertion lifetime must be finite positive",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxAssertionLifetime",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "must be greater than"
+      ]
+    },
+    {
+      "name": "issuer requires selected implementation",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nativeSpire"
+        }
+      ],
+      "violations": [
+        "exactly one field is required"
+      ]
+    },
+    {
+      "name": "separate issuer records native incompatibility decision",
+      "template": "separate",
+      "violations": []
+    }
+  ]
+}

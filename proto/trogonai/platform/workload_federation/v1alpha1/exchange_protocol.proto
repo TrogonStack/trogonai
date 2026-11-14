@@ -1,0 +1,147 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/platform/workload_federation/v1alpha1/exchange_evidence.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_federation/v1alpha1/use_evidence.proto";
+
+// Infrastructure callers have finite operation authority without fabricating a
+// Session or Connection. The protected service-policy owner resolves this exact
+// reference and verifies service identity, scope, operation and original expiry.
+message ServiceOperationAuthorityRef {
+  FederationServiceId service_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  FederationAuthorizationId authorization_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  FederationPolicyRevisionId policy_revision_id = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Session callers reuse the existing ConnectionGrantTerms and live permit at
+// this reference. The broker verifies attempt, plan, confirmation key, scope,
+// audience, lifecycle and ceilings; a presented reference grants no authority.
+message FederationCallerAuthority {
+  oneof caller {
+    option (buf.validate.oneof).required = true;
+    trogonai.connections.types.v1alpha1.ConnectionGrantRef connection_grant_ref = 1;
+    ServiceOperationAuthorityRef infrastructure_service_ref = 2;
+  }
+}
+
+// A privileged authenticated custody/executor call. Ingress derives source and
+// authority from protected owners, checks the caller key, resolves the exact
+// binding and operation and keeps the original deadline across every await.
+// This request is not a generic provider request and carries no assertion.
+// request_id is stable across retries; uncertain effects are reconciled before
+// a repeated request can issue another exchange.
+message PrepareFederatedUseRequest {
+  option (buf.validate.message).cel = {
+    id: "prepare_federated_use.service_authority"
+    message: "service authority must match the captured original authorization"
+    expression: "!has(this.caller_authority.infrastructure_service_ref) || (this.caller_authority.infrastructure_service_ref.authorization_id == this.authority.authorization_id && this.caller_authority.infrastructure_service_ref.policy_revision_id == this.authority.policy_revision_id)"
+  };
+  FederationRequestId request_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  FederationAuthorityEvidence authority = 2 [features.field_presence = LEGACY_REQUIRED];
+  FederationCallerAuthority caller_authority = 3 [features.field_presence = LEGACY_REQUIRED];
+  RecipientOperationId operation_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Derived from the caller's authenticated proof-of-possession transport.
+  // Merely presenting this hash never proves possession of the key.
+  bytes holder_public_key_sha256 = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+// An opaque volatile broker handle, not a credential or bearer capability.
+// Only the owning broker can resolve it to material. Every use reauthenticates
+// its original holder and checks current source, policy, recipient_binding_ref and operation.
+// The broker never persists the credential or exchange assertion in this record.
+message BrokerCredentialUseHandle {
+  option (buf.validate.message).cel = {
+    id: "broker_use_handle.validity"
+    message: "broker handle validity must stay within original authority and provider expiry"
+    expression: "this.issued_at >= this.authority.admitted_at && this.permitted_local_use_until > this.issued_at && this.permitted_local_use_until <= this.authority.original_authority_expires_at && this.permitted_local_use_until <= this.provider_expires_at"
+  };
+  BrokerUseHandleId use_handle_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  FederationExchangeId exchange_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  FederationAuthorityEvidence authority = 3 [features.field_presence = LEGACY_REQUIRED];
+  RecipientOperationId operation_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  bytes holder_public_key_sha256 = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  google.protobuf.Timestamp issued_at = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp permitted_local_use_until = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp provider_expires_at = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}
+
+message PrepareFederatedUseResponse {
+  FederationRequestId request_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    BrokerCredentialUseHandle handle = 2;
+    FederationExchangeFailure failed = 3;
+    FederationUncertainEffect uncertain = 4;
+  }
+}
+
+// Every field must equal the broker's protected handle record. The guard is
+// bound to the verified transport holder; supplying these fields is not proof.
+// Withdrawal or a changed source/binding invalidates the handle immediately.
+message FederationUseGuard {
+  BrokerUseHandleId use_handle_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  RecipientBindingRef recipient_binding_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  FederationAuthorizationId authorization_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  RecipientOperationId operation_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  bytes holder_public_key_sha256 = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  google.protobuf.Timestamp original_authority_expires_at = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}
+
+// Actual provider API requests/responses remain in operation-specific adapters.
+// The invocation reference resolves that owner's admitted exact operation; it
+// cannot select another resource, role, scope, payload or provider endpoint.
+message UseFederatedCredentialRequest {
+  FederationRequestId request_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  FederationUseGuard guard = 2 [features.field_presence = LEGACY_REQUIRED];
+  FederationOperationInvocationId operation_invocation_id = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message UseFederatedCredentialResponse {
+  FederationRequestId request_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  FederationUseRecord outcome = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Acknowledgement means local mediated use is withdrawn, never that provider
+// credentials have been remotely revoked. Denial takes effect before later audit
+// or bookkeeping; repeated authorized withdrawal is idempotent.
+message WithdrawBrokerUseHandleRequest {
+  FederationRequestId request_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  FederationUseGuard guard = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WithdrawBrokerUseHandleResponse {
+  FederationRequestId request_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty withdrawn = 2;
+    FederationExchangeFailure failed = 3;
+  }
+}

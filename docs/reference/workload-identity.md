@@ -5,6 +5,16 @@ under draft [ADR#0098](../adr/0098-attested-workload-identity.md).
 The checklists distinguish implemented consumer behavior from the issuer,
 provider and deployment acceptance still required before enabling the profile.
 
+For terminology and component responsibilities, read
+[Workload identity and portable trust](../architecture/workload-identity.md).
+The [federation proposal](../research/workload-identity/federation.md) separates
+native SPIFFE domain trust, inbound external workload admission and outbound
+provider exchange. The [adapter roadmap](../research/workload-identity/adapter-roadmap.md)
+records portability, custody and implementation dependencies. Both remain
+research proposals, including any amendment to current production seal policy.
+The [configuration contract reference](./workload-identity-configuration.md)
+maps the protobuf records and the identity-aware workflow version gate.
+
 ## Runtime foundation and limits
 
 | Boundary | Foundation | Enablement gate |
@@ -142,6 +152,11 @@ failure categories. Local broker tests establish these code paths; independent
 recovery governance and deployed HA/restore acceptance remain required.
 These time bounds also require the deployment's clock-integrity controls;
 restored state and clocks cannot substitute for an independently advanced fence.
+
+The [registration operations procedure](../how-to/operate-workload-registration.md)
+connects these controls into provisioning, renewal, withdrawal and recovery.
+The [trusted-host integration procedure](../how-to/integrate-workload-identity.md)
+explains how a consumer retains material and peer deadlines through actual I/O.
 
 ## Egress readiness
 
