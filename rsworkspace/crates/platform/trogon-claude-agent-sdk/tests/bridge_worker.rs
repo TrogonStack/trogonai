@@ -657,6 +657,8 @@ async fn report_deliveries(
         if let Err(reason) = worker.pump_deliveries(Some(1)).await {
             return Ok(Err(reason));
         }
+        // The handle's close says goodbye before it drops what is queued, as the recorded close did.
+        worker.goodbye().await;
         worker.close_queue();
         worker.close_deliveries();
     }
