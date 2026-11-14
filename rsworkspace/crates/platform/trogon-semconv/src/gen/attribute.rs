@@ -48,6 +48,84 @@ impl ErrorType {
     }
 }
 
+/// The unique and stable identifier of the GenAI hosted agent resource
+pub const GEN_AI_AGENT_ID: &str = "gen_ai.agent.id";
+
+/// Human-readable name of the GenAI agent provided by the application
+pub const GEN_AI_AGENT_NAME: &str = "gen_ai.agent.name";
+
+/// The version of the GenAI agent
+pub const GEN_AI_AGENT_VERSION: &str = "gen_ai.agent.version";
+
+/// The unique identifier for a conversation (session, thread), used to store and correlate messages within this conversation
+pub const GEN_AI_CONVERSATION_ID: &str = "gen_ai.conversation.id";
+
+/// The name of the operation being performed
+pub const GEN_AI_OPERATION_NAME: &str = "gen_ai.operation.name";
+
+/// Allowed values for the `gen_ai.operation.name` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum GenAiOperationName {
+    /// Chat completion operation
+    Chat,
+    /// Invoke GenAI agent
+    InvokeAgent,
+    /// Execute a tool
+    ExecuteTool,
+}
+
+impl GenAiOperationName {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::InvokeAgent => "invoke_agent",
+            Self::ExecuteTool => "execute_tool",
+        }
+    }
+}
+
+/// The Generative AI provider as identified by the client or server instrumentation
+pub const GEN_AI_PROVIDER_NAME: &str = "gen_ai.provider.name";
+
+/// The name of the GenAI model a request is being made to
+pub const GEN_AI_REQUEST_MODEL: &str = "gen_ai.request.model";
+
+/// Array of reasons the model stopped generating tokens, corresponding to each generation received
+pub const GEN_AI_RESPONSE_FINISH_REASONS: &str = "gen_ai.response.finish_reasons";
+
+/// The unique identifier for the completion
+pub const GEN_AI_RESPONSE_ID: &str = "gen_ai.response.id";
+
+/// The name of the model that generated the response
+pub const GEN_AI_RESPONSE_MODEL: &str = "gen_ai.response.model";
+
+/// The tool call identifier supplied by the model or provider
+pub const GEN_AI_TOOL_CALL_ID: &str = "gen_ai.tool.call.id";
+
+/// Name of the tool utilized by the agent
+pub const GEN_AI_TOOL_NAME: &str = "gen_ai.tool.name";
+
+/// Type of the tool utilized by the agent
+pub const GEN_AI_TOOL_TYPE: &str = "gen_ai.tool.type";
+
+/// The number of input tokens served from a provider-managed cache
+pub const GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: &str = "gen_ai.usage.cache_read.input_tokens";
+
+/// The number of input tokens written to a provider-managed cache
+pub const GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS: &str = "gen_ai.usage.cache_write.input_tokens";
+
+/// The total number of input (prompt) tokens across all modalities
+pub const GEN_AI_USAGE_INPUT_TOKENS: &str = "gen_ai.usage.input_tokens";
+
+/// The total number of output (completion) tokens across all modalities
+pub const GEN_AI_USAGE_OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
+
+/// The number of output tokens used for reasoning (e.g. chain-of-thought, extended thinking)
+pub const GEN_AI_USAGE_REASONING_OUTPUT_TOKENS: &str = "gen_ai.usage.reasoning.output_tokens";
+
 /// Standard OTel http.request.method. Emitted by http.server.request
 pub const HTTP_REQUEST_METHOD: &str = "http.request.method";
 
