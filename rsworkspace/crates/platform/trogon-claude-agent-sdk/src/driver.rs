@@ -936,7 +936,7 @@ where
             if let Some(error) = self.expired_control() {
                 return Err(error);
             }
-            if self.run_end.close_due() {
+            if self.run_end.close_due() && !self.holds_input_for_callbacks() {
                 self.run_end.closing_input();
                 self.end_input().await;
             }
@@ -1054,6 +1054,14 @@ where
         } else if let Some(event) = crate::startup_timeout::StartupEvent::from_frame(frame, Instant::now()) {
             let _ = tap.send(event);
         }
+    }
+
+    /// `sdk.mjs` ends its input only once the callbacks it started have answered; Python closes at the result
+    /// whatever is still running. A callback that starts after stdin closed has nowhere to answer.
+    fn holds_input_for_callbacks(&self) -> bool {
+        self.argv_style == crate::ArgvStyle::TypeScript
+            && !self.input_ended
+            && (!self.callback_handles.is_empty() || !self.detached_callbacks.is_empty())
     }
 
     fn running_callbacks(&self) -> usize {
