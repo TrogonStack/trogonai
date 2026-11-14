@@ -95,8 +95,11 @@ fn every_user_id_is_asked_until_one_does_not_say_no() {
 mod links {
     use std::{fs, os::unix::fs::symlink, path::Path};
 
-    use super::super::{DocumentProbe, Linkage, linkage};
-    use crate::{adapters::NativeHost, settings_resolve_state::ResolverState};
+    use crate::{
+        adapters::NativeHost,
+        settings_resolve_state::ResolverState,
+        settings_resolve_writable_document::{DocumentProbe, Linkage, linkage},
+    };
 
     fn linkage_of(root: &Path, name: &str) -> Linkage {
         let probe = DocumentProbe {

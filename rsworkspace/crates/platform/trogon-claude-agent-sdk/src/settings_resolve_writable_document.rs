@@ -39,7 +39,7 @@ impl DocumentProbe<'_> {
 
 /// How a document sits among symbolic links (`linkOf` upstream), as far as the write check tells the cases apart.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Linkage {
+pub(crate) enum Linkage {
     /// No link on the way (`null`).
     Direct,
     /// A link on the way whose ends were found (`inside` or `outside`).
@@ -49,7 +49,7 @@ enum Linkage {
 }
 
 /// `E4` upstream.
-fn linkage<H: SettingsHost>(host: &H, state: &ResolverState, probe: &DocumentProbe<'_>) -> Linkage {
+pub(crate) fn linkage<H: SettingsHost>(host: &H, state: &ResolverState, probe: &DocumentProbe<'_>) -> Linkage {
     let root = resolve_path(Path::new("/"), probe.root);
     let Ok(root_linked) = is_link(host, &root) else {
         return Linkage::Direct;

@@ -16,7 +16,9 @@ use reqwest::ResponseBuilderExt;
 use serde_json::{Value, json};
 use tokio::time::Instant;
 use trogon_claude_agent_sdk::adapters::HttpExecute;
-use trogon_claude_agent_sdk::{AttachBridgeSessionOptions, ReconnectOptions, WorkerPacing, attach_bridge_session};
+use trogon_claude_agent_sdk::{
+    AttachBridgeSessionOptions, ReconnectOptions, StreamClocks, WorkerPacing, attach_bridge_session,
+};
 
 /// What `Date.now` reads at the start of the case; only the differences matter.
 const WALL_ORIGIN: Duration = Duration::from_secs(1_700_000_000);
