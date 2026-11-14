@@ -3433,6 +3433,116 @@
       "rationale": "This TypeScript package entrypoint serves browser/remote bridge or binary-extraction hosting outside the native Rust subprocess contract. Its declaration changes remain visible for review even though no corresponding Rust API is promised."
     },
     {
+      "id": "bridge-credentials",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "bridge.RemoteCredentials",
+            "bridge.SessionState",
+            "bridge.CredentialsFailure",
+            "bridge.CredentialsFailure.reason",
+            "bridge.CredentialsFailure.source",
+            "bridge.CredentialsFailure.status",
+            "bridge.CredentialsFailure.terminal",
+            "bridge.CredentialsRejection",
+            "bridge.CredentialsRejection.reason",
+            "bridge.CredentialsRejection.terminal",
+            "bridge.fetchRemoteCredentials",
+            "bridge.isCredentialsFailure",
+            "bridge.isCredentialsRejection"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "BridgeClient",
+        "FetchRemoteCredentialsOptions",
+        "RemoteCredentials",
+        "RemoteMcpConfig",
+        "RemoteCredentialsOutcome",
+        "CredentialsFailure",
+        "CredentialsRejection",
+        "DeviceRefusal",
+        "FailureSource",
+        "SessionState",
+        "adapters::HttpExecute"
+      ],
+      "tests": [
+        {
+          "path": "tests/bridge_credentials.rs",
+          "name": "fetch_remote_credentials_matches_the_upstream_client"
+        },
+        {
+          "path": "src/bridge_types_tests.rs",
+          "name": "describes_credentials_failures"
+        },
+        {
+          "path": "src/bridge_js_tests.rs",
+          "name": "reads_numbers_like_the_number_function"
+        }
+      ],
+      "status": "supported",
+      "rationale": "fetchRemoteCredentials is replayed against goldens recorded by running the real bridge.mjs in node against a local server (bridge_credentials_goldens.mjs): the POST to /v1/code/sessions/{id}/bridge with its header order, the entrypoint to client platform mapping, the optional trusted device token header, the 401 and 403 classification (untrusted_device refusals, stale relogin, security tier, origin versus edge source from the response headers), the 200 body checks including the safe integer worker_epoch read through Number(), the undeclared mcp_config content, and null for 5xx, 408, 429, network errors and timeouts. The HTTP client is injected through HttpExecute so a decorator can stand in for the network; the native client follows up to 21 redirects like axios. SessionState is the idle, running and requires_action vocabulary the later session handle reports."
+    },
+    {
+      "id": "bridge-create-code-session",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "bridge.createCodeSession",
+            "bridge.CreateSessionFailure",
+            "bridge.CreateSessionFailure.detail",
+            "bridge.CreateSessionFailure.reason",
+            "bridge.CreateSessionFailure.status",
+            "bridge.CreateSessionFailure.terminal",
+            "bridge.isCreateSessionFailure",
+            "bridge.CodeSessionGitContext",
+            "bridge.CodeSessionGitContext.branch",
+            "bridge.CodeSessionGitContext.defaultBranch",
+            "bridge.CodeSessionGitContext.gitRepoUrl",
+            "bridge.BranchDropLogDedup",
+            "bridge.BranchDropLogDedup.lastKey"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "BridgeClient",
+        "CreateCodeSessionOptions",
+        "CreateSessionOutcome",
+        "CreateSessionFailure",
+        "CodeSessionGitContext",
+        "BranchDropLogDedup",
+        "GitContextProbe",
+        "GitRepository",
+        "DefaultGitProbe"
+      ],
+      "tests": [
+        {
+          "path": "tests/bridge_credentials.rs",
+          "name": "create_code_session_matches_the_upstream_client"
+        },
+        {
+          "path": "src/bridge_git_tests.rs",
+          "name": "drops_log_lines_that_repeat"
+        },
+        {
+          "path": "src/bridge_js_tests.rs",
+          "name": "drops_messages_the_cleaning_would_change"
+        }
+      ],
+      "status": "partial",
+      "rationale": "createCodeSession is replayed against goldens recorded from the real bridge.mjs: the request body key order, the git source and outcome entries, the branch drop log dedup state, grouping_rejected taking precedence over 401, 408 and 429, the cse_ session id check, and the error detail that is kept only when it is one plain line under the upstream sanitizer. Repository addresses are parsed by a regex port of the upstream parser, but the upstream rejectors it also applies to hosts and paths are not modeled, and the default branch guess that inspects the local repository is behind GitContextProbe with a default that never guesses. Unicode tables come from the Rust crates, so a character Node's ICU classifies differently could drift, and a lone surrogate cannot reach a Rust string. attachBridgeSession and the session handle stay under the bridge entrypoint's out of scope row."
+    },
+    {
       "id": "extract-entrypoint",
       "upstream": {
         "python": {

@@ -11,6 +11,10 @@ mod agent_definition;
 mod agent_name;
 mod argv;
 mod auth_token;
+mod bridge_client;
+mod bridge_git;
+mod bridge_js;
+mod bridge_types;
 mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
@@ -172,6 +176,13 @@ pub use agent_name::AgentName;
 pub use auth_token::{
     HostAuthToken, HostAuthTokenFuture, HostAuthTokenHandler, HostAuthTokenRequest, OAuthDeclineReason,
     OAuthTokenFuture, OAuthTokenHandler, OAuthTokenRequest, OAuthTokenResponse, OAuthTokenState,
+};
+pub use bridge_client::BridgeClient;
+pub use bridge_git::{BranchDropLogDedup, CodeSessionGitContext, DefaultGitProbe, GitContextProbe, GitRepository};
+pub use bridge_types::{
+    CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
+    DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,
+    RemoteMcpConfig, SessionState,
 };
 pub use builtin_tool_name::BuiltinToolName;
 pub use bundled_cli::{

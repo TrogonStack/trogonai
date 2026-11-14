@@ -1,12 +1,14 @@
 mod environment;
 mod filesystem;
 mod host;
+mod http;
 mod process;
 mod wall_clock;
 
 pub use environment::{CurrentDirectory, EnvironmentVariable, SystemEnvironment, TemporaryDirectory};
 pub use filesystem::*;
 pub use host::*;
+pub use http::HttpExecute;
 pub use process::{SpawnProcess, TokioProcessSpawner};
 pub use wall_clock::{SystemClock, WallClock};
 

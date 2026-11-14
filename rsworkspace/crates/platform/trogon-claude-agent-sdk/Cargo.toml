@@ -24,6 +24,7 @@ tokio-util = { workspace = true, features = ["rt"] }
 jsonschema = { workspace = true }
 url = { workspace = true }
 regex = "=1.12.3"
+reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
 uuid = { workspace = true }
 sha2 = { workspace = true }
 icu_collator = "=2.4.0"
