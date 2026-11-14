@@ -15,7 +15,7 @@ on:
       - "**/*.proto"
       - "**/*.yaml"
       - "**/*.yml"
-      - ".config/mise/tasks/github-actions/lint-adr-refs"
+      - ".config/mise/tasks/github/workflows/ci-adr/**"
       - ".github/workflows/ci-adr.yml"
 
 concurrency:
@@ -42,4 +42,4 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Lint ADR references
-        run: mise run --skip-tools github-actions:lint-adr-refs
+        run: mise run --skip-tools github:workflows:ci-adr:lint-adr-refs

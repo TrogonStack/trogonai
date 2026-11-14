@@ -42,13 +42,13 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check Go workspace
-        run: mise run --skip-tools check:go
+        run: mise run --skip-tools github:workflows:ci-go:check
 
       - name: Test Go workspace with race detection
-        run: mise run --skip-tools test:go:race
+        run: mise run --skip-tools github:workflows:ci-go:test-race
 
       - name: Build Go workspace
-        run: mise run --skip-tools build:go
+        run: mise run --skip-tools github:workflows:ci-go:build
 
   result:
     # Job names like lint and build repeat across workflows, and a skipped job
@@ -59,17 +59,20 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
       - name: Check Go jobs
         env:
           SELECTION_RESULT: ${{ needs.changes.result }}
           SELECTED: ${{ needs.changes.outputs.go }}
           JOB_RESULTS: ${{ needs.verify.result }}
-        # A cancelled run also skips jobs, so a skip only passes when selection
-        # succeeded and found nothing to check.
-        run: |
-          for result in $JOB_RESULTS; do
-            if [ "$result" = success ]; then continue; fi
-            if [ "$result" = skipped ] && [ "$SELECTION_RESULT" = success ] && [ "$SELECTED" != true ]; then continue; fi
-            echo "::error::Go jobs ended with $JOB_RESULTS after selection ended with $SELECTION_RESULT"
-            exit 1
-          done
+        run: mise run --skip-tools github:workflows:ci-go:result

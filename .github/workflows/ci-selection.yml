@@ -117,11 +117,11 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install selector dependencies
-        run: mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:install
+        run: mise run --skip-tools github:workflows:ci-selection:install
 
       - name: Select affected checks
         id: filter
         env:
           CI_FILTERS: ${{ inputs.filters }}
           GH_TOKEN: ${{ github.token }}
-        run: mise exec node@26.3.0 -- mise run --skip-tools github:workflows:ci-selection:filter
+        run: mise run --skip-tools github:workflows:ci-selection:filter

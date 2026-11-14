@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run clippy on a2a-gateway with the spicedb feature"
+#MISE dir="rsworkspace"
+set -euo pipefail
+
+exec cargo clippy -p a2a-gateway --all-targets --features spicedb

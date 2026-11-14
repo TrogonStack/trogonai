@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Build the docs site"
+#MISE depends=["build:docs"]
+set -euo pipefail

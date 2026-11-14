@@ -10,6 +10,7 @@ on:
       - '.config/mise/config.toml'
       - '.config/mise/mise.lock'
       - '.github/workflows/ci-web.yml'
+      - '.config/mise/tasks/github/workflows/ci-web/**'
 
 concurrency:
   group: ci-web-${{ github.ref }}
@@ -39,34 +40,33 @@ jobs:
           cache: pnpm
           cache-dependency-path: tsworkspace/pnpm-lock.yaml
 
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
       - name: Waive the minimum release age policy
         if: contains(github.event.pull_request.labels.*.name, 'pnpm:skip:release-age')
-        run: echo 'PNPM_CONFIG_MINIMUM_RELEASE_AGE=0' >> "$GITHUB_ENV"
+        run: mise run --skip-tools github:workflows:ci-web:waive-release-age
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: tsworkspace
+        run: mise run --skip-tools github:workflows:ci-web:install
 
       - name: Format check
-        run: pnpm fmt:check
-        working-directory: tsworkspace
+        run: mise run --skip-tools github:workflows:ci-web:fmt-check
 
       - name: Lint
-        run: pnpm lint
-        working-directory: tsworkspace
+        run: mise run --skip-tools github:workflows:ci-web:lint
 
       - name: Typecheck
-        run: pnpm typecheck
-        working-directory: tsworkspace
+        run: mise run --skip-tools github:workflows:ci-web:typecheck
 
       - name: Build
-        run: pnpm build
-        working-directory: tsworkspace
+        run: mise run --skip-tools github:workflows:ci-web:build
 
       - name: Test
-        run: pnpm test
-        working-directory: tsworkspace
+        run: mise run --skip-tools github:workflows:ci-web:test
 
       - name: Primitive layer policy
-        run: pnpm check:primitives
-        working-directory: tsworkspace
+        run: mise run --skip-tools github:workflows:ci-web:check-primitives

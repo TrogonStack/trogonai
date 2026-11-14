@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Test SPIRE deployment security and release refusal"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+# Exact versions instead of the project toolset keep this gate on the versions
+# the workflow installs, independent of what the shared config pins.
+exec mise exec python@3.14.5 -- python3 -m unittest discover -s devops/kubernetes/spire -p 'test_*.py'

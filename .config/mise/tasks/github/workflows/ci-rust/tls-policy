@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Enforce the TLS policy (ADR#0015) on the Rust dependency graph"
+#MISE depends=["rust:tls-policy"]
+set -euo pipefail

@@ -42,7 +42,7 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check buf format
-        run: buf format --diff --exit-code proto
+        run: mise run --skip-tools github:workflows:ci-proto:format
 
   lint:
     needs: changes
@@ -61,7 +61,7 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Lint proto sources
-        run: buf lint
+        run: mise run --skip-tools github:workflows:ci-proto:lint
 
   build:
     needs: changes
@@ -80,7 +80,7 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build proto module
-        run: buf build
+        run: mise run --skip-tools github:workflows:ci-proto:build
 
   breaking:
     needs: changes
@@ -101,7 +101,7 @@ jobs:
 
       - name: Read pinned buf version
         id: buf
-        run: echo "version=$(buf --version)" >> "$GITHUB_OUTPUT"
+        run: mise run --skip-tools github:workflows:ci-proto:buf-version
 
       - name: Check for breaking changes against the pull request base
         uses: bufbuild/buf-action@85aebf73123b5c15fd5528aaecbf9129cddf7fa7 # v1.6.0
@@ -131,7 +131,7 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Validate protobuf contract fixtures
-        run: mise run --skip-tools proto:validate
+        run: mise run --skip-tools github:workflows:ci-proto:validate
 
   generate:
     needs: changes
@@ -160,28 +160,26 @@ jobs:
           cache: pnpm
           cache-dependency-path: tsworkspace/pnpm-lock.yaml
 
-      - name: Install TypeScript proto generator
-        run: pnpm install --frozen-lockfile --filter @trogonai/proto...
-        working-directory: tsworkspace
-
       - name: Install proto codegen toolchain via mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           install_args: buf rust cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Install TypeScript proto generator
+        run: mise run --skip-tools github:workflows:ci-proto:install-generator
+
       - name: Regenerate protobuf bindings
-        run: mise run --skip-tools proto:generate
+        run: mise run --skip-tools github:workflows:ci-proto:generate
 
       - name: Assert generated output matches proto sources
-        run: mise run --skip-tools github-actions:assert-proto-generated
+        run: mise run --skip-tools github:workflows:ci-proto:assert-proto-generated
 
       - name: Regenerate TypeScript key custody bindings
-        run: pnpm --filter @trogonai/proto generate:key-custody
-        working-directory: tsworkspace
+        run: mise run --skip-tools github:workflows:ci-proto:generate-key-custody
 
       - name: Assert TypeScript key custody bindings match proto sources
-        run: mise run --skip-tools github-actions:assert-key-custody-proto-generated
+        run: mise run --skip-tools github:workflows:ci-proto:assert-key-custody-proto-generated
 
   result:
     # Job names like lint and build repeat across workflows, and a skipped job
@@ -192,17 +190,20 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
       - name: Check Proto jobs
         env:
           SELECTION_RESULT: ${{ needs.changes.result }}
           SELECTED: ${{ needs.changes.outputs.proto }}
           JOB_RESULTS: ${{ needs.format.result }} ${{ needs.lint.result }} ${{ needs.build.result }} ${{ needs.contract-validation.result }} ${{ needs.generate.result }} ${{ github.event_name == 'pull_request' && needs.breaking.result || '' }}
-        # A cancelled run also skips jobs, so a skip only passes when selection
-        # succeeded and found nothing to check.
-        run: |
-          for result in $JOB_RESULTS; do
-            if [ "$result" = success ]; then continue; fi
-            if [ "$result" = skipped ] && [ "$SELECTION_RESULT" = success ] && [ "$SELECTED" != true ]; then continue; fi
-            echo "::error::Proto jobs ended with $JOB_RESULTS after selection ended with $SELECTION_RESULT"
-            exit 1
-          done
+        run: mise run --skip-tools github:workflows:ci-proto:result

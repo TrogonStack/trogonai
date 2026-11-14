@@ -26,4 +26,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ACP_FRESHNESS_FILE_ISSUE: 'true'
-        run: mise run --skip-tools acp-freshness
+        run: mise run --skip-tools github:workflows:acp-freshness:check

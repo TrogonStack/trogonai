@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Install the pinned nightly toolchain that rust:coverage runs on"
+set -euo pipefail
+
+exec rustup toolchain install nightly-2026-04-16 --profile minimal --component llvm-tools-preview --target wasm32-unknown-unknown

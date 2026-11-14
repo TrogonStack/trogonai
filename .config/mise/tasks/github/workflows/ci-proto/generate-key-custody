@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Regenerate TypeScript key custody bindings"
+#MISE dir="tsworkspace"
+set -euo pipefail
+
+exec pnpm --filter @trogonai/proto generate:key-custody

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Record whether this job restored the Rust cache by exact key in GITHUB_STEP_SUMMARY"
+set -euo pipefail
+
+: "${GITHUB_JOB:?GITHUB_JOB is required}"
+: "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+
+echo "rust-cache exact key match for ${GITHUB_JOB} (partial restore reports false) = ${CACHE_HIT:-false}" >>"$GITHUB_STEP_SUMMARY"
