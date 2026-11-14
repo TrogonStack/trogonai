@@ -931,8 +931,8 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         let mut made = 0_u32;
         loop {
             let capped = attempts.is_some_and(|cap| made >= cap);
-            let jitter = self.pacing.jitter();
-            let next = self.lock().queue.poll(jitter);
+            let pacing = &self.pacing;
+            let next = self.lock().queue.poll_with(&mut || pacing.jitter());
             match next {
                 Next::Idle => return Ok(true),
                 Next::Pause(_) | Next::Send(_) if capped => return Ok(false),

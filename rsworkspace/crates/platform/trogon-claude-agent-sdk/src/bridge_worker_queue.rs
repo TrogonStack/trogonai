@@ -303,6 +303,12 @@ impl PatchQueue {
 
     /// What to do next. `jitter` is a fresh value in `[0, 1)` for the backoff.
     pub fn poll(&mut self, jitter: f64) -> Next {
+        self.poll_with(&mut || jitter)
+    }
+
+    /// [`poll`](Self::poll) for a caller that draws its random numbers as the upstream client does: one only when a
+    /// failed patch is given its backoff, so a poll that sends or finds nothing to do leaves the sequence alone.
+    pub fn poll_with(&mut self, jitter: &mut dyn FnMut() -> f64) -> Next {
         loop {
             if self.claim.is_none() {
                 self.drain();
@@ -352,7 +358,7 @@ impl PatchQueue {
                         held.rearmed = rearmed;
                         held.phase = Phase::Paused;
                     }
-                    return Next::Pause(retry_delay(attempts, jitter));
+                    return Next::Pause(retry_delay(attempts, jitter()));
                 }
                 Phase::Paused => {
                     if self.closed || self.hands_back_without_status(&claim.patch) {
