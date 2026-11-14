@@ -337,6 +337,20 @@ async fn a_failed_registration_is_an_attach_error() -> TestResult {
     Ok(())
 }
 
+/// With an epoch nothing is registered, so a base URL that does not parse is reported by the attach itself.
+#[tokio::test]
+async fn an_invalid_base_url_is_an_attach_error() -> TestResult {
+    let goldens: Value = serde_json::from_str(GOLDENS)?;
+    for golden in goldens["invalid_url"].as_array().ok_or("no invalid_url cases")? {
+        let case = json!({"epoch_option": 2, "interval_ms": 600000});
+        let (attached, _hosted) = attach(&case, &text(golden, "base")?).await?;
+        let error = attached.err().ok_or("attached")?;
+        assert!(matches!(error, AttachError::InvalidUrl), "{golden}");
+        assert_eq!(text(golden, "message")?, error.to_string(), "{golden}");
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn an_upload_only_session_never_asks_for_the_stream() -> TestResult {
     let case = json!({"epoch_option": 6, "interval_ms": 600000});

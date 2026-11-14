@@ -483,5 +483,10 @@
 "concurrency": [
 {"name":"heartbeat_during_upload","mode":"heartbeat_during_upload","log":["events in","heartbeat in","heartbeat out","events out"]},
 {"name":"events_while_a_batch_is_open","mode":"events_while_a_batch_is_open","log":["events in","events out","events in","events out"]}
+],
+"invalid_url": [
+{"name":"not a url","base":"not a url","message":"Invalid URL","code":"ERR_INVALID_URL"},
+{"name":"","base":"","message":"Invalid URL","code":"ERR_INVALID_URL"},
+{"name":"/relative","base":"/relative","message":"Invalid URL","code":"ERR_INVALID_URL"}
 ]
 }

@@ -1162,6 +1162,19 @@ async function networkCase(mode) {
   return { name: mode || 'invalid', mode: mode || 'invalid', message: port === null ? message : message?.replace(String(port), '<port>'), code };
 }
 
+// What attaching throws when the epoch is given (so nothing is registered) and the base URL is not a URL.
+async function invalidUrlCase(base) {
+  let message = null;
+  let code = null;
+  try {
+    await bridge.attachBridgeSession({ sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: true, epoch: 2 });
+  } catch (error) {
+    message = String(error.message);
+    code = error.code ?? null;
+  }
+  return { name: base, base, message, code };
+}
+
 // What the fetch under a worker request throws, as the request path names it (`lm`: the code, else the name).
 async function fetchFailureCase(mode) {
   const server = await listen((req, res) => {
@@ -1294,7 +1307,7 @@ if (only !== undefined) {
   process.exit(0);
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [], handle: [], network: [], fetch_failures: [], concurrency: [] };
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [], handle: [], network: [], fetch_failures: [], concurrency: [], invalid_url: [] };
 // `--section=<name>` records only that section and keeps every other part of the existing goldens file as it is.
 const sectionOnly = flags.find((flag) => flag.startsWith('--section='))?.slice('--section='.length);
 const existing = sectionOnly === undefined ? null : JSON.parse(fs.readFileSync(out, 'utf8'));
@@ -1321,10 +1334,13 @@ if (existing === null) {
   for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
   for (const mode of ['destroy', 'truncated', 'hang']) goldens.fetch_failures.push(await fetchFailureCase(mode));
   for (const mode of ['heartbeat_during_upload', 'events_while_a_batch_is_open']) goldens.concurrency.push(await concurrencyCase(mode));
+  for (const base of ['not a url', '', '/relative']) goldens.invalid_url.push(await invalidUrlCase(base));
 } else {
   for (const key of ['pure', 'control', 'network', 'fetch_failures']) goldens[key] = existing[key];
   if (sectionOnly === 'concurrency') for (const mode of ['heartbeat_during_upload', 'events_while_a_batch_is_open']) goldens.concurrency.push(await concurrencyCase(mode));
   else goldens.concurrency = existing.concurrency ?? [];
+  if (sectionOnly === 'invalid_url') for (const base of ['not a url', '', '/relative']) goldens.invalid_url.push(await invalidUrlCase(base));
+  else goldens.invalid_url = existing.invalid_url ?? [];
 }
 fs.rmSync(work, { recursive: true, force: true });
 

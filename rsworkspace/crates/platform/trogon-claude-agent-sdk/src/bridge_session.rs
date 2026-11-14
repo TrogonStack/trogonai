@@ -109,6 +109,8 @@ pub enum AttachError {
     InvalidSessionId(#[from] InvalidSessionId),
     #[error("{}", .0.message())]
     Register(RegisterFailure),
+    #[error("Invalid URL")]
+    InvalidUrl,
 }
 
 pub(crate) fn lookup_environment(lookup: &Option<EnvironmentLookup>, name: &str) -> Option<String> {
@@ -194,6 +196,8 @@ where
         Some(epoch) => epoch,
         None => worker.register_worker().await.map_err(AttachError::Register)?,
     };
+    // The upstream entrypoint builds the session URL after the epoch is known and throws when it does not parse.
+    url::Url::parse(worker.session_url()).map_err(|_| AttachError::InvalidUrl)?;
     callbacks.control.has_stop_task = callbacks.asynchronous.on_stop_task.is_some();
     callbacks.control.has_background_tasks = callbacks.asynchronous.on_background_tasks.is_some();
     callbacks.control.has_side_question = callbacks.asynchronous.on_side_question.is_some();
