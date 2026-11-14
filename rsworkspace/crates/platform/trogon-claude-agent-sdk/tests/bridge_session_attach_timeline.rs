@@ -2,12 +2,13 @@
 //! upstream bundle produced with its timers and `Math.random` stubbed (`stream` cases of
 //! `tests/fixtures/bridge_worker/timelines.json`): when each request for the stream and each heartbeat was sent and
 //! when the session closed. The service is scripted from the case, the Tokio clock is paused and the random draws
-//! are the recorded ones, so the times are exact. The cases that move the clocks are replayed by the stream timer
-//! tests, which can set the clocks.
+//! are the recorded ones, so the times are exact. A reconnect replays `reconnectTransport` of the default attach.
+//! The cases that move the clocks (`skews`) hand the attach clocks that jump ahead at their times, the way a paused
+//! or sleeping process does.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -15,7 +16,10 @@ use reqwest::ResponseBuilderExt;
 use serde_json::{Value, json};
 use tokio::time::Instant;
 use trogon_claude_agent_sdk::adapters::HttpExecute;
-use trogon_claude_agent_sdk::{AttachBridgeSessionOptions, WorkerPacing, attach_bridge_session};
+use trogon_claude_agent_sdk::{AttachBridgeSessionOptions, ReconnectOptions, WorkerPacing, attach_bridge_session};
+
+/// What `Date.now` reads at the start of the case; only the differences matter.
+const WALL_ORIGIN: Duration = Duration::from_secs(1_700_000_000);
 
 const TIMELINES: &str = include_str!("fixtures/bridge_worker/timelines.json");
 
@@ -186,18 +190,48 @@ async fn replay(name: &str) {
     options.heartbeat_interval_ms = script["interval"].as_u64();
     options.arguments = Some(Vec::new());
     options.environment = Some(Arc::new(|_| None));
+    let wall_skew = Arc::new(AtomicU64::new(0));
+    let monotonic_skew = Arc::new(AtomicU64::new(0));
+    let (wall, monotonic) = (Arc::clone(&wall_skew), Arc::clone(&monotonic_skew));
+    options.stream_clocks = Some(StreamClocks {
+        wall: Arc::new(move || WALL_ORIGIN + start.elapsed() + Duration::from_millis(wall.load(Ordering::SeqCst))),
+        monotonic: Arc::new(move || start.elapsed() + Duration::from_millis(monotonic.load(Ordering::SeqCst))),
+    });
+    let skews = script["skews"].as_array().cloned().unwrap_or_default();
+    let jumper = tokio::spawn(async move {
+        for skew in skews {
+            tokio::time::sleep_until(start + Duration::from_millis(skew[0].as_u64().expect("a time"))).await;
+            wall_skew.fetch_add(skew[1].as_u64().expect("wall"), Ordering::SeqCst);
+            monotonic_skew.fetch_add(skew[2].as_u64().expect("monotonic"), Ordering::SeqCst);
+        }
+    });
     let closing = Arc::clone(&log);
     options.callbacks.on_close = Some(Box::new(move |code| note(&closing, start, &format!("closed {code}"))));
     let mut session = attach_bridge_session(service, Recorded(Arc::new(Mutex::new(randoms.into()))), options)
         .await
         .expect("attached");
 
-    if let Some(close_at) = script["close_at"].as_u64() {
-        tokio::time::sleep_until(start + Duration::from_millis(close_at)).await;
-        session.close().await;
+    let mut calls: Vec<(u64, &str)> = ["reconnect_at", "close_at"]
+        .into_iter()
+        .filter_map(|key| script[key].as_u64().map(|at| (at, key)))
+        .collect();
+    calls.sort_by_key(|(at, _)| *at);
+    for (at, call) in calls {
+        tokio::time::sleep_until(start + Duration::from_millis(at)).await;
+        if call == "close_at" {
+            session.close().await;
+        } else {
+            let reconnect = ReconnectOptions {
+                api_base_url: "http://service.invalid".to_owned(),
+                ingress_token: "tok2".into(),
+                epoch: None,
+            };
+            session.reconnect_transport(reconnect).await.expect("reconnected");
+        }
     }
     tokio::time::sleep_until(start + Duration::from_millis(until + 1)).await;
     drop(session);
+    jumper.await.expect("the clocks jumped");
     let recorded: Vec<String> = serde_json::from_value(case["timeline"].clone()).expect("a timeline");
     let kept: Vec<String> = recorded
         .into_iter()
@@ -235,6 +269,10 @@ recorded!(
     a_stream_that_breaks_is_reopened_after_the_last_sequence,
     a_permanent_status_closes_the_session,
     a_permanent_status_with_a_body_that_never_ends_closes_after_three_seconds,
+    a_late_liveness_check_reopens_at_once,
+    a_late_wall_clock_alone_reopens_at_once,
+    a_late_monotonic_clock_alone_reopens_at_once,
+    a_small_jump_is_a_lost_stream,
     a_frame_postpones_the_liveness_timer,
     a_chunk_without_a_whole_frame_does_not_postpone_it,
     a_probe_sends_a_beat_at_once,
@@ -244,6 +282,7 @@ recorded!(
     closing_stops_the_liveness_timer,
     closing_stops_a_waiting_reconnect,
     closing_stops_a_stream_that_delivers,
+    a_reconnect_restarts_the_heartbeat_and_opens_the_stream_after_the_last_sequence,
 );
 
 #[tokio::test(start_paused = true)]

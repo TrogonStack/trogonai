@@ -18,7 +18,9 @@
 // A case with `conns` leaves `outboundOnly` off and scripts what the service answers to each GET of the stream, in
 // order: `'hang'` (no answer), `'reset'` (the socket is destroyed), or `{ status, chunks: [[ms after the answer, text]], then: 'end' | 'reset', hangBody }`; a stream
 // that has no more connections scripted stays open and silent. `skews` (`[virtual ms, wall ms, monotonic ms]`) move
-// `Date.now` and `performance.now` ahead without firing a timer, the way a paused or sleeping process does.
+// `Date.now` and `performance.now` ahead without firing a timer, the way a paused or sleeping process does. A case with
+// `together` runs everything the case does in one virtual millisecond (writes, flush, close, reconnect) in one
+// synchronous step, as a host does that calls the handle twice before yielding; without it the recorder lets the sockets settle between two writes.
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -187,6 +189,16 @@ add('reconnecting_sends_the_waiting_rows_and_drops_the_deltas', { until: 400, re
 const tool = (id) => assistant([{ type: 'text', text: 'hi' }, { type: 'tool_use', id, name: 'Bash', input: {} }]);
 add('closing_sends_the_row_that_is_ready', { until: 400, closeAt: 0, writes: writes(at(0, tool('t1'))) });
 add('closing_sends_the_row_that_waits_behind_the_ready_one', { until: 400, closeAt: 0, writes: writes(at(0, tool('t1')), at(0, assistant([{ type: 'text', text: 'wait' }]))) });
+const row = (text) => user(text);
+add('two_rows_written_together_are_posted_apart', { until: 400, together: true, writes: writes(at(0, row('a'), row('b'))) });
+add('several_rows_written_together_follow_the_first_in_one_post', { until: 400, together: true, writes: writes(at(0, row('a'), row('b'), row('c'), row('d'), row('e'))) });
+add('rows_written_together_behind_a_window_follow_the_window_row_in_one_post', { until: 400, together: true, writes: writes(at(0, say('a')), at(10, row('a'), row('b'), row('c'))) });
+add('two_rows_written_together_behind_a_window_are_posted_apart', { until: 400, together: true, writes: writes(at(0, say('a')), at(10, row('a'), row('b'))) });
+add('rows_written_together_in_two_milliseconds_are_posted_by_millisecond', { until: 400, together: true, writes: writes(at(0, row('a'), row('b'), row('c')), at(5, row('d'), row('e'))) });
+add('rows_written_together_and_a_close_in_the_same_step', { until: 400, together: true, closeAt: 0, writes: writes(at(0, row('a'), row('b'), row('c'))) });
+add('rows_and_a_flush_in_the_same_step', { until: 400, together: true, flushAt: 0, writes: writes(at(0, row('a'), row('b'), row('c'))) });
+add('rows_written_together_behind_a_window_and_a_close_in_the_same_step', { until: 400, together: true, closeAt: 10, writes: writes(at(0, say('a')), at(10, row('a'), row('b'))) });
+add('rows_written_together_follow_the_first_in_posts_of_a_hundred', { until: 400, together: true, writes: writes(at(0, ...Array.from({ length: 102 }, (_, n) => row(`r${n}`)))) });
 const evt = (id) => `id: ${id}\nevent: client_event\ndata: ${JSON.stringify({ event_id: `e${id}`, sequence_num: id, event_type: 'user', source: 'client', payload: { type: 'user', uuid: `u${id}`, message: { role: 'user', content: 'hi' } } })}\n\n`;
 const probe = 'event: ephemeral_event\ndata: {"event_type":"heartbeat_probe"}\n\n';
 const ping = ': ka\n\n';
@@ -216,6 +228,7 @@ streamed('closing_stops_the_liveness_timer', [{}, {}], { until: 120000, closeAt:
 streamed('closing_stops_a_waiting_reconnect', ['reset', {}], { until: 20000, closeAt: 500 });
 streamed('closing_stops_a_pending_open', ['hang', {}], { until: 100000, closeAt: 5000 });
 streamed('closing_stops_a_stream_that_delivers', [{ chunks: [[100, evt(1)]] }, {}], { until: 120000, closeAt: 20000 });
+add('a_reconnect_restarts_the_heartbeat_and_opens_the_stream_after_the_last_sequence', { until: 60000, conns: [{ chunks: [[100, evt(3)]] }, {}], reconnectAt: 5000 });
 add('closing_stops_the_timer', { until: 100000, closeAt: 25000 });
 add('a_terminal_answer_stops_the_timer', { until: 90000, answers: [{ status: 409, body: {} }] });
 
@@ -292,6 +305,15 @@ async function run(spec) {
   if (spec.reconnectAt !== undefined) steps.push([spec.reconnectAt, () => { handle.reconnectTransport({ apiBaseUrl: base, ingressToken: 'tok2' }).catch(() => {}); }]);
   for (const [when, wall, mono] of spec.skews ?? []) steps.push([when, () => { wallSkew += wall; monoSkew += mono; }]);
   steps.sort((a, b) => a[0] - b[0]);
+  if (spec.together) {
+    const merged = [];
+    for (const [when, step] of steps) {
+      const last = merged.at(-1);
+      if (last && last[0] === when) last[1].push(step); else merged.push([when, [step]]);
+    }
+    steps.length = 0;
+    for (const [when, group] of merged) steps.push([when, () => { for (const step of group) step(); }]);
+  }
   for (const [when, step] of steps) {
     await advanceTo(when);
     step();
@@ -300,7 +322,7 @@ async function run(spec) {
   try { handle.close(); } catch {}
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
-  const script = { interval: spec.interval ?? null, until: spec.until, close_at: spec.closeAt ?? null, flush_at: spec.flushAt ?? null, reconnect_at: spec.reconnectAt ?? null, conns, skews: spec.skews ?? [], writes: spec.writes ?? [], answers: answers.map((a) => a) };
+  const script = { interval: spec.interval ?? null, until: spec.until, close_at: spec.closeAt ?? null, flush_at: spec.flushAt ?? null, reconnect_at: spec.reconnectAt ?? null, ...(spec.together && { together: true }), conns, skews: spec.skews ?? [], writes: spec.writes ?? [], answers: answers.map((a) => a) };
   return { name: spec.name, script, randoms: [...randoms], stream_randoms: [...streamRandoms], timeline: [...timeline] };
 }
 

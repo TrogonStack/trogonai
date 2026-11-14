@@ -80,10 +80,17 @@ pub struct AttachBridgeSessionOptions {
     pub environment: Option<EnvironmentLookup>,
     /// The process arguments `--bare` is looked for in; the process arguments when absent.
     pub arguments: Option<Vec<String>>,
-    /// The caller runs the steps itself ([`BridgeSession::pump`], [`BridgeSession::stream_push`] and the others)
-    /// instead of the session starting the heartbeat timer, the upload task and the read stream the way the upstream
-    /// entrypoint does. The recorded goldens that replay one request at a time use it.
+    /// Rust only; `false` unless set, which is how the upstream entrypoint behaves. When `true` the caller runs the
+    /// steps itself ([`BridgeSession::pump`], [`BridgeSession::stream_push`] and the others) instead of the session
+    /// starting the heartbeat timer, the upload task and the read stream. The tests that replay one recorded request
+    /// at a time are its only users.
+    #[doc(hidden)]
     pub caller_driven: bool,
+    /// Rust only. The two clocks the liveness check of the read stream compares, which the bundle reads from
+    /// `Date.now` and `performance.now`; the system clocks when absent. It lets a test move them the way a paused
+    /// or sleeping process does.
+    #[doc(hidden)]
+    pub stream_clocks: Option<StreamClocks>,
 }
 
 impl AttachBridgeSessionOptions {
@@ -107,6 +114,7 @@ impl AttachBridgeSessionOptions {
             environment: None,
             arguments: None,
             caller_driven: false,
+            stream_clocks: None,
         }
     }
 }
@@ -156,6 +164,7 @@ pub struct BridgeSession<H, P = TokioPacing> {
     /// What the read stream, the host and the tasks share.
     pub(crate) shared: Arc<Runtime<H, P>>,
     pub(crate) scheduled: bool,
+    pub(crate) stream_clocks: Option<StreamClocks>,
 }
 
 /// `attachBridgeSession`: registers the worker when no epoch is given, and starts it (`connect`).
@@ -181,6 +190,7 @@ where
         environment,
         arguments,
         caller_driven,
+        stream_clocks,
     } = options;
     let entrypoint = lookup_environment(&environment, "CLAUDE_CODE_ENTRYPOINT");
     let session_access_token =
@@ -264,6 +274,7 @@ where
         stream_task: None,
         shared,
         scheduled: !caller_driven,
+        stream_clocks,
     };
     session.connect(epoch).await;
     session.start_runtime();
@@ -422,9 +433,10 @@ where
         if !self.mark_closed() {
             return;
         }
-        // Rows the host wrote that the upload task has not taken yet go out first, then the ones that waited for a
-        // window, each in its own post, the way the upstream uploader sends what is queued before it says goodbye.
-        let ready = self.uploads.take();
+        // The post the uploader had started goes out first, then the rows that waited for a window, each in its own
+        // post, the way the upstream uploader sends what is queued before it says goodbye. Rows queued behind the
+        // started post are dropped.
+        let ready = self.uploads.take_started();
         let waiting = self.uploads.close_window();
         if !self.lifecycle.is_ended() {
             for rows in [ready, waiting] {
@@ -471,6 +483,7 @@ where
             self.stream_task = Some(tokio::spawn(read_stream(
                 Arc::clone(&self.shared),
                 Arc::clone(&self.worker),
+                self.stream_clocks.clone().unwrap_or_default(),
             )));
         }
     }
@@ -505,13 +518,12 @@ where
 
 /// The read stream of one worker: the loop that opens and reads it, and the loop that applies what it carries, one
 /// effect after the other. When the service refuses the stream for good the session ends with the status.
-async fn read_stream<H, P>(shared: Arc<Runtime<H, P>>, worker: Arc<WorkerClient<H, P>>)
+async fn read_stream<H, P>(shared: Arc<Runtime<H, P>>, worker: Arc<WorkerClient<H, P>>, clocks: StreamClocks)
 where
     H: HttpExecute + Send + Sync + 'static,
     P: WorkerPacing + Send + Sync + 'static,
 {
     let connector = HttpStreamConnector::new(Arc::clone(&worker));
-    let clocks = StreamClocks::default();
     let (send, mut arrived) = tokio::sync::mpsc::unbounded_channel();
     let reading = async {
         let code = run_stream(

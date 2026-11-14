@@ -93,10 +93,39 @@ pub(crate) fn wind_down<H: HttpExecute, P: WorkerPacing>(worker: &WorkerClient<H
 }
 
 /// What the handle wrote that is ready to upload, and the stream events still waiting in their window.
+///
+/// The upstream uploader sends at once what it is given while it is idle, so the rows that made it start go out
+/// alone (`first`); everything that is ready while it posts waits for that post to end and then goes out together
+/// (`ready`), a hundred rows to a post. `busy` is true from the first row until the queue is found empty.
 #[derive(Default)]
 struct Held {
+    first: Vec<ClientEvent>,
     ready: Vec<ClientEvent>,
+    busy: bool,
     window: StreamEvents,
+}
+
+impl Held {
+    /// Rows that became ready: the first batch when the uploader is idle, the queue behind the post otherwise.
+    fn release(&mut self, sent: Vec<ClientEvent>) {
+        if sent.is_empty() {
+            return;
+        }
+        if self.busy {
+            self.ready.extend(sent);
+        } else {
+            self.busy = true;
+            self.first = sent;
+        }
+    }
+
+    /// Everything that is ready, in upload order.
+    fn all(&mut self) -> Vec<ClientEvent> {
+        let mut events = std::mem::take(&mut self.first);
+        events.append(&mut self.ready);
+        self.busy = false;
+        events
+    }
 }
 
 /// The events the handle wrote and the counters the upload task and its waiters agree on.
@@ -121,14 +150,34 @@ impl Uploads {
         {
             let mut held = self.held();
             let sent = held.window.write(frame, now);
-            held.ready.extend(sent);
+            held.release(sent);
         }
         self.wake();
     }
 
-    /// The events ready to upload.
+    /// Every event that is ready to upload.
     pub(crate) fn take(&self) -> Vec<ClientEvent> {
-        std::mem::take(&mut self.held().ready)
+        self.held().all()
+    }
+
+    /// The next post of the upload task: the first batch while there is one, then everything that waited behind it.
+    /// Empty once the queue is, which makes the uploader idle again.
+    pub(crate) fn take_next(&self) -> Vec<ClientEvent> {
+        let mut held = self.held();
+        if held.first.is_empty() {
+            held.busy = !held.ready.is_empty();
+            std::mem::take(&mut held.ready)
+        } else {
+            std::mem::take(&mut held.first)
+        }
+    }
+
+    /// What the uploader had already started to post when the host closed; the rows queued behind it are dropped.
+    pub(crate) fn take_started(&self) -> Vec<ClientEvent> {
+        let mut held = self.held();
+        held.ready.clear();
+        held.busy = false;
+        std::mem::take(&mut held.first)
     }
 
     /// When the stream window ends, if one is open.
@@ -143,7 +192,7 @@ impl Uploads {
             return false;
         }
         let sent = held.window.take();
-        held.ready.extend(sent);
+        held.release(sent);
         true
     }
 
@@ -151,7 +200,7 @@ impl Uploads {
     pub(crate) fn flush_window(&self) {
         let mut held = self.held();
         let sent = held.window.take();
-        held.ready.extend(sent);
+        held.release(sent);
     }
 
     /// The handle closing or reconnecting: drops the held stream events and hands back the rows that waited.
@@ -239,17 +288,23 @@ async fn upload_loop<H, P>(
 
 /// `drain_outbox` and `pump` of the session, run by the task.
 async fn drain<H: HttpExecute, P: WorkerPacing>(uploads: &Uploads, lifecycle: &Lifecycle, worker: &WorkerClient<H, P>) {
-    let events = uploads.take();
-    if !events.is_empty() {
-        let submitted = worker.submit_events(events).await;
-        settle(lifecycle, worker, submitted);
+    loop {
+        let events = uploads.take_next();
+        let last = events.is_empty();
+        if !last {
+            let submitted = worker.submit_events(events).await;
+            settle(lifecycle, worker, submitted);
+        }
+        let reports = worker.pump(None).await;
+        settle(lifecycle, worker, reports);
+        let events = worker.pump_events(None).await;
+        settle(lifecycle, worker, events);
+        let deliveries = worker.pump_deliveries(None).await;
+        settle(lifecycle, worker, deliveries);
+        if last {
+            return;
+        }
     }
-    let reports = worker.pump(None).await;
-    settle(lifecycle, worker, reports);
-    let events = worker.pump_events(None).await;
-    settle(lifecycle, worker, events);
-    let deliveries = worker.pump_deliveries(None).await;
-    settle(lifecycle, worker, deliveries);
 }
 
 fn settle<H: HttpExecute, P: WorkerPacing, T>(

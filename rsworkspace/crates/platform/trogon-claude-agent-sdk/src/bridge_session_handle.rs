@@ -198,7 +198,17 @@ where
     /// `flush`: sends the events the session holds. The reports and acknowledgements are not part of it.
     pub async fn flush(&mut self) {
         self.uploads.flush_window();
-        self.drain_outbox().await;
+        // The post the uploader had started and the rows queued behind it are separate posts, as upstream.
+        loop {
+            let events = self.uploads.take_next();
+            if events.is_empty() {
+                break;
+            }
+            let submitted = self.worker.submit_events(events).await;
+            self.settle(submitted);
+            let flushed = self.worker.flush_events().await;
+            self.settle(flushed);
+        }
         let flushed = self.worker.flush_events().await;
         self.settle(flushed);
     }

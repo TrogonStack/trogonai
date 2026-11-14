@@ -1,7 +1,9 @@
 //! The stream event window of an attached session replays the cases the pinned upstream bundle produced
 //! (`tests/fixtures/bridge_worker/timelines.json`): what each events request carried and when it was sent, as the
 //! handle is written to, flushed, closed and reconnected. The service is in memory and the Tokio clock is paused, so
-//! the times are exact. Same-millisecond order between a state PUT and an events POST is not compared.
+//! the times are exact. Same-millisecond order between a state PUT and an events POST is not compared. A case that
+//! is recorded `together` calls the handle several times in one millisecond without yielding, so the rows share one
+//! turn of the upload task; the others let it finish its posts between two calls, as the recorder does.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::{Arc, Mutex};
@@ -141,8 +143,15 @@ async fn replay(name: &str) {
         }
     }
     steps.sort_by_key(|(at, _)| *at);
+    let together = script["together"] == true;
+    let mut last = None;
     for (at, step) in steps {
-        until(start, at).await;
+        if last != Some(at) {
+            until(start, at).await;
+        } else if !together {
+            session.uploaded().await;
+        }
+        last = Some(at);
         match step.as_str() {
             Some("flush_at") => session.flush().await,
             Some("close_at") => session.close().await,
@@ -213,6 +222,15 @@ replayed!(
     closing_drops_the_window,
     closing_sends_the_row_that_waits_behind_the_ready_one,
     reconnecting_sends_the_waiting_rows_and_drops_the_deltas,
+    two_rows_written_together_are_posted_apart,
+    several_rows_written_together_follow_the_first_in_one_post,
+    rows_written_together_behind_a_window_follow_the_window_row_in_one_post,
+    two_rows_written_together_behind_a_window_are_posted_apart,
+    rows_written_together_in_two_milliseconds_are_posted_by_millisecond,
+    rows_written_together_follow_the_first_in_posts_of_a_hundred,
+    rows_written_together_and_a_close_in_the_same_step,
+    rows_written_together_behind_a_window_and_a_close_in_the_same_step,
+    rows_and_a_flush_in_the_same_step,
 );
 
 #[tokio::test(start_paused = true)]
