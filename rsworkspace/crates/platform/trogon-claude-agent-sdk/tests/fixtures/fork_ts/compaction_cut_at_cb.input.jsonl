@@ -1,0 +1,16 @@
+{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"s0","timestamp":"t1","message":{"role":"user","content":"one"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"s0","timestamp":"t2","message":{"role":"assistant","content":"two"}}
+{"type":"system","subtype":"compact_boundary","uuid":"cb","parentUuid":null,"logicalParentUuid":"a1","sessionId":"s0","timestamp":"t3","compactMetadata":{"trigger":"auto","durationMs":7,"postTokens":5,"preservedSegment":{"headUuid":"u1","anchorUuid":"cb","tailUuid":"a1"},"runningTurnSends":[1]}}
+{"type":"user","uuid":"u2","parentUuid":"cb","sessionId":"s0","timestamp":"t4","message":{"role":"user","content":"three"}}
+{"type":"assistant","uuid":"a2","parentUuid":"u2","sessionId":"s0","timestamp":"t5","message":{"role":"assistant","content":"four"}}
+{"type":"user","uuid":"x1","parentUuid":"u2","sessionId":"s0","timestamp":"t5b","message":{"role":"user","content":"dead"}}
+{"type":"user","uuid":"u3","parentUuid":"a2","sessionId":"s0","timestamp":"t6","message":{"role":"user","content":"five"}}
+{"type":"system","subtype":"compact_boundary","uuid":"cb2","parentUuid":"u3","logicalParentUuid":"u3","sessionId":"s0","timestamp":"t7","compactMetadata":{"durationMs":0,"preservedMessages":{"anchorUuid":"cb2","uuids":["a2","u3"]}}}
+{"type":"attachment","uuid":"att1","parentUuid":"cb2","sessionId":"s0","timestamp":"t8","attachment":{"type":"deferred_tools_record","nameOnlyAnnouncements":["u1","zzz","a2"]}}
+{"type":"system","subtype":"model_refusal_fallback","uuid":"m1","parentUuid":"att1","sessionId":"s0","timestamp":"t9"}
+{"type":"attachment","uuid":"att2","parentUuid":"m1","sessionId":"s0","timestamp":"t10","attachment":{"type":"queued_command","source_uuid":"u2","prompt":"p"}}
+{"type":"user","uuid":"q1","parentUuid":"att2","sessionId":"s0","timestamp":"t11","fold":{"command":{"source_uuid":"a2","value":"v"}},"message":{"role":"user","content":"six"}}
+{"type":"progress","uuid":"pr1","parentUuid":"pr2","sessionId":"s0"}
+{"type":"progress","uuid":"pr2","parentUuid":"pr1","sessionId":"s0"}
+{"type":"user","uuid":"q2","parentUuid":"pr1","logicalParentUuid":null,"sessionId":"s0","timestamp":"t12","teamName":"tm","isSidechain":false,"message":{"role":"user","content":"seven"}}
+{"type":"user","uuid":"sc1","parentUuid":"q2","sessionId":"s0","timestamp":"t13","isSidechain":true,"message":{"role":"user","content":"side"}}

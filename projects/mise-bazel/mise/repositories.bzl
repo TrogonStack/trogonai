@@ -27,6 +27,13 @@ _RUST_HOSTS = {
     ),
 }
 
+_NODE_HOSTS = {
+    ("mac os x", "aarch64"): ["@platforms//os:osx", "@platforms//cpu:aarch64"],
+    ("mac os x", "x86_64"): ["@platforms//os:osx", "@platforms//cpu:x86_64"],
+    ("linux", "aarch64"): ["@platforms//os:linux", "@platforms//cpu:aarch64"],
+    ("linux", "x86_64"): ["@platforms//os:linux", "@platforms//cpu:x86_64"],
+}
+
 _ARCH_ALIASES = {"arm64": "aarch64", "amd64": "x86_64"}
 
 _SKIPPED = ["BUILD", "BUILD.bazel", "MODULE.bazel", "REPO.bazel", "ROOT", "WORKSPACE", "WORKSPACE.bazel"]
@@ -81,6 +88,18 @@ def _mise_go_impl(rctx):
         fail("The Go SDK at {} is not go{}".format(source, rctx.attr.version))
     rctx.file("ROOT", "go{}\n".format(rctx.attr.version))
     rctx.file("BUILD.bazel", 'exports_files(["ROOT"])\n')
+
+def _mise_node_impl(rctx):
+    host = _NODE_HOSTS.get((rctx.os.name, _ARCH_ALIASES.get(rctx.os.arch, rctx.os.arch)))
+    if host == None:
+        fail("The mise Node.js toolchain supports macOS and Linux on ARM64 and x86-64 only")
+    source = _link_installed(rctx)
+    if not source.get_child("bin/node").exists:
+        fail("The Node.js install at {} lacks bin/node".format(source))
+    rctx.file("ROOT", "node{}\n".format(rctx.attr.version))
+    rctx.template("BUILD.bazel", rctx.attr._build, substitutions = {
+        "%{constraints}": repr(host),
+    })
 
 def _mise_rust_impl(rctx):
     version = rctx.attr.version
@@ -145,6 +164,14 @@ mise_tool = repository_rule(
 mise_go = repository_rule(
     implementation = _mise_go_impl,
     attrs = _INSTALLED,
+    environ = _ENVIRON,
+    local = True,
+    configure = True,
+)
+
+mise_node = repository_rule(
+    implementation = _mise_node_impl,
+    attrs = _INSTALLED | {"_build": attr.label(default = Label("//mise/private:node.BUILD.bazel.tpl"))},
     environ = _ENVIRON,
     local = True,
     configure = True,

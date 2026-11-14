@@ -21,12 +21,10 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     JsonObject, SdkSessionInfo, SessionId, SummaryDialect,
-    session_project_key::{canonicalize_lenient, sanitize_path},
-    session_prompt::{entry_first_prompt, iso_to_epoch_ms},
-    session_transcript::{
-        MessagePage, SessionMessage, entries_to_session_messages, entries_to_subagent_messages,
-        parent_ids_from_agent_metadata, parse_transcript_entries,
-    },
+    home_directory::{HomeDirectoryError, Platform, python_home, python_join},
+    session_project_key::{canonicalize_lenient, platform_nfc, sanitize_path},
+    session_prompt::{PromptMode, entry_first_prompt_with, iso_to_epoch_ms},
+    session_transcript::MessagePage,
 };
 
 /// Arguments of [`SessionFiles::list_sessions`] (`ListSessionsOptions` upstream).
@@ -63,34 +61,56 @@ impl Default for ListSessionsOptions {
 #[derive(Clone, Debug)]
 pub struct SessionFiles {
     projects_dir: PathBuf,
+    pub(crate) precompact_skip: bool,
 }
 
 impl SessionFiles {
-    /// Resolves the directory like the CLI: `CLAUDE_CONFIG_DIR`, else `~/.claude`, NFC normalized. `None` when
-    /// neither the variable nor a home directory is set.
-    pub fn from_environment() -> Option<Self> {
+    /// Resolves the directory like Python's `_get_claude_config_home_dir`: a non-empty `CLAUDE_CONFIG_DIR`, else
+    /// `Path.home() / ".claude"`, NFC normalized. Python raises `RuntimeError("Could not determine home directory.")`
+    /// when no home directory can be determined; this returns that error.
+    ///
+    /// # Errors
+    ///
+    /// [`HomeDirectoryError`] when neither `HOME` nor the passwd database names a home directory.
+    pub fn from_environment() -> Result<Self, HomeDirectoryError> {
         Self::from_environment_with(&SystemEnvironment)
     }
 
     /// [`SessionFiles::from_environment`] over an explicit environment source.
-    pub fn from_environment_with<E: EnvironmentVariable>(environment: &E) -> Option<Self> {
+    ///
+    /// # Errors
+    ///
+    /// [`HomeDirectoryError`] when no home directory can be determined.
+    pub fn from_environment_with<E: EnvironmentVariable>(environment: &E) -> Result<Self, HomeDirectoryError> {
         let configured = environment
             .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
             .filter(|value| !value.is_empty());
         let config = match configured {
             Some(value) => PathBuf::from(value),
-            None => {
-                let home = environment.var_os(OsStr::new(if cfg!(windows) { "USERPROFILE" } else { "HOME" }))?;
-                PathBuf::from(home).join(".claude")
-            }
+            None => python_join(
+                Platform::host(),
+                &python_home(environment, Platform::host())?,
+                ".claude",
+            ),
         };
-        Some(Self::with_config_dir(config))
+        let mut files = Self::with_config_dir(config);
+        files.precompact_skip = !crate::session_precompact::skip_disabled(environment);
+        Ok(files)
+    }
+
+    /// Whether transcripts above 5 MiB skip everything before the last compact boundary. On by default;
+    /// [`SessionFiles::from_environment_with`] turns it off when `CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP` is truthy.
+    #[must_use]
+    pub fn with_precompact_skip(mut self, enabled: bool) -> Self {
+        self.precompact_skip = enabled;
+        self
     }
 
     pub fn with_config_dir(config_dir: impl AsRef<Path>) -> Self {
         let normalized: String = config_dir.as_ref().to_string_lossy().nfc().collect();
         Self {
             projects_dir: PathBuf::from(normalized).join("projects"),
+            precompact_skip: true,
         }
     }
 
@@ -128,73 +148,6 @@ impl SessionFiles {
             .into_iter()
             .find_map(|entry| read_session_lite(&entry.join(&file_name)))
             .and_then(|lite| parse_session_info_from_lite(session_id, &lite, None))
-    }
-
-    /// Reads a session's visible conversation by walking its `parentUuid` chain.
-    pub fn get_session_messages(
-        &self,
-        session_id: &str,
-        directory: Option<&Path>,
-        page: MessagePage,
-    ) -> Vec<SessionMessage> {
-        let Some(session_id) = valid_uuid(session_id) else {
-            return Vec::new();
-        };
-        let Some(content) = self.read_session_file(session_id, directory) else {
-            return Vec::new();
-        };
-        entries_to_session_messages(&parse_transcript_entries(&content), page)
-    }
-
-    /// Lists the ids of the subagents of a session, including nested `subagents/workflows/<run>/` transcripts.
-    pub fn list_subagents(&self, session_id: &str, directory: Option<&Path>) -> Vec<String> {
-        let Some(session_id) = valid_uuid(session_id) else {
-            return Vec::new();
-        };
-        let Some(subagents) = self.resolve_subagents_dir(session_id, directory) else {
-            return Vec::new();
-        };
-        collect_agent_files(&subagents).into_iter().map(|(id, _)| id).collect()
-    }
-
-    /// Reads a subagent's conversation. The parent ids come from the `agent-<id>.meta.json` sidecar and are `None`
-    /// when it is missing or unusable.
-    pub fn get_subagent_messages(
-        &self,
-        session_id: &str,
-        agent_id: &str,
-        directory: Option<&Path>,
-        page: MessagePage,
-    ) -> Vec<SessionMessage> {
-        let Some(session_id) = valid_uuid(session_id) else {
-            return Vec::new();
-        };
-        if agent_id.is_empty() {
-            return Vec::new();
-        }
-        let Some(subagents) = self.resolve_subagents_dir(session_id, directory) else {
-            return Vec::new();
-        };
-        let Some((_, transcript)) = collect_agent_files(&subagents)
-            .into_iter()
-            .find(|(id, _)| id == agent_id)
-        else {
-            return Vec::new();
-        };
-        let Ok(content) = std::fs::read_to_string(&transcript) else {
-            return Vec::new();
-        };
-        if content.is_empty() {
-            return Vec::new();
-        }
-        let meta = read_agent_metadata_sidecar(&transcript);
-        let (tool_use_id, parent_agent_id) = parent_ids_from_agent_metadata(meta.as_ref());
-        entries_to_subagent_messages(
-            &parse_transcript_entries(&content),
-            page,
-            tool_use_id.as_deref(),
-            parent_agent_id.as_deref(),
-        )
     }
 
     pub(crate) fn project_dirs(&self) -> Vec<PathBuf> {
@@ -244,7 +197,7 @@ impl SessionFiles {
         if let Some(dir) = self.find_project_dir(canonical) {
             candidates.push((dir, canonical.to_owned()));
         }
-        for worktree in worktree_paths(canonical) {
+        for worktree in worktree_paths(canonical, SummaryDialect::Python) {
             if worktree == canonical {
                 continue;
             }
@@ -258,7 +211,7 @@ impl SessionFiles {
     fn sessions_for_project(&self, directory: &Path, include_worktrees: bool) -> Vec<SdkSessionInfo> {
         let canonical = canonicalize_lenient(directory);
         let worktrees = if include_worktrees {
-            worktree_paths(&canonical)
+            worktree_paths(&canonical, SummaryDialect::Python)
         } else {
             Vec::new()
         };
@@ -269,14 +222,7 @@ impl SessionFiles {
                 .unwrap_or_default();
         }
 
-        let case_insensitive = cfg!(windows);
-        let fold = |name: &str| {
-            if case_insensitive {
-                name.to_lowercase()
-            } else {
-                name.to_owned()
-            }
-        };
+        let fold = |name: &str| crate::session_project_key::fold_directory_name(name, cfg!(windows));
         let mut indexed: Vec<(String, String)> = worktrees
             .into_iter()
             .map(|path| {
@@ -327,7 +273,7 @@ impl SessionFiles {
         deduplicate(sessions)
     }
 
-    fn read_session_file(&self, session_id: &str, directory: Option<&Path>) -> Option<String> {
+    pub(crate) fn read_session_file(&self, session_id: &str, directory: Option<&Path>) -> Option<String> {
         let file_name = format!("{session_id}.jsonl");
         let read = |dir: &Path| {
             std::fs::read_to_string(dir.join(&file_name))
@@ -364,11 +310,6 @@ impl SessionFiles {
                 .find_map(|(dir, _)| non_empty(&dir));
         }
         self.project_dirs().into_iter().find_map(|dir| non_empty(&dir))
-    }
-
-    fn resolve_subagents_dir(&self, session_id: &str, directory: Option<&Path>) -> Option<PathBuf> {
-        let transcript = self.resolve_session_file_path(session_id, directory)?;
-        Some(transcript.with_extension("").join("subagents"))
     }
 }
 
@@ -519,6 +460,11 @@ pub(crate) fn extract_first_prompt_from_head(head: &str) -> String {
 }
 
 pub(crate) fn extract_first_prompt_from_head_with(head: &str, dialect: SummaryDialect) -> String {
+    extract_first_prompt_from_head_mode(head, dialect, PromptMode::Stored)
+}
+
+/// Upstream `Ug`: the head scan, with `mode` choosing whether a plugin prompt is shown as its label.
+pub(crate) fn extract_first_prompt_from_head_mode(head: &str, dialect: SummaryDialect, mode: PromptMode) -> String {
     let mut command_fallback: Option<String> = None;
     for line in head.split('\n') {
         if !(line.contains("\"type\":\"user\"") || line.contains("\"type\": \"user\"")) {
@@ -535,7 +481,7 @@ pub(crate) fn extract_first_prompt_from_head_with(head: &str, dialect: SummaryDi
         let Ok(Value::Object(entry)) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if let Some(prompt) = entry_first_prompt(dialect, &entry, &mut command_fallback) {
+        if let Some(prompt) = entry_first_prompt_with(dialect, mode, &entry, &mut command_fallback) {
             return prompt;
         }
     }
@@ -595,7 +541,7 @@ pub(crate) fn parse_session_info_from_lite(
 
 /// Runs `git worktree list --porcelain` in `cwd` with upstream's five second limit. Empty when git is missing or
 /// `cwd` is not in a repository.
-pub(crate) fn worktree_paths(cwd: &str) -> Vec<String> {
+pub(crate) fn worktree_paths(cwd: &str, dialect: SummaryDialect) -> Vec<String> {
     let Ok(mut child) = Command::new("git")
         .args([
             "-c",
@@ -643,7 +589,7 @@ pub(crate) fn worktree_paths(cwd: &str) -> Vec<String> {
     output
         .split('\n')
         .filter_map(|line| line.strip_prefix("worktree "))
-        .map(|path| path.nfc().collect())
+        .map(|path| platform_nfc(path, dialect))
         .collect()
 }
 
@@ -667,7 +613,7 @@ pub(crate) fn read_agent_metadata_sidecar(transcript: &Path) -> Option<JsonObjec
 }
 
 /// Recursively collects `agent-*.jsonl` files, directory entries sorted by name at every level.
-fn collect_agent_files(base: &Path) -> Vec<(String, PathBuf)> {
+pub(crate) fn collect_agent_files(base: &Path) -> Vec<(String, PathBuf)> {
     fn walk(dir: &Path, out: &mut Vec<(String, PathBuf)>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -692,28 +638,5 @@ fn collect_agent_files(base: &Path) -> Vec<(String, PathBuf)> {
     files
 }
 
-/// [`SessionFiles::get_session_messages`] over the environment's config directory.
-pub fn get_session_messages(session_id: &str, directory: Option<&Path>, page: MessagePage) -> Vec<SessionMessage> {
-    SessionFiles::from_environment()
-        .map(|files| files.get_session_messages(session_id, directory, page))
-        .unwrap_or_default()
-}
-
-/// [`SessionFiles::list_subagents`] over the environment's config directory.
-pub fn list_subagents(session_id: &str, directory: Option<&Path>) -> Vec<String> {
-    SessionFiles::from_environment()
-        .map(|files| files.list_subagents(session_id, directory))
-        .unwrap_or_default()
-}
-
-/// [`SessionFiles::get_subagent_messages`] over the environment's config directory.
-pub fn get_subagent_messages(
-    session_id: &str,
-    agent_id: &str,
-    directory: Option<&Path>,
-    page: MessagePage,
-) -> Vec<SessionMessage> {
-    SessionFiles::from_environment()
-        .map(|files| files.get_subagent_messages(session_id, agent_id, directory, page))
-        .unwrap_or_default()
-}
+#[cfg(test)]
+mod tests;

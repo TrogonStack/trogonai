@@ -1,3 +1,7 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# No dependency runs install scripts. pnpm 11 reads only this setting, so it
+# also tells Bazel that no lifecycle hook actions are needed.
+allowBuilds: {}

@@ -15,6 +15,24 @@ use crate::JsonObject;
 pub enum SessionMessageKind {
     User,
     Assistant,
+    /// Only returned by the TypeScript dialect with `include_system_messages`.
+    System,
+}
+
+/// Fields the TypeScript SDK adds to a message beyond the Python shape. All stay at their default in the Python
+/// dialect.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MessageExtras {
+    pub timestamp: Option<Value>,
+    pub origin: Option<Value>,
+    /// `is_meta` upstream: a meta, compact summary or transcript-only entry.
+    pub is_meta: bool,
+    pub is_compact_summary: bool,
+    pub is_queued_command: bool,
+    pub is_completed_local_command: bool,
+    pub interrupted_by_shutdown: bool,
+    pub tool_denial_unanswered: Option<String>,
+    pub tool_result_meta: Option<Value>,
 }
 
 /// A user or assistant message from a session transcript (`SessionMessage` upstream).
@@ -29,6 +47,7 @@ pub struct SessionMessage {
     pub message: Value,
     pub parent_tool_use_id: Option<String>,
     pub parent_agent_id: Option<String>,
+    pub extras: MessageExtras,
 }
 
 /// Paging shared by the message readers: `limit` of `None` or `Some(0)` returns everything, as upstream does.
@@ -39,7 +58,7 @@ pub struct MessagePage {
 }
 
 impl MessagePage {
-    fn apply<T>(self, mut items: Vec<T>) -> Vec<T> {
+    pub(crate) fn apply<T>(self, mut items: Vec<T>) -> Vec<T> {
         match self.limit {
             Some(limit) if limit > 0 => items.into_iter().skip(self.offset).take(limit).collect(),
             _ if self.offset > 0 => items.drain(self.offset.min(items.len())..).collect(),
@@ -475,6 +494,7 @@ fn to_session_message(
         message: entry.get("message").cloned().unwrap_or(Value::Null),
         parent_tool_use_id: parent_tool_use_id.map(str::to_owned),
         parent_agent_id: parent_agent_id.map(str::to_owned),
+        extras: MessageExtras::default(),
     }
 }
 

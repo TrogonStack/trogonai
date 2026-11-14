@@ -28,4 +28,3 @@ uuid = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tower = "0.5"
 trogon-nats = { workspace = true, features = ["test-support"] }
-

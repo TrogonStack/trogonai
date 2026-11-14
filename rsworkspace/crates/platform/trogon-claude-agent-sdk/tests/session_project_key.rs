@@ -4,7 +4,7 @@ use std::{
     io,
     path::{Path, PathBuf},
 };
-use trogon_claude_agent_sdk::{SessionProjectKey, adapters::CanonicalizePath};
+use trogon_claude_agent_sdk::{SessionProjectKey, SessionProjectKeyError, adapters::CanonicalizePath};
 
 struct CanonicalPath;
 impl CanonicalizePath for CanonicalPath {
@@ -16,9 +16,15 @@ impl CanonicalizePath for CanonicalPath {
 
 #[test]
 fn project_key_matches_upstream_utf16_replacement() -> Result<(), Box<dyn std::error::Error>> {
+    // TypeScript composes the path to NFC only on macOS; elsewhere the combining mark is replaced on its own.
+    let decomposed_cafe = if cfg!(target_os = "macos") {
+        "-projects-caf-"
+    } else {
+        "-projects-cafe-"
+    };
     for (path, expected) in [
         ("/projects/hello🌻", "-projects-hello--"),
-        ("/projects/cafe\u{301}", "-projects-caf-"),
+        ("/projects/cafe\u{301}", decomposed_cafe),
         ("/projects/hello.world", "-projects-hello-world"),
     ] {
         let key = SessionProjectKey::for_directory_with_filesystem(Path::new(path), &CanonicalPath)?;
@@ -54,8 +60,10 @@ fn long_project_paths_are_truncated_and_suffixed_with_a_stable_hash() -> Result<
 }
 
 #[test]
-fn explicit_project_keys_reject_unsafe_components() -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(SessionProjectKey::new("project-1")?.as_str(), "project-1");
+fn explicit_project_keys_take_any_name_as_upstream_does_and_checked_rejects_unsafe_ones()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(SessionProjectKey::new("project-1").as_str(), "project-1");
+    assert_eq!(SessionProjectKey::checked("project-1")?.as_str(), "project-1");
     for value in [
         "",
         ".",
@@ -68,7 +76,12 @@ fn explicit_project_keys_reject_unsafe_components() -> Result<(), Box<dyn std::e
         "lpt1.txt",
         "tab\there",
     ] {
-        assert!(SessionProjectKey::new(value).is_err(), "{value:?} must be rejected");
+        assert_eq!(SessionProjectKey::new(value).as_str(), value);
+        let error = SessionProjectKey::checked(value)
+            .err()
+            .ok_or("accepted an unsafe project key")?;
+        assert!(matches!(error, SessionProjectKeyError::Invalid), "{value:?}");
+        assert_eq!(error.to_string(), "invalid session project key");
     }
     Ok(())
 }

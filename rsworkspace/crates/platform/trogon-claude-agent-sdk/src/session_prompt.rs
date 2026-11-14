@@ -1,8 +1,15 @@
 //! First-prompt extraction and timestamp parsing shared by the summary fold and the transcript readers.
 
+use std::borrow::Cow;
+
 use serde_json::Value;
 
-use crate::{JsonObject, SummaryDialect};
+use crate::{
+    JsonObject, SummaryDialect,
+    constants::{
+        TS_PASTED_OPEN, TS_PLUGIN_PROMPT_HEADER_PREFIX, TS_PLUGIN_PROMPT_HEADER_SUFFIX, TS_PLUGIN_PROMPT_TRAILER,
+    },
+};
 
 /// Extracts the first meaningful user prompt from one transcript entry.
 ///
@@ -11,6 +18,103 @@ use crate::{JsonObject, SummaryDialect};
 /// only record `command_fallback`. The two upstream SDKs differ in which text they skip and how they truncate.
 pub(crate) fn entry_first_prompt(
     dialect: SummaryDialect,
+    entry: &JsonObject,
+    command_fallback: &mut Option<String>,
+) -> Option<String> {
+    entry_first_prompt_with(dialect, PromptMode::Stored, entry, command_fallback)
+}
+
+/// Whether a plugin prompt is shown as its label (`shown`) or as it is stored (`stored`). Only the TypeScript
+/// dialect has the `shown` rewrite.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PromptMode {
+    Stored,
+    Shown,
+}
+
+/// Whitespace per the JavaScript `\s` class and `String.prototype.trim`: U+FEFF counts, U+0085 does not.
+pub(crate) fn js_space(ch: char) -> bool {
+    (ch.is_whitespace() && ch != '\u{85}') || ch == '\u{feff}'
+}
+
+pub(crate) fn js_trim(text: &str) -> &str {
+    text.trim_matches(js_space)
+}
+
+/// Upstream `Rxe` and `$U`: `Prompt from the <label> plugin: <text>` for a stored plugin prompt, else `None`.
+fn plugin_prompt(content: &str, plugin: Option<&Value>) -> Option<String> {
+    let text = plugin?
+        .as_object()?
+        .get("text")?
+        .as_str()
+        .filter(|text| !text.is_empty())?;
+    let header = &content[..content.find('\n').map_or(0, |index| index + 1)];
+    if header.encode_utf16().count() <= 28 {
+        return None;
+    }
+    let label = header
+        .strip_prefix(TS_PLUGIN_PROMPT_HEADER_PREFIX)?
+        .strip_suffix(TS_PLUGIN_PROMPT_HEADER_SUFFIX)?;
+    let rest = content.strip_prefix(header)?.strip_prefix(text)?;
+    (rest == TS_PLUGIN_PROMPT_TRAILER).then(|| format!("Prompt from the {label} plugin: {text}"))
+}
+
+/// Upstream `PA`: replace every pasted-content block with its body.
+pub(crate) fn strip_pasted(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::new();
+    let (mut kept, mut from) = (0_usize, 0_usize);
+    let mut blocks = 0_usize;
+    while let Some(found) = text[from..].find(TS_PASTED_OPEN) {
+        let open = from + found;
+        let id_start = open + TS_PASTED_OPEN.len();
+        let id = bytes.get(id_start..id_start + 4);
+        let valid = id.is_some_and(|id| id.iter().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')))
+            && bytes.get(id_start + 4..id_start + 7) == Some(b"\">\n");
+        if !valid {
+            from = id_start;
+            continue;
+        }
+        let body_start = id_start + 7;
+        let Some(id) = id.and_then(|id| std::str::from_utf8(id).ok()) else {
+            break;
+        };
+        let close = format!("\n</pasted_content id=\"{id}\">");
+        let Some(found) = text.get(body_start - 1..).and_then(|rest| rest.find(&close)) else {
+            break;
+        };
+        let close_at = body_start - 1 + found + 1;
+        let mut text_end = open;
+        for _ in 0..2 {
+            if text_end > kept && bytes.get(text_end - 1) == Some(&b'\n') {
+                text_end -= 1;
+            }
+        }
+        if text_end > kept {
+            out.push_str(&text[kept..text_end]);
+        }
+        kept = close_at + close.len() - 1;
+        for _ in 0..2 {
+            if bytes.get(kept) == Some(&b'\n') {
+                kept += 1;
+            }
+        }
+        out.push_str(text.get(body_start..close_at - 1).unwrap_or(""));
+        blocks += 1;
+        from = kept;
+    }
+    if blocks == 0 {
+        return text.to_owned();
+    }
+    if kept < text.len() {
+        out.push_str(&text[kept..]);
+    }
+    out
+}
+
+pub(crate) fn entry_first_prompt_with(
+    dialect: SummaryDialect,
+    mode: PromptMode,
     entry: &JsonObject,
     command_fallback: &mut Option<String>,
 ) -> Option<String> {
@@ -23,9 +127,17 @@ pub(crate) fn entry_first_prompt(
         return None;
     }
     let message = entry.get("message").and_then(Value::as_object)?;
-    let mut texts: Vec<&str> = Vec::new();
+    let typescript = dialect == SummaryDialect::TypeScript;
+    let mut texts: Vec<Cow<'_, str>> = Vec::new();
+    let mut rewritten = false;
     match message.get("content") {
-        Some(Value::String(text)) => texts.push(text),
+        Some(Value::String(text)) => {
+            let shown = (typescript && mode == PromptMode::Shown)
+                .then(|| plugin_prompt(text, entry.get("pluginPrompt")))
+                .flatten();
+            rewritten = shown.is_some();
+            texts.push(shown.map_or(Cow::Borrowed(text.as_str()), Cow::Owned));
+        }
         Some(Value::Array(blocks)) => {
             for block in blocks {
                 let Some(block) = block.as_object() else { continue };
@@ -33,7 +145,7 @@ pub(crate) fn entry_first_prompt(
                     Some("tool_result") => return None,
                     Some("text") => {
                         if let Some(text) = block.get("text").and_then(Value::as_str) {
-                            texts.push(text);
+                            texts.push(Cow::Borrowed(text));
                         }
                     }
                     _ => {}
@@ -43,21 +155,27 @@ pub(crate) fn entry_first_prompt(
         _ => {}
     }
     for raw in texts {
-        let result = raw.replace('\n', " ");
-        let result = result.trim();
+        let stripped = if typescript {
+            strip_pasted(&raw)
+        } else {
+            raw.into_owned()
+        };
+        let result = stripped.replace('\n', " ");
+        let result = if typescript { js_trim(&result) } else { result.trim() };
         if result.is_empty() {
             continue;
         }
-        if let Some(name) = command_name(result) {
+        if !rewritten && let Some(name) = command_name(result, typescript) {
             if command_fallback.as_deref().is_none_or(str::is_empty) {
                 *command_fallback = Some(name.to_owned());
             }
             continue;
         }
-        if dialect == SummaryDialect::TypeScript
+        if typescript
+            && !rewritten
             && let Some(command) = bash_input(result)
         {
-            return Some(format!("! {}", command.trim()));
+            return Some(format!("! {}", js_trim(command)));
         }
         if skip_first_prompt(dialect, result) {
             continue;
@@ -68,7 +186,9 @@ pub(crate) fn entry_first_prompt(
 }
 
 /// `<command-name>(.*?)</command-name>`, first match.
-pub(crate) fn command_name(text: &str) -> Option<&str> {
+///
+/// `.` excludes only `\n` in Python and also `\r`, U+2028 and U+2029 in JavaScript.
+pub(crate) fn command_name(text: &str, typescript: bool) -> Option<&str> {
     const OPEN: &str = "<command-name>";
     const CLOSE: &str = "</command-name>";
     let mut from = 0;
@@ -76,7 +196,8 @@ pub(crate) fn command_name(text: &str) -> Option<&str> {
         let inner_start = from + start + OPEN.len();
         if let Some(end) = text[inner_start..].find(CLOSE) {
             let inner = &text[inner_start..inner_start + end];
-            if !inner.contains('\n') {
+            let line_break = |ch: char| ch == '\n' || (typescript && matches!(ch, '\r' | '\u{2028}' | '\u{2029}'));
+            if !inner.contains(line_break) {
                 return Some(inner);
             }
         } else {
@@ -132,7 +253,7 @@ fn typescript_skip(text: &str) -> bool {
     if interrupted_marker(text) {
         return true;
     }
-    let Some(rest) = text.trim_start().strip_prefix('<') else {
+    let Some(rest) = text.trim_start_matches(js_space).strip_prefix('<') else {
         return false;
     };
     let mut chars = rest.chars();
@@ -143,7 +264,7 @@ fn typescript_skip(text: &str) -> bool {
         if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
             continue;
         }
-        return ch == '>' || ch.is_whitespace();
+        return ch == '>' || js_space(ch);
     }
     false
 }
@@ -165,7 +286,7 @@ fn truncate_prompt(dialect: SummaryDialect, text: &str) -> String {
                 if keep.last().is_some_and(|unit| (0xD800..=0xDBFF).contains(unit)) {
                     keep = &keep[..199];
                 }
-                format!("{}\u{2026}", String::from_utf16_lossy(keep).trim())
+                format!("{}\u{2026}", js_trim(&String::from_utf16_lossy(keep)))
             } else {
                 text.to_owned()
             }
@@ -253,6 +374,33 @@ fn parse_iso_micros(text: &str) -> Option<(i64, ())> {
     Some((((days * 86400 + seconds_of_day - offset) * 1_000_000) + micros, ()))
 }
 
+/// `Date.prototype.toISOString` for a Unix epoch millisecond count.
+pub(crate) fn iso_from_epoch_ms(millis: i64) -> String {
+    const DAY_MS: i64 = 86_400_000;
+    let days = millis.div_euclid(DAY_MS);
+    let rest = millis.rem_euclid(DAY_MS);
+    let shifted = days + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
+        rest / 3_600_000,
+        rest / 60_000 % 60,
+        rest / 1000 % 60,
+        rest % 1000
+    )
+}
+
 fn days_in_month(year: i64, month: i64) -> i64 {
     match month {
         2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
@@ -271,3 +419,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     era * 146_097 + day_of_era - 719_468
 }
+
+#[cfg(test)]
+#[path = "session_prompt_tests.rs"]
+mod tests;

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Test the NATS gateway bootstrap identity script"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+exec sh devops/docker/compose/services/nats/gateway-env.test.sh

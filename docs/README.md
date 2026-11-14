@@ -10,6 +10,12 @@ The [gateway webhook reference](./reference/gateway-webhooks.md) describes
 dynamic endpoint registration, request authentication, and the durable delivery
 contract that other systems consume.
 
+## Development verification
+
+[Verify scheduler decisions with Hydro](./how-to/verify-scheduler-with-hydro.md)
+explores client command orderings and exercises the production scheduler domain
+deciders for each order. Its scope is separate from broker and processor recovery.
+
 ## Workload identity
 
 The proposed [workload identity profile](./reference/workload-identity.md)

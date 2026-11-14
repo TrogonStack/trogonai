@@ -71,12 +71,60 @@ pub(super) fn unknown_keys(value: &serde_json::Value, known: &[&str]) -> usize {
         .map_or(0, |map| map.keys().filter(|key| !known.contains(&key.as_str())).count())
 }
 
+/// The number of the listed string-literal properties of `value` that hold a string the
+/// declarations do not list.
+pub(super) fn unlisted_literals(value: &serde_json::Value, literals: &[(&str, &[&str])]) -> usize {
+    let Some(map) = value.as_object() else {
+        return 0;
+    };
+    literals
+        .iter()
+        .filter(|(key, allowed)| {
+            map.get(*key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| !allowed.contains(&text))
+        })
+        .count()
+}
+
 /// Keeps the candidate with the fewest unknown keys; the earliest declared wins ties.
 pub(super) fn keep_best<T>(best: &mut Option<(usize, T)>, candidate: Option<(usize, T)>) {
     if let Some((score, value)) = candidate
         && best.as_ref().is_none_or(|(current, _)| score < *current)
     {
         *best = Some((score, value));
+    }
+}
+
+/// Whether `value` holds one of the listed strings under `key`.
+pub(super) fn tag_str(value: &serde_json::Value, key: &str, allowed: &[&str]) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|text| allowed.contains(&text))
+}
+
+/// Whether `value` holds one of the listed booleans under `key`.
+pub(super) fn tag_bool(value: &serde_json::Value, key: &str, allowed: &[bool]) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .is_some_and(|flag| allowed.contains(&flag))
+}
+
+/// Keeps the candidate that pins the most tags, then the one with the fewest unknown keys; the
+/// earliest declared wins ties.
+pub(super) fn keep_most_specific<T>(
+    best: &mut Option<(usize, usize, T)>,
+    specificity: usize,
+    candidate: Option<(usize, T)>,
+) {
+    if let Some((score, value)) = candidate
+        && best
+            .as_ref()
+            .is_none_or(|(pinned, current, _)| specificity > *pinned || (specificity == *pinned && score < *current))
+    {
+        *best = Some((specificity, score, value));
     }
 }
 

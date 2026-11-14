@@ -25,8 +25,9 @@ use crate::{
         LiteSessionFile, extract_first_prompt_from_head_with, extract_json_string_field, read_session_lite, string_end,
         unescape_json_string, valid_uuid, worktree_paths,
     },
-    session_project_key::{canonicalize_lenient, hyphenate, sanitize_path},
-    session_prompt::{entry_first_prompt, iso_to_epoch_ms},
+    session_probe_ts::{blocks_probe, is_network_or_device_path},
+    session_project_key::{canonicalize_lenient_in, hyphenate, platform_nfc, project_name_ts, sanitize_path},
+    session_prompt::{entry_first_prompt, iso_to_epoch_ms, js_trim},
 };
 
 enum Parsed {
@@ -158,10 +159,6 @@ fn media_summary(head: &str) -> &'static str {
         }
     }
     ""
-}
-
-fn js_trim(text: &str) -> &str {
-    text.trim_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}')
 }
 
 /// Upstream `Lz`: collapse control and format characters, drop the rest of C0 and C1, cap at 200 characters.
@@ -375,13 +372,13 @@ fn case_insensitive_platform() -> bool {
 }
 
 fn unified(path: &str, fold: bool) -> String {
-    let slashed = path.replace('\\', "/");
+    let slashed = tt(path).replace('\\', "/");
     if fold { slashed.to_lowercase() } else { slashed }
 }
 
 /// Upstream `Vl` followed by the platform's case rule.
 fn name_key(path: &str, fold: bool) -> String {
-    let name = hyphenate(path, SummaryDialect::TypeScript);
+    let name = hyphenate(&tt(path), SummaryDialect::TypeScript);
     if fold { name.to_lowercase() } else { name }
 }
 
@@ -407,70 +404,9 @@ fn within_worktrees(path: &str, worktrees: Option<&[String]>, fold: bool) -> boo
     })
 }
 
-fn is_slash(ch: char) -> bool {
-    matches!(ch, '/' | '\\')
-}
-
-fn normalized_segments(path: &str) -> Option<Vec<&str>> {
-    if !path.starts_with('/') {
-        return None;
-    }
-    let mut segments: Vec<&str> = Vec::new();
-    for segment in path.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                segments.pop();
-            }
-            other => segments.push(other),
-        }
-    }
-    Some(segments)
-}
-
-/// Upstream `Gr` and the lexical part of `iM`: network, device and automount paths that must not be probed.
-fn unsafe_to_probe(path: &str) -> bool {
-    let mut chars = path.chars();
-    let (first, second, third) = (chars.next(), chars.next(), chars.next());
-    let two_slashes = first.is_some_and(is_slash) && second.is_some_and(is_slash);
-    if two_slashes {
-        let lowered = path.to_ascii_lowercase();
-        let wsl = ["//wsl$/", "//wsl.localhost/"]
-            .iter()
-            .any(|prefix| lowered.replace('\\', "/").starts_with(prefix));
-        if !wsl || third.is_some_and(|ch| matches!(ch, '?' | '.')) {
-            return true;
-        }
-    }
-    if first.is_some_and(is_slash) && second == Some('?') && third == Some('?') && chars.next().is_some_and(is_slash) {
-        return true;
-    }
-    let lowered = path.to_ascii_lowercase().replace('\\', "/");
-    if ["/global??/", "/globalroot/", "/dosdevices/", "/device/"]
-        .iter()
-        .any(|prefix| lowered.starts_with(prefix))
-    {
-        return true;
-    }
-    let Some(segments) = normalized_segments(path) else {
-        return false;
-    };
-    for end in 1..=segments.len() {
-        let head = &segments[..end];
-        let lower = |index: usize| head[index].to_lowercase();
-        if (end == 2 && lower(0) == "net")
-            || (end == 3 && lower(0) == "network" && lower(1) == "servers")
-            || (end == 1 && lower(0) == "network")
-            || (end == 1 && matches!(lower(0).as_str(), ".vol" | ".file" | ".nofollow" | ".resolve"))
-        {
-            return true;
-        }
-    }
-    segments.len() == 1 && segments[0].eq_ignore_ascii_case("net")
-}
-
-fn has_parent_segment(path: &str) -> bool {
-    path.split(is_slash).any(|segment| segment == "..")
+/// Upstream `tt`.
+fn tt(path: &str) -> String {
+    platform_nfc(path, SummaryDialect::TypeScript)
 }
 
 /// Upstream `l0`: `cwd` is a different directory whose project name collides with `project_path`'s, so the session
@@ -480,20 +416,25 @@ fn foreign_lookalike(cwd: &str, project_path: &str) -> bool {
     if !colliding_names(cwd, project_path, fold) {
         return false;
     }
-    if unsafe_to_probe(cwd)
-        || unsafe_to_probe(project_path)
-        || has_parent_segment(cwd)
-        || has_parent_segment(project_path)
-    {
+    if is_network_or_device_path(cwd) || is_network_or_device_path(project_path) {
+        return false;
+    }
+    if blocks_probe(cwd) || blocks_probe(project_path) {
         return false;
     }
     let Ok(real) = std::fs::canonicalize(cwd) else {
         return false;
     };
-    let Some(real) = real.to_str() else {
-        return false;
-    };
-    colliding_names(real, &canonicalize_lenient(Path::new(project_path)), fold)
+    let real = tt(&real.to_string_lossy());
+    colliding_names(&real, &resolved_project_path(project_path), fold)
+}
+
+/// Upstream `is`: the realpath of `path`, or `path` itself when it cannot be resolved.
+fn resolved_project_path(path: &str) -> String {
+    match std::fs::canonicalize(path) {
+        Ok(real) => tt(&real.to_string_lossy()),
+        Err(_) => tt(path),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -597,11 +538,7 @@ fn collect_page(
 }
 
 fn fold_name(name: &str) -> String {
-    if cfg!(windows) {
-        name.to_lowercase()
-    } else {
-        name.to_owned()
-    }
+    crate::session_project_key::fold_directory_name(name, cfg!(windows))
 }
 
 /// Upstream `Yl`/`u0`: some transcript in `dir` was recorded in a directory that sanitizes like `path`.
@@ -617,7 +554,7 @@ fn holds_session_of(dir: &Path, path: &str) -> bool {
         }
         read_session_lite(&file)
             .and_then(|lite| relocated_cwd(&lite))
-            .is_some_and(|cwd| fold_name(&hyphenate(&cwd, SummaryDialect::TypeScript)) == wanted)
+            .is_some_and(|cwd| fold_name(&hyphenate(&tt(&cwd), SummaryDialect::TypeScript)) == wanted)
     })
 }
 
@@ -666,11 +603,19 @@ impl SessionFiles {
     /// was cut at 200 characters may have been hashed differently by another client, so directories with the same
     /// prefix count when one of their transcripts was recorded in `path`.
     pub(crate) fn project_dirs_for_ts(&self, path: &str) -> Vec<PathBuf> {
-        let sanitized = sanitize_path(path, SummaryDialect::TypeScript);
+        let sanitized = project_name_ts(path);
         let exact = self.projects_dir().join(&sanitized);
         let mut found = Vec::new();
         if exact.is_dir() {
             found.push(exact.clone());
+        }
+        let hashed = sanitize_path(path, SummaryDialect::TypeScript);
+        if hashed != sanitized {
+            let other = self.projects_dir().join(&hashed);
+            if other.is_dir() {
+                found.push(other);
+            }
+            return found;
         }
         if sanitized.len() <= MAX_SANITIZED_LENGTH {
             return found;
@@ -709,9 +654,9 @@ impl SessionFiles {
 
     /// Upstream `PLe`/`jz`: candidates of one project directory and, optionally, its sibling worktrees.
     fn candidates_for_project(&self, directory: &Path, include_worktrees: bool, stat: bool) -> Vec<Candidate> {
-        let canonical = canonicalize_lenient(directory);
+        let canonical = canonicalize_lenient_in(directory, SummaryDialect::TypeScript);
         let worktrees = if include_worktrees {
-            worktree_paths(&canonical)
+            worktree_paths(&canonical, SummaryDialect::TypeScript)
         } else {
             Vec::new()
         };
@@ -728,7 +673,7 @@ impl SessionFiles {
         let mut named: Vec<(String, String, Option<String>)> = worktrees
             .iter()
             .map(|path| {
-                let exact = fold_name(&sanitize_path(path, SummaryDialect::TypeScript));
+                let exact = fold_name(&project_name_ts(path));
                 let truncated = (exact.len() > MAX_SANITIZED_LENGTH).then(|| exact[..MAX_SANITIZED_LENGTH].to_owned());
                 (path.clone(), exact, truncated)
             })
@@ -819,13 +764,13 @@ impl SessionFiles {
             dirs.sort();
             return dirs.iter().find_map(|dir| non_empty_file(dir)).map(|path| (path, None));
         };
-        let canonical = canonicalize_lenient(directory);
+        let canonical = canonicalize_lenient_in(directory, SummaryDialect::TypeScript);
         for dir in self.unique_project_dirs(&canonical) {
             if let Some(path) = non_empty_file(&dir) {
                 return Some((path, Some(canonical)));
             }
         }
-        for worktree in worktree_paths(&canonical) {
+        for worktree in worktree_paths(&canonical, SummaryDialect::TypeScript) {
             if worktree == canonical {
                 continue;
             }

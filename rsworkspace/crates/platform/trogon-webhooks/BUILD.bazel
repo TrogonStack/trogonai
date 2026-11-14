@@ -1,0 +1,15 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-webhooks",
+    integration_tests = {
+        "endpoint_registry": {},
+        "http_ingress": {},
+        "native_delivery": {"tags": ["requires-network"]},
+    },
+    deps = [
+        "//rsworkspace/crates/platform/trogon-nats",
+        "//rsworkspace/crates/platform/trogon-std",
+        "//rsworkspace/crates/platform/trogonai-proto",
+    ],
+)
