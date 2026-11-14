@@ -11,9 +11,14 @@
 //
 // Each case yields a timeline of strings, `<virtual ms> <event>`: `schedule <delay ms>` when the heartbeat timer was
 // set, `request <METHOD> <path>` when the server saw a request (GET /worker, the stored state read, is left out) and
-// `closed <code>` when the session reported its close code. A POST to the events route also lists what it carried,
+// `closed <code>` when the session reported its close code. A GET of the read stream is logged with its query, and the
+// values `Math.random` gave the reconnect delay of the stream (`handleConnectionError`) are kept apart, in order. A POST to the events route also lists what it carried,
 // as `request POST /worker/events <json>`: each event's payload without `session_id`, and `"e":1` on the ones the
 // store does not keep. A case may script `writes` (`[virtual ms, frame]`), a `flushAt` and a `closeAt`.
+// A case with `conns` leaves `outboundOnly` off and scripts what the service answers to each GET of the stream, in
+// order: `'hang'` (no answer), `'reset'` (the socket is destroyed), or `{ status, chunks: [[ms after the answer, text]], then: 'end' | 'reset', hangBody }`; a stream
+// that has no more connections scripted stays open and silent. `skews` (`[virtual ms, wall ms, monotonic ms]`) move
+// `Date.now` and `performance.now` ahead without firing a timer, the way a paused or sleeping process does.
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -39,10 +44,21 @@ const source = fs.readFileSync(bridgePath, 'utf8');
 const scheduleStart = source.indexOf('startHeartbeat(){if(this.stopHeartbeat()');
 const scheduleEnd = source.indexOf('noteBeatingEventsPostOk(', scheduleStart);
 if (scheduleStart < 0 || scheduleEnd < 0) throw new Error('bundle layout changed around startHeartbeat');
+const reconnectStart = source.indexOf('handleConnectionError(){');
+const reconnectEnd = source.indexOf('reopenAfterSleep(', reconnectStart);
+if (reconnectStart < 0 || reconnectEnd < 0) throw new Error('bundle layout changed around handleConnectionError');
 const lineStarts = [0];
 for (let i = source.indexOf('\n'); i >= 0; i = source.indexOf('\n', i + 1)) lineStarts.push(i + 1);
 // True when the innermost bundle frame of the caller sits inside the heartbeat schedule (the request the beat starts
 // sets its own timers from the same call chain, and those are not the schedule).
+const insideReconnect = () => {
+  const stack = new Error().stack ?? '';
+  for (const match of stack.matchAll(/bridge\.mjs:(\d+):(\d+)/g)) {
+    const offset = lineStarts[Number(match[1]) - 1] + Number(match[2]) - 1;
+    if (offset >= reconnectStart && offset < reconnectEnd) return true;
+  }
+  return false;
+};
 const insideSchedule = () => {
   const stack = new Error().stack ?? '';
   const match = /bridge\.mjs:(\d+):(\d+)/.exec(stack);
@@ -59,6 +75,9 @@ const timers = new Map();
 let timeline = [];
 let randoms = [];
 let pendingRandom = null;
+let streamRandoms = [];
+let wallSkew = 0;
+let monoSkew = 0;
 let seed = 1;
 const seeded = () => {
   seed = (seed + 0x6d2b79f5) | 0;
@@ -69,10 +88,11 @@ const seeded = () => {
 Math.random = () => {
   const value = seeded();
   if (insideSchedule()) pendingRandom = value;
+  if (insideReconnect()) streamRandoms.push(value);
   return value;
 };
-Date.now = () => BASE + virtual;
-performance.now = () => 1000 + virtual;
+Date.now = () => BASE + virtual + wallSkew;
+performance.now = () => 1000 + virtual + monoSkew;
 const handleOf = (id) => ({
   ref() { return this; },
   unref() { return this; },
@@ -83,7 +103,7 @@ const handleOf = (id) => ({
 });
 const schedule = (callback, delay, args, every) => {
   const id = nextId++;
-  const wait = Number(delay) >= 1 ? Number(delay) : 1;
+  const wait = Number(delay) >= 1 ? Math.trunc(Number(delay)) : 1;
   if (insideSchedule()) {
     timeline.push(`${virtual} schedule ${wait}`);
     if (pendingRandom !== null) randoms.push(pendingRandom);
@@ -164,6 +184,31 @@ add('escaped_characters_count_as_their_escapes', { until: 300, writes: writes(at
 add('flushing_sends_the_window_at_once', { until: 300, flushAt: 40, writes: writes(at(0, say('a')), at(10, assistant([{ type: 'text', text: 'hi' }])), at(60, say('b'))) });
 add('closing_drops_the_window', { until: 400, closeAt: 50, writes: writes(at(0, say('a')), at(10, assistant([{ type: 'text', text: 'hi' }]))) });
 add('reconnecting_sends_the_waiting_rows_and_drops_the_deltas', { until: 400, reconnectAt: 50, writes: writes(at(0, say('a')), at(10, assistant([{ type: 'text', text: 'hi' }])), at(60, say('b'))) });
+const evt = (id) => `id: ${id}\nevent: client_event\ndata: ${JSON.stringify({ event_id: `e${id}`, sequence_num: id, event_type: 'user', source: 'client', payload: { type: 'user', uuid: `u${id}`, message: { role: 'user', content: 'hi' } } })}\n\n`;
+const probe = 'event: ephemeral_event\ndata: {"event_type":"heartbeat_probe"}\n\n';
+const ping = ': ka\n\n';
+const quiet = 600000;
+const streamed = (name, conns, rest = {}) => add(name, { interval: quiet, until: 30000, conns, ...rest });
+streamed('a_response_that_never_comes_is_given_up_after_thirty_seconds', ['hang', {}], { until: 100000 });
+streamed('a_failed_open_is_retried_with_a_growing_delay', [{ status: 500 }, { status: 502 }, { status: 503 }, {}]);
+streamed('a_refusal_whose_body_never_ends_is_given_up_after_three_seconds', [{ status: 500, hangBody: true }, {}]);
+streamed('a_stream_that_ends_is_reopened_after_the_last_sequence', [{ chunks: [[0, evt(4)]], then: 'end' }, {}]);
+streamed('a_stream_that_opened_starts_the_delay_over', [{ then: 'end' }, { status: 500 }, { chunks: [[0, evt(1)]], then: 'end' }, {}], { until: 40000 });
+streamed('a_connection_that_is_reset_is_retried', ['reset', {}]);
+streamed('a_stream_that_breaks_is_reopened_after_the_last_sequence', [{ chunks: [[50, evt(2)]], then: 'reset' }, {}]);
+streamed('a_permanent_status_closes_the_session', [{ status: 403 }], { until: 5000 });
+streamed('a_permanent_status_with_a_body_that_never_ends_closes_after_three_seconds', [{ status: 401, hangBody: true }], { until: 8000 });
+streamed('a_silent_stream_is_reopened_by_the_liveness_timer', [{}, {}], { until: 120000 });
+streamed('a_frame_postpones_the_liveness_timer', [{ chunks: [[30000, ping]] }, {}], { until: 120000 });
+streamed('a_chunk_without_a_whole_frame_does_not_postpone_it', [{ chunks: [[30000, ': k']] }, {}], { until: 120000 });
+streamed('a_late_liveness_check_reopens_at_once', [{}, {}], { until: 60000, skews: [[1000, 20000, 20000]] });
+streamed('a_late_wall_clock_alone_reopens_at_once', [{}, {}], { until: 60000, skews: [[1000, 20000, 0]] });
+streamed('a_late_monotonic_clock_alone_reopens_at_once', [{}, {}], { until: 60000, skews: [[1000, 0, 20000]] });
+streamed('a_small_jump_is_a_lost_stream', [{}, {}], { until: 60000, skews: [[1000, 5000, 5000]] });
+streamed('a_probe_sends_a_beat_at_once', [{ chunks: [[100, probe]] }], { until: 20000 });
+streamed('a_second_probe_waits_for_the_beat_spacing', [{ chunks: [[100, probe], [600, probe]] }], { until: 20000 });
+streamed('a_third_probe_does_not_add_a_second_wait', [{ chunks: [[100, probe], [600, probe], [900, probe]] }], { until: 20000 });
+streamed('a_probe_during_an_unanswered_beat_is_sent_after_it', [{ chunks: [[100, probe], [600, probe]] }], { until: 60000, answers: ['hang'] });
 add('closing_stops_the_timer', { until: 100000, closeAt: 25000 });
 add('a_terminal_answer_stops_the_timer', { until: 90000, answers: [{ status: 409, body: {} }] });
 
@@ -171,10 +216,19 @@ async function run(spec) {
   timers.clear();
   timeline = [];
   randoms = [];
+  streamRandoms = [];
   pendingRandom = null;
+  wallSkew = 0;
+  monoSkew = 0;
   virtual = 0;
   seed = 1;
   let beats = 0;
+  let streams = 0;
+  const conns = spec.conns ?? [];
+  const later = (delay, callback) => {
+    const id = nextId++;
+    timers.set(id, { at: virtual + delay, callback, args: [], every: 0, order: id });
+  };
   const events = (body) => JSON.stringify(JSON.parse(body).events.map((event) => {
     const { session_id: _session, ...payload } = event.payload;
     return { p: payload, ...(event.ephemeral && { e: 1 }) };
@@ -187,6 +241,20 @@ async function run(spec) {
     req.on('end', () => {
       const detail = route === '/worker/events' ? ` ${events(Buffer.concat(chunks).toString())}` : '';
       if (!(req.method === 'GET' && route === '/worker')) timeline.push(`${virtual} request ${req.method} ${route}${detail}`);
+      if (req.method === 'GET' && route.split('?')[0] === '/worker/events/stream') {
+        const conn = conns[streams] ?? {};
+        streams += 1;
+        if (conn === 'hang') return;
+        if (conn === 'reset') { req.socket.destroy(); return; }
+        res.statusCode = conn.status ?? 200;
+        res.setHeader('content-type', 'text/event-stream');
+        res.flushHeaders();
+        for (const [delay, text] of conn.chunks ?? []) later(delay, () => res.write(text));
+        const last = Math.max(0, ...(conn.chunks ?? []).map(([delay]) => delay));
+        if (conn.then === 'reset') later(last, () => res.socket.destroy());
+        if (conn.then === 'end' || (conn.status >= 400 && !conn.hangBody)) later(last, () => res.end());
+        return;
+      }
       let answer = accept;
       if (route === '/worker/heartbeat') {
         const scripted = answers[beats];
@@ -205,7 +273,7 @@ async function run(spec) {
     sessionId: 'cse_abc',
     apiBaseUrl: base,
     ingressToken: 'tok',
-    outboundOnly: true,
+    outboundOnly: conns.length === 0,
     epoch: 2,
     heartbeatIntervalMs: spec.interval,
     onClose: (code) => timeline.push(`${virtual} closed ${code}`),
@@ -215,6 +283,7 @@ async function run(spec) {
   if (spec.flushAt !== undefined) steps.push([spec.flushAt, () => { handle.flush().catch(() => {}); }]);
   if (spec.closeAt !== undefined) steps.push([spec.closeAt, () => handle.close()]);
   if (spec.reconnectAt !== undefined) steps.push([spec.reconnectAt, () => { handle.reconnectTransport({ apiBaseUrl: base, ingressToken: 'tok2' }).catch(() => {}); }]);
+  for (const [when, wall, mono] of spec.skews ?? []) steps.push([when, () => { wallSkew += wall; monoSkew += mono; }]);
   steps.sort((a, b) => a[0] - b[0]);
   for (const [when, step] of steps) {
     await advanceTo(when);
@@ -224,8 +293,8 @@ async function run(spec) {
   try { handle.close(); } catch {}
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
-  const script = { interval: spec.interval ?? null, until: spec.until, close_at: spec.closeAt ?? null, flush_at: spec.flushAt ?? null, reconnect_at: spec.reconnectAt ?? null, writes: spec.writes ?? [], answers: answers.map((a) => a) };
-  return { name: spec.name, script, randoms: [...randoms], timeline: [...timeline] };
+  const script = { interval: spec.interval ?? null, until: spec.until, close_at: spec.closeAt ?? null, flush_at: spec.flushAt ?? null, reconnect_at: spec.reconnectAt ?? null, conns, skews: spec.skews ?? [], writes: spec.writes ?? [], answers: answers.map((a) => a) };
+  return { name: spec.name, script, randoms: [...randoms], stream_randoms: [...streamRandoms], timeline: [...timeline] };
 }
 
 const results = [];

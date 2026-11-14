@@ -296,6 +296,18 @@ impl StreamSession {
     /// expiry is a lost stream, counted twice (see below). The sleep notice the upstream transport can subscribe to is not reachable from
     /// `attachBridgeSession`, so this is the only way the reopen happens.
     pub fn liveness_expired(&mut self, wall_silent: Duration, monotonic_silent: Duration, random: f64) -> Reopen {
+        self.liveness_expired_with(wall_silent, monotonic_silent, &mut || random)
+    }
+
+    /// [`liveness_expired`](Self::liveness_expired) for a caller that draws its random numbers as the upstream
+    /// client does: none for a reopen at once, and one for each of the two lost-stream reports otherwise, so the
+    /// draw order matches the recorded `Math.random` sequence. The second draw is the one that sets the wait.
+    pub fn liveness_expired_with(
+        &mut self,
+        wall_silent: Duration,
+        monotonic_silent: Duration,
+        random: &mut dyn FnMut() -> f64,
+    ) -> Reopen {
         let silent = wall_silent.max(monotonic_silent);
         let late = silent.saturating_sub(liveness_timeout());
         if self.connected && silent > liveness_timeout() + Duration::from_millis(SLEEP_LATENESS_MS) {
@@ -304,18 +316,27 @@ impl StreamSession {
         }
         // The liveness handler reports the lost stream, and the read loop its abort ends reports it again: two
         // attempts are counted and the second delay is the one that stands.
-        self.lost(random);
-        Reopen::After(self.lost(random))
+        let first = random();
+        self.lost(first);
+        let second = random();
+        Reopen::After(self.lost(second))
     }
 
     /// Takes a chunk of the body and says what the frames in it ask for.
     pub fn push(&mut self, bytes: &[u8]) -> Vec<StreamEffect> {
+        self.push_counted(bytes).1
+    }
+
+    /// [`push`](Self::push), also saying how many frames the chunk completed: each one restarts the liveness timer,
+    /// a chunk that ends inside a frame does not.
+    pub fn push_counted(&mut self, bytes: &[u8]) -> (usize, Vec<StreamEffect>) {
         let frames = self.parser.push_bytes(bytes);
+        let count = frames.len();
         let mut effects = Vec::new();
         for frame in frames {
             self.frame(frame, &mut effects);
         }
-        effects
+        (count, effects)
     }
 
     fn frame(&mut self, frame: SseFrame, effects: &mut Vec<StreamEffect>) {

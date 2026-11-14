@@ -28,6 +28,7 @@ mod bridge_worker_heartbeat;
 mod bridge_worker_inbound;
 mod bridge_worker_queue;
 mod bridge_worker_stream;
+mod bridge_worker_stream_driver;
 mod bridge_worker_types;
 mod builtin_tool_name;
 mod bundled_cli;
@@ -228,7 +229,7 @@ pub use bridge_worker_events::{
     POST_TIMEOUT_CEILING_MS, POST_TIMEOUT_FLOOR_MS, SHRINK_FROM_BYTES, lane_for_path, refused_for_good,
     retry_delay as event_retry_delay, upload_body, upload_timeout,
 };
-pub use bridge_worker_heartbeat::{HeartbeatDriver, heartbeat_delay};
+pub use bridge_worker_heartbeat::{HeartbeatDriver, PROBE_BEAT_SPACING, heartbeat_delay};
 pub use bridge_worker_inbound::{INBOUND_DEDUP_CAPACITY, Inbound, InboundRouter, NOTIFICATION_ORIGIN, UuidSet};
 pub use bridge_worker_queue::{
     Next, Patch, PatchQueue, Requeue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches,
@@ -238,6 +239,10 @@ pub use bridge_worker_stream::{
     FrameParser, KEEPALIVE_SECONDS, LIVENESS_GRACE_MS, PERMANENT_STREAM_STATUSES, RECONNECT_BASE_MS, RECONNECT_CAP_MS,
     RECONNECT_JITTER_RATIO, Reopen, SLEEP_LATENESS_MS, SseFrame, StreamEffect, StreamOpen, StreamRequest,
     StreamSession, liveness_timeout, reconnect_delay,
+};
+pub use bridge_worker_stream_driver::{
+    CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector, StreamFailure,
+    StreamResponse, run_stream,
 };
 pub use bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
