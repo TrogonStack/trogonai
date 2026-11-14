@@ -5,6 +5,19 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library
 
 _RUSTC_FLAGS = ["-Dwarnings"]
 
+def _without(labels, others):
+    """Drops from `labels` every label already in `others`.
+
+    A Cargo crate may list a dependency both as optional, turned on by one of
+    its features, and as a dev-dependency. Targets that take both lists would
+    then name it twice, which Bazel rejects. A `select` cannot be inspected,
+    so `labels` is kept whole when `others` is one.
+    """
+    if type(others) != "list":
+        return labels
+    seen = {str(Label(other)): True for other in others}
+    return [label for label in labels if str(Label(label)) not in seen]
+
 def workspace_crate(
         name,
         version = "0.1.0",
@@ -101,7 +114,7 @@ def workspace_crate(
             edition = edition,
             proc_macro_deps = all_crate_deps(proc_macro = True) + proc_macro_deps + test_proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
-            deps = lib_deps + all_crate_deps(normal = True) + deps + test_deps,
+            deps = lib_deps + all_crate_deps(normal = True) + _without(deps, test_deps) + test_deps,
             **dict({"data": data, "version": version}, **attrs)
         )
 
@@ -116,7 +129,7 @@ def workspace_crate(
             rustc_flags = _RUSTC_FLAGS,
             # Examples link dev-dependencies, which only test code may use.
             testonly = True,
-            deps = lib_deps + all_crate_deps(normal = True) + deps + test_deps,
+            deps = lib_deps + all_crate_deps(normal = True) + _without(deps, test_deps) + test_deps,
             **dict({"version": version}, **attrs)
         )
 
