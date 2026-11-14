@@ -28,7 +28,7 @@
 //! - `onConnectNeedsRecord` (offset 1196900): never set, so the stored record read is abandoned at registration.
 
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Method;
@@ -520,14 +520,11 @@ impl Tickets {
     }
 }
 
-/// Talks to the worker endpoints of one remote session the way the upstream bridge entrypoint does.
-pub struct WorkerClient<H, P = TokioPacing> {
-    http: Arc<H>,
-    pacing: Arc<P>,
-    session_url: String,
-    session_id: String,
+/// Everything the worker changes after it is built. It sits behind one lock that is only held between two awaits,
+/// never across one, so a heartbeat can go out while an upload is waiting for its answer (the upstream client keeps
+/// no such lock either: its queues and counters are plain fields).
+struct State {
     token: SensitiveString,
-    platform: &'static str,
     epoch: i64,
     state: SessionState,
     heartbeat_interval_ms: f64,
@@ -535,7 +532,6 @@ pub struct WorkerClient<H, P = TokioPacing> {
     consecutive_not_found: u32,
     tickets: Tickets,
     session_access_token: Option<SensitiveString>,
-    non_origin_403: NonOrigin403,
     queue: PatchQueue,
     events: EventQueue,
     deliveries: DeliveryQueue,
@@ -551,6 +547,18 @@ pub struct WorkerClient<H, P = TokioPacing> {
     dropped_owed_metadata_patches: u32,
 }
 
+/// Talks to the worker endpoints of one remote session the way the upstream bridge entrypoint does. Every call takes
+/// `&self`: calls may overlap, as the upstream timers and uploads do.
+pub struct WorkerClient<H, P = TokioPacing> {
+    http: Arc<H>,
+    pacing: Arc<P>,
+    session_url: String,
+    session_id: String,
+    platform: &'static str,
+    non_origin_403: NonOrigin403,
+    state: Mutex<State>,
+}
+
 impl<H, P> WorkerClient<H, P> {
     pub fn new(http: H, pacing: P, config: WorkerConfig) -> Result<Self, InvalidSessionId> {
         let session_url = session_url(&config.api_base_url, &config.session_id)?;
@@ -560,48 +568,58 @@ impl<H, P> WorkerClient<H, P> {
             pacing: Arc::new(pacing),
             session_url,
             session_id: config.session_id,
-            token: config.token,
             platform: client_platform(config.entrypoint.as_deref().unwrap_or("")),
-            epoch: 0,
-            state: SessionState::Idle,
-            heartbeat_interval_ms: interval as f64,
-            consecutive_auth_failures: 0,
-            consecutive_not_found: 0,
-            tickets: Tickets::default(),
-            session_access_token: config.session_access_token,
             non_origin_403: config.non_origin_403,
-            queue: PatchQueue::new(),
-            events: EventQueue::default(),
-            deliveries: DeliveryQueue::default(),
-            pending_processing: Vec::new(),
-            dropped_durable_event_batches: 0,
-            record_at_start: None,
-            reported_keys: Vec::new(),
-            reply_degraded: false,
-            init_state_get_ordering_bound: INIT_STATE_GET_ORDERING_BOUND,
-            closed: false,
-            epoch_superseded: false,
-            dropped_state_patches: 0,
-            dropped_owed_metadata_patches: 0,
+            state: Mutex::new(State {
+                token: config.token,
+                epoch: 0,
+                state: SessionState::Idle,
+                heartbeat_interval_ms: interval as f64,
+                consecutive_auth_failures: 0,
+                consecutive_not_found: 0,
+                tickets: Tickets::default(),
+                session_access_token: config.session_access_token,
+                queue: PatchQueue::new(),
+                events: EventQueue::default(),
+                deliveries: DeliveryQueue::default(),
+                pending_processing: Vec::new(),
+                dropped_durable_event_batches: 0,
+                record_at_start: None,
+                reported_keys: Vec::new(),
+                reply_degraded: false,
+                init_state_get_ordering_bound: INIT_STATE_GET_ORDERING_BOUND,
+                closed: false,
+                epoch_superseded: false,
+                dropped_state_patches: 0,
+                dropped_owed_metadata_patches: 0,
+            }),
         })
+    }
+
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Replaces the token the requests carry. The tickets held for the old `Authorization` value are dropped: they
     /// belong to it.
-    pub fn set_token(&mut self, token: SensitiveString) {
-        self.token = token;
+    pub fn set_token(&self, token: SensitiveString) {
+        self.lock().token = token;
     }
 
     /// Replaces the `CLAUDE_CODE_SESSION_ACCESS_TOKEN` value a `401` or `403` is checked against.
-    pub fn set_session_access_token(&mut self, token: Option<SensitiveString>) {
-        self.session_access_token = token;
+    pub fn set_session_access_token(&self, token: Option<SensitiveString>) {
+        self.lock().session_access_token = token;
     }
 
     /// `sessionTicketFor`: the session ticket held for the token the requests carry now, if any.
-    pub fn session_ticket(&self) -> Option<&str> {
-        let authorization = format!("Bearer {}", self.token.expose());
+    pub fn session_ticket(&self) -> Option<String> {
+        let state = self.lock();
+        let authorization = format!("Bearer {}", state.token.expose());
         let authorization = header_value(&authorization, true)?;
-        self.tickets.session_ticket_for(authorization.as_bytes())
+        state
+            .tickets
+            .session_ticket_for(authorization.as_bytes())
+            .map(str::to_owned)
     }
 
     pub fn session_url(&self) -> &str {
@@ -609,21 +627,21 @@ impl<H, P> WorkerClient<H, P> {
     }
 
     pub fn epoch(&self) -> i64 {
-        self.epoch
+        self.lock().epoch
     }
 
     /// The state the worker last reported, or `Idle` before it reported any.
     pub fn state(&self) -> SessionState {
-        self.state
+        self.lock().state
     }
 
     /// The current beat interval: the one the worker started with, or the last one the service advised.
     pub fn heartbeat_interval_ms(&self) -> f64 {
-        self.heartbeat_interval_ms
+        self.lock().heartbeat_interval_ms
     }
 
     fn authorization(&self, for_fetch: bool) -> Option<HeaderValue> {
-        header_value(&format!("Bearer {}", self.token.expose()), for_fetch)
+        header_value(&format!("Bearer {}", self.lock().token.expose()), for_fetch)
     }
 }
 
@@ -677,8 +695,12 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// answered or `initStateGetOrderingBoundMs` has passed, and a read still pending when the registration is
     /// accepted is abandoned, which leaves the stored record unknown, as `stateReadEndsAtRegistration` does for an
     /// attached session (offset 1196900, where `onConnectNeedsRecord` is never set).
-    pub async fn initialize(&mut self, epoch: i64) -> Result<(), InitError> {
-        self.epoch = epoch;
+    pub async fn initialize(&self, epoch: i64) -> Result<(), InitError> {
+        let bound = {
+            let mut state = self.lock();
+            state.epoch = epoch;
+            state.init_state_get_ordering_bound
+        };
         let mut read = Box::pin(read_worker_record(
             self.http.clone(),
             self.pacing.clone(),
@@ -689,7 +711,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         let mut answered = None;
         tokio::select! {
             result = &mut read => answered = Some(result),
-            () = tokio::time::sleep(self.init_state_get_ordering_bound) => {}
+            () = tokio::time::sleep(bound) => {}
         }
         if let Some(Err(reason)) = answered {
             return Err(InitError::Mismatch(reason));
@@ -712,13 +734,13 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         registered?;
         match answered {
             Some(Err(reason)) => return Err(InitError::Mismatch(reason)),
-            Some(Ok(record)) => self.record_at_start = record,
+            Some(Ok(record)) => self.lock().record_at_start = record,
             None => {}
         }
         Ok(())
     }
 
-    async fn register_idle(&mut self, body: &Value) -> Result<(), InitError> {
+    async fn register_idle(&self, body: &Value) -> Result<(), InitError> {
         let mut attempt = 0;
         let failure = loop {
             attempt += 1;
@@ -727,7 +749,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 .await
                 .map_err(InitError::Mismatch)?;
             let RequestOutcome::Failed(failure) = outcome else {
-                self.state = SessionState::Idle;
+                self.lock().state = SessionState::Idle;
                 return Ok(());
             };
             if matches!(failure.status, Some(400 | 413 | 422)) || attempt >= INIT_ATTEMPTS {
@@ -747,20 +769,23 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// Reports the worker state. Nothing is sent when the state is the one already reported and no details ride
     /// along; the outcome is `None` then.
     pub async fn report_state(
-        &mut self,
+        &self,
         state: SessionState,
         details: Option<&RequiresActionDetails>,
     ) -> Result<Option<RequestOutcome>, MismatchReason> {
-        if state == self.state && details.is_none() {
-            return Ok(None);
-        }
-        self.state = state;
-        let body = json!({
-            "worker_epoch": self.epoch,
-            "worker_status": state.as_str(),
-            "requires_action_details": details.map_or(Value::Null, RequiresActionDetails::to_json),
-            "internal_metadata": {"reply_degraded": self.reply_degraded},
-        });
+        let body = {
+            let mut held = self.lock();
+            if state == held.state && details.is_none() {
+                return Ok(None);
+            }
+            held.state = state;
+            json!({
+                "worker_epoch": held.epoch,
+                "worker_status": state.as_str(),
+                "requires_action_details": details.map_or(Value::Null, RequiresActionDetails::to_json),
+                "internal_metadata": {"reply_degraded": held.reply_degraded},
+            })
+        };
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
             .map(Some)
@@ -769,16 +794,19 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// Reports `external_metadata` for the worker. The keys the stored record already holds are left out the first
     /// time they are reported (`withoutRepeatsOfRecord`); the outcome is `None` when nothing is left to send.
     pub async fn report_metadata(
-        &mut self,
+        &self,
         metadata: &Map<String, Value>,
     ) -> Result<Option<RequestOutcome>, MismatchReason> {
-        let Some(metadata) = self.without_repeats_of_record(metadata) else {
-            return Ok(None);
+        let body = {
+            let mut held = self.lock();
+            let Some(metadata) = without_repeats_of_record(&mut held, metadata) else {
+                return Ok(None);
+            };
+            json!({
+                "worker_epoch": held.epoch,
+                "external_metadata": external_metadata_patch(&metadata),
+            })
         };
-        let body = json!({
-            "worker_epoch": self.epoch,
-            "external_metadata": external_metadata_patch(&metadata),
-        });
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
             .map(Some)
@@ -786,11 +814,12 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
 
     /// Queues a state report the way `reportState` does: nothing is queued when the state is the one already
     /// reported and no details ride along. Returns whether a patch was queued. [`WorkerClient::flush`] sends it.
-    pub fn submit_state(&mut self, state: SessionState, details: Option<&RequiresActionDetails>) -> bool {
-        if state == self.state && details.is_none() {
+    pub fn submit_state(&self, state: SessionState, details: Option<&RequiresActionDetails>) -> bool {
+        let mut held = self.lock();
+        if state == held.state && details.is_none() {
             return false;
         }
-        self.state = state;
+        held.state = state;
         let mut patch = Patch::new();
         patch.insert("worker_status".to_owned(), json!(state.as_str()));
         patch.insert(
@@ -799,16 +828,17 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         );
         patch.insert(
             "internal_metadata".to_owned(),
-            json!({"reply_degraded": self.reply_degraded}),
+            json!({"reply_degraded": held.reply_degraded}),
         );
-        self.queue.enqueue(patch);
+        held.queue.enqueue(patch);
         true
     }
 
     /// Queues `external_metadata` the way `reportMetadata` does, leaving out the keys the stored record already
     /// holds the first time they are reported. Returns whether a patch was queued. [`WorkerClient::flush`] sends it.
-    pub fn submit_metadata(&mut self, metadata: &Map<String, Value>) -> bool {
-        let Some(metadata) = self.without_repeats_of_record(metadata) else {
+    pub fn submit_metadata(&self, metadata: &Map<String, Value>) -> bool {
+        let mut held = self.lock();
+        let Some(metadata) = without_repeats_of_record(&mut held, metadata) else {
             return false;
         };
         let mut patch = Patch::new();
@@ -816,195 +846,175 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             "external_metadata".to_owned(),
             Value::Object(external_metadata_patch(&metadata)),
         );
-        self.queue.enqueue(patch);
+        held.queue.enqueue(patch);
         true
     }
 
-    /// `withoutRepeatsOfRecord`: the metadata without the keys that were first reported now and equal what the
-    /// record held at the start. `None` when that leaves nothing of a non-empty report.
-    fn without_repeats_of_record(&mut self, metadata: &Map<String, Value>) -> Option<Map<String, Value>> {
-        let mut repeated: Vec<&str> = Vec::new();
-        for key in metadata.keys() {
-            if !RECORDED_KEYS.contains(&key.as_str()) || self.reported_keys.iter().any(|seen| seen == key) {
-                continue;
-            }
-            self.reported_keys.push(key.clone());
-            let stored = self.record_at_start.as_ref().and_then(|record| record.get(key));
-            if self.record_at_start.is_some() && js_equal(metadata.get(key), stored) {
-                repeated.push(key);
-            }
-        }
-        if repeated.is_empty() {
-            return Some(metadata.clone());
-        }
-        let left: Map<String, Value> = metadata
-            .iter()
-            .filter(|(key, _)| !repeated.contains(&key.as_str()))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        (!left.is_empty()).then_some(left)
-    }
-
     /// Stops the queue from taking new patches; see [`PatchQueue::close_to_new_patches`].
-    pub fn close_queue_to_new_patches(&mut self) {
-        self.queue.close_to_new_patches();
+    pub fn close_queue_to_new_patches(&self) {
+        self.lock().queue.close_to_new_patches();
     }
 
     /// Drops what the queue still holds and stops it for good.
-    pub fn close_queue(&mut self) {
-        self.closed = true;
-        self.queue.close();
+    pub fn close_queue(&self) {
+        let mut held = self.lock();
+        held.closed = true;
+        held.queue.close();
     }
 
     /// How many patches the client gave up on (`droppedWorkerStatePatchCount`, bridge.mjs offset 1128273).
     pub fn dropped_state_patches(&self) -> u32 {
-        self.dropped_state_patches
+        self.lock().dropped_state_patches
     }
 
     /// How many of those still owed metadata (`droppedOwedMetadataPatchCount`).
     pub fn dropped_owed_metadata_patches(&self) -> u32 {
-        self.dropped_owed_metadata_patches
+        self.lock().dropped_owed_metadata_patches
     }
 
     /// Rust only. Sets the `external_metadata` the stored record held when the session started (`recordAtStart`);
     /// `initialize` sets it from the read it makes.
-    pub fn set_record_at_start(&mut self, record: Option<Map<String, Value>>) {
-        self.record_at_start = record;
+    pub fn set_record_at_start(&self, record: Option<Map<String, Value>>) {
+        self.lock().record_at_start = record;
     }
 
     /// Rust only. Sets `initStateGetOrderingBoundMs` (offset 1049109, `dHe` = 10 seconds), which no public option of
     /// the bridge reaches; it lets a test keep the ordering exact without waiting out the real bound.
+    pub fn set_init_state_get_ordering_bound(&self, bound: Duration) {
+        self.lock().init_state_get_ordering_bound = bound;
+    }
+
     /// Rust only. Sets the `reply_degraded` value every status report carries. The bridge evaluates `e3()` (offset
     /// 856241) to false for an attached session, so the value is false unless a caller sets it.
-    pub fn set_init_state_get_ordering_bound(&mut self, bound: Duration) {
-        self.init_state_get_ordering_bound = bound;
-    }
-
-    pub fn set_reply_degraded(&mut self, degraded: bool) {
-        self.reply_degraded = degraded;
-    }
-
-    /// The queue behind [`WorkerClient::submit_state`] and [`WorkerClient::submit_metadata`].
-    pub fn queue(&self) -> &PatchQueue {
-        &self.queue
+    pub fn set_reply_degraded(&self, degraded: bool) {
+        self.lock().reply_degraded = degraded;
     }
 
     /// Sends what is queued, retrying with the upstream backoff until the service takes every patch. A `400`,
     /// `413` or `422` drops the patch and puts back what must still reach the service. Returns whether everything
     /// went out and nothing was dropped; a mismatch ends the flush.
-    pub async fn flush(&mut self) -> Result<bool, MismatchReason> {
+    pub async fn flush(&self) -> Result<bool, MismatchReason> {
         let drained = self.pump(None).await?;
-        Ok(drained && !self.queue.has_dropped_something() && !self.queue.is_closed())
+        let held = self.lock();
+        Ok(drained && !held.queue.has_dropped_something() && !held.queue.is_closed())
     }
 
     /// [`WorkerClient::flush`] that stops once `attempts` requests were made and another request or a retry wait
     /// is next, so patches queued meanwhile are seen by the wait that follows. Returns whether the queue drained.
-    pub async fn pump(&mut self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
+    pub async fn pump(&self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
         let mut made = 0_u32;
         loop {
             let capped = attempts.is_some_and(|cap| made >= cap);
-            match self.queue.poll(self.pacing.jitter()) {
+            let jitter = self.pacing.jitter();
+            let next = self.lock().queue.poll(jitter);
+            match next {
                 Next::Idle => return Ok(true),
                 Next::Pause(_) | Next::Send(_) if capped => return Ok(false),
                 Next::Pause(delay) => self.pacing.pause(delay).await,
                 Next::Send(patch) => {
                     made += 1;
                     let mut body = Patch::new();
-                    body.insert("worker_epoch".to_owned(), json!(self.epoch));
+                    body.insert("worker_epoch".to_owned(), json!(self.epoch()));
                     for (key, value) in &patch {
                         body.insert(key.clone(), value.clone());
                     }
                     let outcome = self
                         .request(Method::PUT, "/worker", &Value::Object(body), REQUEST_TIMEOUT, false)
                         .await?;
-                    match outcome {
-                        RequestOutcome::Accepted(_) => self.queue.sent(true),
-                        RequestOutcome::Failed(failure) if self.closed && failure.status == Some(409) => {
-                            self.dropped_state_patches += 1;
-                            if without_status(&patch).is_some() {
-                                self.dropped_owed_metadata_patches += 1;
-                            }
-                            self.queue.sent(true);
-                        }
-                        RequestOutcome::Failed(failure) if matches!(failure.status, Some(400 | 413 | 422)) => {
-                            self.dropped_state_patches += 1;
-                            if without_status(&patch).is_some() {
-                                self.dropped_owed_metadata_patches += 1;
-                            }
-                            let back = requeue_after_refusal(&patch);
-                            if let Some(metadata) = back.metadata {
-                                self.queue.requeue_metadata(metadata);
-                            }
-                            if let Some(status) = back.status {
-                                self.queue.requeue_status(status);
-                            }
-                            self.queue.sent(true);
-                        }
-                        RequestOutcome::Failed(_) => self.queue.sent(false),
-                    }
+                    self.take_patch_answer(&patch, outcome);
                 }
             }
         }
     }
 
+    /// What the queue does with the answer to a patch.
+    fn take_patch_answer(&self, patch: &Patch, outcome: RequestOutcome) {
+        let mut held = self.lock();
+        match outcome {
+            RequestOutcome::Accepted(_) => held.queue.sent(true),
+            RequestOutcome::Failed(failure) if held.closed && failure.status == Some(409) => {
+                held.dropped_state_patches += 1;
+                if without_status(patch).is_some() {
+                    held.dropped_owed_metadata_patches += 1;
+                }
+                held.queue.sent(true);
+            }
+            RequestOutcome::Failed(failure) if matches!(failure.status, Some(400 | 413 | 422)) => {
+                held.dropped_state_patches += 1;
+                if without_status(patch).is_some() {
+                    held.dropped_owed_metadata_patches += 1;
+                }
+                let back = requeue_after_refusal(patch);
+                if let Some(metadata) = back.metadata {
+                    held.queue.requeue_metadata(metadata);
+                }
+                if let Some(status) = back.status {
+                    held.queue.requeue_status(status);
+                }
+                held.queue.sent(true);
+            }
+            RequestOutcome::Failed(_) => held.queue.sent(false),
+        }
+    }
+
     /// Queues client events for `POST /worker/events` (`writeEvents`). An event without a string `uuid` gets one.
     /// When the queue is full the call sends until there is room, as the upstream writer waits for it.
-    pub async fn submit_events(&mut self, events: Vec<ClientEvent>) -> Result<(), MismatchReason> {
+    pub async fn submit_events(&self, events: Vec<ClientEvent>) -> Result<(), MismatchReason> {
         let events: Vec<ClientEvent> = events.into_iter().map(with_uuid).collect();
-        for chunk in events.chunks(self.events_capacity()) {
-            while !self.events.has_room_for(chunk.len()) && !self.events.is_closed() {
+        let capacity = self.lock().events.capacity();
+        for chunk in events.chunks(capacity) {
+            loop {
+                let full = {
+                    let held = self.lock();
+                    !held.events.has_room_for(chunk.len()) && !held.events.is_closed()
+                };
+                if !full {
+                    break;
+                }
                 self.pump_events(Some(1)).await?;
             }
-            self.events.enqueue(chunk.to_vec());
+            self.lock().events.enqueue(chunk.to_vec());
         }
         Ok(())
     }
 
-    fn events_capacity(&self) -> usize {
-        self.events.capacity()
-    }
-
     /// Sends the queued events, retrying with the upstream backoff until the service takes every batch. Returns
     /// whether the queue drained; a mismatch ends the flush.
-    pub async fn flush_events(&mut self) -> Result<bool, MismatchReason> {
+    pub async fn flush_events(&self) -> Result<bool, MismatchReason> {
         self.pump_events(None).await
     }
 
     /// How many batches of durable events the service refused for good and the client dropped.
     pub fn dropped_durable_event_batches(&self) -> u32 {
-        self.dropped_durable_event_batches
+        self.lock().dropped_durable_event_batches
     }
 
     /// Closes the event queue (`close`); with `retain` the events not yet taken stay available to the caller.
-    pub fn close_events(&mut self, retain: bool) -> usize {
-        self.events.close(retain)
+    pub fn close_events(&self, retain: bool) -> usize {
+        self.lock().events.close(retain)
     }
 
     /// The events kept by [`WorkerClient::close_events`].
-    pub fn take_undelivered_events(&mut self) -> Vec<ClientEvent> {
-        self.events.take_undelivered()
-    }
-
-    /// The event queue.
-    pub fn event_queue(&self) -> &EventQueue {
-        &self.events
+    pub fn take_undelivered_events(&self) -> Vec<ClientEvent> {
+        self.lock().events.take_undelivered()
     }
 
     /// [`WorkerClient::flush_events`] that stops once `attempts` requests were made and another request or a retry
     /// wait is next.
-    pub async fn pump_events(&mut self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
+    pub async fn pump_events(&self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
         let mut made = 0_u32;
         loop {
             if attempts.is_some_and(|cap| made >= cap) {
-                return Ok(self.events.is_idle());
+                return Ok(self.lock().events.is_idle());
             }
-            match self.events.poll() {
+            let next = self.lock().events.poll();
+            match next {
                 EventNext::Idle => return Ok(true),
                 EventNext::Pause(delay) => self.pacing.pause(delay).await,
                 EventNext::Send(batch) => {
                     made += 1;
                     let timeout = upload_timeout(batch.bytes, batch.cuttable, batch.retry_count);
-                    let body = upload_body(self.epoch, &batch.events);
+                    let body = upload_body(self.epoch(), &batch.events);
                     let outcome = self
                         .request_with(
                             Method::POST,
@@ -1023,49 +1033,56 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
 
     /// What the upload does with the answer to a batch (the end of the `send` of the client event uploader, bridge.mjs
     /// offset 1036000 to 1040000).
-    async fn take_event_answer(&mut self, outcome: RequestOutcome) -> Result<(), MismatchReason> {
+    async fn take_event_answer(&self, outcome: RequestOutcome) -> Result<(), MismatchReason> {
         let RequestOutcome::Failed(failure) = outcome else {
-            self.events.done();
+            self.lock().events.done();
             return Ok(());
         };
         let status = failure.status;
-        if self.closed && status == Some(409) && self.events.in_flight_events().iter().all(|event| event.ephemeral) {
-            self.events.done();
-            return Ok(());
-        }
-        if status.is_some_and(refused_for_good) {
-            let dropped = self.events.keep_only(|event| !event.ephemeral);
-            let durable = self.events.in_flight_events();
-            if dropped > 0 {
-                if durable.is_empty() {
-                    self.events.done();
+        let resend = {
+            let mut held = self.lock();
+            if held.closed && status == Some(409) && held.events.in_flight_events().iter().all(|event| event.ephemeral)
+            {
+                held.events.done();
+                return Ok(());
+            }
+            if !status.is_some_and(refused_for_good) {
+                let jitter = self.pacing.jitter();
+                held.events.failed(jitter, failure.retry_after_ms, failure.fetch_failed);
+                return Ok(());
+            }
+            let dropped = held.events.keep_only(|event| !event.ephemeral);
+            let durable = held.events.in_flight_events();
+            if dropped > 0 && durable.is_empty() {
+                held.events.done();
+                return Ok(());
+            }
+            if dropped > 0 { Some((durable, held.epoch)) } else { None }
+        };
+        if let Some((durable, epoch)) = resend {
+            let body = upload_body(epoch, &durable);
+            let bytes = durable.iter().map(ClientEvent::json_bytes).sum();
+            let timeout = upload_timeout(bytes, durable.len() > 1, 0);
+            let retry = self
+                .request_with(Method::POST, "/worker/events", &body, timeout, false, Some("resend"))
+                .await?;
+            let mut held = self.lock();
+            match retry {
+                RequestOutcome::Accepted(_) => {
+                    held.events.done();
                     return Ok(());
                 }
-                let body = upload_body(self.epoch, &durable);
-                let bytes = durable.iter().map(ClientEvent::json_bytes).sum();
-                let timeout = upload_timeout(bytes, durable.len() > 1, 0);
-                let retry = self
-                    .request_with(Method::POST, "/worker/events", &body, timeout, false, Some("resend"))
-                    .await?;
-                match retry {
-                    RequestOutcome::Accepted(_) => {
-                        self.events.done();
-                        return Ok(());
-                    }
-                    RequestOutcome::Failed(again) if !again.status.is_some_and(refused_for_good) => {
-                        let jitter = self.pacing.jitter();
-                        self.events.failed(jitter, again.retry_after_ms, again.fetch_failed);
-                        return Ok(());
-                    }
-                    RequestOutcome::Failed(_) => {}
+                RequestOutcome::Failed(again) if !again.status.is_some_and(refused_for_good) => {
+                    let jitter = self.pacing.jitter();
+                    held.events.failed(jitter, again.retry_after_ms, again.fetch_failed);
+                    return Ok(());
                 }
+                RequestOutcome::Failed(_) => {}
             }
-            self.dropped_durable_event_batches += 1;
-            self.events.done();
-            return Ok(());
         }
-        let jitter = self.pacing.jitter();
-        self.events.failed(jitter, failure.retry_after_ms, failure.fetch_failed);
+        let mut held = self.lock();
+        held.dropped_durable_event_batches += 1;
+        held.events.done();
         Ok(())
     }
 
@@ -1073,17 +1090,25 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// with no message uuid and no options). `received` and `processed` wait in the delivery queue; `processing`
     /// waits for the next [`WorkerClient::pump_deliveries`] and goes out in one request of its own. A closed client
     /// ignores `processing`, and a closed queue drops the others.
-    pub async fn report_delivery(&mut self, event_id: &str, status: DeliveryStatus) -> Result<(), MismatchReason> {
+    pub async fn report_delivery(&self, event_id: &str, status: DeliveryStatus) -> Result<(), MismatchReason> {
         if status == DeliveryStatus::Processing {
-            if !self.closed {
-                self.pending_processing.push(event_id.to_owned());
+            let mut held = self.lock();
+            if !held.closed {
+                held.pending_processing.push(event_id.to_owned());
             }
             return Ok(());
         }
-        while !self.deliveries.has_room_for(1) && !self.deliveries.is_closed() {
+        loop {
+            let full = {
+                let held = self.lock();
+                !held.deliveries.has_room_for(1) && !held.deliveries.is_closed()
+            };
+            if !full {
+                break;
+            }
             self.pump_deliveries(Some(1)).await?;
         }
-        self.deliveries.enqueue(vec![DeliveryAck {
+        self.lock().deliveries.enqueue(vec![DeliveryAck {
             event_id: event_id.to_owned(),
             status,
         }]);
@@ -1094,13 +1119,14 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// with the upstream backoff. The `processing` acknowledgements leave right after the first request, the way
     /// the upstream microtask sends them while that request is in flight, or before a retry wait, or when nothing
     /// else is waiting. Returns whether the queue drained; a mismatch ends the call.
-    pub async fn pump_deliveries(&mut self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
+    pub async fn pump_deliveries(&self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
         let mut made = 0_u32;
         loop {
             if attempts.is_some_and(|cap| made >= cap) {
-                return Ok(self.deliveries.is_idle());
+                return Ok(self.lock().deliveries.is_idle());
             }
-            match self.deliveries.poll() {
+            let next = self.lock().deliveries.poll();
+            match next {
                 DeliveryNext::Idle => {
                     self.send_processing_acks().await?;
                     return Ok(true);
@@ -1111,18 +1137,21 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 }
                 DeliveryNext::Send(batch) => {
                     made += 1;
-                    let body = delivery_body(self.epoch, &batch);
+                    let body = delivery_body(self.epoch(), &batch);
                     let outcome = self
                         .request(Method::POST, "/worker/events/delivery", &body, REQUEST_TIMEOUT, false)
                         .await?;
-                    match outcome {
-                        RequestOutcome::Accepted(_) => self.deliveries.done(),
-                        RequestOutcome::Failed(failure) if failure.status.is_some_and(refused_for_good) => {
-                            self.deliveries.dropped();
-                        }
-                        RequestOutcome::Failed(failure) => {
-                            let jitter = self.pacing.jitter();
-                            self.deliveries.failed(jitter, failure.retry_after_ms);
+                    {
+                        let mut held = self.lock();
+                        match outcome {
+                            RequestOutcome::Accepted(_) => held.deliveries.done(),
+                            RequestOutcome::Failed(failure) if failure.status.is_some_and(refused_for_good) => {
+                                held.deliveries.dropped();
+                            }
+                            RequestOutcome::Failed(failure) => {
+                                let jitter = self.pacing.jitter();
+                                held.deliveries.failed(jitter, failure.retry_after_ms);
+                            }
                         }
                     }
                     self.send_processing_acks().await?;
@@ -1133,9 +1162,12 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
 
     /// One request for every `processing` acknowledgement waiting (`sendProcessingAcks`). It is not retried: the
     /// upstream failure path only queues the receipts that rode along, and there are none.
-    async fn send_processing_acks(&mut self) -> Result<(), MismatchReason> {
-        let ids = std::mem::take(&mut self.pending_processing);
-        if self.closed || ids.is_empty() {
+    async fn send_processing_acks(&self) -> Result<(), MismatchReason> {
+        let (ids, closed, epoch) = {
+            let mut held = self.lock();
+            (std::mem::take(&mut held.pending_processing), held.closed, held.epoch)
+        };
+        if closed || ids.is_empty() {
             return Ok(());
         }
         let acks: Vec<DeliveryAck> = ids
@@ -1145,37 +1177,37 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 status: DeliveryStatus::Processing,
             })
             .collect();
-        let body = delivery_body(self.epoch, &acks);
+        let body = delivery_body(epoch, &acks);
         self.request(Method::POST, "/worker/events/delivery", &body, REQUEST_TIMEOUT, false)
             .await?;
         Ok(())
     }
 
     /// Drops the acknowledgements still queued and stops the queue (`close`, offset 1143123).
-    pub fn close_deliveries(&mut self) {
-        self.pending_processing.clear();
-        self.deliveries.close();
+    pub fn close_deliveries(&self) {
+        let mut held = self.lock();
+        held.pending_processing.clear();
+        held.deliveries.close();
     }
 
     /// How many delivery batches the service refused for good (`droppedDeliveryAckBatches`).
     pub fn dropped_delivery_ack_batches(&self) -> u32 {
-        self.deliveries.dropped_batches()
-    }
-
-    /// The delivery acknowledgement queue.
-    pub fn delivery_queue(&self) -> &DeliveryQueue {
-        &self.deliveries
+        self.lock().deliveries.dropped_batches()
     }
 
     /// The goodbye of a closing worker (`sendGoodbye`, offset 1061793): `PUT /worker` with the connection marked as
     /// disconnected, so the service does not wait for a worker that left. It is not sent for a worker with no epoch,
     /// one the service already replaced, or one in the middle of a turn. Whatever the service answers is ignored.
     /// Returns whether the request was sent.
-    pub async fn goodbye(&mut self) -> bool {
-        if self.epoch <= 0 || self.epoch_superseded || self.state == SessionState::Running {
-            return false;
-        }
-        let body = json!({"worker_epoch": self.epoch, "connection_status": "disconnected"});
+    pub async fn goodbye(&self) -> bool {
+        let epoch = {
+            let held = self.lock();
+            if held.epoch <= 0 || held.epoch_superseded || held.state == SessionState::Running {
+                return false;
+            }
+            held.epoch
+        };
+        let body = json!({"worker_epoch": epoch, "connection_status": "disconnected"});
         let _ = self
             .request(Method::PUT, "/worker", &body, GOODBYE_TIMEOUT, false)
             .await;
@@ -1183,9 +1215,13 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     }
 
     /// One heartbeat. An accepted answer that advises a beat interval changes the interval the worker keeps.
-    pub async fn heartbeat(&mut self) -> Result<RequestOutcome, MismatchReason> {
-        let body = json!({"session_id": self.session_id, "worker_epoch": self.epoch});
-        let timeout = heartbeat_timeout(self.heartbeat_interval_ms);
+    pub async fn heartbeat(&self) -> Result<RequestOutcome, MismatchReason> {
+        let (epoch, interval) = {
+            let held = self.lock();
+            (held.epoch, held.heartbeat_interval_ms)
+        };
+        let body = json!({"session_id": self.session_id, "worker_epoch": epoch});
+        let timeout = heartbeat_timeout(interval);
         let outcome = self
             .request(Method::POST, "/worker/heartbeat", &body, timeout, true)
             .await?;
@@ -1195,13 +1231,13 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         {
             let floor = HEARTBEAT_INTERVAL_FLOOR_MS as f64;
             let ceiling = HEARTBEAT_INTERVAL_CEILING_MS as f64;
-            self.heartbeat_interval_ms = (seconds * 1000.0).clamp(floor, ceiling);
+            self.lock().heartbeat_interval_ms = (seconds * 1000.0).clamp(floor, ceiling);
         }
         Ok(outcome)
     }
 
     async fn request(
-        &mut self,
+        &self,
         method: Method,
         path: &str,
         body: &Value,
@@ -1214,7 +1250,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// [`WorkerClient::request`] that also tells the service whether it may have seen the rows before
     /// (`x-ccr-upload-attempt`).
     async fn request_with(
-        &mut self,
+        &self,
         method: Method,
         path: &str,
         body: &Value,
@@ -1238,7 +1274,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             return unanswered("fetch_failed:TypeError");
         };
         let key = authorization.as_bytes().to_vec();
-        let held = self.tickets.headers_for(&key);
+        let held = self.lock().tickets.headers_for(&key);
         let mut request = reqwest::Request::new(method, url);
         let headers = request.headers_mut();
         headers.insert("authorization", authorization);
@@ -1262,10 +1298,11 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             Err(Fault::Unreachable(_)) => return unanswered("fetch_failed:TypeError"),
         };
         let status = reply.status;
-        self.tickets.note(&key, reply.redirected, status, &reply.headers);
+        let mut state = self.lock();
+        state.tickets.note(&key, reply.redirected, status, &reply.headers);
         if (200..300).contains(&status) {
-            self.consecutive_auth_failures = 0;
-            self.consecutive_not_found = 0;
+            state.consecutive_auth_failures = 0;
+            state.consecutive_not_found = 0;
             let data = parse_body
                 .then(|| {
                     reply
@@ -1276,7 +1313,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 .flatten();
             return Ok(RequestOutcome::Accepted(data));
         }
-        if self.closed {
+        if state.closed {
             return Ok(RequestOutcome::Failed(RequestFailure {
                 status: Some(status),
                 reason: format!("http_{status}"),
@@ -1286,12 +1323,12 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             }));
         }
         if status == 409 {
-            self.epoch_superseded = true;
+            state.epoch_superseded = true;
             return Err(conflict_reason(&reply.headers, reply.body.as_deref()).unwrap_or(MismatchReason::EpochConflict));
         }
         if status == 404 {
-            self.consecutive_not_found += 1;
-            if self.consecutive_not_found >= NOT_FOUND_BEFORE_EXIT {
+            state.consecutive_not_found += 1;
+            if state.consecutive_not_found >= NOT_FOUND_BEFORE_EXIT {
                 return Err(MismatchReason::SessionNotFound);
             }
         }
@@ -1299,7 +1336,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             && self.non_origin_403 == NonOrigin403::Transient
             && refusal_source(&reply.headers).is_non_origin();
         if matches!(status, 401 | 403) {
-            let expiry = self
+            let expiry = state
                 .session_access_token
                 .as_ref()
                 .filter(|token| !token.expose().is_empty())
@@ -1308,8 +1345,8 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 return Err(MismatchReason::TokenExpired);
             }
             if !non_origin_refusal {
-                self.consecutive_auth_failures += 1;
-                if self.consecutive_auth_failures >= AUTH_FAILURES_BEFORE_EXIT {
+                state.consecutive_auth_failures += 1;
+                if state.consecutive_auth_failures >= AUTH_FAILURES_BEFORE_EXIT {
                     return Err(MismatchReason::AuthExhausted);
                 }
             }
@@ -1326,6 +1363,31 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             non_origin_refusal,
         }))
     }
+}
+
+/// `withoutRepeatsOfRecord`: the metadata without the keys that were first reported now and equal what the record
+/// held at the start. `None` when that leaves nothing of a non-empty report.
+fn without_repeats_of_record(state: &mut State, metadata: &Map<String, Value>) -> Option<Map<String, Value>> {
+    let mut repeated: Vec<&str> = Vec::new();
+    for key in metadata.keys() {
+        if !RECORDED_KEYS.contains(&key.as_str()) || state.reported_keys.iter().any(|seen| seen == key) {
+            continue;
+        }
+        state.reported_keys.push(key.clone());
+        let stored = state.record_at_start.as_ref().and_then(|record| record.get(key));
+        if state.record_at_start.is_some() && js_equal(metadata.get(key), stored) {
+            repeated.push(key);
+        }
+    }
+    if repeated.is_empty() {
+        return Some(metadata.clone());
+    }
+    let left: Map<String, Value> = metadata
+        .iter()
+        .filter(|(key, _)| !repeated.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    (!left.is_empty()).then_some(left)
 }
 
 /// `getWorkerState` as `initialize` runs it: `GET /worker` with up to ten attempts, bridge.mjs offset 1049109. The

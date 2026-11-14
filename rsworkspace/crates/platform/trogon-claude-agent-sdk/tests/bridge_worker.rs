@@ -391,7 +391,7 @@ async fn run_case(case: &Value) -> TestResult {
     )
     .await?;
     let pacing = Recorded::new(0.0);
-    let mut worker = WorkerClient::new(
+    let worker = WorkerClient::new(
         http()?,
         pacing.clone(),
         WorkerConfig {
@@ -450,7 +450,7 @@ async fn run_case(case: &Value) -> TestResult {
                 continue;
             }
             if field(step, "op").as_str() == Some("events") {
-                match post_events(&mut worker, step).await? {
+                match post_events(&worker, step).await? {
                     Ok(()) => continue,
                     Err(reason) => {
                         ending = Ending::mismatch(reason);
@@ -459,7 +459,7 @@ async fn run_case(case: &Value) -> TestResult {
                 }
             }
             if field(step, "op").as_str() == Some("delivery") {
-                match report_deliveries(&mut worker, step).await? {
+                match report_deliveries(&worker, step).await? {
                     Ok(()) => continue,
                     Err(reason) => {
                         ending = Ending::mismatch(reason);
@@ -468,7 +468,7 @@ async fn run_case(case: &Value) -> TestResult {
                 }
             }
             if field(step, "op").as_str() == Some("burst") {
-                match burst(&mut worker, step).await? {
+                match burst(&worker, step).await? {
                     Ok(()) => continue,
                     Err(reason) => {
                         ending = Ending::mismatch(reason);
@@ -540,7 +540,7 @@ async fn run_case(case: &Value) -> TestResult {
 /// Queues the patches of one burst, then sends them. An item that carries `afterMs` is queued while the first
 /// request is waiting to be retried.
 async fn burst(
-    worker: &mut WorkerClient<reqwest::Client, Recorded>,
+    worker: &WorkerClient<reqwest::Client, Recorded>,
     step: &Value,
 ) -> Result<Result<(), MismatchReason>, Box<dyn std::error::Error>> {
     for item in queue(step, "ops") {
@@ -606,7 +606,7 @@ fn hide_uuids(body: &str) -> String {
 /// Writes the events of one step as a caller would: the first goes out alone and the rest arrive while it is in
 /// flight (a failed first request is retried with them).
 async fn post_events(
-    worker: &mut WorkerClient<reqwest::Client, Recorded>,
+    worker: &WorkerClient<reqwest::Client, Recorded>,
     step: &Value,
 ) -> Result<Result<(), MismatchReason>, Box<dyn std::error::Error>> {
     let mut events = Vec::new();
@@ -638,7 +638,7 @@ async fn post_events(
 /// Reports the deliveries of one step as the handle does: the first goes out alone and the rest arrive while it is in
 /// flight. A step that closes lets the first request go out, then closes the client.
 async fn report_deliveries(
-    worker: &mut WorkerClient<reqwest::Client, Recorded>,
+    worker: &WorkerClient<reqwest::Client, Recorded>,
     step: &Value,
 ) -> Result<Result<(), MismatchReason>, Box<dyn std::error::Error>> {
     for report in queue(step, "reports") {
@@ -980,7 +980,7 @@ async fn requests_that_fail_before_headers_report_the_fetch_error() -> TestResul
             json!(mode)
         };
         let (base, _) = serve(None, vec![], vec![answer]).await?;
-        let mut worker = client(&base, Recorded::new(0.0))?;
+        let worker = client(&base, Recorded::new(0.0))?;
         let outcome = worker.heartbeat().await;
         match field(case, "reason").as_str() {
             Some(reason) => match outcome {
@@ -1024,11 +1024,11 @@ fn refusal_sources_and_token_expiry_match_the_upstream_client() -> TestResult {
 async fn held_tickets_follow_the_token_in_use() -> TestResult {
     let ticketed = json!({"status": 200, "headers": [["x-ccr-ticket-session", "t1"]], "body": "{}"});
     let (base, _) = serve(None, vec![], vec![ticketed]).await?;
-    let mut worker = client(&base, Recorded::new(0.0))?;
+    let worker = client(&base, Recorded::new(0.0))?;
     worker.heartbeat().await.map_err(|reason| reason.as_str())?;
-    assert_eq!(worker.session_ticket(), Some("t1"));
+    assert_eq!(worker.session_ticket().as_deref(), Some("t1"));
     worker.set_token(SensitiveString::from("other"));
-    assert_eq!(worker.session_ticket(), None);
+    assert_eq!(worker.session_ticket(), None::<String>);
     worker.set_session_access_token(Some(SensitiveString::from("h.e30.s")));
     Ok(())
 }
@@ -1037,7 +1037,7 @@ async fn held_tickets_follow_the_token_in_use() -> TestResult {
 async fn a_transient_non_origin_403_never_exhausts_the_session() -> TestResult {
     let refusal = json!({"status": 403, "headers": [["cf-ray", "abc-LHR"]], "body": ""});
     let (base, _) = serve(None, vec![], vec![refusal]).await?;
-    let mut worker = WorkerClient::new(
+    let worker = WorkerClient::new(
         reqwest::Client::new(),
         Recorded::new(0.0),
         WorkerConfig {
@@ -1098,7 +1098,7 @@ fn a_new_client_starts_idle_with_the_default_cadence() -> TestResult {
 async fn init_backs_off_between_attempts_and_then_gives_up() -> TestResult {
     let (base, log) = serve(None, vec![json!({"status": 500, "headers": [], "body": ""})], vec![]).await?;
     let pacing = Recorded::new(0.0);
-    let mut worker = client(&base, pacing.clone())?;
+    let worker = client(&base, pacing.clone())?;
     let failure = InitFailure {
         reason: "worker_register_failed",
         http_status: Some(500),
@@ -1124,7 +1124,7 @@ async fn init_retries_with_jitter_until_the_service_accepts() -> TestResult {
     )
     .await?;
     let pacing = Recorded::new(0.5);
-    let mut worker = client(&base, pacing.clone())?;
+    let worker = client(&base, pacing.clone())?;
     assert_eq!(worker.initialize(7).await, Ok(()));
     assert_eq!(pacing.delays(), vec![Duration::from_millis(750)]);
     assert_eq!(log.lock().map_err(|_| "poisoned log")?.len(), 2);
@@ -1134,7 +1134,7 @@ async fn init_retries_with_jitter_until_the_service_accepts() -> TestResult {
 
 #[tokio::test]
 async fn init_reports_that_nobody_answered() -> TestResult {
-    let mut worker = client(&closed_port().await?, Recorded::new(0.0))?;
+    let worker = client(&closed_port().await?, Recorded::new(0.0))?;
     assert_eq!(
         worker.initialize(1).await,
         Err(InitError::Failed(InitFailure {
@@ -1152,7 +1152,7 @@ async fn a_client_error_clears_the_held_tickets_but_a_429_does_not() -> TestResu
     for (status, kept) in [(400, false), (429, true)] {
         let refusal = json!({"status": status, "headers": [], "body": ""});
         let (base, log) = serve(None, vec![ticket.clone(), refusal, ok_response()], vec![]).await?;
-        let mut worker = client(&base, Recorded::new(0.0))?;
+        let worker = client(&base, Recorded::new(0.0))?;
         worker.initialize(1).await.map_err(|_| "init failed")?;
         let refused = worker.report_state(SessionState::Running, None).await;
         assert!(matches!(refused, Ok(Some(RequestOutcome::Failed(_)))), "{status}");
@@ -1204,7 +1204,7 @@ async fn register_worker_reads_a_body_that_starts_with_a_byte_order_mark() -> Te
 
 #[tokio::test]
 async fn requests_that_cannot_be_made_do_not_reach_the_service() -> TestResult {
-    let mut bad_token = WorkerClient::new(
+    let bad_token = WorkerClient::new(
         reqwest::Client::new(),
         Recorded::new(0.0),
         config("http://h", "a\u{100}"),
@@ -1213,7 +1213,7 @@ async fn requests_that_cannot_be_made_do_not_reach_the_service() -> TestResult {
     assert_eq!(outcome, Ok(Some(type_error())));
     let mut relative = client("", Recorded::new(0.0))?;
     assert_eq!(relative.heartbeat().await, Ok(type_error()));
-    let mut refused = client(&closed_port().await?, Recorded::new(0.0))?;
+    let refused = client(&closed_port().await?, Recorded::new(0.0))?;
     assert_eq!(refused.heartbeat().await, Ok(type_error()));
     Ok(())
 }
@@ -1232,7 +1232,7 @@ fn type_error() -> RequestOutcome {
 async fn a_body_that_ends_early_is_accepted_without_its_data() -> TestResult {
     let truncated = json!({"status": 200, "headers": [["content-length", "10"]], "body": "ab"});
     let (base, _) = serve(None, vec![], vec![truncated]).await?;
-    let mut worker = client(&base, Recorded::new(0.0))?;
+    let worker = client(&base, Recorded::new(0.0))?;
     assert_eq!(worker.heartbeat().await, Ok(RequestOutcome::Accepted(None)));
     Ok(())
 }
@@ -1240,7 +1240,7 @@ async fn a_body_that_ends_early_is_accepted_without_its_data() -> TestResult {
 #[tokio::test(start_paused = true)]
 async fn a_silent_service_times_the_request_out() -> TestResult {
     let (base, _) = serve(Some(json!("hang")), vec![], vec![json!("hang")]).await?;
-    let mut worker = client(&base, Recorded::new(0.0))?;
+    let worker = client(&base, Recorded::new(0.0))?;
     let failure = worker.register_worker().await.err().ok_or("expected a failure")?;
     assert_eq!(failure, RegisterFailure::TimedOut);
     assert_eq!(failure.to_string(), "timeout of 10000ms exceeded");
@@ -1271,7 +1271,7 @@ async fn heartbeat_answers_move_the_beat_interval_within_its_bounds() -> TestRes
     let answers = ["30", "0.01", "100000", "0", "-4", "\"7\"", "null"]
         .map(|seconds| json!({"status": 200, "headers": [], "body": format!("{{\"heartbeat_interval_seconds\":{seconds}}}")}));
     let (base, _) = serve(None, vec![], answers.to_vec()).await?;
-    let mut worker = client(&base, Recorded::new(0.0))?;
+    let worker = client(&base, Recorded::new(0.0))?;
     for expected in [
         30_000.0, 10_000.0, 300_000.0, 300_000.0, 300_000.0, 300_000.0, 300_000.0,
     ] {
@@ -1298,7 +1298,7 @@ async fn a_429_reports_how_long_the_service_asked_to_wait() -> TestResult {
         answer(500, Some("3")),
     ];
     let (base, _) = serve(None, vec![], answers).await?;
-    let mut worker = client(&base, Recorded::new(0.0))?;
+    let worker = client(&base, Recorded::new(0.0))?;
     let mut waits = Vec::new();
     for _ in 0..4 {
         match worker.heartbeat().await {
@@ -1313,7 +1313,7 @@ async fn a_429_reports_how_long_the_service_asked_to_wait() -> TestResult {
 #[tokio::test]
 async fn requires_action_details_ride_along_and_always_send() -> TestResult {
     let (base, log) = serve(None, vec![], vec![]).await?;
-    let mut worker = client(&base, Recorded::new(0.0))?;
+    let worker = client(&base, Recorded::new(0.0))?;
     worker.initialize(5).await.map_err(|_| "init failed")?;
     let details = RequiresActionDetails {
         tool_name: "Bash".to_owned(),

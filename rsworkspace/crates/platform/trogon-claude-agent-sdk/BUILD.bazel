@@ -67,6 +67,7 @@ workspace_crate(
             ],
         },
         "bridge_worker": {"compile_data": ["tests/fixtures/bridge_worker/goldens.json"]},
+        "bridge_worker_concurrency": {},
         "bridge_worker_control": {"compile_data": ["tests/fixtures/bridge_worker/goldens.json"]},
         "bridge_worker_control_async": {"compile_data": ["tests/fixtures/bridge_worker/goldens.json"]},
         "bridge_worker_delivery": {},
