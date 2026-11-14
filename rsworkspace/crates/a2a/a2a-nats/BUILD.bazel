@@ -3,6 +3,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 workspace_crate(
     name = "a2a-nats",
     crate_features = ["spicedb"],
+    # The @crates labels are optional dependencies of the enabled features. No
+    # workspace member enables those features, so crate_universe leaves them out.
     deps = [
         "//rsworkspace/crates/a2a/a2a-identity-types",
         "//rsworkspace/crates/a2a/a2a-pack",
@@ -11,5 +13,8 @@ workspace_crate(
         "//rsworkspace/crates/platform/trogon-nats",
         "//rsworkspace/crates/platform/trogon-semconv",
         "//rsworkspace/crates/platform/trogon-std",
+        "@crates//:authzed",
+        "@crates//:moka",
+        "@crates//:tonic",
     ],
 )

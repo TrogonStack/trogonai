@@ -38,6 +38,8 @@ workspace_crate(
     ],
     # Some tests start a NATS server in a container through Docker.
     unit_test_tags = ["requires-network"],
+    # The @crates labels are optional dependencies of the enabled features. No
+    # workspace member enables those features, so crate_universe leaves them out.
     deps = [
         "//rsworkspace/crates/a2a/a2a-auth-callout",
         "//rsworkspace/crates/a2a/a2a-nats",
@@ -49,5 +51,7 @@ workspace_crate(
         "//rsworkspace/crates/platform/trogon-semconv",
         "//rsworkspace/crates/platform/trogon-std",
         "//rsworkspace/crates/platform/trogon-telemetry",
+        "@crates//:authzed",
+        "@crates//:tonic",
     ],
 )

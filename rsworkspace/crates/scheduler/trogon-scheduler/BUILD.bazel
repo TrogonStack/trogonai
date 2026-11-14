@@ -31,6 +31,8 @@ workspace_crate(
     },
     # Some tests start NATS and Postgres in containers through Docker.
     unit_test_tags = ["requires-network"],
+    # The @crates labels are optional dependencies of the enabled features. No
+    # workspace member enables those features, so crate_universe leaves them out.
     deps = [
         "//rsworkspace/crates/decider/trogon-decider-nats",
         "//rsworkspace/crates/decider/trogon-decider-runtime",
@@ -40,5 +42,7 @@ workspace_crate(
         "//rsworkspace/crates/platform/trogon-telemetry",
         "//rsworkspace/crates/platform/trogonai-proto",
         "//rsworkspace/crates/scheduler/trogon-scheduler-domain",
+        "@crates//:sqlx",
+        "@crates//:url",
     ],
 )
