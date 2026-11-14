@@ -863,7 +863,11 @@ async fn ordinary_connection_never_reads_session_environment_or_current_director
         ..TrackedEnvironment::new(&filesystem)
     };
     connect_with_tracked_environment(&filesystem, ClaudeAgentOptions::default(), environment.clone()).await?;
-    assert!(environment.accesses()?.is_empty());
+    // The run-end ceiling is the one process variable every connection reads.
+    assert_eq!(
+        environment.accesses()?,
+        [variable("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")]
+    );
     Ok(())
 }
 
