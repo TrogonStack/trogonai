@@ -65,6 +65,7 @@
       },
       "rust_api": [
         "ClaudeAgentOptions.cli_path",
+        "ClaudeAgentOptions.bundled_cli_root",
         "ClaudeAgentOptions.cwd",
         "ClaudeAgentOptions.model",
         "find_bundled_cli",
@@ -103,10 +104,22 @@
         {
           "name": "the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
           "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "host_target_prefers_musl_on_linux_unless_the_process_runs_against_glibc",
+          "path": "tests/bundled_cli.rs"
+        },
+        {
+          "name": "the_bundled_directory_comes_first_like_python_and_only_when_named",
+          "path": "src/cli_discovery/tests.rs"
+        },
+        {
+          "name": "connect_spawns_the_bundled_cli_under_the_configured_root",
+          "path": "tests/subprocess.rs"
         }
       ],
       "status": "supported",
-      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. The bundled executable lookups (Python _bundled directory, TypeScript platform packages with musl and Windows or arm variants) are caller-driven helpers in find_bundled_cli and find_native_cli; they are not part of connect's discovery. Python's bundled-CLI version gate (999.0.0 minimum, claude.version record) and its derived client app trigger are the same kind of helper, meets_derived_client_app_minimum and bundled_cli_derives_client_app; connect asks them only through the Python-dialect client_app_derivation option, so TypeScript, which has neither, stays connect's default."
+      "rationale": "Core optional paths and model strings retain upstream values without configuration-time validation. Omitted cli_path is discovered in Python's order at startup (golden argv, environment and initialize bytes are pinned by tests/golden_argv_env.rs); Windows batch paths are refused before spawn. Named fixtures cover argument preservation and cwd forwarding, not upstream runtime parity. Python's _bundled lookup runs first in connect's discovery when bundled_cli_root names the directory that holds _bundled, matching goldens recorded from claude_agent_sdk 0.2.181 _find_cli; it is off by default because TypeScript has no bundled directory. TypeScript's platform packages (musl and Windows or arm variants) are resolved by find_native_cli, and NativePackageTarget::host prefers musl on Linux unless the process reports a glibc runtime version, as the Node process report does. Python's bundled-CLI version gate (999.0.0 minimum, claude.version record) and its derived client app trigger are the same kind of helper, meets_derived_client_app_minimum and bundled_cli_derives_client_app; connect asks them only through the Python-dialect client_app_derivation option, so TypeScript, which has neither, stays connect's default."
     },
     {
       "id": "process-errors-and-shutdown",

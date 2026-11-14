@@ -276,6 +276,10 @@ impl Default for Limits {
 #[derive(Clone, Debug, Default)]
 pub struct ClaudeAgentOptions {
     pub cli_path: Option<PathBuf>,
+    /// Python `_find_bundled_cli`: the directory that holds `_bundled`, Python's package directory. When `connect`
+    /// discovers the CLI it takes `<root>/_bundled/claude` (`claude.exe` on Windows) before anything else, as long
+    /// as it is a file. `None`, the default, has no bundled lookup, as in TypeScript.
+    pub bundled_cli_root: Option<PathBuf>,
     pub cwd: Option<PathBuf>,
     pub model: Option<ModelName>,
     pub max_turns: Option<NonZeroUsize>,
