@@ -1,4 +1,69 @@
+use std::path::Path;
+
+use serde_json::Value;
+
 use super::*;
+use crate::bridge_fake_probe::FakeProbe;
+use crate::bridge_refs::find_root;
+
+const PLATFORM_GOLDENS: &str = include_str!("../tests/fixtures/bridge_create_session/platform.json");
+
+fn text(case: &Value, index: usize) -> &str {
+    case["args"][index].as_str().unwrap_or_default()
+}
+
+#[test]
+fn answers_path_checks_like_the_upstream_bridge_on_every_platform() {
+    let cases: Vec<Value> = serde_json::from_str(PLATFORM_GOLDENS).unwrap_or_default();
+    assert!(cases.len() > 300);
+    for case in &cases {
+        let name = case["name"].as_str().unwrap_or_default();
+        let guard = PathGuard::new(Arc::new(FakeProbe::from_case(case)));
+        let expected = &case["expect"];
+        match case["fn"].as_str().unwrap_or_default() {
+            "walk" => assert_eq!(
+                Value::Bool(guard.walks(text(case, 0), text(case, 1))),
+                *expected,
+                "{name}"
+            ),
+            "refuses" => assert_eq!(
+                Value::Bool(guard.refuses(text(case, 0), text(case, 1))),
+                *expected,
+                "{name}"
+            ),
+            "mac" => assert_eq!(
+                Value::Bool(guard.mac_mount_point(text(case, 0), text(case, 1))),
+                *expected,
+                "{name}"
+            ),
+            "step" => assert_eq!(
+                Value::Bool(guard.forbidden_step(text(case, 0), text(case, 1))),
+                *expected,
+                "{name}"
+            ),
+            "host" => assert_eq!(
+                guard.automount_host(text(case, 0)).map_or(Value::Null, Value::String),
+                *expected,
+                "{name}"
+            ),
+            "autofs" => {
+                let answers: Vec<Value> = case["args"][0]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|path| Value::Bool(guard.autofs_root(path.as_str().unwrap_or_default())))
+                    .collect();
+                assert_eq!(Value::Array(answers), *expected, "{name}");
+            }
+            "root" => assert_eq!(
+                find_root(&guard, Path::new(text(case, 0))).map_or(Value::Null, Value::String),
+                *expected,
+                "{name}"
+            ),
+            other => panic!("{name}: unknown function {other}"),
+        }
+    }
+}
 
 #[test]
 fn folds_path_text_the_way_the_path_module_does() {

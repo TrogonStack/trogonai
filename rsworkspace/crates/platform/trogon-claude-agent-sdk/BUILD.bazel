@@ -29,6 +29,7 @@ workspace_crate(
         "tests/fixtures/bridge_create_session/details.json",
         "tests/fixtures/bridge_create_session/gated.json",
         "tests/fixtures/bridge_create_session/guesses.json",
+        "tests/fixtures/bridge_create_session/platform.json",
         "tests/fixtures/bridge_create_session/unicode.json",
         "tests/fixtures/bridge_create_session/urls.json",
         "tests/fixtures/connector_vetting/probes.json",
