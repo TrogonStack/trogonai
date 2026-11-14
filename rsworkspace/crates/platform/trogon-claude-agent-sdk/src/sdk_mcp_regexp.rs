@@ -17,11 +17,47 @@ pub(crate) fn compile(source: &str, flags: &str) -> Result<Regex, String> {
     if !flags_valid(flags) {
         return Err(format!("Invalid flags supplied to RegExp constructor '{flags}'"));
     }
-    Regex::with_flags(source, flags).map_err(|error| {
+    let read = if flags.contains('u') || flags.contains('v') {
+        source.to_owned()
+    } else {
+        identity_u_escapes(source)
+    };
+    Regex::with_flags(&read, flags).map_err(|error| {
         let reason = reason(source, flags.contains('u') || flags.contains('v')).unwrap_or(error.text.as_str());
         let shown = if source.is_empty() { "(?:)" } else { source };
         format!("Invalid regular expression: /{shown}/{flags}: {reason}")
     })
+}
+
+/// `source` as the engine has to read it without the `u` or `v` flag. There a `\u` that does not start four hex
+/// digits is the identity escape for `u`, so `/\u{2}/` matches `uu`, while the engine reads `\u{...}` as a
+/// code point escape in every mode.
+fn identity_u_escapes(source: &str) -> String {
+    let characters: Vec<char> = source.chars().collect();
+    let mut read = String::with_capacity(source.len());
+    let mut index = 0;
+    while let Some(&character) = characters.get(index) {
+        match (character, characters.get(index + 1).copied()) {
+            ('\\', Some('u'))
+                if !characters
+                    .get(index + 2..)
+                    .is_some_and(|rest| rest.iter().take(4).filter(|digit| digit.is_ascii_hexdigit()).count() == 4) =>
+            {
+                read.push('u');
+                index += 2;
+            }
+            ('\\', Some(escaped)) => {
+                read.push('\\');
+                read.push(escaped);
+                index += 2;
+            }
+            _ => {
+                read.push(character);
+                index += 1;
+            }
+        }
+    }
+    read
 }
 
 /// `regexp.flags`: the flags in the order the getter reads them, whatever order the constructor was given.
