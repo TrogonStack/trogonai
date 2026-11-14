@@ -22,6 +22,7 @@ def workspace_crate(
         dev_deps = [],
         examples = {},
         integration_tests = {},
+        library_tags = [],
         unit_test_tags = []):
     """Declares a library, its unit tests, doctests, integration tests, and examples.
 
@@ -49,6 +50,7 @@ def workspace_crate(
         dev_deps: Workspace crate labels only the tests and examples depend on.
         examples: Maps each `examples/<name>.rs` to extra `rust_binary` attributes.
         integration_tests: Maps each `tests/<name>.rs` to extra `rust_test` attributes.
+        library_tags: Tags for the library target.
         unit_test_args: Arguments for the unit test binary, such as `--skip` filters.
         unit_test_tags: Tags for the unit test target.
     """
@@ -134,6 +136,7 @@ def workspace_crate(
         proc_macro_deps = all_crate_deps(proc_macro = True) + proc_macro_deps,
         rustc_env = rustc_env,
         rustc_flags = _RUSTC_FLAGS,
+        tags = library_tags,
         version = version,
         visibility = ["//visibility:public"],
         deps = all_crate_deps(normal = True) + deps,
