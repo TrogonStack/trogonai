@@ -5,26 +5,19 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened]
+    # //... globs files from almost every directory, so a list of inputs kept
+    # falling behind new packages. Everything triggers except files no Bazel
+    # target or GitHub Action reads; later patterns win over earlier ones.
     paths:
-      - '.bazel*'
-      - 'MODULE.bazel*'
-      - '**/BUILD.bazel'
-      - '**/*.bzl'
-      - '.config/mise/config.toml'
-      - '.config/mise/mise.lock'
-      - '.config/bazel/**'
-      - 'projects/mise-bazel/**'
-      - '.config/mise/tasks/bazel/**'
-      - '.config/mise/tasks/github/workflows/ci-bazel/**'
-      - 'rsworkspace/Cargo.lock'
-      - 'rsworkspace/**/Cargo.toml'
-      - 'rsworkspace/crates/**'
-      - 'goworkspace/**'
-      - 'proto/trogonai/scheduler/schedules/v1/**'
-      - 'docs/**'
-      - 'tsworkspace/**'
-      - 'tests/github_actions/**'
-      - '.github/actions/**'
+      - '**'
+      - '!*.md'
+      - '!LICENSE'
+      - '!CITATION.cff'
+      - '!.agents/**'
+      - '!.claude/**'
+      - '!.github/workflows/**'
+      - '!.github/dependabot.yml'
+      - '!.github/release-please-*.json'
       - '.github/workflows/ci-bazel.yml'
 
 concurrency:
