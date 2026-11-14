@@ -59,6 +59,16 @@ pub enum StringFormatChoice {
     IsoTime,
 }
 
+/// The bundled zod object or the tool author's own `z.object`: a raw shape as a tool's input schema and a whole
+/// `z.object` list alike, and so do the objects nested in either. The MCP server wraps a raw shape in the bundled
+/// zod 4.6.2 object, which reports an absent required key whose schema takes `undefined` (a zod 4.1.12
+/// `.catch`) as `nonoptional`; the author's zod 4.1.12 object keeps the value that schema gives `undefined`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObjectChoice {
+    Bundled,
+    Author,
+}
+
 /// One choice for the schema node a pointer names. Without one, the node follows the first variant of its
 /// kind, which is the mapping zod's own `toJSONSchema` makes most likely.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -72,6 +82,7 @@ pub enum SchemaChoice {
     StringFormat(StringFormatChoice),
     /// The flags of the `RegExp` behind a `pattern`, which the listed JSON Schema drops.
     RegexFlags(String),
+    Object(ObjectChoice),
 }
 
 impl SchemaChoice {
@@ -84,6 +95,7 @@ impl SchemaChoice {
             Self::NumberFormat(_) => "number format",
             Self::StringFormat(_) => "string format",
             Self::RegexFlags(_) => "regex flags",
+            Self::Object(_) => "object",
         }
     }
 
@@ -119,6 +131,10 @@ impl SchemaChoice {
             }
             Self::RegexFlags(flags) => {
                 target.insert("x-trogon-flags".into(), flags.as_str().into());
+            }
+            Self::Object(ObjectChoice::Bundled) => {}
+            Self::Object(ObjectChoice::Author) => {
+                target.insert("x-trogon-author-object".into(), true.into());
             }
         }
     }

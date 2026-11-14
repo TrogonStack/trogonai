@@ -1,11 +1,13 @@
 use std::io;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 use serde_json::Value;
 
 use super::{PATTERNS, redact};
 use crate::{
     Error,
-    error::{SpawnFailure, launch_failure},
+    error::{SpawnFailureError, launch_failure},
     framing::SharedTail,
 };
 
@@ -64,7 +66,6 @@ fn base64_decoding_handles_padding_and_rejects_other_characters() -> TestResult 
 
 #[cfg(unix)]
 fn failed_with_code_one(tail: &SharedTail) -> Error {
-    use std::os::unix::process::ExitStatusExt;
     Error::Process {
         status: std::process::ExitStatus::from_raw(1 << 8),
         stderr: tail.snapshot(),
@@ -132,7 +133,7 @@ fn a_launch_failure_keeps_its_kind_and_text_and_adds_the_path() -> TestResult {
     assert_eq!(wrapped.to_string(), text);
     let failure = wrapped
         .get_ref()
-        .and_then(|inner| inner.downcast_ref::<SpawnFailure>())
+        .and_then(|inner| inner.downcast_ref::<SpawnFailureError>())
         .ok_or("the path was not kept")?;
     assert_eq!(failure.to_string(), text);
     Ok(())
@@ -145,7 +146,7 @@ fn the_errno_values_of_an_unusable_path_are_launch_failures() -> TestResult {
         let wrapped = launch_failure(std::path::Path::new("/opt/claude"), io::Error::from_raw_os_error(errno));
         let carries_path = wrapped
             .get_ref()
-            .is_some_and(|inner| inner.downcast_ref::<SpawnFailure>().is_some());
+            .is_some_and(|inner| inner.downcast_ref::<SpawnFailureError>().is_some());
         assert!(carries_path, "errno {errno}");
     }
     Ok(())
@@ -157,7 +158,7 @@ fn any_other_spawn_error_is_left_as_it_was() {
     assert!(
         wrapped
             .get_ref()
-            .is_some_and(|inner| inner.downcast_ref::<SpawnFailure>().is_none())
+            .is_some_and(|inner| inner.downcast_ref::<SpawnFailureError>().is_none())
     );
     assert_eq!(wrapped.to_string(), "out of memory");
 }

@@ -1,7 +1,9 @@
 //! CPython 3.12 `ntpath` and the `PureWindowsPath` parse and format steps, ported over code points the way Python
 //! indexes strings. Python runs these for `Path.home()` and `Path.home() / segment` on Windows.
 
-const SEPARATOR: char = '\\';
+mod constants;
+
+use constants::SEPARATOR;
 
 type Split = (String, String, String);
 

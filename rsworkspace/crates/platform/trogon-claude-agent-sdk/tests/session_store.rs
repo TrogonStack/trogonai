@@ -713,11 +713,11 @@ async fn timed_out_mirror_append_is_reported_and_never_retried() -> TestResult {
     Ok(())
 }
 
-struct FailingStore {
+struct FailingAppendStore {
     calls: Arc<AtomicUsize>,
     started: Arc<Mutex<Vec<tokio::time::Instant>>>,
 }
-impl SessionStore for FailingStore {
+impl SessionStore for FailingAppendStore {
     fn append<'a>(&'a self, _: &'a SessionKey, _: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -739,7 +739,7 @@ async fn definite_mirror_failure_is_retried_with_a_bounded_attempt_count() -> Te
     let calls = Arc::new(AtomicUsize::new(0));
     let started = Arc::new(Mutex::new(Vec::new()));
     let options = options(
-        Arc::new(FailingStore {
+        Arc::new(FailingAppendStore {
             calls: calls.clone(),
             started: started.clone(),
         }),
@@ -849,18 +849,18 @@ const STORE_FAILURE_GOLDENS: &str = include_str!("fixtures/session_resume/python
 
 /// The recorded Python store: the call a case names raises with that backend message, and every other call answers
 /// one transcript entry, with a subagent `agent-a` when the store lists subkeys.
-struct FailingStore {
+struct ResumeFailingStore {
     case: String,
     entry: SessionEntry,
 }
 
-impl FailingStore {
+impl ResumeFailingStore {
     fn refuse<'a, T: Send + 'a>(message: &'static str) -> SessionStoreFuture<'a, T> {
         Box::pin(async move { Err(SessionStoreError::backend(std::io::Error::other(message))) })
     }
 }
 
-impl SessionStore for FailingStore {
+impl SessionStore for ResumeFailingStore {
     fn supports(&self, operation: SessionStoreOperation) -> bool {
         match operation {
             SessionStoreOperation::Append | SessionStoreOperation::Load => true,
@@ -907,7 +907,7 @@ async fn store_failures_during_resume_read_like_each_sdk() -> TestResult {
         };
         for dialect in [SummaryDialect::Python, SummaryDialect::TypeScript] {
             let root = tempfile::tempdir()?;
-            let store = Arc::new(FailingStore {
+            let store = Arc::new(ResumeFailingStore {
                 case: name.to_owned(),
                 entry: SessionEntry::try_from(json!({"type":"user","uuid":"u1"}))?,
             });

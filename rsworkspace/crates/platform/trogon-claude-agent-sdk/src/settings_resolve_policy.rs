@@ -28,7 +28,7 @@ use crate::{
     settings_resolve_values::{
         SettingsMap, has_authored_value, has_policy_content, in_schema_order, merge_with_union, omit, pick,
     },
-    settings_resolve_writable::{DocumentProbe, user_can_write},
+    settings_resolve_writable_document::{DocumentProbe, user_can_write},
 };
 
 fn is_absent(error: &io::Error) -> bool {
@@ -458,6 +458,8 @@ struct Selection {
     parent_never_shut_out: bool,
     /// The file tier holds only what the organization withholds, so the parent stays in force (`Ye` upstream).
     held_back: bool,
+    /// The file tier only narrows the admin the other tiers settle, so the composition keeps the file's key order.
+    withheld_only: bool,
     remote_in_sources: bool,
 }
 
@@ -611,6 +613,7 @@ fn select_admin(
         remote_in_sources: remote_candidate.is_some(),
         parent_never_shut_out: never_shut_out,
         held_back,
+        withheld_only,
     }
 }
 
@@ -887,7 +890,7 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
         && (evaluation.mdm.load_state == LoadState::DidNotLoad || evaluation.mdm.unreadable);
     let key_order = if origin == Some(PolicyOrigin::Parent) {
         PolicyKeyOrder::Composed
-    } else if selection.file_index == Some(0) && admin.is_some() {
+    } else if (selection.file_index == Some(0) || selection.withheld_only) && admin.is_some() {
         held.key_order
     } else {
         PolicyKeyOrder::Schema
@@ -900,3 +903,7 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
         file_did_not_load: file.load_state == LoadState::DidNotLoad,
     }
 }
+
+#[cfg(test)]
+#[path = "settings_resolve_policy_tests.rs"]
+mod tests;

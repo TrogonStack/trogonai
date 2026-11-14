@@ -5,6 +5,8 @@ use std::ffi::OsString;
 
 #[cfg(unix)]
 use crate::constants::{PASSWD_INITIAL_BUFFER, PASSWD_MAX_BUFFER};
+#[cfg(unix)]
+use std::{ffi::CStr, mem::MaybeUninit, os::unix::ffi::OsStringExt, ptr};
 
 /// The `pw_dir` of one user id as `getpwuid_r` reports it; `None` when the database has no such user.
 #[cfg(unix)]
@@ -14,8 +16,6 @@ pub(crate) fn home_of_uid(uid: u32) -> Option<OsString> {
 
 #[cfg(unix)]
 fn home_of_uid_with_buffer(uid: u32, initial: usize, maximum: usize) -> Option<OsString> {
-    use std::{ffi::CStr, mem::MaybeUninit, os::unix::ffi::OsStringExt, ptr};
-
     let mut buffer = vec![0_u8; initial];
     loop {
         let mut record = MaybeUninit::<libc::passwd>::uninit();

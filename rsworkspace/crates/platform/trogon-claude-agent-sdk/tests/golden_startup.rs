@@ -17,7 +17,7 @@ use std::{
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    Error, InitializeTimeoutError, Prompt, StartupOptions, startup_with_adapters,
+    Error, InitializeTimeoutError, Message, Prompt, StartupOptions, startup_with_adapters,
     upstream::messages::SDKStartupFailureReason,
 };
 
@@ -27,8 +27,8 @@ mod scripted_process;
 mod startup_cli;
 
 use startup_cli::{
-    COLD_ARGUMENTS, INIT, MARKS, Outcome, Script, WAIT, WORK, arguments, hook_response, hook_started, mark, options,
-    start, user, uuid,
+    COLD_ARGUMENTS, HookGate, INIT, MARKS, Outcome, Script, WAIT, WORK, arguments, hook_response, hook_started, mark,
+    options, start, user, uuid,
 };
 
 #[tokio::test]
@@ -41,7 +41,11 @@ async fn startup_writes_the_handshake_then_the_prompt() -> Outcome {
         command.environment.get(OsStr::new(MARKS)),
         Some(&Some(OsString::from("1")))
     );
-    let query = warm.query(Prompt::from("hi")).await?;
+    let mut query = warm.query(Prompt::from("hi")).await?;
+    assert!(matches!(
+        tokio::time::timeout(WAIT, query.next_message()).await??,
+        Some(Message::Result(_))
+    ));
     query.disconnect().await?;
     assert_eq!(run.lines().await?, vec![INIT.to_owned(), user("hi")]);
     Ok(())
@@ -69,6 +73,17 @@ async fn closing_a_warm_query_sends_no_prompt() -> Outcome {
     Ok(())
 }
 
+#[tokio::test]
+async fn a_warm_query_reports_its_initialize_answer_and_disposes_without_a_prompt() -> Outcome {
+    let (adapters, run) = start(Script::default(), &[]);
+    let warm = startup_with_adapters(StartupOptions::new(options(WORK)), adapters).await?;
+    let info = warm.connection_info().await?;
+    assert_eq!(info.as_json(), Some(&json!({"hook_on_failure_supported": true})));
+    warm.dispose().await?;
+    assert_eq!(run.lines().await?, vec![INIT.to_owned()]);
+    Ok(())
+}
+
 async fn timeout_error(script: Script) -> Outcome<InitializeTimeoutError> {
     let (adapters, run) = start(script, &[]);
     let params = StartupOptions {
@@ -90,11 +105,17 @@ const BACKGROUND: &str = "A hook that runs in the background counts as not finis
 const UNREPORTED: &str =
     "Claude Code did not answer the initialize request and reported no SessionStart or Setup hook running.";
 
-async fn default_timeout_error(script: Script) -> Outcome<InitializeTimeoutError> {
+/// The default limit under a paused clock. The hook gate only observes: `onStartupHooksRunning` changes nothing the
+/// timer counts.
+async fn default_timeout_error(mut script: Script) -> Outcome<InitializeTimeoutError> {
+    let gate = HookGate::default();
+    script.hooks = Some(gate.clone());
     let (adapters, run) = start(script, &[]);
-    let error = startup_with_adapters(StartupOptions::new(options(WORK)), adapters)
-        .await
-        .err();
+    let params = StartupOptions {
+        on_startup_hooks_running: Some(gate.callback()),
+        ..StartupOptions::new(options(WORK))
+    };
+    let error = startup_with_adapters(params, adapters).await.err();
     run.server.abort();
     match error {
         Some(Error::InitializeTimeout(error)) => Ok(error),
@@ -236,9 +257,17 @@ async fn startup_marks_are_kept_up_to_sixty_four_characters() -> Outcome {
     Ok(())
 }
 
+/// Started hooks as `(id, event)`, the ids that answered, the expected message tail and how many hooks stay open.
+type TimeoutCase = (
+    &'static [(&'static str, &'static str)],
+    &'static [&'static str],
+    String,
+    usize,
+);
+
 #[tokio::test]
 async fn the_timeout_says_what_the_reported_hooks_did() -> Outcome {
-    let cases: [(&[(&str, &str)], &[&str], String, usize); 6] = [
+    let cases: [TimeoutCase; 6] = [
         (
             &[("h1", "SessionStart"), ("h2", "Setup")],
             &[],

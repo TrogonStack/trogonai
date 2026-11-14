@@ -695,12 +695,6 @@ pub(crate) const REPLACED_ADMIN_ARRAY_KEYS: [&str; 5] = [
 /// Keys a lower managed tier also replaces whole, but the top tier unions (`AQe` upstream).
 pub(crate) const LOWER_TIER_REPLACED_KEYS: [&str; 2] = ["awsPairs", "ripgrep"];
 
-/// Keys whose arrays the upstream settings merge replaces at every depth (`merge.replacedArrayKeys`).
-pub(crate) const REPLACED_ARRAY_KEYS: [&str; 1] = ["fallbackModel"];
-
-/// Object keys the upstream settings merge spreads shallowly (`merge.shallowObjectKeys`).
-pub(crate) const SHALLOW_MERGED_OBJECT_KEYS: [&str; 2] = ["extraKnownMarketplaces", "managedMcpServers"];
-
 /// Key of the sandbox AWS credential pairs the merge treats specially.
 pub(crate) const AWS_PAIRS_KEY: &str = "awsPairs";
 
@@ -1386,3 +1380,9 @@ pub(crate) const CLAIM_FOLLOWING_SETTINGS: [&str; 6] = [
     "availableModels",
     "disableAutoMode",
 ];
+
+/// The session id Python's `ClaudeSDKClient.connect(str)` and `query` write when the caller names none.
+pub(crate) const PYTHON_DEFAULT_SESSION: &str = "default";
+
+/// The keyword a schema `pattern` takes in the TypeScript call check.
+pub(crate) const ECMA_PATTERN: &str = "x-trogon-pattern";

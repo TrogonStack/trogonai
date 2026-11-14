@@ -20,6 +20,8 @@ workspace_crate(
             "tags": ["manual"],
         },
     },
+    # The @crates labels are optional dependencies of the enabled features. No
+    # workspace member enables those features, so crate_universe leaves them out.
     deps = [
         "//rsworkspace/crates/decider/trogon-decider",
         "//rsworkspace/crates/decider/trogon-decider-guest-sdk",
@@ -27,5 +29,6 @@ workspace_crate(
         "//rsworkspace/crates/decider/trogon-decider-wit",
         "//rsworkspace/crates/platform/trogon-std",
         "//rsworkspace/crates/platform/trogonai-proto",
+        "@crates//:buffa",
     ],
 )

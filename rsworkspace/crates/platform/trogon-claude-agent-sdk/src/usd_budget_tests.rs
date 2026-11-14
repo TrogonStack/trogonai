@@ -94,3 +94,26 @@ fn python_text_prints_every_double_like_cpython_str() -> TestResult {
     assert_eq!(printed, expected);
     Ok(())
 }
+
+#[test]
+fn integer_amounts_print_like_python_str_of_an_int() {
+    for (value, python, typescript) in [(0, "0", "0"), (5, "5", "5"), (-1, "-1", "-1")] {
+        let budget = UsdBudget::from_integer(value);
+        assert_eq!(budget.python_text(), python, "{value}");
+        assert_eq!(budget.typescript_text(), typescript, "{value}");
+    }
+    assert_eq!(UsdBudget::from_integer(0).get().to_bits(), 0.0_f64.to_bits());
+}
+
+#[test]
+fn integer_and_float_amounts_compare_like_python() {
+    assert_eq!(UsdBudget::from_integer(0), UsdBudget::new(0.0));
+    assert_eq!(UsdBudget::new(-0.0), UsdBudget::from_integer(0));
+    assert_eq!(UsdBudget::from_integer(2), UsdBudget::new(2.0));
+    assert_ne!(UsdBudget::from_integer(2), UsdBudget::new(2.5));
+    assert_ne!(
+        UsdBudget::from_integer(i64::MAX),
+        UsdBudget::new(9_223_372_036_854_775_808.0)
+    );
+    assert_ne!(UsdBudget::from_integer(0), UsdBudget::new(f64::NAN));
+}

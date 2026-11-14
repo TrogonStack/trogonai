@@ -8,8 +8,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     ClaudeAgentOptions, ClaudeSdkClient, DialogKind, ElicitationHandler, Error, HookRegistration, Message,
-    OutputSchema, Query, SdkMcpServers, SseCcrEvent, SseHandle, SseOptions, SseTransport, ToolPermissionHandler,
-    Transport, UserDialogHandler, UserInput, WebSocketOptions, WebSocketTransport,
+    OutputSchema, Query, SdkMcpServers, SseCcrEvent, SseHandle, SseOptions, SseTransport, SystemPrompt,
+    ToolPermissionHandler, Transport, UserDialogHandler, UserInput, WebSocketOptions, WebSocketTransport,
 };
 
 /// TypeScript `prompt: AsyncIterable<SDKUserMessage>`.
@@ -112,18 +112,27 @@ pub async fn browser_query(options: BrowserQueryOptions) -> Result<Query, Error>
         prompt_suggestions,
         supported_dialog_kinds: supported_dialog_kinds.unwrap_or_default(),
         capture_sdk_mcp_manifests: Some(false),
+        // The browser `query()` builds its `initConfig` from `promptSuggestions` and `supportedDialogKinds` alone,
+        // so its initialize request has no `systemPrompt`, unlike `sdk.mjs`, which defaults it to `[""]`.
+        system_prompt: SystemPrompt::ClaudeCode,
         ..ClaudeAgentOptions::default()
     };
     let token = abort.unwrap_or_default();
     match transport {
         BrowserTransport::WebSocket(websocket) => {
             let transport = WebSocketTransport::new(websocket).with_abort(token.clone());
-            open(agent, transport, None, (prompt, token, declare_dialog_kinds)).await
+            Box::pin(open(agent, transport, None, (prompt, token, declare_dialog_kinds))).await
         }
         BrowserTransport::Sse(sse) => {
             let transport = SseTransport::new(sse).with_abort(token.clone());
             let handle = transport.handle();
-            open(agent, transport, Some(handle), (prompt, token, declare_dialog_kinds)).await
+            Box::pin(open(
+                agent,
+                transport,
+                Some(handle),
+                (prompt, token, declare_dialog_kinds),
+            ))
+            .await
         }
     }
 }
@@ -134,7 +143,7 @@ async fn open<T: Transport>(
     sse: Option<SseHandle>,
     (prompt, token, declare_dialog_kinds): (BrowserPrompt, CancellationToken, bool),
 ) -> Result<Query, Error> {
-    let client = ClaudeSdkClient::connect_browser(agent, transport, declare_dialog_kinds).await?;
+    let client = Box::pin(ClaudeSdkClient::connect_browser(agent, transport, declare_dialog_kinds)).await?;
     let handle = client.handle();
     tokio::spawn(async move {
         if handle.stream_input(prompt).await.is_err() {

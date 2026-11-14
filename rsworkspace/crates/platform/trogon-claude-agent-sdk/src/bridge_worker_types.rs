@@ -1,5 +1,3 @@
-use std::fmt;
-
 use serde_json::{Map, Value};
 
 /// Why the worker service refused to keep this worker, as the upstream request path names it.
@@ -88,34 +86,33 @@ impl RequiresActionDetails {
 }
 
 /// How `registerWorker` failed.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RegisterFailure {
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum RegisterFailureError {
+    #[error("Request failed with status code {0}")]
     Status(u16),
+    #[error("timeout of 10000ms exceeded")]
     TimedOut,
     /// The request never got an answer; the text and code are the ones the transport error carries.
-    Network {
-        message: String,
-        code: Option<String>,
-    },
-    InvalidEpoch {
-        detail: Option<String>,
-    },
+    #[error("{message}")]
+    Network { message: String, code: Option<String> },
+    #[error("{}", invalid_epoch_message(.detail))]
+    InvalidEpoch { detail: Option<String> },
 }
 
-impl RegisterFailure {
+/// The text of the `registerWorker` error for a `worker_epoch` the response did not carry as a valid number.
+fn invalid_epoch_message(detail: &Option<String>) -> String {
+    match detail {
+        Some(detail) => format!("registerWorker: invalid worker_epoch in response: {detail}"),
+        None => "registerWorker: invalid worker_epoch in response (the response is not quoted: it is too long or is \
+                 not one plain line)"
+            .to_owned(),
+    }
+}
+
+impl RegisterFailureError {
     /// The text of the error the upstream call throws.
     pub fn message(&self) -> String {
-        match self {
-            Self::Status(status) => format!("Request failed with status code {status}"),
-            Self::TimedOut => "timeout of 10000ms exceeded".to_owned(),
-            Self::Network { message, .. } => message.clone(),
-            Self::InvalidEpoch { detail: Some(detail) } => {
-                format!("registerWorker: invalid worker_epoch in response: {detail}")
-            }
-            Self::InvalidEpoch { detail: None } => "registerWorker: invalid worker_epoch in response (the response is \
-                                                     not quoted: it is too long or is not one plain line)"
-                .to_owned(),
-        }
+        self.to_string()
     }
 
     /// The axios error code the upstream error carries, when it has one.
@@ -130,34 +127,19 @@ impl RegisterFailure {
     }
 }
 
-impl fmt::Display for RegisterFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message())
-    }
-}
-
-impl std::error::Error for RegisterFailure {}
-
 /// The `CCRClient init failed` error: the worker could not register its first state.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InitFailure {
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("CCRClient init failed: {reason}")]
+pub struct InitFailureError {
     pub reason: &'static str,
     pub http_status: Option<u16>,
     pub no_answer: bool,
 }
 
-impl fmt::Display for InitFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "CCRClient init failed: {}", self.reason)
-    }
-}
-
-impl std::error::Error for InitFailure {}
-
 /// An init that stopped: the service refused the registration, or the request path escalated.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InitError {
-    Failed(InitFailure),
+    Failed(InitFailureError),
     Mismatch(MismatchReason),
 }
 

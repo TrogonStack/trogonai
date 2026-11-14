@@ -5,17 +5,24 @@
 
 use std::sync::Arc;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::SensitiveString;
 use crate::adapters::HttpExecute;
-use crate::bridge_session::{BridgeSession, request_key};
+use crate::bridge_session::BridgeSession;
+use crate::bridge_session_callbacks::request_key;
 use crate::bridge_session_runtime::wind_down;
 use crate::bridge_types::SessionState;
-use crate::bridge_worker::{InvalidSessionId, NonOrigin403, WorkerClient, WorkerConfig, WorkerPacing, session_url};
+use crate::bridge_worker::{
+    InvalidSessionIdError, NonOrigin403, WorkerClient, WorkerConfig, WorkerPacing, session_url,
+};
 use crate::bridge_worker_delivery::DeliveryStatus;
 use crate::bridge_worker_events::ClientEvent;
 use crate::bridge_worker_stream::StreamSession;
+
+mod constants;
+
+use constants::NOT_CARRIED_AS_ECHO;
 
 /// What `reconnectTransport` is given.
 pub struct ReconnectOptions {
@@ -29,37 +36,57 @@ pub struct ReconnectOptions {
 #[derive(Debug, thiserror::Error)]
 pub enum ReconnectError {
     #[error(transparent)]
-    InvalidSessionId(#[from] InvalidSessionId),
+    InvalidSessionIdError(#[from] InvalidSessionIdError),
     /// `new URL` threw on the session URL built from the given base. The old worker's undelivered events are
     /// dropped and the session is closed without telling the host.
     #[error("Invalid URL")]
     InvalidUrl,
 }
 
-/// The frame types a rebuilt transport does not take back as its own writes.
-const NOT_CARRIED_AS_ECHO: [&str; 4] = [
-    "control_request",
-    "control_response",
-    "control_cancel_request",
-    "result",
-];
+/// A JSON object with its keys in the order given. These frames carry plain scalars and nested objects, so
+/// building them by hand cannot fail the way serializing a typed payload can.
+fn object<const N: usize>(entries: [(&str, Value); N]) -> Value {
+    Value::Object(
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
+}
+
+fn text(value: &str) -> Value {
+    Value::String(value.to_owned())
+}
+
+fn zero() -> Value {
+    Value::from(0_u64)
+}
 
 /// `Jp`: the usage block of a result nobody ran a turn for.
 fn zero_usage() -> Value {
-    json!({
-        "output_tokens_details": {"thinking_tokens": 0},
-        "input_tokens": 0,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 0,
-        "output_tokens": 0,
-        "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0},
-        "service_tier": "standard",
-        "cache_creation": {"ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0},
-        "inference_geo": "",
-        "iterations": [],
-        "speed": "standard",
-        "fallback_credit": null,
-    })
+    object([
+        ("output_tokens_details", object([("thinking_tokens", zero())])),
+        ("input_tokens", zero()),
+        ("cache_creation_input_tokens", zero()),
+        ("cache_read_input_tokens", zero()),
+        ("output_tokens", zero()),
+        (
+            "server_tool_use",
+            object([("web_search_requests", zero()), ("web_fetch_requests", zero())]),
+        ),
+        ("service_tier", text("standard")),
+        (
+            "cache_creation",
+            object([
+                ("ephemeral_1h_input_tokens", zero()),
+                ("ephemeral_5m_input_tokens", zero()),
+            ]),
+        ),
+        ("inference_geo", text("")),
+        ("iterations", Value::Array(Vec::new())),
+        ("speed", text("standard")),
+        ("fallback_credit", Value::Null),
+    ])
 }
 
 impl<H, P> BridgeSession<H, P>
@@ -95,22 +122,22 @@ where
         if self.is_closed() {
             return;
         }
-        let frame = json!({
-            "type": "result",
-            "duration_ms": 0,
-            "duration_api_ms": 0,
-            "total_cost_usd": 0,
-            "usage": zero_usage(),
-            "modelUsage": {},
-            "permission_denials": [],
-            "session_id": self.session_id,
-            "uuid": uuid::Uuid::new_v4().to_string(),
-            "subtype": "success",
-            "is_error": false,
-            "num_turns": 0,
-            "result": "",
-            "stop_reason": null,
-        });
+        let frame = object([
+            ("type", text("result")),
+            ("duration_ms", zero()),
+            ("duration_api_ms", zero()),
+            ("total_cost_usd", zero()),
+            ("usage", zero_usage()),
+            ("modelUsage", object([])),
+            ("permission_denials", Value::Array(Vec::new())),
+            ("session_id", Value::String(self.session_id.clone())),
+            ("uuid", Value::String(uuid::Uuid::new_v4().to_string())),
+            ("subtype", text("success")),
+            ("is_error", Value::Bool(false)),
+            ("num_turns", zero()),
+            ("result", text("")),
+            ("stop_reason", Value::Null),
+        ]);
         self.queue_frame(frame);
     }
 
@@ -162,11 +189,11 @@ where
         if self.is_closed() {
             return;
         }
-        self.queue_frame(json!({
-            "type": "control_cancel_request",
-            "request_id": request_id,
-            "session_id": self.session_id,
-        }));
+        self.queue_frame(object([
+            ("type", text("control_cancel_request")),
+            ("request_id", text(request_id)),
+            ("session_id", Value::String(self.session_id.clone())),
+        ]));
     }
 
     /// `reportState`.

@@ -175,7 +175,7 @@ async fn w3_resume_materializes_into_a_private_temporary_directory_and_cleanup_r
             .is_some_and(|name| name.starts_with("claude-resume-"))
     );
     assert_eq!(runtime.config_dir.as_deref(), Some(config.as_path()));
-    assert_eq!(runtime.projects_dir, config.join("projects"));
+    assert_eq!(runtime.projects_dir, Some(config.join("projects")));
     assert_eq!(runtime.resume_session_id, Some(SessionId::from(SESSION)));
     let project_dir = config.join("projects").join(fixture.project.as_str());
     let transcript = project_dir.join(format!("{SESSION}.jsonl"));
@@ -576,7 +576,8 @@ async fn s26_latest_resume_without_a_usable_candidate_skips_materialization() ->
     let runtime = fixture.prepare(StoreResume::Latest).await?;
     assert!(runtime.materialized.is_none());
     assert_eq!(runtime.resume_session_id, None);
-    assert_eq!(runtime.mirror.projects_dir(), runtime.projects_dir);
+    assert!(runtime.projects_dir.is_some());
+    assert_eq!(runtime.mirror.projects_dir(), runtime.projects_dir.as_deref());
     Ok(())
 }
 
@@ -592,7 +593,10 @@ async fn s22_a_non_uuid_resume_id_skips_materialization() -> TestResult {
         runtime.config_dir, None,
         "the child inherits the caller configuration directory"
     );
-    assert_eq!(runtime.projects_dir, fixture.filesystem.path("config").join("projects"));
+    assert_eq!(
+        runtime.projects_dir,
+        Some(fixture.filesystem.path("config").join("projects"))
+    );
     assert!(fixture.filesystem.paths(Operation::CreateDirectory)?.is_empty());
     Ok(())
 }

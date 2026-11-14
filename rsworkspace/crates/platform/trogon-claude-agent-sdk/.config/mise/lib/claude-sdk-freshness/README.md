@@ -181,6 +181,22 @@ mise run claude-sdk:message-goldens --check  # fail when expected.json differs
 The task needs Node and a Python with `venv`; it installs the pinned Python package's
 dependencies into a temporary virtual environment.
 
+## Run end machine goldens
+
+`run_end_machine_goldens.mjs` and `run_end_machine_goldens.py` run the pinned TypeScript and
+Python `query()` against `run_end_machine_cli.mjs`, a CLI that plays scripted session states,
+delegated tasks, queued turns and results and logs when its stdin closes. Together they write
+`tests/fixtures/auth_callbacks/run_machine.json`, each keeping the entries the other wrote.
+Each scenario runs for 3.5 seconds before the recorder closes the query. A close caused by that
+shutdown is not counted, so a run the SDK never ends records `never`.
+
+```sh
+node run_end_machine_goldens.mjs <package-dir> run_machine.json
+python3 -I run_end_machine_goldens.py <python-src> run_machine.json
+```
+
+The Python recorder needs the pinned package's dependencies (`anyio`, `mcp`, `jsonschema`).
+
 ## Scheduled issue reporting
 
 [The workflow](../../../../../../../../.github/workflows/claude-sdk-freshness.yml) follows the

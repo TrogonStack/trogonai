@@ -121,7 +121,7 @@ async fn heartbeat_runs_while_an_upload_is_in_flight() -> TestResult {
     let (log, beat, release) = (Log::default(), Arc::new(Notify::new()), Arc::new(Notify::new()));
     let base = server(Arc::clone(&log), Arc::clone(&beat), Arc::clone(&release)).await?;
     let worker = worker(&base)?;
-    worker.submit_events(vec![event("e1")]).await?;
+    assert_eq!(worker.submit_events(vec![event("e1")]).await, Ok(()));
     let upload = worker.pump_events(None);
     let beating = async {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -143,7 +143,7 @@ async fn events_are_accepted_while_a_batch_is_in_flight() -> TestResult {
     let (log, beat, release) = (Log::default(), Arc::new(Notify::new()), Arc::new(Notify::new()));
     let base = server(Arc::clone(&log), Arc::clone(&beat), Arc::clone(&release)).await?;
     let worker = worker(&base)?;
-    worker.submit_events(vec![event("e1")]).await?;
+    assert_eq!(worker.submit_events(vec![event("e1")]).await, Ok(()));
     let upload = worker.pump_events(None);
     let writing = async {
         tokio::time::sleep(Duration::from_millis(50)).await;

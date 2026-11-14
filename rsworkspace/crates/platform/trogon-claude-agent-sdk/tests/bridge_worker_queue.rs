@@ -8,6 +8,8 @@ use trogon_claude_agent_sdk::{
     Next, Patch, PatchQueue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches, without_status,
 };
 
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
 fn patch(value: Value) -> Patch {
     value.as_object().cloned().unwrap_or_default()
 }
@@ -22,10 +24,10 @@ fn metadata(key: &str) -> Patch {
     patch(json!({"external_metadata": {key: 1}}))
 }
 
-fn sends(next: Next) -> Patch {
+fn sends(next: Next) -> Result<Patch, String> {
     match next {
-        Next::Send(patch) => patch,
-        other => panic!("expected a send, got {other:?}"),
+        Next::Send(patch) => Ok(patch),
+        other => Err(format!("expected a send, got {other:?}")),
     }
 }
 
@@ -84,7 +86,7 @@ fn the_retry_delay_doubles_to_a_ceiling_and_adds_the_jitter() {
 }
 
 #[test]
-fn closing_to_new_patches_drops_a_waiting_status_and_keeps_what_outlives_it() {
+fn closing_to_new_patches_drops_a_waiting_status_and_keeps_what_outlives_it() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("a"));
     queue.enqueue(status());
@@ -94,13 +96,13 @@ fn closing_to_new_patches_drops_a_waiting_status_and_keeps_what_outlives_it() {
     assert!(queue.has_dropped_something());
     queue.enqueue(metadata("late"));
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"external_metadata": {"a": 1}}),
         "the patch that was already sending goes out unchanged"
     );
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"internal_metadata": {"card_turn_stamp": null}}),
         "the waiting status is cut down to what outlives it"
     );
@@ -108,10 +110,11 @@ fn closing_to_new_patches_drops_a_waiting_status_and_keeps_what_outlives_it() {
     queue.sent(true);
     assert_eq!(queue.poll(0.0), Next::Idle);
     assert!(!queue.owes_metadata());
+    Ok(())
 }
 
 #[test]
-fn a_status_that_fails_after_the_queue_closed_is_handed_back_without_it() {
+fn a_status_that_fails_after_the_queue_closed_is_handed_back_without_it() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(patch(json!({
         "worker_status": "running",
@@ -121,10 +124,11 @@ fn a_status_that_fails_after_the_queue_closed_is_handed_back_without_it() {
     queue.close_to_new_patches();
     queue.sent(false);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"internal_metadata": {"last_served_model": "m"}})
     );
     assert!(queue.has_dropped_something());
+    Ok(())
 }
 
 #[test]
@@ -146,7 +150,7 @@ fn closing_drops_everything_that_has_not_gone_out() {
 }
 
 #[test]
-fn a_failed_patch_waits_before_it_is_sent_again() {
+fn a_failed_patch_waits_before_it_is_sent_again() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("a"));
     assert!(matches!(queue.poll(0.0), Next::Send(_)));
@@ -154,12 +158,13 @@ fn a_failed_patch_waits_before_it_is_sent_again() {
     assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(500)));
     queue.enqueue(metadata("b"));
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"external_metadata": {"a": 1, "b": 1}}),
         "what was queued during the wait joins the retry"
     );
     queue.sent(false);
     assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(1000)));
+    Ok(())
 }
 
 #[test]
@@ -190,7 +195,7 @@ fn a_refusal_gives_back_the_metadata_and_the_bare_status() {
 }
 
 #[test]
-fn a_requeued_status_gives_way_to_one_that_is_waiting() {
+fn a_requeued_status_gives_way_to_one_that_is_waiting() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("a"));
     queue.enqueue(status());
@@ -198,14 +203,15 @@ fn a_requeued_status_gives_way_to_one_that_is_waiting() {
     assert!(matches!(queue.poll(0.0), Next::Send(_)));
     queue.sent(true);
     assert_eq!(
-        sends(queue.poll(0.0)).get("worker_status"),
+        sends(queue.poll(0.0))?.get("worker_status"),
         Some(&json!("running")),
         "the status that was already waiting wins"
     );
+    Ok(())
 }
 
 #[test]
-fn requeued_metadata_goes_out_after_the_waiting_patch_and_skips_what_it_carries() {
+fn requeued_metadata_goes_out_after_the_waiting_patch_and_skips_what_it_carries() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("x"));
     queue.requeue_metadata(patch(json!({"external_metadata": {"plan_doc": 1, "x": 2}})));
@@ -213,19 +219,20 @@ fn requeued_metadata_goes_out_after_the_waiting_patch_and_skips_what_it_carries(
     assert!(matches!(queue.poll(0.0), Next::Send(_)));
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"external_metadata": {"x": 1}})
     );
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"external_metadata": {"plan_doc": 1}}),
         "a key a later patch carries is not sent from the requeue"
     );
+    Ok(())
 }
 
 #[test]
-fn requeued_metadata_sends_the_switched_off_servers_alone() {
+fn requeued_metadata_sends_the_switched_off_servers_alone() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("seed"));
     queue.requeue_metadata(patch(
@@ -234,12 +241,200 @@ fn requeued_metadata_sends_the_switched_off_servers_alone() {
     assert!(matches!(queue.poll(0.0), Next::Send(_)));
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"internal_metadata": {"cost_state": 1}})
     );
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"internal_metadata": {"disabled_mcp_servers": ["a"]}})
     );
+    Ok(())
+}
+
+#[test]
+fn the_queue_reports_what_it_holds_and_drops_what_comes_after_it_closed() {
+    let mut queue = PatchQueue::new();
+    assert!(!queue.unsent());
+    assert!(!queue.has_work());
+    assert!(queue.keeps_without_status(&metadata("a")));
+    assert!(!queue.keeps_without_status(&status()));
+    queue.enqueue(metadata("a"));
+    assert!(queue.unsent());
+    assert!(queue.has_work());
+    queue.close();
+    queue.close_to_new_patches();
+    assert!(
+        !queue.is_closed_to_new_patches(),
+        "a closed queue is not closed again to new patches"
+    );
+    queue.requeue_status(patch(json!({"worker_status": "idle"})));
+    queue.requeue_metadata(metadata("b"));
+    assert!(queue.has_dropped_something());
+}
+
+#[test]
+fn the_patch_helpers_skip_what_is_not_a_metadata_group() {
+    assert_eq!(
+        subtract_patches(
+            &patch(json!({"worker_status": "idle", "external_metadata": {"a": 1}})),
+            &Patch::new()
+        )
+        .map(Value::Object),
+        Some(json!({"external_metadata": {"a": 1}}))
+    );
+    assert_eq!(without_status(&patch(json!({"worker_status": "idle"}))), None);
+    let back = requeue_after_refusal(&patch(json!({"internal_metadata": {"cost_state": 1, "other": 2}})));
+    assert_eq!(
+        back.metadata.map(Value::Object),
+        Some(json!({"internal_metadata": {"cost_state": 1}}))
+    );
+    assert_eq!(back.status, None);
+}
+
+#[test]
+fn a_closed_queue_does_not_send_a_started_patch_again() -> TestResult {
+    let mut queue = PatchQueue::new();
+    queue.enqueue(metadata("a"));
+    sends(queue.poll(0.0))?;
+    queue.close();
+    assert_eq!(queue.poll(0.0), Next::Idle);
+    Ok(())
+}
+
+#[test]
+fn a_closed_queue_drops_a_patch_waiting_out_its_backoff() -> TestResult {
+    let mut queue = PatchQueue::new();
+    queue.enqueue(metadata("a"));
+    sends(queue.poll(0.0))?;
+    queue.sent(false);
+    assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(500)));
+    queue.close();
+    assert_eq!(queue.poll(0.0), Next::Idle);
+    Ok(())
+}
+
+#[test]
+fn closing_to_new_patches_starts_the_backoff_over_once() -> TestResult {
+    let mut queue = PatchQueue::new();
+    queue.enqueue(metadata("a"));
+    sends(queue.poll(0.0))?;
+    queue.sent(false);
+    assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(500)));
+    sends(queue.poll(0.0))?;
+    queue.sent(false);
+    assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(1000)));
+    sends(queue.poll(0.0))?;
+    queue.sent(false);
+    queue.close_to_new_patches();
+    assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(500)));
+    sends(queue.poll(0.0))?;
+    queue.sent(false);
+    assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(1000)));
+    Ok(())
+}
+
+#[test]
+fn failed_requeued_metadata_goes_back_behind_the_waiting_patch_after_close() -> TestResult {
+    let mut queue = PatchQueue::new();
+    queue.enqueue(metadata("seed"));
+    queue.requeue_metadata(patch(json!({"internal_metadata": {"cost_state": 1}})));
+    sends(queue.poll(0.0))?;
+    queue.sent(true);
+    assert_eq!(
+        Value::Object(sends(queue.poll(0.0))?),
+        json!({"internal_metadata": {"cost_state": 1}})
+    );
+    queue.enqueue(metadata("b"));
+    queue.close_to_new_patches();
+    queue.sent(false);
+    assert_eq!(Value::Object(sends(queue.poll(0.0))?), Value::Object(metadata("b")));
+    queue.sent(true);
+    assert_eq!(
+        Value::Object(sends(queue.poll(0.0))?),
+        json!({"internal_metadata": {"cost_state": 1}})
+    );
+    queue.sent(true);
+    assert_eq!(queue.poll(0.0), Next::Idle);
+    assert!(!queue.has_dropped_something());
+    Ok(())
+}
+
+#[test]
+fn requeued_metadata_waiting_out_its_backoff_goes_back_behind_a_new_patch() -> TestResult {
+    let mut queue = PatchQueue::new();
+    queue.enqueue(metadata("seed"));
+    queue.requeue_metadata(patch(json!({"internal_metadata": {"cost_state": 1}})));
+    sends(queue.poll(0.0))?;
+    queue.sent(true);
+    sends(queue.poll(0.0))?;
+    queue.sent(false);
+    assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(500)));
+    queue.enqueue(metadata("b"));
+    assert_eq!(Value::Object(sends(queue.poll(0.0))?), Value::Object(metadata("b")));
+    queue.sent(true);
+    assert_eq!(
+        Value::Object(sends(queue.poll(0.0))?),
+        json!({"internal_metadata": {"cost_state": 1}})
+    );
+    Ok(())
+}
+
+#[test]
+fn a_requeued_status_waiting_out_its_backoff_gives_way_to_a_new_status() -> TestResult {
+    let mut queue = PatchQueue::new();
+    queue.enqueue(metadata("seed"));
+    queue.requeue_status(patch(json!({"worker_status": "idle"})));
+    sends(queue.poll(0.0))?;
+    queue.sent(true);
+    assert_eq!(Value::Object(sends(queue.poll(0.0))?), json!({"worker_status": "idle"}));
+    queue.sent(false);
+    assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(500)));
+    queue.enqueue(status());
+    assert_eq!(sends(queue.poll(0.0))?.get("worker_status"), Some(&json!("running")));
+    queue.sent(true);
+    assert_eq!(queue.poll(0.0), Next::Idle);
+    Ok(())
+}
+
+#[test]
+fn a_requeued_status_waiting_out_its_backoff_goes_first_before_new_metadata() -> TestResult {
+    let mut queue = PatchQueue::new();
+    queue.enqueue(metadata("seed"));
+    queue.requeue_status(patch(json!({"worker_status": "idle"})));
+    sends(queue.poll(0.0))?;
+    queue.sent(true);
+    sends(queue.poll(0.0))?;
+    queue.sent(false);
+    assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(500)));
+    queue.enqueue(metadata("b"));
+    assert_eq!(
+        Value::Object(sends(queue.poll(0.0))?),
+        json!({"worker_status": "idle"}),
+        "the requeued status is sent again unmerged"
+    );
+    queue.sent(true);
+    assert_eq!(Value::Object(sends(queue.poll(0.0))?), Value::Object(metadata("b")));
+    Ok(())
+}
+
+#[test]
+fn a_failed_status_after_close_cuts_the_waiting_external_metadata() -> TestResult {
+    let mut queue = PatchQueue::new();
+    assert!(!queue.has_cut_kept_metadata());
+    queue.enqueue(patch(json!({
+        "worker_status": "running",
+        "internal_metadata": {"reply_degraded": false, "last_served_model": "m"}
+    })));
+    sends(queue.poll(0.0))?;
+    queue.enqueue(metadata("a"));
+    queue.close_to_new_patches();
+    queue.sent(false);
+    assert_eq!(
+        Value::Object(sends(queue.poll(0.0))?),
+        json!({"internal_metadata": {"last_served_model": "m"}})
+    );
+    assert!(queue.has_cut_kept_metadata());
+    assert!(queue.has_dropped_something());
+    Ok(())
 }

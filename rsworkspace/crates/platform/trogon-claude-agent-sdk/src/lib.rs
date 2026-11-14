@@ -18,12 +18,14 @@ mod bridge_fake_probe;
 mod bridge_flavor;
 mod bridge_git;
 mod bridge_gitcmd;
+mod bridge_gitdir;
 mod bridge_js;
 mod bridge_packed;
 mod bridge_paths;
 mod bridge_platform;
 mod bridge_refs;
 mod bridge_session;
+mod bridge_session_callbacks;
 mod bridge_session_core;
 mod bridge_session_handle;
 mod bridge_session_runtime;
@@ -49,6 +51,7 @@ mod builtin_tool_name;
 mod bundled_cli;
 mod channel;
 mod cli_discovery;
+mod cli_not_found_error;
 mod cli_path;
 mod client;
 mod client_app;
@@ -193,6 +196,7 @@ mod settings_resolve_state;
 mod settings_resolve_tier;
 mod settings_resolve_values;
 mod settings_resolve_writable;
+mod settings_resolve_writable_document;
 mod settings_sandbox;
 mod settings_sandbox_schema;
 mod settings_schema;
@@ -238,6 +242,7 @@ mod transport;
 mod ui_host;
 mod usd_budget;
 mod user_input;
+mod user_input_priority;
 mod validation_choices;
 mod version_check;
 mod websocket_error;
@@ -259,9 +264,10 @@ pub use bridge_gitcmd::GitProbeContext;
 pub use bridge_paths::PathGuard;
 pub use bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe, ProbeError};
 pub use bridge_session::{
-    AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, CloseCallback,
-    EnvironmentLookup, InboundMessageCallback, PermissionResponseCallback, attach_bridge_session,
+    AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, EnvironmentLookup,
+    attach_bridge_session,
 };
+pub use bridge_session_callbacks::{CloseCallback, InboundMessageCallback, PermissionResponseCallback};
 pub use bridge_session_handle::{ReconnectError, ReconnectOptions};
 pub use bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
@@ -271,12 +277,12 @@ pub use bridge_types::{
 pub use bridge_worker::{
     AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
     HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
-    InvalidSessionId, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
+    InvalidSessionIdError, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
     WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, refusal_source,
     retry_after_ms, session_url, token_expiry,
 };
 pub use bridge_worker_control::{
-    CallbackResult, ControlCallbacks, ControlReply, ControlSession, DeferredControl, HostError, HostFuture,
+    BridgeControlReply, CallbackResult, ControlCallbacks, ControlSession, DeferredControl, HostError, HostFuture,
     ModelCallback, ModelVerdict, PendingControl, PendingModelCallback, PendingThinkingTokensCallback, TextCallback,
     ThinkingTokensCallback, answer_control_request, clean_control_text, is_pending_prompt,
 };
@@ -301,16 +307,17 @@ pub use bridge_worker_queue::{
 };
 pub use bridge_worker_stream::{
     FrameParser, KEEPALIVE_SECONDS, LIVENESS_GRACE_MS, PERMANENT_STREAM_STATUSES, RECONNECT_BASE_MS, RECONNECT_CAP_MS,
-    RECONNECT_JITTER_RATIO, Reopen, SLEEP_LATENESS_MS, SseFrame, StreamEffect, StreamOpen, StreamRequest,
-    StreamSession, liveness_timeout, reconnect_delay,
+    RECONNECT_JITTER_RATIO, Reopen, SLEEP_LATENESS_MS, StreamEffect, StreamOpen, StreamRequest, StreamSession,
+    liveness_timeout, reconnect_delay,
 };
 pub use bridge_worker_stream_driver::{
-    CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector, StreamFailure,
-    StreamResponse, run_stream,
+    CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector,
+    StreamFailureError, StreamResponse, run_stream,
 };
 pub use bridge_worker_stream_http::{HttpStreamBody, HttpStreamConnector};
 pub use bridge_worker_types::{
-    InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
+    InitError, InitFailureError, MismatchReason, RegisterFailureError, RequestFailure, RequestOutcome,
+    RequiresActionDetails,
 };
 pub use browser_query::{
     BrowserPrompt, BrowserQueryOptions, BrowserTransport, browser_query, get_ccr_event, get_sse_drop_counts,
@@ -321,7 +328,7 @@ pub use bundled_cli::{
     NativeCliNotFoundError, NativePackageTarget, NodeModuleLookup, NodeModuleNotFoundError, ResolveNodeModule,
     bundled_cli_derives_client_app, find_bundled_cli, find_native_cli, meets_derived_client_app_minimum,
 };
-pub use cli_discovery::CliNotFoundError;
+pub use cli_not_found_error::CliNotFoundError;
 pub use cli_path::{CliPathError, WindowsBatchCli};
 pub use client::{
     ClaudeSdkClient, ClientConnector, ClientHandle, ConnectPrompt, CustomTransport, NativeCli, Query,
@@ -419,7 +426,7 @@ pub use runtime_options::{
 };
 pub use schema_pointer::{SchemaPointer, SchemaPointerError};
 pub use sdk_mcp_choices::{
-    LengthChoice, NullabilityChoice, NumberFormatChoice, RefineFailure, Refinement, SchemaCallback,
+    LengthChoice, NullabilityChoice, NumberFormatChoice, ObjectChoice, RefineFailure, Refinement, SchemaCallback,
     SchemaCallbackOptions, SchemaChoice, StringCheckKind, StringFormatChoice, Transformation, UnionChoice,
 };
 pub use sdk_mcp_server::{
@@ -476,7 +483,7 @@ pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
-pub use settings_sandbox_schema::{SandboxConfigRejected, SandboxConfigSchema};
+pub use settings_sandbox_schema::{SandboxConfigRejectedError, SandboxConfigSchema};
 pub use sse_ccr_event::SseCcrEvent;
 pub use sse_delivery_update::SseDeliveryUpdate;
 pub use sse_drop_category::SseDropCategory;
@@ -511,6 +518,7 @@ pub use upstream::settings_resolution::{
 };
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
+pub use user_input_priority::UserInputPriority;
 pub use validation_choices::{ValidationChoices, ValidationChoicesError, ValidationChoicesOptions};
 pub use version_check::{parse_version, unreported_version_warning};
 pub use websocket_error::WebSocketError;

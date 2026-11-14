@@ -719,12 +719,8 @@ async fn enable_remote_control_writes_the_typescript_request_bytes() -> TestResu
     };
     handle.enable_remote_control(true, None, Some(keep_off)).await?;
     client.disconnect().await?;
-    let written = server.await??;
-    let lines: Vec<String> = written
-        .iter()
-        .filter(|line| line.contains(r#""subtype":"remote_control""#))
-        .map(|line| typescript_line(line))
-        .collect();
+    // The captured `requests` are every line `sdk.mjs` wrote, the initialize request first.
+    let lines: Vec<String> = server.await??.iter().map(|line| typescript_line(line)).collect();
     assert_eq!(
         lines,
         Captured::parse(CAPTURED)?.strings("remote_request_bytes", "requests")?
@@ -760,12 +756,7 @@ async fn an_undefined_remote_control_response_follows_sdk_mjs() -> TestResult {
                 .enable_remote_control(state == "on", Some("n1"), None)
                 .await;
             client.disconnect().await?;
-            let written = server.await??;
-            let lines: Vec<String> = written
-                .iter()
-                .filter(|line| line.contains(r#""subtype":"remote_control""#))
-                .map(|line| typescript_line(line))
-                .collect();
+            let lines: Vec<String> = server.await??.iter().map(|line| typescript_line(line)).collect();
             assert_eq!(lines, captured.strings(&scenario, "requests")?, "{scenario}");
             let seen = captured.field(&scenario, "seen")?;
             match (seen.get("error"), result) {

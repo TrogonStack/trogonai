@@ -94,6 +94,15 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. Both pinned SDKs pass the wire value through unchanged; tool_use_result_object gives the dictionary view Python annotates, and `typed_tool_use_result(tool_name)` the `sdk-tools` output type TypeScript declares for that tool. |
 | additional_fields / message_fields | No separate typed extension fields | Envelope and MessageParam scopes differ | Explicit maps preserve manually supplied outer and nested extension data. |
 
+## User input
+
+| Rust field family | Python streamed message | TypeScript SDKUserMessage | Written representation |
+| --- | --- | --- | --- |
+| content | str or list of blocks | message: MessageParam | `UserInput::from(Prompt)` text or `UserInput::blocks`; a `query()` string prompt is one text block under TypeScript and a string under Python. |
+| parent_tool_use_id / isSynthetic / tool_use_result / priority / origin / shouldQuery / timestamp / client_composed / uuid / pasted_content / inline_pastes / session_id / agent_id / subagent_type / task_description | dict keys written as given | declared SDKUserMessage fields | Optional typed fields written in declaration order; `UserInputPriority` keeps unknown strings. |
+| additional_fields | dict keys written as given | extra keys written as given | Appended after the typed fields without replacing them. |
+| `UserInput::from_json` | streamed dict written as given | streamed object written as given | The object as given, key order included; typed fields set afterwards replace keys in place or append. |
+
 ## Partial events
 
 | Rust field | Python StreamEvent | TypeScript SDKPartialAssistantMessage | Stored representation |

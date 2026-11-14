@@ -16,7 +16,9 @@ use reqwest::ResponseBuilderExt;
 use serde_json::{Value, json};
 use tokio::time::Instant;
 use trogon_claude_agent_sdk::adapters::HttpExecute;
-use trogon_claude_agent_sdk::{AttachBridgeSessionOptions, ReconnectOptions, WorkerPacing, attach_bridge_session};
+use trogon_claude_agent_sdk::{
+    AttachBridgeSessionOptions, ReconnectOptions, StreamClocks, WorkerPacing, attach_bridge_session,
+};
 
 /// What `Date.now` reads at the start of the case; only the differences matter.
 const WALL_ORIGIN: Duration = Duration::from_secs(1_700_000_000);
@@ -80,7 +82,13 @@ impl HttpExecute for Service {
             note(&inner.log, inner.start, "request POST /worker/heartbeat");
             hang = inner.answers.get(inner.beats.fetch_add(1, Ordering::SeqCst)).is_some();
         } else if path.ends_with("/worker/events/stream") {
-            note(&inner.log, inner.start, "request GET /worker/events/stream");
+            // The recorder logged the stream's route with its query, so a resumed open shows where it resumes from.
+            let query = url.query().map(|query| format!("?{query}")).unwrap_or_default();
+            note(
+                &inner.log,
+                inner.start,
+                &format!("request GET /worker/events/stream{query}"),
+            );
             conn = Some(
                 inner
                     .conns

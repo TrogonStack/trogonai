@@ -16,60 +16,13 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    adapters::{
-        ChangeMode, CreateDirectory, EmitWarning, EnvironmentVariable, ExtractHost, FileIdentity, HostIdentity,
-        NativeExtractHost, OpenFile, OperatingSystem, ProcessId, RandomBytes, ReadFile, RealUserId, RemoveFile,
-        RenamePath, StatLink, TemporaryDirectory,
-    },
+    adapters::{ExtractHost, NativeExtractHost, OperatingSystem},
     node_path_join::{PathStyle, join},
 };
 
-const CHUNK: usize = 1 << 20;
-const FAILURE_PREFIX: &str = "[claude-agent-sdk] Failed to extract CLI from $bunfs: ";
-const FAILURE_SUFFIX: &str = ". Child processes cannot access $bunfs paths \u{2014} the CLI will likely fail to start.";
-const HASH_DIRECTORY_MESSAGE: &str = "The claude-agent-sdk-<hash> folder under the temp directory is a symlink or not a directory, possibly planted; delete it and restart";
+mod constants;
 
-/// libuv's name and text for each errno `extractFromBunfs` can meet, which is how Node words `err.message`.
-#[cfg(unix)]
-const ERRNO_TABLE: &[(i32, &str, &str)] = &[
-    (libc::EPERM, "EPERM", "operation not permitted"),
-    (libc::ENOENT, "ENOENT", "no such file or directory"),
-    (libc::EIO, "EIO", "i/o error"),
-    (libc::ENOMEM, "ENOMEM", "not enough memory"),
-    (libc::EACCES, "EACCES", "permission denied"),
-    (libc::EBUSY, "EBUSY", "resource busy or locked"),
-    (libc::EEXIST, "EEXIST", "file already exists"),
-    (libc::EXDEV, "EXDEV", "cross-device link not permitted"),
-    (libc::ENOTDIR, "ENOTDIR", "not a directory"),
-    (libc::EISDIR, "EISDIR", "illegal operation on a directory"),
-    (libc::EINVAL, "EINVAL", "invalid argument"),
-    (libc::EMFILE, "EMFILE", "too many open files"),
-    (libc::ENOSPC, "ENOSPC", "no space left on device"),
-    (libc::EROFS, "EROFS", "read-only file system"),
-    (libc::ENAMETOOLONG, "ENAMETOOLONG", "name too long"),
-    (libc::ENOTEMPTY, "ENOTEMPTY", "directory not empty"),
-    (libc::ELOOP, "ELOOP", "too many symbolic links encountered"),
-];
-
-/// The same table keyed by the Win32 error codes libuv translates.
-#[cfg(not(unix))]
-const ERRNO_TABLE: &[(i32, &str, &str)] = &[
-    (5, "EPERM", "operation not permitted"),
-    (2, "ENOENT", "no such file or directory"),
-    (3, "ENOENT", "no such file or directory"),
-    (8, "ENOMEM", "not enough memory"),
-    (32, "EBUSY", "resource busy or locked"),
-    (33, "EBUSY", "resource busy or locked"),
-    (80, "EEXIST", "file already exists"),
-    (183, "EEXIST", "file already exists"),
-    (17, "EXDEV", "cross-device link not permitted"),
-    (267, "ENOTDIR", "not a directory"),
-    (87, "EINVAL", "invalid argument"),
-    (4, "EMFILE", "too many open files"),
-    (112, "ENOSPC", "no space left on device"),
-    (206, "ENAMETOOLONG", "name too long"),
-    (145, "ENOTEMPTY", "directory not empty"),
-];
+use constants::{CHUNK, ERRNO_TABLE, FAILURE_PREFIX, FAILURE_SUFFIX, HASH_DIRECTORY_MESSAGE};
 
 fn errno_row(error: &io::Error) -> Option<&'static (i32, &'static str, &'static str)> {
     let raw = error.raw_os_error()?;
@@ -363,7 +316,7 @@ fn extract<H: ExtractHost>(host: &H, embedded: &Path) -> Result<PathBuf, String>
 /// otherwise the file is copied to `{tmpdir}/claude-agent-sdk-{uid}/claude-agent-sdk-{sha256[..16]}/<name>` (see
 /// `safeTempBase` for the Windows root) and that path is returned. A copy that is already there is reused only
 /// after it is read back and found to be a plain file with the same bytes. Any failure is reported through
-/// [`EmitWarning`] with the upstream text and the input path is returned.
+/// [`EmitWarning`](crate::adapters::EmitWarning) with the upstream text and the input path is returned.
 pub fn extract_from_bunfs_with<H: ExtractHost>(embedded_path: &Path, host: &H) -> PathBuf {
     let text = embedded_path.to_string_lossy();
     if !text.contains("$bunfs") && !text.contains("~BUN") {

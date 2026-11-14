@@ -66,8 +66,11 @@ async fn connect(cli_path: PathBuf, windows_batch_cli: WindowsBatchCli) -> (Resu
     (result, calls.load(Ordering::SeqCst))
 }
 
+/// A golden path with Python's refusal text for this host's `platform.system()`, when Python refuses it.
+type GoldenPath = (PathBuf, Option<String>);
+
 /// The golden paths that are valid on this host, each with Python's refusal text for this host's `platform.system()`.
-fn golden_paths() -> Result<Vec<(PathBuf, Option<String>)>, Box<dyn std::error::Error>> {
+fn golden_paths() -> Result<Vec<GoldenPath>, Box<dyn std::error::Error>> {
     let goldens: serde_json::Value = serde_json::from_str(GOLDENS)?;
     let mut paths = Vec::new();
     for case in goldens["windows_batch_cli"]

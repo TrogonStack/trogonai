@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    ffi::OsStr,
     future::{Future, pending},
     sync::Arc,
     time::Duration,
@@ -14,6 +15,7 @@ use tokio::{
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
+    adapters::{EnvironmentVariable, SystemEnvironment},
     constants::{
         self, PYTHON_INITIALIZE_TIMEOUT_SECONDS, PYTHON_INT_LITERAL_REPR_CHARS, TYPESCRIPT_INITIALIZE_TIMEOUT,
     },
@@ -38,7 +40,7 @@ pub(crate) enum Command {
         response: ControlSender,
     },
     Prompt {
-        input: crate::UserInput,
+        input: Box<crate::UserInput>,
         response: oneshot::Sender<Result<(), Error>>,
     },
     Control {
@@ -181,7 +183,9 @@ impl ControlResponder {
     /// timeout. Without a deadline it waits until the caller stops waiting.
     fn time_out_at(self, deadline: Option<Instant>) {
         let operation = self.operation();
-        let (Self::Initialize { mut response, .. } | Self::Control { mut response, .. }) = self;
+        let (Self::Initialize { mut response, .. }
+        | Self::Control { mut response, .. }
+        | Self::Raw { mut response, .. }) = self;
         tokio::spawn(async move {
             let expired = match deadline {
                 Some(deadline) => tokio::select! {
@@ -213,7 +217,9 @@ pub(crate) enum McpTransportEvent {
 
 /// `pendingMcpResponses`: shared with the manifest capture, whose per-server handshakes register waiters too.
 #[derive(Clone, Default)]
-pub(crate) struct WaiterTable(Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<Result<JsonObject, ()>>>>>);
+pub(crate) struct WaiterTable(Arc<std::sync::Mutex<HashMap<String, Waiter>>>);
+
+type Waiter = oneshot::Sender<Result<JsonObject, ()>>;
 
 impl WaiterTable {
     /// Replacing an entry drops the earlier waiter, which is then never answered.
@@ -619,6 +625,9 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     /// `startup()`: the hook and startup-mark frames, for the initialize timer. Closing the receiver ends the
     /// observation.
     pub startup_tap: Option<UnboundedSender<crate::startup_timeout::StartupEvent>>,
+    /// Where the response to the connect-time initialize request goes. The driver writes that request before it
+    /// handles anything else.
+    pub first_initialize: ControlSender,
 }
 
 /// The initialize request and the callbacks it registers, built before any transport exists so that a bad
@@ -721,10 +730,14 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         prompt_hold,
         host,
         startup_tap,
+        first_initialize,
     } = input;
     transport.connect().await?;
     let capture_manifests = options.argv_style == crate::ArgvStyle::TypeScript
-        && options.captures_sdk_mcp_manifests(std::env::var_os("CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS").as_deref());
+        && options.captures_sdk_mcp_manifests(
+            EnvironmentVariable::var_os(&SystemEnvironment, OsStr::new("CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS"))
+                .as_deref(),
+        );
     let initialize_hold = options.argv_style == crate::ArgvStyle::TypeScript
         && (initialization.expectations.blocking_hooks || initialization.expectations.managed_settings);
     if initialize_hold {
@@ -793,7 +806,10 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
             driver.mcp.forward(name, session);
         }
     }
-    Ok(tokio::spawn(driver.run(terminal)))
+    // `sdk.mjs` writes the initialize request while it constructs the Query, so it is on stdin before the caller
+    // holds anything; the outcome travels into the task so a failed write ends the run like any other error.
+    let started = driver.start(first_initialize).await;
+    Ok(tokio::spawn(driver.run(started, terminal)))
 }
 
 impl<T, F> Driver<T, F>
@@ -801,10 +817,20 @@ where
     T: Transport,
     F: crate::adapters::SessionFileSystem,
 {
-    async fn run(mut self, terminal: oneshot::Sender<Result<(), Error>>) {
-        let primary = match self.event_loop().await {
+    async fn run(mut self, started: Result<(), Error>, terminal: oneshot::Sender<Result<(), Error>>) {
+        let primary = match started {
+            Ok(()) => Box::pin(self.event_loop()).await,
+            Err(error) => Err(error),
+        };
+        let primary = match primary {
             Err(Error::ShutdownRequested) => Ok(()),
             outcome => outcome,
+        };
+        // Kept unanswered until the run ends, as they were while they waited in the queue.
+        let _unapplied = if self.shutdown_seen && primary.is_ok() {
+            Box::pin(self.write_queued_prompts()).await
+        } else {
+            Vec::new()
         };
         self.callbacks.abort_all();
         self.mcp.tasks.abort_all();
@@ -821,7 +847,7 @@ where
                 Err(error)
             }
         };
-        let mirror_cleanup = self.finalize_mirror().await;
+        let mirror_cleanup = Box::pin(self.finalize_mirror()).await;
         if let Some(materialized) = self.session.as_mut().and_then(|session| session.materialized.take()) {
             materialized.cleanup().await;
         }
@@ -854,9 +880,41 @@ where
         let _ = terminal.send(outcome);
     }
 
-    /// Whether another document may be written: the transport is ready and input has not been ended.
+    /// `sdk.mjs` writes a prompt to stdin as `query()` takes it, so one taken before `close()` is on stdin when the
+    /// input ends. The close can reach the driver ahead of a prompt queued before it, so those prompts are written
+    /// now; the other commands are handed back untouched.
+    async fn write_queued_prompts(&mut self) -> Vec<Command> {
+        let mut unapplied = Vec::new();
+        while let Some(command) = self.commands.try_recv() {
+            if !matches!(command, Command::Prompt { .. }) {
+                unapplied.push(command);
+                continue;
+            }
+            if let Err(error) = Box::pin(self.command(command)).await {
+                tracing::debug!(%error, "a prompt queued before the close could not be written");
+                break;
+            }
+        }
+        unapplied
+    }
+
+    /// Writes the connect-time initialize request. `sdk.mjs` writes it while it constructs the Query, before the
+    /// caller holds anything to close, and Python waits for its answer; either way a close that follows at once
+    /// finds the request already on stdin. A process spawned under an aborted signal writes nothing.
+    async fn start(&mut self, first_initialize: ControlSender) -> Result<(), Error> {
+        if self.abort.is_cancelled() {
+            return Err(crate::AbortError::PROCESS.into());
+        }
+        Box::pin(self.command(Command::Initialize {
+            first: true,
+            response: first_initialize,
+        }))
+        .await
+    }
+
+    /// Whether another document may be written: the transport accepts writes and input has not been ended.
     fn input_open(&self) -> bool {
-        !self.input_ended && self.transport.is_ready()
+        !self.input_ended && self.transport.accepts_writes()
     }
 
     /// Python `end_input`. A failure to end input is not an error of the run.
@@ -895,7 +953,8 @@ where
 
     async fn event_loop(&mut self) -> Result<(), Error> {
         loop {
-            if self.shutdown.try_recv().is_ok() {
+            // A taken or dropped signal leaves the receiver spent, and polling it again panics.
+            if self.shutdown_seen || !matches!(self.shutdown.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
                 self.shutdown_seen = true;
                 return Ok(());
             }
@@ -905,7 +964,7 @@ where
             if let Some(error) = self.expired_control() {
                 return Err(error);
             }
-            if self.run_end.close_due() {
+            if self.run_end.close_due() && !self.holds_input_for_callbacks() {
                 self.run_end.closing_input();
                 self.end_input().await;
             }
@@ -915,7 +974,7 @@ where
             // until the caller takes a message.
             let reading = self.overflow.is_empty() && !self.deferred_full();
             tokio::select! {
-                _ = &mut self.shutdown => { self.shutdown_seen = true; return Ok(()); }
+                _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; return Ok(()); }
                 () = self.abort.cancelled() => return Err(crate::AbortError::PROCESS.into()),
                 ready = self.messages.ready(), if !self.overflow.is_empty() => {
                     if !ready { return Err(Error::DriverStopped); }
@@ -937,7 +996,7 @@ where
                     self.wire_ids = self.transport.take_wire_ids();
                     self.tap_startup(&message);
                     let parsed = self.decode_message(message)?;
-                    self.frame(parsed).await?;
+                    Box::pin(self.frame(parsed)).await?;
                 }
                 flushed = async { match self.mirror_flush.as_mut() { Some(flush) => flush.await, None => pending().await } }, if self.mirror_flush.is_some() => {
                     self.mirror_flush = None;
@@ -948,13 +1007,13 @@ where
                 }
                 outbound = self.mcp.inbound.recv() => {
                     if let Some(event) = outbound {
-                        self.mcp_transport_event(event).await?;
+                        Box::pin(self.mcp_transport_event(event)).await?;
                     }
                 }
                 _ = self.mcp.tasks.join_next(), if !self.mcp.tasks.is_empty() => {}
                 command = self.commands.recv() => {
                     let Some(command) = command else { return Ok(()); };
-                    self.command(command).await?;
+                    Box::pin(self.command(command)).await?;
                 }
                 callback = self.callbacks.join_next_with_id(), if !self.callbacks.is_empty() => {
                     match callback {
@@ -1025,6 +1084,14 @@ where
         }
     }
 
+    /// `sdk.mjs` ends its input only once the callbacks it started have answered; Python closes at the result
+    /// whatever is still running. A callback that starts after stdin closed has nowhere to answer.
+    fn holds_input_for_callbacks(&self) -> bool {
+        self.argv_style == crate::ArgvStyle::TypeScript
+            && !self.input_ended
+            && (!self.callback_handles.is_empty() || !self.detached_callbacks.is_empty())
+    }
+
     fn running_callbacks(&self) -> usize {
         self.callback_handles.len() + self.detached_callbacks.len() + self.cancelled_callbacks.len()
     }
@@ -1086,9 +1153,14 @@ where
         Ok(id)
     }
     fn controls_full(&self) -> bool {
-        self.limits
-            .max_pending_controls
-            .is_some_and(|limit| self.pending.len() >= limit.get())
+        // The initialize handshake is not an application control, so it does not use up the limit.
+        self.limits.max_pending_controls.is_some_and(|limit| {
+            self.pending
+                .values()
+                .filter(|pending| !matches!(pending.response, ControlResponder::Initialize { .. }))
+                .count()
+                >= limit.get()
+        })
     }
 
     #[cfg(test)]
@@ -1620,10 +1692,15 @@ where
                 {
                     object.insert("client_composed".into(), true.into());
                 }
+                // A message object written as given carries its own uuid, so read it from the frame.
+                let uuid = frame
+                    .get("uuid")
+                    .and_then(serde_json::Value::as_str)
+                    .map(crate::MessageId::from);
                 self.write(frame).await?;
                 self.state = State::Running;
                 self.run_end.prompt_written();
-                self.run_state.pending_inputs.push_back(input.uuid.clone());
+                self.run_state.pending_inputs.push_back(uuid);
                 let _ = response.send(Ok(()));
             }
             Command::Control {
@@ -1842,6 +1919,9 @@ where
                                 (control_value(self.argv_style, response), sender)
                             }
                         };
+                        if operation == ControlOperation::RemoteControl {
+                            self.host.settle_remote_control(response.as_ref());
+                        }
                         if operation == ControlOperation::Interrupt
                             && let Some(object) = response.as_ref().and_then(serde_json::Value::as_object)
                             && let crate::InterruptReceipt::Reported {
@@ -1907,8 +1987,13 @@ where
                         Ok(()) => {}
                         Err(crate::MirrorEnqueueError::Key(error)) => {
                             // One line for the same reason as the control response above.
-                            let projects_dir = session.mirror.projects_dir();
+                            let projects_dir = session.mirror.projects_dir().unwrap_or(std::path::Path::new(""));
                             tracing::warn!(file_path = %file_path.display(), projects_dir = %projects_dir.display(), %error, "dropping transcript mirror frame whose file path is not under the projects directory");
+                        }
+                        Err(error @ crate::MirrorEnqueueError::MissingConfigDirectory) => {
+                            // Upstream TypeScript's append throws from `os.homedir()`, is logged at error level, and
+                            // its `onError` throws again before it can report a `mirror_error`.
+                            tracing::error!(file_path = %file_path.display(), %error, "dropping transcript mirror frame");
                         }
                         Err(crate::MirrorEnqueueError::Closed) => {
                             return Err(Error::Session(crate::SessionError::MirrorStopped));
@@ -1962,7 +2047,7 @@ where
                 return;
             }
             let delivered = tokio::select! {
-                _ = &mut self.shutdown => { self.shutdown_seen = true; false }
+                _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; false }
                 sent = self.messages.send(message) => sent.is_ok(),
             };
             if !delivered {
@@ -2123,14 +2208,14 @@ where
                 },
                 event = self.mcp.inbound.recv() => {
                     if let Some(event) = event {
-                        self.mcp_transport_event(event).await?;
+                        Box::pin(self.mcp_transport_event(event)).await?;
                     }
                 }
                 () = &mut deadline => {
                     settled = false;
                     break;
                 }
-                _ = &mut self.shutdown => {
+                _ = &mut self.shutdown, if !self.shutdown_seen => {
                     self.shutdown_seen = true;
                     return Err(Error::ShutdownRequested);
                 }
@@ -2155,8 +2240,8 @@ where
             tracing::warn!(
                 captured = captured.len(),
                 servers,
-                "in-process MCP servers captured within {} ms; the rest will handshake over the control channel",
-                constants::MCP_MANIFEST_CAPTURE_DEADLINE.as_millis()
+                deadline_ms = constants::MCP_MANIFEST_CAPTURE_DEADLINE.as_millis(),
+                "in-process MCP servers captured within the deadline; the rest will handshake over the control channel"
             );
         }
         if captured.is_empty() {
@@ -2423,7 +2508,7 @@ where
         }
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
         tokio::select! {
-            _ = &mut self.shutdown => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
+            _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
             () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
         }

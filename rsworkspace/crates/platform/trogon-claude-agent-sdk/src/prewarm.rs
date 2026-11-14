@@ -58,7 +58,13 @@ pub struct WarmQuery {
 impl WarmQuery {
     /// TypeScript `WarmQuery.query(prompt)`. Taking `self` is how Rust says the call "can only be called once".
     pub async fn query(self, prompt: impl Into<UserInput>) -> Result<Query, Error> {
-        crate::client::start_query(self.client, prompt.into(), Completion::Run).await
+        Box::pin(crate::client::start_query(
+            self.client,
+            prompt.into(),
+            Completion::Run,
+            crate::client::PromptShape::SdkMjs,
+        ))
+        .await
     }
 
     /// TypeScript `WarmQuery.close()`: discards the process without sending a prompt.
@@ -115,7 +121,7 @@ where
         initialize_timeout,
         on_hooks_running: on_startup_hooks_running,
     };
-    let client = ClaudeSdkClient::connect_startup(options, adapters, discover, settings).await?;
+    let client = Box::pin(ClaudeSdkClient::connect_startup(options, adapters, discover, settings)).await?;
     Ok(WarmQuery { client })
 }
 
@@ -373,7 +379,7 @@ where
         initialize_timeout: Some(initialize_timeout.unwrap_or(STARTUP_DEFAULT_LIMIT)),
         on_hooks_running: on_startup_hooks_running,
     };
-    let client = match ClaudeSdkClient::connect_startup(options, adapters, discover, settings).await {
+    let client = match Box::pin(ClaudeSdkClient::connect_startup(options, adapters, discover, settings)).await {
         Ok(client) => client,
         Err(error) => {
             cleanup();
@@ -730,7 +736,8 @@ impl SpareProcess {
             None => None,
         };
         let held_prompt = settings.is_some();
-        let prompt = prompt.into();
+        // `claim` hands the prompt to `WarmQuery.query`, which writes a string prompt as `query()` does.
+        let prompt = prompt.into().into_query_prompt(true);
         let (now, later) = if held_prompt {
             (None, Some(prompt))
         } else {

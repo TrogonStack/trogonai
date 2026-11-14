@@ -64,6 +64,8 @@ pub(crate) struct WorkSecretAnswerer {
 pub(crate) struct HostStateInner {
     generation: u64,
     answerer: Option<WorkSecretAnswerer>,
+    /// The enable call whose answer the driver settles as it reads the frame, before the next line.
+    armed: Option<(u64, [Option<WorkSecretAnswerer>; 2])>,
     ui_host: Option<UiHost>,
 }
 
@@ -93,6 +95,35 @@ impl HostState {
         let mut state = self.lock();
         state.generation += 1;
         (state.generation, std::mem::replace(&mut state.answerer, next))
+    }
+
+    /// Records the candidates the driver settles when the CLI's answer to call `generation` arrives, so a
+    /// `remote_control_work_secret` request written right behind that answer already sees the settled answerer,
+    /// as it does in `sdk.mjs` where the answer's continuation runs before the next line is read.
+    pub(crate) fn arm_remote_control(&self, generation: u64, candidates: [Option<WorkSecretAnswerer>; 2]) {
+        self.lock().armed = Some((generation, candidates));
+    }
+
+    /// The driver's half of an enable: settles the armed call from its answer. A missing or `null` answer leaves
+    /// the answerer alone.
+    pub(crate) fn settle_remote_control(&self, response: Option<&Value>) {
+        let mut state = self.lock();
+        let Some((generation, candidates)) = state.armed.take() else {
+            return;
+        };
+        if state.generation != generation {
+            return;
+        }
+        let Some(response) = response.filter(|response| !response.is_null()) else {
+            return;
+        };
+        let bridge_session_id = response.get("bridge_session_id").and_then(Value::as_str);
+        state.answerer = bridge_session_id.and_then(|bridge| {
+            candidates
+                .into_iter()
+                .flatten()
+                .find(|candidate| same_session(&candidate.session_id, bridge))
+        });
     }
 
     /// A failed call clears the answerer unless a newer call has started.

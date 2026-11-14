@@ -7,25 +7,16 @@
 //! them, so the deltas reach the viewer first. Any other row ends the window at once and goes out after what was
 //! held. The session upload task owns the clock: [`StreamEvents`] only says when the window is due.
 
-use std::time::Duration;
-
 use serde_json::{Map, Value};
 use tokio::time::Instant;
 
-use crate::bridge_session::client_event;
 use crate::bridge_worker_events::ClientEvent;
 
-type Frame = Map<String, Value>;
+mod constants;
 
-/// `o5`: how long the first stream event waits for the ones that follow.
-const WINDOW: Duration = Duration::from_millis(100);
-/// `ea`: the most a live-view row may weigh once serialized; a heavier one is dropped.
-const EPHEMERAL_LIMIT: usize = 61_440;
-/// `MG`: the most a merged delta may weigh, which leaves room for the row around it.
-const MERGE_LIMIT: usize = EPHEMERAL_LIMIT - 4096;
-/// No character takes more than this many bytes once escaped, so a batch of this many characters or fewer is safe
-/// to merge without measuring.
-const WIDEST_ESCAPE: usize = 6;
+use constants::{EPHEMERAL_LIMIT, LIVE_ONLY_LIMIT, MERGE_LIMIT, OVERSIZED_REPLY, WIDEST_ESCAPE, WINDOW};
+
+type Frame = Map<String, Value>;
 
 /// The events held back, the rows waiting behind them, and when the window ends.
 #[derive(Default)]
@@ -300,6 +291,46 @@ fn merge(frames: &[Frame], measure: bool) -> Option<Vec<Frame>> {
     }
     merged.extend(run.take().map(Run::finish));
     (characters * WIDEST_ESCAPE <= MERGE_LIMIT).then_some(merged)
+}
+
+/// `toClientEvent`: the row as it is uploaded. Thinking-token rows and `live_only` control responses are live-view
+/// rows. A live-only control response that would not fit is replaced by an error that says so (`rF`).
+pub(crate) fn client_event(frame: Value) -> Option<ClientEvent> {
+    let Value::Object(mut payload) = frame else {
+        return None;
+    };
+    let live_only = payload.get("type").is_some_and(|kind| kind == "control_response")
+        && payload.get("live_only").is_some_and(|flag| flag == true);
+    if live_only && serde_json::to_string(&payload).map_or(0, |text| text.len()) > LIVE_ONLY_LIMIT {
+        payload = oversized_reply(&payload);
+    }
+    let thinking = payload.get("type").is_some_and(|kind| kind == "system")
+        && payload
+            .get("subtype")
+            .is_some_and(|subtype| subtype == "thinking_tokens");
+    let historical = payload.get("historical").is_some_and(|flag| flag == true);
+    Some(ClientEvent {
+        payload,
+        historical,
+        ephemeral: live_only || thinking,
+    })
+}
+
+fn oversized_reply(payload: &Map<String, Value>) -> Map<String, Value> {
+    let mut replaced = Map::new();
+    replaced.insert("type".to_owned(), Value::String("control_response".to_owned()));
+    replaced.insert("live_only".to_owned(), Value::Bool(true));
+    if let Some(uuid) = payload.get("uuid").filter(|uuid| uuid.is_string()) {
+        replaced.insert("uuid".to_owned(), uuid.clone());
+    }
+    let mut response = Map::new();
+    response.insert("subtype".to_owned(), Value::String("error".to_owned()));
+    if let Some(id) = payload.get("response").and_then(|response| response.get("request_id")) {
+        response.insert("request_id".to_owned(), id.clone());
+    }
+    response.insert("error".to_owned(), Value::String(OVERSIZED_REPLY.to_owned()));
+    replaced.insert("response".to_owned(), Value::Object(response));
+    replaced
 }
 
 #[cfg(test)]

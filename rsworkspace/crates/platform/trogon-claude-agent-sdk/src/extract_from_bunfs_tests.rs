@@ -12,6 +12,10 @@ use std::{
 use serde_json::Value;
 
 use super::*;
+use crate::adapters::{
+    ChangeMode, CreateDirectory, EmitWarning, EnvironmentVariable, FileIdentity, HostIdentity, NativeHost, OpenFile,
+    ProcessId, RandomBytes, ReadFile, RealUserId, RemoveFile, RenamePath, StatLink, TemporaryDirectory,
+};
 
 type TestResult = Result<(), Box<dyn Error>>;
 

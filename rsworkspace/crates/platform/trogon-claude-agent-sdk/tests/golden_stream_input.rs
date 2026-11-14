@@ -165,12 +165,20 @@ async fn serve(process: ScriptedProcessHarness, cli: Cli, closing: Arc<AtomicBoo
                 0,
             ),
         };
-        tasks.push(tokio::spawn(reply(
+        let answering = reply(
             Arc::clone(&stdout),
             Arc::clone(&log),
             delay,
             vec![("control_response", answer)],
-        )));
+        );
+        // The recording stub answered an immediate request before it read the next line: `sdk.mjs` writes the
+        // first prompt right behind initialize without waiting for the answer, yet every recording logs the answer
+        // first. Only a late answer runs beside the reads.
+        if delay == 0 {
+            answering.await?;
+        } else {
+            tasks.push(tokio::spawn(answering));
+        }
     }
     if !closing.load(Ordering::SeqCst) {
         note(&log, "eof")?;

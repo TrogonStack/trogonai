@@ -155,21 +155,23 @@ async fn connect_with_verbatim_text_stamps_it() -> TestResult {
     Ok(())
 }
 
-/// `sdk.mjs` `query({prompt: string})`: the TypeScript style writes the prompt in the empty session. `sdk.mjs`
-/// sends the text as one text block; the string content here is the structured-input gap tracked separately.
+/// `sdk.mjs` `query({prompt: string})`: the TypeScript style writes the prompt in the empty session, as one text
+/// block.
 #[tokio::test]
 async fn connect_with_text_under_typescript_uses_the_empty_session() -> TestResult {
     let lines = record(ArgvStyle::TypeScript, |_| {}, "x", nothing).await?;
-    assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0]["session_id"], "");
-    assert_eq!(lines[0]["parent_tool_use_id"], Value::Null);
-    assert_eq!(lines[0]["message"]["content"], "x");
+    assert_eq!(
+        lines,
+        [
+            json!({"type":"user","session_id":"","message":{"role":"user","content":[{"type":"text","text":"x"}]},
+                "parent_tool_use_id":null})
+        ]
+    );
     Ok(())
 }
 
 /// Python `ClaudeSDKClient.connect(AsyncIterable)`: a background task streams the inputs as given, then ends
-/// stdin. Python leaves out the session id of an input that names none; this writes it empty, which is the
-/// raw-input gap tracked separately.
+/// stdin. An input that names no session goes without one, as Python writes it.
 #[tokio::test]
 async fn connect_with_a_stream_streams_it_in_the_background() -> TestResult {
     for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
@@ -178,7 +180,8 @@ async fn connect_with_a_stream_streams_it_in_the_background() -> TestResult {
         let client = client.connect(ConnectPrompt::stream(stream)).await?;
         let lines = user_lines(server).await?;
         client.disconnect().await?;
-        assert_eq!(lines, [python_user("one", ""), python_user("two", "keep")], "{style:?}");
+        let unnamed = json!({"type":"user","message":{"role":"user","content":"one"},"parent_tool_use_id":null});
+        assert_eq!(lines, [unnamed, python_user("two", "keep")], "{style:?}");
     }
     Ok(())
 }
@@ -312,6 +315,44 @@ async fn scope_reports_a_failed_disconnect_beside_the_body_error() -> TestResult
     };
     assert!(
         matches!(&outcome, Err(Error::Cleanup { primary, cleanup }) if interrupt(primary) && interrupt(cleanup)),
+        "{outcome:?}"
+    );
+    server.await??;
+    Ok(())
+}
+
+/// Python `ClaudeSDKClient.connect(str)` with the prompt given as an owned string or as a prompt value.
+#[tokio::test]
+async fn connect_takes_an_owned_string_or_a_prompt() -> TestResult {
+    let owned = record(ArgvStyle::Python, |_| {}, String::from("owned"), nothing).await?;
+    assert_eq!(owned, [python_user("owned", "default")]);
+    let prompt = record(ArgvStyle::Python, |_| {}, Prompt::from("prompt"), nothing).await?;
+    assert_eq!(prompt, [python_user("prompt", "default")]);
+    Ok(())
+}
+
+/// When only the disconnect fails, Python's `__aexit__` raises its exception even though the body returned; the
+/// scope returns the disconnect's error.
+#[tokio::test]
+async fn scope_reports_a_failed_disconnect_after_a_body_that_succeeded() -> TestResult {
+    let short = |options: &mut ClaudeAgentOptions| {
+        options.limits.control_timeout = Some(Timeout::new(Duration::from_millis(100)));
+    };
+    let (client, server) = unconnected(ArgvStyle::TypeScript, short, &["interrupt"]);
+    let outcome = client
+        .scope(async |client| -> Result<(), Error> {
+            let interrupted = client.handle().interrupt().await;
+            assert!(interrupted.is_err(), "the silent CLI never answers the interrupt");
+            Ok(())
+        })
+        .await;
+    assert!(
+        matches!(
+            &outcome,
+            Err(Error::ControlTimeout {
+                operation: ControlOperation::Interrupt
+            })
+        ),
         "{outcome:?}"
     );
     server.await??;

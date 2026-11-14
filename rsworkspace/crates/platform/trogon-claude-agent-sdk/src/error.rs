@@ -127,7 +127,7 @@ pub enum Error {
     #[error("the CLI path cannot be started safely")]
     CliPath(#[from] crate::CliPathError),
     #[error(transparent)]
-    CliNotFound(#[from] crate::CliNotFoundError),
+    CliNotFound(#[from] crate::cli_not_found_error::CliNotFoundError),
     /// Node `os.homedir()` or Python `Path.home()` found no home directory where the dialect needs one.
     #[error(transparent)]
     HomeDirectory(#[from] crate::HomeDirectoryError),
@@ -369,7 +369,10 @@ impl Error {
             }
             Self::Spawn(source) => {
                 return Some(
-                    match source.get_ref().and_then(|inner| inner.downcast_ref::<SpawnFailure>()) {
+                    match source
+                        .get_ref()
+                        .and_then(|inner| inner.downcast_ref::<SpawnFailureError>())
+                    {
                         Some(failure) => launch_message(&failure.path),
                         None => format!(
                             "Failed to spawn Claude Code process: {}",
@@ -408,19 +411,12 @@ impl Error {
 }
 
 /// A spawn error that carries the path it tried to start, so TypeScript's launch-failure text can name it.
-#[derive(Debug)]
-pub(crate) struct SpawnFailure {
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub(crate) struct SpawnFailureError {
     path: std::path::PathBuf,
-    source: io::Error,
+    error: io::Error,
 }
-
-impl std::fmt::Display for SpawnFailure {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.source, formatter)
-    }
-}
-
-impl std::error::Error for SpawnFailure {}
 
 /// Whether TypeScript words a spawn failure as a failed launch of the executable: the errors a missing or
 /// unusable path produces.
@@ -446,9 +442,9 @@ pub(crate) fn launch_failure(path: &std::path::Path, error: io::Error) -> io::Er
     if is_launch_failure(&error) {
         io::Error::new(
             error.kind(),
-            SpawnFailure {
+            SpawnFailureError {
                 path: path.to_path_buf(),
-                source: error,
+                error,
             },
         )
     } else {
@@ -459,7 +455,7 @@ pub(crate) fn launch_failure(path: &std::path::Path, error: io::Error) -> io::Er
 /// TypeScript's text for a path that could not be started, which depends on whether it names a native binary and
 /// whether it exists.
 fn launch_message(path: &std::path::Path) -> String {
-    let native = !crate::process_transport::is_script(path, crate::ArgvStyle::TypeScript);
+    let native = !crate::process_options::is_script(path, crate::ArgvStyle::TypeScript);
     let shown = crate::stderr_redaction::redact(&path.to_string_lossy());
     match (native, path.exists()) {
         (true, true) => format!(

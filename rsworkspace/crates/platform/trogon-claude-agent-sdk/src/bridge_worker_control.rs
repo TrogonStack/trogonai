@@ -5,8 +5,8 @@
 //! `onRenameSession`, `onStopTask`, `onBackgroundTasks`, `onSideQuestion` and the version string into the dispatcher,
 //! and nothing else, so those are the only callbacks [`ControlCallbacks`] carries. A request that the upstream answers
 //! after an asynchronous host call (`stop_task`, `background_tasks` and `side_question` with a registered callback)
-//! comes back as [`ControlReply::Deferred`] with what the responder needs, and a `set_model` or
-//! `set_max_thinking_tokens` callback that returns a promise comes back as [`ControlReply::Pending`] with that future;
+//! comes back as [`BridgeControlReply::Deferred`] with what the responder needs, and a `set_model` or
+//! `set_max_thinking_tokens` callback that returns a promise comes back as [`BridgeControlReply::Pending`] with that future;
 //! `bridge_worker_control_async` finishes both.
 //!
 //! Branches the attach path never reaches (each is a draft row in the unreachable notes):
@@ -21,18 +21,16 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use serde_json::{Map, Value, json};
+use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::bridge_js::{clean_label, clean_reply_text};
 
-const ERROR_CODE_UNSUPPORTED: &str = "unsupported_request";
-const PERMISSION_MODES: [&str; 6] = ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"];
-/// `NPe`: the settings a Remote Control client may change, `MPe` how many unknown names an error lists, and `UPe` how
-/// long each is.
-const FLAG_SETTINGS: [&str; 2] = ["effortLevel", "ultracode"];
-const FLAG_KEYS_SHOWN: usize = 5;
-const FLAG_KEY_LIMIT: usize = 40;
-const THINKING_DISPLAYS: [&str; 3] = ["summarized", "omitted", "highlights"];
+mod constants;
+
+use constants::{
+    ERROR_CODE_UNSUPPORTED, FLAG_KEY_LIMIT, FLAG_KEYS_SHOWN, FLAG_SETTINGS, PERMISSION_MODES, THINKING_DISPLAYS,
+};
 
 /// What a host callback that reports success or failure returned. A callback that returns nothing is `None` where
 /// the callback type says `Option<CallbackResult>`.
@@ -138,7 +136,7 @@ impl std::fmt::Debug for PendingControl {
 }
 
 #[derive(Debug)]
-pub enum ControlReply {
+pub enum BridgeControlReply {
     /// The `control_response` frame to write, with the session id already on it.
     Frame(Value),
     Deferred(DeferredControl),
@@ -183,20 +181,43 @@ fn js_string(value: Option<&Value>) -> String {
     }
 }
 
+/// The `mcp_status` answer: no servers are attached.
+#[derive(Serialize)]
+struct McpStatus {
+    #[serde(rename = "mcpServers")]
+    mcp_servers: Vec<Value>,
+}
+
+/// The `fork_conversation` answer: forking needs the remote control server.
+#[derive(Serialize)]
+struct ForkConversation {
+    forked: bool,
+    error: &'static str,
+    reason: &'static str,
+}
+
+/// The `mcp_set_servers` answer for a hint-only request: nothing changed.
+#[derive(Serialize)]
+struct McpSetServers {
+    added: Vec<Value>,
+    removed: Vec<Value>,
+    errors: Map<String, Value>,
+}
+
 pub(crate) struct Replier<'a> {
     pub(crate) session_id: &'a str,
     pub(crate) id: Option<&'a Value>,
 }
 
 impl Replier<'_> {
-    fn frame(&self, subtype: &str, tail: Vec<(&str, Value)>) -> ControlReply {
-        ControlReply::Frame(self.frame_value(subtype, tail))
+    fn frame(&self, subtype: &str, tail: Vec<(&str, Value)>) -> BridgeControlReply {
+        BridgeControlReply::Frame(self.frame_value(subtype, tail))
     }
 
     /// The `control_response` frame with the request id after the subtype and `tail` after it.
     pub(crate) fn frame_value(&self, subtype: &str, tail: Vec<(&str, Value)>) -> Value {
         let mut response = Map::new();
-        response.insert("subtype".to_owned(), json!(subtype));
+        response.insert("subtype".to_owned(), Value::from(subtype));
         if let Some(id) = self.id {
             response.insert("request_id".to_owned(), id.clone());
         }
@@ -204,40 +225,47 @@ impl Replier<'_> {
             response.insert(key.to_owned(), value);
         }
         let mut frame = Map::new();
-        frame.insert("type".to_owned(), json!("control_response"));
+        frame.insert("type".to_owned(), Value::from("control_response"));
         frame.insert("response".to_owned(), Value::Object(response));
-        frame.insert("session_id".to_owned(), json!(self.session_id));
+        frame.insert("session_id".to_owned(), Value::from(self.session_id));
         Value::Object(frame)
     }
 
-    fn success(&self) -> ControlReply {
+    fn success(&self) -> BridgeControlReply {
         self.frame("success", Vec::new())
     }
 
-    fn success_with(&self, response: Value) -> ControlReply {
-        self.frame("success", vec![("response", response)])
+    /// A serialization failure answers as an error reply, the one path this reply already has.
+    fn success_with(&self, response: &impl Serialize) -> BridgeControlReply {
+        match serde_json::to_value(response) {
+            Ok(response) => self.frame("success", vec![("response", response)]),
+            Err(error) => self.error(&error.to_string()),
+        }
     }
 
-    fn error(&self, text: &str) -> ControlReply {
-        self.frame("error", vec![("error", json!(text))])
+    fn error(&self, text: &str) -> BridgeControlReply {
+        self.frame("error", vec![("error", Value::from(text))])
     }
 
-    fn cleaned_error(&self, text: Option<&str>, code: Option<&str>) -> ControlReply {
-        let mut tail = vec![("error", json!(clean_control_text(text.unwrap_or_default())))];
+    fn cleaned_error(&self, text: Option<&str>, code: Option<&str>) -> BridgeControlReply {
+        let mut tail = vec![("error", Value::String(clean_control_text(text.unwrap_or_default())))];
         if let Some(code) = code {
-            tail.push(("error_code", json!(code)));
+            tail.push(("error_code", Value::from(code)));
         }
         self.frame("error", tail)
     }
 
-    fn unsupported(&self, text: &str) -> ControlReply {
+    fn unsupported(&self, text: &str) -> BridgeControlReply {
         self.frame(
             "error",
-            vec![("error", json!(text)), ("error_code", json!(ERROR_CODE_UNSUPPORTED))],
+            vec![
+                ("error", Value::from(text)),
+                ("error_code", Value::from(ERROR_CODE_UNSUPPORTED)),
+            ],
         )
     }
 
-    fn verdict(&self, result: Option<&CallbackResult>) -> ControlReply {
+    fn verdict(&self, result: Option<&CallbackResult>) -> BridgeControlReply {
         match result {
             Some(CallbackResult::Failed { error, .. }) => self.cleaned_error(error.as_deref(), None),
             _ => self.success(),
@@ -250,7 +278,7 @@ pub fn answer_control_request(
     request: &Value,
     session: &ControlSession<'_>,
     callbacks: &mut ControlCallbacks,
-) -> ControlReply {
+) -> BridgeControlReply {
     let replier = Replier {
         session_id: session.session_id,
         id: request.get("request_id"),
@@ -299,7 +327,9 @@ pub fn answer_control_request(
             "get_context_usage is not supported in this context (onGetContextUsage callback not registered)",
         ),
         Some("get_usage") => replier.unsupported("get_usage is not supported in this context"),
-        Some("mcp_status") => replier.success_with(json!({ "mcpServers": [] })),
+        Some("mcp_status") => replier.success_with(&McpStatus {
+            mcp_servers: Vec::new(),
+        }),
         Some(name @ ("mcp_authenticate" | "mcp_oauth_callback_url" | "mcp_reconnect")) => missing(name),
         Some("interrupt") => {
             if let Some(callback) = callbacks.on_interrupt.as_mut() {
@@ -316,7 +346,7 @@ pub fn answer_control_request(
             if !callbacks.has_stop_task {
                 return missing("stop_task");
             }
-            ControlReply::Deferred(DeferredControl::StopTask {
+            BridgeControlReply::Deferred(DeferredControl::StopTask {
                 task_id: task_id.to_owned(),
             })
         }
@@ -330,7 +360,7 @@ pub fn answer_control_request(
             if !callbacks.has_background_tasks {
                 return missing("background_tasks");
             }
-            ControlReply::Deferred(DeferredControl::BackgroundTasks { tool_use_id })
+            BridgeControlReply::Deferred(DeferredControl::BackgroundTasks { tool_use_id })
         }
         Some("cancel_async_message") => {
             if field("message_uuid").and_then(Value::as_str).is_none() {
@@ -349,15 +379,15 @@ pub fn answer_control_request(
                     "side_question is not supported in this context (onSideQuestion callback not registered)",
                 );
             }
-            ControlReply::Deferred(DeferredControl::SideQuestion {
+            BridgeControlReply::Deferred(DeferredControl::SideQuestion {
                 request: body.cloned().unwrap_or(Value::Null),
             })
         }
-        Some("fork_conversation") => replier.success_with(json!({
-            "forked": false,
-            "error": "unsupported",
-            "reason": "requires_remote_control_server",
-        })),
+        Some("fork_conversation") => replier.success_with(&ForkConversation {
+            forked: false,
+            error: "unsupported",
+            reason: "requires_remote_control_server",
+        }),
         _ => replier.unsupported(&format!(
             "REPL bridge does not handle control_request subtype: {}",
             clean_control_text(&js_string(subtype_value))
@@ -365,7 +395,7 @@ pub fn answer_control_request(
     }
 }
 
-fn initialize(replier: &Replier<'_>, session: &ControlSession<'_>) -> ControlReply {
+fn initialize(replier: &Replier<'_>, session: &ControlSession<'_>) -> BridgeControlReply {
     let by_subtype = |wanted: &str| -> Vec<Value> {
         session
             .pending_prompts
@@ -375,15 +405,18 @@ fn initialize(replier: &Replier<'_>, session: &ControlSession<'_>) -> ControlRep
             .collect()
     };
     let mut inner = Map::new();
-    inner.insert("commands".to_owned(), json!([]));
-    inner.insert("agents".to_owned(), json!([]));
-    inner.insert("output_style".to_owned(), json!("normal"));
-    inner.insert("available_output_styles".to_owned(), json!(["normal"]));
-    inner.insert("models".to_owned(), json!([]));
-    inner.insert("account".to_owned(), json!({}));
-    inner.insert("pid".to_owned(), json!(session.pid));
+    inner.insert("commands".to_owned(), Value::Array(Vec::new()));
+    inner.insert("agents".to_owned(), Value::Array(Vec::new()));
+    inner.insert("output_style".to_owned(), Value::from("normal"));
+    inner.insert(
+        "available_output_styles".to_owned(),
+        Value::Array(vec![Value::from("normal")]),
+    );
+    inner.insert("models".to_owned(), Value::Array(Vec::new()));
+    inner.insert("account".to_owned(), Value::Object(Map::new()));
+    inner.insert("pid".to_owned(), Value::from(session.pid));
     if let Some(version) = session.claude_code_version {
-        inner.insert("claude_code_version".to_owned(), json!(version));
+        inner.insert("claude_code_version".to_owned(), Value::from(version));
     }
     replier.frame(
         "success",
@@ -398,7 +431,7 @@ fn initialize(replier: &Replier<'_>, session: &ControlSession<'_>) -> ControlRep
     )
 }
 
-fn set_model(replier: &Replier<'_>, body: Option<&Value>, callbacks: &mut ControlCallbacks) -> ControlReply {
+fn set_model(replier: &Replier<'_>, body: Option<&Value>, callbacks: &mut ControlCallbacks) -> BridgeControlReply {
     let model = body.and_then(|body| body.get("model"));
     if model.is_some_and(|model| !model.is_null() && !model.is_string()) {
         return replier.error("set_model: model must be a string");
@@ -412,7 +445,7 @@ fn set_model(replier: &Replier<'_>, body: Option<&Value>, callbacks: &mut Contro
         );
     }
     if let Some(callback) = callbacks.on_set_model_pending.as_mut() {
-        return ControlReply::Pending(PendingControl::SetModel(callback(model.and_then(Value::as_str))));
+        return BridgeControlReply::Pending(PendingControl::SetModel(callback(model.and_then(Value::as_str))));
     }
     let result = callbacks
         .on_set_model
@@ -431,7 +464,7 @@ fn set_max_thinking_tokens(
     replier: &Replier<'_>,
     body: Option<&Value>,
     callbacks: &mut ControlCallbacks,
-) -> ControlReply {
+) -> BridgeControlReply {
     let tokens = body.and_then(|body| body.get("max_thinking_tokens"));
     let display = body.and_then(|body| body.get("thinking_display"));
     let tokens_ok = tokens.is_none_or(|tokens| tokens.is_null() || (tokens.is_number() && is_integer(tokens)));
@@ -444,7 +477,7 @@ fn set_max_thinking_tokens(
         );
     }
     if let Some(callback) = callbacks.on_set_max_thinking_tokens_pending.as_mut() {
-        return ControlReply::Pending(PendingControl::SetMaxThinkingTokens(callback(tokens, display)));
+        return BridgeControlReply::Pending(PendingControl::SetMaxThinkingTokens(callback(tokens, display)));
     }
     let result = callbacks
         .on_set_max_thinking_tokens
@@ -453,7 +486,11 @@ fn set_max_thinking_tokens(
     replier.verdict(result.as_ref())
 }
 
-fn set_permission_mode(replier: &Replier<'_>, mode: Option<&Value>, callbacks: &mut ControlCallbacks) -> ControlReply {
+fn set_permission_mode(
+    replier: &Replier<'_>,
+    mode: Option<&Value>,
+    callbacks: &mut ControlCallbacks,
+) -> BridgeControlReply {
     let named = mode
         .and_then(Value::as_str)
         .map(|text| if text == "manual" { "default" } else { text })
@@ -488,7 +525,7 @@ fn set_permission_mode(replier: &Replier<'_>, mode: Option<&Value>, callbacks: &
 
 /// `qPe` followed by the missing handler: the settings are checked on the spot and the attach path registers no
 /// `onApplyFlagSettings`, so a valid object is answered as not supported.
-fn apply_flag_settings(replier: &Replier<'_>, settings: Option<&Value>) -> ControlReply {
+fn apply_flag_settings(replier: &Replier<'_>, settings: Option<&Value>) -> BridgeControlReply {
     match check_flag_settings(settings) {
         Err(text) => replier.error(&text),
         Ok(()) => replier.unsupported(
@@ -553,11 +590,15 @@ fn check_flag_settings(settings: Option<&Value>) -> Result<(), String> {
     Ok(())
 }
 
-fn mcp_set_servers(replier: &Replier<'_>, body: Option<&Value>) -> ControlReply {
+fn mcp_set_servers(replier: &Replier<'_>, body: Option<&Value>) -> BridgeControlReply {
     let servers = body.and_then(|body| body.get("servers"));
     let hint = body.and_then(|body| body.get("hint"));
     if servers.is_none() && hint.is_some_and(Value::is_string) {
-        return replier.success_with(json!({ "added": [], "removed": [], "errors": {} }));
+        return replier.success_with(&McpSetServers {
+            added: Vec::new(),
+            removed: Vec::new(),
+            errors: Map::new(),
+        });
     }
     if !servers.is_some_and(Value::is_object) {
         return replier.cleaned_error(Some("mcp_set_servers: servers must be an object"), None);
