@@ -59,7 +59,7 @@ fn win32_root_len(text: &str) -> usize {
     usize::from(bytes.first().is_some_and(|byte| separator_byte(*byte)))
 }
 
-fn win32_path<T>(use_path: impl FnOnce(&NodePath<'_>) -> T) -> T {
+fn node_path<T>(use_path: impl FnOnce(&NodePath<'_>) -> T) -> T {
     let process = DrivelessProcess;
     use_path(&NodePath {
         dialect: NodePathDialect::Current,
@@ -70,7 +70,7 @@ fn win32_path<T>(use_path: impl FnOnce(&NodePath<'_>) -> T) -> T {
 
 /// `path.win32.normalize(text)`.
 fn win32_normalize(text: &str) -> String {
-    win32_path(|path| rust(&path.win32_normalize(&js(text))))
+    node_path(|path| rust(&path.win32_normalize(&js(text))))
 }
 
 impl Flavor {
@@ -131,7 +131,7 @@ impl Flavor {
     pub(crate) fn join(self, base: &str, name: &str) -> String {
         match self {
             Self::Posix => join(base, name),
-            Self::Win32 => win32_path(|path| rust(&path.win32_join(&[&js(base), &js(name)]))),
+            Self::Win32 => node_path(|path| rust(&path.win32_join(&[&js(base), &js(name)]))),
         }
     }
 
@@ -139,7 +139,7 @@ impl Flavor {
     pub(crate) fn dirname(self, text: &str) -> String {
         match self {
             Self::Posix => dirname(text),
-            Self::Win32 => win32_path(|path| rust(&path.win32_dirname(&js(text)))),
+            Self::Win32 => node_path(|path| rust(&path.win32_dirname(&js(text)))),
         }
     }
 
@@ -147,7 +147,7 @@ impl Flavor {
     pub(crate) fn resolve(self, base: &str, text: &str) -> String {
         match self {
             Self::Posix => resolve(base, text),
-            Self::Win32 => win32_path(|path| {
+            Self::Win32 => node_path(|path| {
                 path.win32_resolve(&[&js(base), &js(text)])
                     .map(|resolved| rust(&resolved))
                     .unwrap_or_default()
@@ -159,7 +159,7 @@ impl Flavor {
     pub(crate) fn resolve_alone(self, text: &str) -> String {
         match self {
             Self::Posix => resolve(text, "."),
-            Self::Win32 => win32_path(|path| {
+            Self::Win32 => node_path(|path| {
                 path.win32_resolve(&[&js(text)])
                     .map(|resolved| rust(&resolved))
                     .unwrap_or_default()
@@ -244,41 +244,14 @@ pub(crate) fn share_refused(text: &str, base: &str) -> bool {
     name.is_none() || name != server_name(base)
 }
 
-/// `path.posix.dirname`: cuts at the last separator before the final name and keeps any separators run in front of it,
-/// so `a//b` answers `a/` and `//a` answers `//`.
+/// `path.posix.dirname(path)`.
 pub(crate) fn dirname(path: &str) -> String {
-    let bytes = path.as_bytes();
-    let Some(&first) = bytes.first() else {
-        return ".".to_owned();
-    };
-    let rooted = first == b'/';
-    let mut end = None;
-    let mut matched_slash = true;
-    for (index, &byte) in bytes.iter().enumerate().skip(1).rev() {
-        if byte == b'/' {
-            if !matched_slash {
-                end = Some(index);
-                break;
-            }
-        } else {
-            matched_slash = false;
-        }
-    }
-    match end {
-        None if rooted => "/".to_owned(),
-        None => ".".to_owned(),
-        Some(1) if rooted => "//".to_owned(),
-        Some(index) => path[..index].to_owned(),
-    }
+    node_path(|node| rust(&node.posix_dirname(&js(path))))
 }
 
-/// `path.posix.join(base, name)` for a plain `name`.
+/// `path.posix.join(base, name)`.
 pub(crate) fn join(base: &str, name: &str) -> String {
-    match base {
-        "" | "." => name.to_owned(),
-        "/" => format!("/{name}"),
-        other => format!("{}/{name}", other.trim_end_matches('/')),
-    }
+    node_path(|node| rust(&node.posix_join(&[&js(base), &js(name)])))
 }
 
 /// `path.posix.resolve(base, text)` for an absolute `base`.
