@@ -41,7 +41,8 @@ const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const INIT_ATTEMPTS: u32 = 10;
 const INIT_BACKOFF_CEILING_MS: u64 = 30_000;
-const TICKET_HEADERS: [&str; 3] = ["x-ccr-ticket-rev", "x-ccr-ticket-session", "x-ccr-ticket-seq"];
+const SESSION_TICKET_HEADER: &str = "x-ccr-ticket-session";
+const TICKET_HEADERS: [&str; 3] = ["x-ccr-ticket-rev", SESSION_TICKET_HEADER, "x-ccr-ticket-seq"];
 
 /// What the worker waits with: the pause between init attempts and the jitter added to it.
 pub trait WorkerPacing {
@@ -142,31 +143,225 @@ pub struct WorkerConfig {
     pub entrypoint: Option<String>,
     /// The first beat interval; the upstream default when absent.
     pub heartbeat_interval_ms: Option<u64>,
+    /// The `CLAUDE_CODE_SESSION_ACCESS_TOKEN` value, which a `401` or `403` is checked against for an expired `exp`.
+    pub session_access_token: Option<SensitiveString>,
+    /// What a `403` that did not come from the service counts as.
+    pub non_origin_403: NonOrigin403,
+}
+
+/// What a `403` that the service did not send (`request-id` absent or malformed) counts as: `nonOrigin403Transient`.
+/// The attach entrypoint leaves it unset, which reads as `false`. Its windowed form needs the upload lanes and their
+/// backlog, which the attach entrypoint never configures, so it is not part of this client.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum NonOrigin403 {
+    /// The refusal counts like any other `401` or `403`.
+    #[default]
+    Counted,
+    /// The refusal is transient: it is flagged and does not count toward the auth failures that end the worker.
+    Transient,
+}
+
+/// Who a refused request came from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RefusalSource {
+    /// The service itself: the answer carries a well-formed `request-id`.
+    Origin,
+    /// An edge network: `cf-ray` is set or `server` names Cloudflare.
+    NonOriginCloudflare,
+    NonOriginOther,
+}
+
+impl RefusalSource {
+    /// The name the upstream request path logs.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Origin => "origin",
+            Self::NonOriginCloudflare => "nonorigin_cf",
+            Self::NonOriginOther => "nonorigin_other",
+        }
+    }
+
+    pub fn is_non_origin(self) -> bool {
+        self != Self::Origin
+    }
+}
+
+fn valid_request_id(text: &str) -> bool {
+    text.strip_prefix("req_").is_some_and(|rest| {
+        (1..=36).contains(&rest.len()) && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    })
+}
+
+/// `Us`: where an answer came from, read from its headers.
+pub fn refusal_source(headers: &HeaderMap) -> RefusalSource {
+    if header_text(headers, "request-id").is_some_and(|id| valid_request_id(id.trim())) {
+        return RefusalSource::Origin;
+    }
+    let ray = header_text(headers, "cf-ray").is_some_and(|ray| !ray.is_empty());
+    let edge = header_text(headers, "server").is_some_and(|server| server.to_lowercase().contains("cloudflare"));
+    if ray || edge {
+        RefusalSource::NonOriginCloudflare
+    } else {
+        RefusalSource::NonOriginOther
+    }
+}
+
+/// What `Buffer.from(text, "base64url")` reads: both alphabets, nothing for characters outside them, and the end at
+/// the first `=`. Bits that do not make a whole byte are dropped.
+fn node_base64url(text: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let (mut bits, mut count) = (0_u32, 0_u32);
+    for c in text.chars() {
+        let value = match c {
+            'A'..='Z' => u32::from(c) - u32::from('A'),
+            'a'..='z' => u32::from(c) - u32::from('a') + 26,
+            '0'..='9' => u32::from(c) - u32::from('0') + 52,
+            '+' | '-' => 62,
+            '/' | '_' => 63,
+            '=' => break,
+            _ => continue,
+        };
+        bits = (bits << 6) | value;
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            bytes.push(((bits >> count) & 0xff) as u8);
+            bits &= (1 << count) - 1;
+        }
+    }
+    bytes
+}
+
+/// `eA`: the `exp` claim, in seconds, of a session token (a JWT, optionally behind the `sk-ant-si-` prefix).
+pub fn token_expiry(token: &str) -> Option<f64> {
+    let token = token.strip_prefix("sk-ant-si-").unwrap_or(token);
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 || parts[1].is_empty() {
+        return None;
+    }
+    let payload = String::from_utf8_lossy(&node_base64url(parts[1])).into_owned();
+    match parse_json(&payload).ok()? {
+        Value::Object(claims) => match claims.get("exp") {
+            Some(Value::Number(exp)) => exp.as_f64(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn now_ms() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_millis() as f64)
+}
+
+/// The header value for `text` as Node writes it: one byte per character, which must fit in a byte. `fetch` trims
+/// the whitespace around a value; the HTTP client `registerWorker` uses drops line breaks instead.
+fn header_value(text: &str, for_fetch: bool) -> Option<HeaderValue> {
+    let mut bytes = Vec::with_capacity(text.len());
+    for c in text.chars() {
+        if !for_fetch && (c == '\r' || c == '\n') {
+            continue;
+        }
+        bytes.push(u8::try_from(u32::from(c)).ok()?);
+    }
+    if for_fetch {
+        let space = |byte: &u8| matches!(byte, b'\t' | b'\n' | b'\r' | b' ');
+        let start = bytes.iter().position(|byte| !space(byte)).unwrap_or(bytes.len());
+        let end = bytes.iter().rposition(|byte| !space(byte)).map_or(start, |at| at + 1);
+        bytes = bytes[start..end].to_vec();
+    }
+    let mut value = HeaderValue::from_bytes(&bytes).ok()?;
+    value.set_sensitive(true);
+    Some(value)
+}
+
+/// What axios throws for a request that never got an answer, read from the transport error.
+fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailure {
+    let host = url
+        .host_str()
+        .unwrap_or_default()
+        .trim_matches(|c| c == '[' || c == ']');
+    let port = url.port_or_known_default().unwrap_or_default();
+    let named = |message: String, code: &str| RegisterFailure::Network {
+        message,
+        code: Some(code.to_owned()),
+    };
+    if error.is_redirect() {
+        return named(
+            "Maximum number of redirects exceeded".to_owned(),
+            "ERR_FR_TOO_MANY_REDIRECTS",
+        );
+    }
+    if error.is_body() || error.is_decode() {
+        return named("stream has been aborted".to_owned(), "ERR_BAD_RESPONSE");
+    }
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        let shown = current.to_string();
+        if shown.contains("dns error") || shown.contains("failed to lookup address information") {
+            return named(format!("getaddrinfo ENOTFOUND {host}"), "ENOTFOUND");
+        }
+        if shown.contains("connection closed before message completed") {
+            return named("socket hang up".to_owned(), "ECONNRESET");
+        }
+        if let Some(io) = current.downcast_ref::<std::io::Error>() {
+            match io.kind() {
+                std::io::ErrorKind::ConnectionRefused => {
+                    return named(format!("connect ECONNREFUSED {host}:{port}"), "ECONNREFUSED");
+                }
+                std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::UnexpectedEof => return named("socket hang up".to_owned(), "ECONNRESET"),
+                _ => {}
+            }
+        }
+        source = current.source();
+    }
+    named("Network Error".to_owned(), "ERR_NETWORK")
 }
 
 enum Fault {
     TimedOut,
-    Unreachable,
+    Unreachable(Box<reqwest::Error>),
 }
 
 struct Reply {
     status: u16,
     headers: HeaderMap,
-    body: Vec<u8>,
+    /// The whole body, or nothing when reading it failed or ran out of time.
+    body: Option<Vec<u8>>,
+    /// Whether the answer came from another URL than the one asked, after one or more redirects.
+    redirected: bool,
 }
 
+/// Sends one request. The limit covers the wait for the answer and the reading of its body, but only a failure
+/// before the answer starts is a fault: a body that fails or times out later is reported as an unreadable body.
 async fn exchange<H: HttpExecute>(http: &H, request: reqwest::Request, limit: Duration) -> Result<Reply, Fault> {
-    let work = async {
-        let mut response = http.execute(request).await.map_err(|_| Fault::Unreachable)?;
-        let status = response.status().as_u16();
-        let headers = response.headers().clone();
+    let asked = request.url().clone();
+    let deadline = tokio::time::Instant::now() + limit;
+    let mut response = match tokio::time::timeout_at(deadline, http.execute(request)).await {
+        Err(_) => return Err(Fault::TimedOut),
+        Ok(Err(error)) => return Err(Fault::Unreachable(Box::new(error))),
+        Ok(Ok(response)) => response,
+    };
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    let redirected = *response.url() != asked;
+    let read = async {
         let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|_| Fault::Unreachable)? {
+        while let Some(chunk) = response.chunk().await? {
             body.extend_from_slice(&chunk);
         }
-        Ok::<Reply, Fault>(Reply { status, headers, body })
+        Ok::<Vec<u8>, reqwest::Error>(body)
     };
-    tokio::time::timeout(limit, work).await.map_err(|_| Fault::TimedOut)?
+    let body = tokio::time::timeout_at(deadline, read).await.ok().and_then(Result::ok);
+    Ok(Reply {
+        status,
+        headers,
+        body,
+        redirected,
+    })
 }
 
 /// The body as the service client reads it: JSON when it parses, otherwise the text itself.
@@ -193,14 +388,14 @@ fn worker_epoch(data: &Value) -> Result<i64, RegisterFailure> {
 
 /// The reason a `409` gives for refusing the worker: the header first, then `error.reason`, `reason` and `error.type`
 /// of the body.
-fn conflict_reason(headers: &HeaderMap, body: &[u8]) -> Option<MismatchReason> {
+fn conflict_reason(headers: &HeaderMap, body: Option<&[u8]>) -> Option<MismatchReason> {
     if let Some(reason) = header_text(headers, "x-ccr-conflict-reason")
         .as_deref()
         .and_then(MismatchReason::from_conflict)
     {
         return Some(reason);
     }
-    let data = decode(body);
+    let data = parse_json(&decode_text(body?)).ok()?;
     let error = data.get("error");
     let named = error
         .and_then(|error| error.get("reason"))
@@ -221,15 +416,39 @@ fn valid_ticket(value: &str) -> bool {
     (1..=4096).contains(&value.len()) && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// The `x-ccr-ticket-*` headers the service handed out, which the worker echoes on its next requests.
+/// The `x-ccr-ticket-*` headers the service handed out, which the worker echoes on its next requests. They belong
+/// to the `Authorization` value they were handed out for: another value drops them.
 #[derive(Default)]
 struct Tickets {
+    authorization: Option<Vec<u8>>,
     held: Vec<(&'static str, String)>,
 }
 
 impl Tickets {
-    fn note(&mut self, status: u16, headers: &HeaderMap) {
-        if (400..500).contains(&status) && status != 429 {
+    /// The headers to echo for a request that carries `authorization`.
+    fn headers_for(&mut self, authorization: &[u8]) -> Vec<(&'static str, String)> {
+        if self.authorization.as_deref() != Some(authorization) {
+            self.held.clear();
+            self.authorization = Some(authorization.to_owned());
+        }
+        self.held.clone()
+    }
+
+    fn session_ticket_for(&self, authorization: &[u8]) -> Option<&str> {
+        if self.authorization.as_deref() != Some(authorization) {
+            return None;
+        }
+        self.held
+            .iter()
+            .find(|(name, _)| *name == SESSION_TICKET_HEADER)
+            .map(|(_, value)| value.as_str())
+    }
+
+    fn note(&mut self, authorization: &[u8], redirected: bool, status: u16, headers: &HeaderMap) {
+        if self.authorization.as_deref() != Some(authorization) {
+            return;
+        }
+        if redirected || ((400..500).contains(&status) && status != 429) {
             self.held.clear();
             return;
         }
@@ -263,6 +482,8 @@ pub struct WorkerClient<H, P = TokioPacing> {
     consecutive_auth_failures: u32,
     consecutive_not_found: u32,
     tickets: Tickets,
+    session_access_token: Option<SensitiveString>,
+    non_origin_403: NonOrigin403,
 }
 
 impl<H, P> WorkerClient<H, P> {
@@ -282,7 +503,27 @@ impl<H, P> WorkerClient<H, P> {
             consecutive_auth_failures: 0,
             consecutive_not_found: 0,
             tickets: Tickets::default(),
+            session_access_token: config.session_access_token,
+            non_origin_403: config.non_origin_403,
         })
+    }
+
+    /// Replaces the token the requests carry. The tickets held for the old `Authorization` value are dropped: they
+    /// belong to it.
+    pub fn set_token(&mut self, token: SensitiveString) {
+        self.token = token;
+    }
+
+    /// Replaces the `CLAUDE_CODE_SESSION_ACCESS_TOKEN` value a `401` or `403` is checked against.
+    pub fn set_session_access_token(&mut self, token: Option<SensitiveString>) {
+        self.session_access_token = token;
+    }
+
+    /// `sessionTicketFor`: the session ticket held for the token the requests carry now, if any.
+    pub fn session_ticket(&self) -> Option<&str> {
+        let authorization = format!("Bearer {}", self.token.expose());
+        let authorization = header_value(&authorization, true)?;
+        self.tickets.session_ticket_for(authorization.as_bytes())
     }
 
     pub fn session_url(&self) -> &str {
@@ -303,19 +544,33 @@ impl<H, P> WorkerClient<H, P> {
         self.heartbeat_interval_ms
     }
 
-    fn authorization(&self) -> Option<HeaderValue> {
-        let mut value = HeaderValue::from_str(&format!("Bearer {}", self.token.expose())).ok()?;
-        value.set_sensitive(true);
-        Some(value)
+    fn authorization(&self, for_fetch: bool) -> Option<HeaderValue> {
+        header_value(&format!("Bearer {}", self.token.expose()), for_fetch)
     }
 }
 
 impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// `registerWorker`: asks the service for the epoch this worker will run under.
     pub async fn register_worker(&self) -> Result<i64, RegisterFailure> {
+        let named = |message: String, code: &str| RegisterFailure::Network {
+            message,
+            code: Some(code.to_owned()),
+        };
         let url = reqwest::Url::parse(&format!("{}/worker/register", self.session_url))
-            .map_err(|_| RegisterFailure::Unreachable)?;
-        let authorization = self.authorization().ok_or(RegisterFailure::Unreachable)?;
+            .map_err(|_| named("Invalid URL".to_owned(), "ERR_INVALID_URL"))?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(named(
+                format!("Unsupported protocol {}:", url.scheme()),
+                "ERR_BAD_REQUEST",
+            ));
+        }
+        let authorization = self.authorization(false).ok_or_else(|| {
+            named(
+                "Invalid character in header content [\"Authorization\"]".to_owned(),
+                "ERR_INVALID_CHAR",
+            )
+        })?;
+        let target = url.clone();
         let mut request = reqwest::Request::new(Method::POST, url);
         let headers = request.headers_mut();
         headers.insert("accept", HeaderValue::from_static("application/json, text/plain, */*"));
@@ -328,12 +583,15 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             .await
             .map_err(|fault| match fault {
                 Fault::TimedOut => RegisterFailure::TimedOut,
-                Fault::Unreachable => RegisterFailure::Unreachable,
+                Fault::Unreachable(error) => network_failure(&target, &error),
             })?;
+        let Some(body) = &reply.body else {
+            return Err(named("stream has been aborted".to_owned(), "ERR_BAD_RESPONSE"));
+        };
         if !(200..300).contains(&reply.status) {
             return Err(RegisterFailure::Status(reply.status));
         }
-        worker_epoch(&decode(&reply.body))
+        worker_epoch(&decode(body))
     }
 
     /// The first `PUT /worker`: registers the worker as idle and retries what is worth retrying.
@@ -433,14 +691,17 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 reason: reason.to_owned(),
                 retry_after_ms: None,
                 fetch_failed: true,
+                non_origin_refusal: false,
             }))
         };
         let (Some(authorization), Ok(url)) = (
-            self.authorization(),
+            self.authorization(true),
             reqwest::Url::parse(&format!("{}{path}", self.session_url)),
         ) else {
             return unanswered("fetch_failed:TypeError");
         };
+        let key = authorization.as_bytes().to_vec();
+        let held = self.tickets.headers_for(&key);
         let mut request = reqwest::Request::new(method, url);
         let headers = request.headers_mut();
         headers.insert("authorization", authorization);
@@ -448,7 +709,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
         headers.insert("anthropic-client-platform", HeaderValue::from_static(self.platform));
         headers.insert("user-agent", HeaderValue::from_static(USER_AGENT));
-        for (name, value) in &self.tickets.held {
+        for (name, value) in &held {
             if let Ok(value) = HeaderValue::from_str(value) {
                 headers.insert(*name, value);
             }
@@ -458,18 +719,25 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         let reply = match exchange(&self.http, request, timeout).await {
             Ok(reply) => reply,
             Err(Fault::TimedOut) => return unanswered("fetch_failed:TimeoutError"),
-            Err(Fault::Unreachable) => return unanswered("fetch_failed:TypeError"),
+            Err(Fault::Unreachable(_)) => return unanswered("fetch_failed:TypeError"),
         };
         let status = reply.status;
-        self.tickets.note(status, &reply.headers);
+        self.tickets.note(&key, reply.redirected, status, &reply.headers);
         if (200..300).contains(&status) {
             self.consecutive_auth_failures = 0;
             self.consecutive_not_found = 0;
-            let data = parse_body.then(|| parse_json(&decode_text(&reply.body)).ok()).flatten();
+            let data = parse_body
+                .then(|| {
+                    reply
+                        .body
+                        .as_deref()
+                        .and_then(|bytes| parse_json(&decode_text(bytes)).ok())
+                })
+                .flatten();
             return Ok(RequestOutcome::Accepted(data));
         }
         if status == 409 {
-            return Err(conflict_reason(&reply.headers, &reply.body).unwrap_or(MismatchReason::EpochConflict));
+            return Err(conflict_reason(&reply.headers, reply.body.as_deref()).unwrap_or(MismatchReason::EpochConflict));
         }
         if status == 404 {
             self.consecutive_not_found += 1;
@@ -477,10 +745,23 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 return Err(MismatchReason::SessionNotFound);
             }
         }
+        let non_origin_refusal = status == 403
+            && self.non_origin_403 == NonOrigin403::Transient
+            && refusal_source(&reply.headers).is_non_origin();
         if matches!(status, 401 | 403) {
-            self.consecutive_auth_failures += 1;
-            if self.consecutive_auth_failures >= AUTH_FAILURES_BEFORE_EXIT {
-                return Err(MismatchReason::AuthExhausted);
+            let expiry = self
+                .session_access_token
+                .as_ref()
+                .filter(|token| !token.expose().is_empty())
+                .and_then(|token| token_expiry(token.expose()));
+            if expiry.is_some_and(|seconds| seconds * 1000.0 < now_ms()) {
+                return Err(MismatchReason::TokenExpired);
+            }
+            if !non_origin_refusal {
+                self.consecutive_auth_failures += 1;
+                if self.consecutive_auth_failures >= AUTH_FAILURES_BEFORE_EXIT {
+                    return Err(MismatchReason::AuthExhausted);
+                }
             }
         }
         let retry_after_ms = (status == 429)
@@ -492,6 +773,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             reason: format!("http_{status}"),
             retry_after_ms,
             fetch_failed: false,
+            non_origin_refusal,
         }))
     }
 }

@@ -31,6 +31,16 @@ process.env.CLAUDE_CODE_DEBUG_LOGS_DIR = debugLog;
 process.argv.push('--debug');
 process.chdir(work);
 const source = fs.readFileSync(bridgePath, 'utf8');
+const realFetch = globalThis.fetch;
+const fetchErrors = [];
+globalThis.fetch = async (...args) => {
+  try {
+    return await realFetch(...args);
+  } catch (error) {
+    fetchErrors.push({ url: String(args[0]), name: error.name, code: typeof error.code === 'string' ? error.code : null });
+    throw error;
+  }
+};
 const bridge = await import(pathToFileURL(bridgePath).href);
 
 // ---- pure tables, read from the bundle source ----
@@ -64,7 +74,21 @@ const retryAfter = (header) => {
   return !isNaN(seconds) && seconds >= 0 ? seconds * 1000 : null;
 };
 
+const refusal = evaluate(between('var wz=/^req_', 'function Dh('), ['Us', 'sl']);
+const refusalSource = (headers) => refusal.Us((name) => headers[name] ?? null);
+const tokenExpiry = evaluate(`const Zt=(e)=>JSON.parse(e);${between('function V1e(', 'ci();var PG=')}`, ['eA']).eA;
+const jwt = (claims) => `h.${Buffer.from(typeof claims === 'string' ? claims : JSON.stringify(claims)).toString('base64url')}.s`;
+
 const pure = {
+  refusal_sources: [
+    {}, { 'request-id': 'req_abc' }, { 'request-id': ' req_abc ' }, { 'request-id': 'req_' }, { 'request-id': 'req_' + 'a'.repeat(36) },
+    { 'request-id': 'req_' + 'a'.repeat(37) }, { 'request-id': 'abc' }, { 'request-id': 'req_a b' }, { 'cf-ray': 'abc-LHR' }, { 'cf-ray': '' },
+    { server: 'cloudflare' }, { server: 'Cloudflare-nginx' }, { server: 'nginx' }, { 'request-id': 'bad', 'cf-ray': 'x' }, { 'request-id': 'req_ok', server: 'cloudflare' },
+  ].map((headers) => { const source = refusalSource(headers); return { headers, source, non_origin: refusal.sl(source) }; }),
+  token_expiry: [
+    jwt({ exp: 1 }), `sk-ant-si-${jwt({ exp: 2.5 })}`, jwt({ exp: 99999999999 }), jwt({}), jwt({ exp: '5' }), jwt(null), jwt([1]), jwt('not json'), jwt({ exp: -4 }), jwt({ exp: 1e400 }),
+    'a.b', 'a..c', 'a.b.c.d', 'x', '', 'h.e30.s', 'h.e30=.s', 'h.eyJleHAiOjd9.s', 'h.ey Jle HAiOjd9.s', 'h.eyJleHAiOjd9==junk.s', 'h.eyJleHAiOjd9!.s', 'h.eyJleHAiOjd9ZZ.s', 'h.eyJleHAiOjd+/.s', `h.${Buffer.from('{"exp":7}').toString('base64')}.s`,
+  ].map((token) => ({ token, exp: tokenExpiry(token) })),
   retry_after: ['1', '+3', '-1', 'abc', '1.9', '0', '-0', '99999999999999999999999', '1e3', '0x10', '7x', ' 5'].map((header) => ({ header, ms: retryAfter(header) })),
   session_urls: [['http://h', 'cse_abc'], ['http://h/', 'cse_abc'], ['http://h///', 'x-1'], ['https://h:8080/p/', 'A_9'], ['', 'x'], ['http://h', 'bad/id'], ['http://h', ''], ['http://h', 'a b'], ['http://h', 'caf\u00e9']]
     .map(([base, id]) => ({ base, id, ...urlResult(base, id) })),
@@ -116,7 +140,12 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [] };
+const expired = jwt({ exp: 1 });
+const future = jwt({ exp: 99999999999 });
+const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
+const edgeRefusal = (status) => raw(status, '', [['cf-ray', 'abc-LHR']]);
+const landing = '{base}/v1/code/sessions/cse_abc/worker/landing';
 const add = (section, name, spec) => cases[section].push({ name, ...spec });
 
 for (const [name, response] of [
@@ -194,6 +223,23 @@ add('heartbeat', 'conflict_text_body', { epoch: 2, interval: 30, beat: [raw(409,
 add('heartbeat', 'conflict_empty_body', { epoch: 2, interval: 30, beat: [raw(409, '')], waitClose: true });
 add('heartbeat', 'conflict_error_not_object', { epoch: 2, interval: 30, beat: [json(409, { error: 'epoch_stale' })], waitClose: true });
 
+add('state', 'redirected_answer_drops_the_tickets', { epoch: 6, puts: [json(200, {}, [['x-ccr-ticket-rev', 'rev1']]), raw(307, '', [['location', landing]]), json(200, {})], landing: [json(200, {}, [['x-ccr-ticket-rev', 'rev9']])], steps: [{ op: 'state', state: 'running', sends: true }, { op: 'metadata', value: { a: 1 }, sends: true }, { op: 'metadata', value: { b: 1 }, sends: true }] });
+
+add('auth', 'expired_token_on_401', { epoch: 2, interval: 30, sessionToken: expired, beat: [raw(401, '')], waitClose: true });
+add('auth', 'expired_token_on_403', { epoch: 2, interval: 30, sessionToken: expired, beat: [originRefusal(403)], waitClose: true });
+add('auth', 'expired_token_with_prefix', { epoch: 2, interval: 30, sessionToken: `sk-ant-si-${expired}`, beat: [raw(401, '')], waitClose: true });
+add('auth', 'expired_token_on_non_origin_403', { epoch: 2, interval: 30, sessionToken: expired, beat: [raw(403, '')], waitClose: true });
+add('auth', 'expired_token_on_500_is_ignored', { epoch: 2, interval: 30, sessionToken: expired, beat: [raw(500, '')], beats: 4 });
+add('auth', 'expired_token_on_success_is_ignored', { epoch: 2, interval: 30, sessionToken: expired, beats: 3 });
+add('auth', 'future_token_counts_failures', { epoch: 2, interval: 30, sessionToken: future, beat: [raw(401, '')], waitClose: true });
+add('auth', 'token_without_exp_counts_failures', { epoch: 2, interval: 30, sessionToken: jwt({}), beat: [raw(401, '')], waitClose: true });
+add('auth', 'opaque_token_counts_failures', { epoch: 2, interval: 30, sessionToken: 'opaque', beat: [raw(401, '')], waitClose: true });
+add('auth', 'origin_403_counts_failures', { epoch: 2, interval: 30, beat: [originRefusal(403)], waitClose: true });
+add('auth', 'non_origin_403_never_exhausts', { epoch: 2, interval: 30, beat: [raw(403, '')], beats: 14 });
+add('auth', 'edge_403_never_exhausts', { epoch: 2, interval: 30, beat: [edgeRefusal(403)], beats: 14 });
+add('auth', 'non_origin_401_still_counts', { epoch: 2, interval: 30, beat: [edgeRefusal(401)], waitClose: true });
+add('auth', 'non_origin_403_does_not_reset_the_count', { epoch: 2, interval: 30, beat: [...Array(9).fill(originRefusal(403)), ...Array(5).fill(raw(403, '')), originRefusal(403)], waitClose: true });
+
 // ---- runner ----
 const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq']);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -204,7 +250,7 @@ const until = async (predicate, ms) => {
 
 async function run(spec) {
   const requests = [];
-  const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])] };
+  const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], landing: [...(spec.landing ?? [])] };
   const pick = (key) => {
     const queue = queues[key];
     if (queue.length === 0) return json(200, {});
@@ -219,11 +265,12 @@ async function run(spec) {
       const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
       if (!(req.method === 'GET' && route === '/worker')) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString() });
       let response = json(200, {});
-      if (route === '/worker/register') response = pick('register');
+      if (route === '/worker/landing') response = pick('landing');
+      else if (route === '/worker/register') response = pick('register');
       else if (req.method === 'PUT') response = pick('put');
       else if (route === '/worker/heartbeat') response = pick('beat');
       res.statusCode = response.status;
-      for (const [name, value] of response.headers) res.setHeader(name, value);
+      for (const [name, value] of response.headers) res.setHeader(name, value.replace('{base}', `http://127.0.0.1:${server.address().port}`));
       res.end(response.body);
     });
   });
@@ -234,8 +281,9 @@ async function run(spec) {
   const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: true, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code) };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
-  const result = { name: spec.name, epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], steps: spec.steps ?? [], beats: 0 };
+  const result = { name: spec.name, epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
+  if (spec.sessionToken !== undefined) process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = spec.sessionToken;
   try {
     handle = await bridge.attachBridgeSession(options);
     result.rejection = null;
@@ -277,15 +325,89 @@ async function run(spec) {
   result.closes = [...closes];
   result.reason = reasons[0] ?? null;
   try { handle?.close(); } catch {}
+  delete process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
   return result;
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [] };
-for (const section of ['register', 'init', 'state', 'heartbeat']) {
+// ---- transport failures ----
+const listen = (handler) => new Promise((resolve) => {
+  const server = http.createServer(handler);
+  server.listen(0, '127.0.0.1', () => resolve(server));
+});
+const stop = (server) => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); };
+const portOf = (server) => server.address().port;
+
+// What registerWorker throws when the request never gets an answer.
+async function networkCase(mode) {
+  let server;
+  let port = null;
+  let base = '';
+  if (mode === 'refused') {
+    server = await listen(() => {});
+    port = portOf(server);
+    await stop(server);
+    server = undefined;
+    base = `http://127.0.0.1:${port}`;
+  } else if (mode === 'ftp') {
+    base = 'ftp://h';
+  } else if (mode === 'destroy') {
+    server = await listen((req) => req.socket.destroy());
+  } else if (mode === 'loop') {
+    server = await listen((req, res) => { res.statusCode = 302; res.setHeader('location', `${req.url}x`); res.end(); });
+  } else if (mode === 'truncated') {
+    server = await listen((req, res) => { res.writeHead(200, { 'content-length': '100', 'content-type': 'application/json' }); res.write('{"wor'); setTimeout(() => req.socket.destroy(), 20); });
+  }
+  if (server) base = `http://127.0.0.1:${portOf(server)}`;
+  let message = null;
+  let code = null;
+  try {
+    await bridge.attachBridgeSession({ sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: true });
+  } catch (error) {
+    message = String(error.message);
+    code = error.code ?? null;
+  }
+  if (server) await stop(server);
+  return { name: mode || 'invalid', mode: mode || 'invalid', message: port === null ? message : message?.replace(String(port), '<port>'), code };
+}
+
+// What the fetch under a worker request throws, as the request path names it (`lm`: the code, else the name).
+async function fetchFailureCase(mode) {
+  const server = await listen((req, res) => {
+    const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
+    req.resume();
+    req.on('end', () => {
+      if (route === '/worker/heartbeat' && mode === 'destroy') return req.socket.destroy();
+      if (route === '/worker/heartbeat' && mode === 'hang') return;
+      if (route === '/worker/heartbeat' && mode === 'truncated') {
+        res.writeHead(200, { 'content-length': '100', 'content-type': 'application/json' });
+        res.write('{"heartbeat_inter');
+        return setTimeout(() => req.socket.destroy(), 20);
+      }
+      res.setHeader('content-type', 'application/json');
+      res.end('{}');
+    });
+  });
+  fetchErrors.length = 0;
+  const closes = [];
+  const handle = await bridge.attachBridgeSession({ sessionId: 'cse_abc', apiBaseUrl: `http://127.0.0.1:${portOf(server)}`, ingressToken: 'tok', outboundOnly: true, epoch: 2, heartbeatIntervalMs: 30, onClose: (code) => closes.push(code) });
+  const failed = () => fetchErrors.find((entry) => entry.url.endsWith('/worker/heartbeat'));
+  await until(() => failed() !== undefined, mode === 'hang' ? 9000 : 1500);
+  await sleep(300);
+  const first = failed();
+  const result = { name: mode, mode, reason: first ? `fetch_failed:${first.code ?? first.name}` : null, connected: handle.isConnected(), closes: [...closes] };
+  try { handle.close(); } catch {}
+  await stop(server);
+  return result;
+}
+
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], network: [], fetch_failures: [] };
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
+for (const mode of ['refused', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
+for (const mode of ['destroy', 'truncated', 'hang']) goldens.fetch_failures.push(await fetchFailureCase(mode));
 fs.rmSync(work, { recursive: true, force: true });
 
 const compact = (key, value) => (Array.isArray(value) && key !== 'pure' ? `[\n${value.map((c) => JSON.stringify(c)).join(',\n')}\n]` : JSON.stringify(value));
