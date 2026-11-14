@@ -9,6 +9,8 @@ on:
     paths:
       - '.github/workflows/claude-sdk-freshness.yml'
       - 'rsworkspace/crates/platform/trogon-claude-agent-sdk/**'
+      # Gate Z walks the lockfile for OpenSSL crates.
+      - 'rsworkspace/Cargo.lock'
       - '.config/mise/tasks/github/workflows/claude-sdk-freshness/**'
       - 'mise.toml'
 
