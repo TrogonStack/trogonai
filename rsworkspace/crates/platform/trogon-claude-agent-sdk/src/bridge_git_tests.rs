@@ -85,7 +85,10 @@ async fn the_default_probe_guesses_main_outside_a_repository() {
     );
     let guessed = DefaultGitProbe::default().guess_default_branch().await;
     assert!(guessed.is_some_and(|branch| !branch.is_empty()));
-    let nowhere = DefaultGitProbe { directory: None };
+    let nowhere = DefaultGitProbe {
+        directory: None,
+        context: GitProbeContext::default(),
+    };
     assert_eq!(nowhere.guess_default_branch().await, Some("main".to_owned()));
 }
 

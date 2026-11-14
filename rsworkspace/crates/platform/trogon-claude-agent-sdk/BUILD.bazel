@@ -27,6 +27,7 @@ workspace_crate(
         "src/upstream/settings_restrict_probes.json",
         "src/upstream/settings_schema.json",
         "tests/fixtures/bridge_create_session/details.json",
+        "tests/fixtures/bridge_create_session/gated.json",
         "tests/fixtures/bridge_create_session/guesses.json",
         "tests/fixtures/bridge_create_session/unicode.json",
         "tests/fixtures/bridge_create_session/urls.json",

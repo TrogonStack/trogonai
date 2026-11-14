@@ -28,8 +28,9 @@ fn strings(value: &Value) -> Vec<(String, String)> {
 }
 
 #[cfg(unix)]
-#[test]
-fn guesses_the_default_branch_like_the_upstream_bridge() -> io::Result<()> {
+#[tokio::test]
+async fn guesses_the_default_branch_like_the_upstream_bridge() -> io::Result<()> {
+    let context = GitProbeContext::default();
     let cases: Vec<Value> = serde_json::from_str(GUESS_GOLDENS).unwrap_or_default();
     assert!(cases.len() > 60);
     for case in &cases {
@@ -60,7 +61,11 @@ fn guesses_the_default_branch_like_the_upstream_bridge() -> io::Result<()> {
         }
         let cwd = case["cwd"].as_str().unwrap_or("work");
         let expected = case["guess"].as_str().unwrap_or_default();
-        assert_eq!(guess_default_branch(&root.join(cwd)), expected, "{name}");
+        assert_eq!(
+            guess_default_branch(&context, &root.join(cwd)).await,
+            expected,
+            "{name}"
+        );
     }
     Ok(())
 }
@@ -122,8 +127,8 @@ fn reads_only_small_regular_files() -> io::Result<()> {
     Ok(())
 }
 
-#[test]
-fn recognizes_packed_references() -> io::Result<()> {
+#[tokio::test]
+async fn recognizes_packed_references() -> io::Result<()> {
     let temp = tempfile::tempdir()?;
     let sha = "a".repeat(40);
     write(
@@ -135,12 +140,13 @@ fn recognizes_packed_references() -> io::Result<()> {
     assert!(packed_ref(&packed, "refs/remotes/origin/main"));
     assert!(!packed_ref(&packed, "refs/remotes/origin/mai"));
     assert!(!packed_ref(&temp.path().join("missing"), "refs/remotes/origin/main"));
-    assert!(!resolves(temp.path(), "refs/remotes/origin/main", 0));
+    assert!(!resolves(&GitProbeContext::default(), temp.path(), "refs/remotes/origin/main", 0).await);
     Ok(())
 }
 
-#[test]
-fn stops_following_references_past_the_depth_limit() -> io::Result<()> {
+#[tokio::test]
+async fn stops_following_references_past_the_depth_limit() -> io::Result<()> {
+    let context = GitProbeContext::default();
     let temp = tempfile::tempdir()?;
     let root = temp.path();
     let sha = "a".repeat(40);
@@ -152,8 +158,8 @@ fn stops_following_references_past_the_depth_limit() -> io::Result<()> {
             &format!("ref: refs/remotes/origin/r{}\n", step - 1),
         )?;
     }
-    assert!(resolves(root, "refs/remotes/origin/r4", REF_DEPTH));
-    assert!(!resolves(root, "refs/remotes/origin/r6", REF_DEPTH));
+    assert!(resolves(&context, root, "refs/remotes/origin/r4", REF_DEPTH).await);
+    assert!(!resolves(&context, root, "refs/remotes/origin/r6", REF_DEPTH).await);
     Ok(())
 }
 

@@ -13,6 +13,7 @@ mod argv;
 mod auth_token;
 mod bridge_client;
 mod bridge_git;
+mod bridge_gitcmd;
 mod bridge_js;
 mod bridge_packed;
 mod bridge_refs;
@@ -184,6 +185,7 @@ pub use auth_token::{
 };
 pub use bridge_client::BridgeClient;
 pub use bridge_git::{BranchDropLogDedup, CodeSessionGitContext, DefaultGitProbe, GitContextProbe, GitRepository};
+pub use bridge_gitcmd::GitProbeContext;
 pub use bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
     DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,

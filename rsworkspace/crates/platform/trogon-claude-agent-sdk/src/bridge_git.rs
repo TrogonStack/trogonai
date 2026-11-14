@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::{Value, json};
 
+use crate::bridge_gitcmd::GitProbeContext;
 use crate::bridge_js::js_trim;
 use crate::bridge_refs::guess_default_branch;
 use crate::bridge_url::rejected;
@@ -84,6 +85,7 @@ pub trait GitContextProbe {
 #[derive(Clone, Debug)]
 pub struct DefaultGitProbe {
     directory: Option<PathBuf>,
+    context: GitProbeContext,
 }
 
 impl DefaultGitProbe {
@@ -91,6 +93,7 @@ impl DefaultGitProbe {
     pub fn new() -> Self {
         Self {
             directory: std::env::current_dir().ok(),
+            context: GitProbeContext::from_process(),
         }
     }
 
@@ -98,7 +101,15 @@ impl DefaultGitProbe {
     pub fn with_directory(directory: impl Into<PathBuf>) -> Self {
         Self {
             directory: Some(directory.into()),
+            context: GitProbeContext::from_process(),
         }
+    }
+
+    /// The same probe with explicit answers for the process-wide state the upstream Git runner consults.
+    #[must_use]
+    pub fn with_context(mut self, context: GitProbeContext) -> Self {
+        self.context = context;
+        self
     }
 }
 
@@ -114,11 +125,10 @@ impl GitContextProbe for DefaultGitProbe {
     }
 
     async fn guess_default_branch(&self) -> Option<String> {
-        Some(
-            self.directory
-                .as_deref()
-                .map_or_else(|| "main".to_owned(), guess_default_branch),
-        )
+        match self.directory.as_deref() {
+            Some(directory) => Some(guess_default_branch(&self.context, directory).await),
+            None => Some("main".to_owned()),
+        }
     }
 }
 

@@ -8,9 +8,12 @@
 //! saves work and never changes an answer, so this port reads the files on every call.
 
 use std::fs;
+use std::future::Future;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::pin::Pin;
 
+use crate::bridge_gitcmd::GitProbeContext;
 use crate::bridge_js::js_trim;
 use crate::bridge_unicode::js_lowercase;
 
@@ -23,22 +26,22 @@ const ORIGIN: &str = "refs/remotes/origin/";
 const REFTABLE_MARKER: &str = "refs/heads/.invalid";
 
 /// The default branch of the repository around `directory`; `main` when nothing says otherwise, never empty.
-pub(crate) fn guess_default_branch(directory: &Path) -> String {
+pub(crate) async fn guess_default_branch(context: &GitProbeContext, directory: &Path) -> String {
     let Some(git_dir) = find_git_dir(directory) else {
         return FALLBACK.to_owned();
     };
     let repository = common_dir(&git_dir).unwrap_or(git_dir);
-    if is_reftable(&repository) {
-        return FALLBACK.to_owned();
-    }
-    let advertised = origin_head(&repository);
-    if let Some(name) = advertised.filter(|name| resolves(&repository, &format!("{ORIGIN}{name}"), REF_DEPTH)) {
+    if let Some(name) = origin_head(context, &repository).await
+        && resolves(context, &repository, &format!("{ORIGIN}{name}"), REF_DEPTH).await
+    {
         return name;
     }
-    COMMON_FALLBACKS
-        .iter()
-        .find(|name| resolves(&repository, &format!("{ORIGIN}{name}"), REF_DEPTH))
-        .map_or_else(|| FALLBACK.to_owned(), |name| (*name).to_owned())
+    for name in COMMON_FALLBACKS {
+        if resolves(context, &repository, &format!("{ORIGIN}{name}"), REF_DEPTH).await {
+            return name.to_owned();
+        }
+    }
+    FALLBACK.to_owned()
 }
 
 /// `path.resolve(base, relative)`: an absolute `relative` wins, `.` and `..` are folded out.
@@ -179,7 +182,7 @@ fn read_limited(path: &Path) -> Option<String> {
 }
 
 /// The `.git` directory of the nearest repository around `directory`, following a `gitdir:` file.
-fn find_git_dir(directory: &Path) -> Option<PathBuf> {
+pub(crate) fn find_git_dir(directory: &Path) -> Option<PathBuf> {
     let start = resolve(directory, ".");
     let root = start
         .ancestors()
@@ -196,7 +199,7 @@ fn find_git_dir(directory: &Path) -> Option<PathBuf> {
 }
 
 /// The directory a linked worktree shares its references with, when it names one.
-fn common_dir(git_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn common_dir(git_dir: &Path) -> Option<PathBuf> {
     let file = git_dir.join("commondir");
     if !walk_safe(&file, LINK_DEPTH) {
         return None;
@@ -210,7 +213,7 @@ fn common_dir(git_dir: &Path) -> Option<PathBuf> {
     reach(git_dir, js_trim(&content))
 }
 
-/// Whether the repository stores its references in the table format, which this reader does not open.
+/// Whether the repository stores its references in the table format, which is read by asking Git.
 fn is_reftable(repository: &Path) -> bool {
     let head = repository.join("HEAD");
     walk_safe(&head, LINK_DEPTH)
@@ -234,7 +237,19 @@ fn is_object_id(text: &str) -> bool {
 }
 
 /// The branch `refs/remotes/origin/HEAD` points at.
-fn origin_head(repository: &Path) -> Option<String> {
+async fn origin_head(context: &GitProbeContext, repository: &Path) -> Option<String> {
+    if is_reftable(repository) {
+        let name = format!("{ORIGIN}HEAD");
+        let output = context
+            .run(
+                repository,
+                &["symbolic-ref", "-q", "--no-recurse", "--end-of-options", &name],
+            )
+            .await;
+        let target = output.filter(|output| output.success).map(|output| output.stdout)?;
+        let name = js_trim(&target).strip_prefix(ORIGIN)?;
+        return valid_ref_name(name).then(|| name.to_owned());
+    }
     let path = repository.join(format!("{ORIGIN}HEAD"));
     if !walk_safe(&path, LINK_DEPTH) {
         return None;
@@ -245,20 +260,38 @@ fn origin_head(repository: &Path) -> Option<String> {
     valid_ref_name(name).then(|| name.to_owned())
 }
 
-/// Whether `name` resolves to an object, in the loose files, the packed references or the common directory.
-fn resolves(repository: &Path, name: &str, depth: u32) -> bool {
-    if depth == 0 {
-        return false;
-    }
-    if read_ref(repository, name, depth) {
-        return true;
-    }
-    common_dir(repository)
-        .filter(|common| common != repository)
-        .is_some_and(|common| read_ref(&common, name, depth))
+type Resolution<'a> = Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+
+/// Whether `name` resolves to an object, in the table format, the loose files, the packed references or the common
+/// directory.
+fn resolves<'a>(context: &'a GitProbeContext, repository: &'a Path, name: &'a str, depth: u32) -> Resolution<'a> {
+    Box::pin(async move {
+        if depth == 0 {
+            return false;
+        }
+        if is_reftable(repository) {
+            if name != "HEAD" && !(name.starts_with("refs/") && valid_ref_name(name)) {
+                return false;
+            }
+            let output = context
+                .run(
+                    repository,
+                    &["show-ref", "--verify", "--hash", "--end-of-options", name],
+                )
+                .await;
+            return output.is_some_and(|output| output.success && is_object_id(js_trim(&output.stdout)));
+        }
+        if read_ref(context, repository, name, depth).await {
+            return true;
+        }
+        match common_dir(repository).filter(|common| common != repository) {
+            Some(common) => read_ref(context, &common, name, depth).await,
+            None => false,
+        }
+    })
 }
 
-fn read_ref(directory: &Path, name: &str, depth: u32) -> bool {
+async fn read_ref(context: &GitProbeContext, directory: &Path, name: &str, depth: u32) -> bool {
     let path = directory.join(name);
     if !walk_safe(&path, LINK_DEPTH) {
         return false;
@@ -266,7 +299,7 @@ fn read_ref(directory: &Path, name: &str, depth: u32) -> bool {
     if let Some(text) = read_text(&path) {
         let text = js_trim(&text);
         return match text.strip_prefix("ref:").map(js_trim) {
-            Some(target) => valid_ref_name(target) && resolves(directory, target, depth - 1),
+            Some(target) => valid_ref_name(target) && resolves(context, directory, target, depth - 1).await,
             None => is_object_id(text),
         };
     }
