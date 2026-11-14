@@ -140,7 +140,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -249,6 +249,15 @@ add('queue', 'refused_metadata_is_dropped', { epoch: 6, puts: [json(200, {}), ra
 add('queue', 'refused_mixed_patch_requeues_the_status', { epoch: 6, puts: [json(200, {}), json(200, {}), raw(422, ''), json(200, {})], steps: [burst(3, { state: 'running' }, { state: 'idle' }, { metadata: { a: 1 } })] });
 add('queue', 'refused_mixed_patch_requeues_owed_metadata', { epoch: 6, puts: [json(200, {}), json(200, {}), raw(422, ''), json(200, {})], steps: [burst(4, { state: 'running' }, { state: 'idle' }, { metadata: { plan_doc: 'x', model: 'm' } })] });
 add('queue', 'a_later_patch_joins_the_retry', { epoch: 6, puts: [json(200, {}), raw(500, ''), json(200, {})], steps: [burst(2, { state: 'running' }, { metadata: { a: 1 }, afterMs: 100 })] });
+const stored = (metadata) => json(200, { worker: { external_metadata: metadata } });
+add('record', 'repeat_of_the_record_is_not_sent', { epoch: 6, record: stored({ last_served_model: 'm1' }), steps: [{ op: 'metadata', value: { last_served_model: 'm1' }, sends: false }, { op: 'metadata', value: { last_served_model: 'm1' }, sends: true }] });
+add('record', 'only_the_repeated_keys_are_left_out', { epoch: 6, record: stored({ permission_mode: 'plan' }), steps: [{ op: 'metadata', value: { permission_mode: 'plan', other: 1 }, sends: true }] });
+add('record', 'a_changed_value_is_sent', { epoch: 6, record: stored({ permission_mode: 'plan' }), steps: [{ op: 'metadata', value: { permission_mode: 'auto' }, sends: true }] });
+add('record', 'a_key_outside_the_set_is_always_sent', { epoch: 6, record: stored({ other: 1 }), steps: [{ op: 'metadata', value: { other: 1 }, sends: true }] });
+add('record', 'null_equals_a_missing_key', { epoch: 6, record: stored({}), steps: [{ op: 'metadata', value: { rate_limit_info: null }, sends: false }] });
+add('record', 'objects_compare_deeply', { epoch: 6, record: stored({ context_usage: { a: [1, { b: 2 }], c: 1 } }), steps: [{ op: 'metadata', value: { context_usage: { c: 1, a: [1, { b: 2 }] } }, sends: false }, { op: 'metadata', value: { is_ultraplan_mode: true }, sends: true }] });
+add('record', 'an_unreadable_record_suppresses_nothing', { epoch: 6, record: raw(400, ''), steps: [{ op: 'metadata', value: { last_served_model: 'm1' }, sends: true }] });
+add('record', 'a_record_that_is_not_an_object_counts_as_empty', { epoch: 6, record: json(200, { worker: { external_metadata: 'x' } }), steps: [{ op: 'metadata', value: { rate_limit_info: null }, sends: false }] });
 
 // ---- runner ----
 const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq']);
@@ -275,7 +284,8 @@ async function run(spec) {
       const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
       if (!(req.method === 'GET' && route === '/worker')) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: Date.now() });
       let response = json(200, {});
-      if (route === '/worker/landing') response = pick('landing');
+      if (req.method === 'GET' && route === '/worker') response = spec.record ?? response;
+      else if (route === '/worker/landing') response = pick('landing');
       else if (route === '/worker/register') response = pick('register');
       else if (req.method === 'PUT') response = pick('put');
       else if (route === '/worker/heartbeat') response = pick('beat');
@@ -291,7 +301,7 @@ async function run(spec) {
   const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: true, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code) };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
-  const result = { name: spec.name, epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
+  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
   if (spec.sessionToken !== undefined) process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = spec.sessionToken;
   try {
@@ -431,8 +441,8 @@ async function fetchFailureCase(mode) {
   return result;
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], network: [], fetch_failures: [] };
-for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue']) {
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], network: [], fetch_failures: [] };
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
 for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));

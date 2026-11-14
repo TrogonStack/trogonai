@@ -177,6 +177,24 @@ async fn serve_all(
     beats: Vec<Value>,
     landings: Vec<Value>,
 ) -> Result<(String, Log), std::io::Error> {
+    serve_record(
+        register,
+        puts,
+        beats,
+        landings,
+        json!({"status": 200, "headers": [], "body": "{}"}),
+    )
+    .await
+}
+
+/// `serve_all`, plus the answer `GET /worker` gives. That read is left out of the request log.
+async fn serve_record(
+    register: Option<Value>,
+    puts: Vec<Value>,
+    beats: Vec<Value>,
+    landings: Vec<Value>,
+    record: Value,
+) -> Result<(String, Log), std::io::Error> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
     let origin = base.clone();
@@ -195,6 +213,10 @@ async fn serve_all(
                 .unwrap_or(&request.path)
                 .to_owned();
             let route = format!("{} {}", request.method, request.path);
+            if route == "GET /worker" {
+                let _ = write_response(&mut stream, &record, &origin).await;
+                continue;
+            }
             let response = match route.as_str() {
                 "POST /worker/register" => register
                     .clone()
@@ -316,11 +338,16 @@ impl Ending {
 async fn run_case(case: &Value) -> TestResult {
     let name = text(field(case, "name")).ok_or("unnamed case")?;
     let register = case.get("register").filter(|response| !response.is_null()).cloned();
-    let (base, log) = serve_all(
+    let record = case
+        .get("record")
+        .cloned()
+        .unwrap_or_else(|| json!({"status": 200, "headers": [], "body": "{}"}));
+    let (base, log) = serve_record(
         register.clone(),
         queue(case, "puts"),
         queue(case, "beat"),
         queue(case, "landing"),
+        record,
     )
     .await?;
     let pacing = Recorded::new(0.0);
@@ -388,7 +415,7 @@ async fn run_case(case: &Value) -> TestResult {
                 }
                 _ => {
                     let metadata = field(step, "value").as_object().cloned().unwrap_or_default();
-                    worker.report_metadata(&metadata).await.map(|_| true)
+                    worker.report_metadata(&metadata).await.map(|sent| sent.is_some())
                 }
             };
             match outcome {
@@ -450,7 +477,9 @@ async fn burst(
             Some(state) => {
                 worker.submit_state(state_named(state)?, None);
             }
-            None => worker.submit_metadata(field(&item, "metadata").as_object().ok_or("metadata")?),
+            None => {
+                worker.submit_metadata(field(&item, "metadata").as_object().ok_or("metadata")?);
+            }
         }
     }
     Ok(worker.flush().await.map(|_| ()))
@@ -907,7 +936,7 @@ async fn requests_that_cannot_be_made_do_not_reach_the_service() -> TestResult {
         config("http://h", "a\u{100}"),
     )?;
     let outcome = bad_token.report_metadata(&Map::new()).await;
-    assert_eq!(outcome, Ok(type_error()));
+    assert_eq!(outcome, Ok(Some(type_error())));
     let mut relative = client("", Recorded::new(0.0))?;
     assert_eq!(relative.heartbeat().await, Ok(type_error()));
     let mut refused = client(&closed_port().await?, Recorded::new(0.0))?;
