@@ -69,6 +69,16 @@ queued input or `stream_input`, and receive on the owner concurrently. Call
 `finish_input()` when no more user messages will be sent. Reported queue counts
 handle CLIs that coalesce queued sends into a turn.
 
+`stream_input` follows TypeScript's `Query.streamInput()` by default: an abort
+ends it quietly, a write after close fails with `Error::NotReadyForWriting`, and
+stdin closes once the stream ends. When a callback needs the CLI and the call
+wrote a prompt, stdin stays open until the run ends; both SDKs count the
+prompts of each call, so a call that wrote nothing closes stdin at once even
+while an earlier call's run is open. `try_stream_input` takes a fallible stream;
+under TypeScript its error is returned and stdin stays open. Under
+`ArgvStyle::Python` both log a failure, close stdin and return `Ok`, like
+Python's `stream_input`.
+
 `close()` on a `Query`, the client or any `ClientHandle` is TypeScript's
 `Query.close()`: it takes `&self`, so it can be called while the stream is being
 read, shuts the process down without waiting and is idempotent. Messages already

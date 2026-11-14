@@ -168,8 +168,10 @@ pub(crate) struct RunEnd {
     in_flight: HashSet<String>,
     /// Python `_run_final`: stdin is closed or the reader is gone, so the run stays ended.
     run_final: bool,
-    /// Prompts written, TypeScript `streamInput`'s `count` and Python's `written`.
+    /// Prompts written on the session.
     written: usize,
+    /// Prompts the finished input wrote, TypeScript `streamInput`'s `count` and Python's `written`.
+    input_written: usize,
     /// The input is complete: `streamInput` finished writing, or Python spawned its waiter.
     finished: bool,
     /// TypeScript `isSingleUserTurn`: a string prompt, whose stdin closes inside `endRun`.
@@ -195,6 +197,7 @@ impl RunEnd {
             in_flight: HashSet::new(),
             run_final: false,
             written: 0,
+            input_written: 0,
             finished: false,
             single_turn: false,
             holding: false,
@@ -227,7 +230,7 @@ impl RunEnd {
             return;
         }
         self.run_final = true;
-        if self.written > 0 {
+        if self.input_written > 0 {
             self.deadline = None;
         }
     }
@@ -253,9 +256,11 @@ impl RunEnd {
     }
 
     /// The caller finished its input. `single_turn` is TypeScript's string prompt; `needs` is
-    /// `hasBidirectionalNeeds()`.
-    pub(crate) fn finish(&mut self, single_turn: bool, needs: bool) {
+    /// `hasBidirectionalNeeds()`; `written` is the caller's own count of the prompts it wrote, every prompt of the
+    /// session when it kept none.
+    pub(crate) fn finish(&mut self, single_turn: bool, needs: bool, written: Option<usize>) {
         self.finished = true;
+        self.input_written = written.unwrap_or(self.written);
         if self.typescript() && single_turn {
             self.single_turn = true;
             if self.ended {
@@ -265,7 +270,7 @@ impl RunEnd {
         }
         // `if (count > 0 && hasBidirectionalNeeds()) await waitForRunEnd()`, and Python's `stream_input` and
         // string prompt wait the same way.
-        self.holding = self.written > 0 && needs;
+        self.holding = self.input_written > 0 && needs;
         if self.ended {
             self.released = true;
         }

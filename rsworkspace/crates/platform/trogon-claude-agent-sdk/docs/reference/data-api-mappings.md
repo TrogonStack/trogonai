@@ -120,6 +120,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `UnconnectedClient::scope(body)`, `Error::Cleanup` when the body and the disconnect both fail | `async with ClaudeSDKClient() as client:`, the disconnect exception chained to the body's | not applicable |
 | `query(prompt)`, `query_in_session(prompt, session_id)` | `query(prompt, session_id="default")` | a string prompt with `session_id: ""` |
 | `query_stream(stream)`, `query_stream_in_session(stream, session_id)` | `query(AsyncIterable, session_id)`, the session set only where a message has none | not applicable |
+| `stream_input(stream)`, `try_stream_input(stream)` on `ClaudeSdkClient` or `ClientHandle` | `Query.stream_input` under `ArgvStyle::Python`: stops once closed, logs a failing stream or write, closes stdin and never fails | `Query.streamInput()`: stops at an abort, waits behind the prompt hold, rejects with the write or stream error and then leaves stdin open |
 | `Error::QueryClosed` | a waiting control request runs out its timeout | "Query closed before response received" |
 | `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
 | `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |

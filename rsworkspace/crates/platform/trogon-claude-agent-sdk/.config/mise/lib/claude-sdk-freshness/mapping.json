@@ -515,18 +515,69 @@
         }
       },
       "rust_api": [
+        "ClaudeSdkClient.stream_input",
+        "ClaudeSdkClient.try_stream_input",
         "ClientHandle.stream_input",
+        "ClientHandle.try_stream_input",
         "ClientHandle.send_input",
         "ClientHandle.finish_input"
       ],
       "tests": [
         {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_ends_the_input_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_stops_at_an_abort"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_rejects_a_write_after_close"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_rejects_with_a_failing_stream_and_leaves_stdin_open"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_waits_behind_the_prompt_hold"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_ends_the_input_like_claude_agent_sdk"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_stops_at_a_close"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_closes_stdin_after_a_failing_stream"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "the_infallible_stream_input_streams_like_query_stream_input"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "stream_input_counts_the_prompts_of_its_own_call"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_closes_stdin_at_once_for_a_stream_that_writes_nothing"
+        },
+        {
           "path": "tests/runtime_sessions.rs",
           "name": "coalesced_input_count_ends_the_run_after_one_result"
         }
       ],
-      "status": "partial",
-      "rationale": "Streaming and queued structured sends are exposed through a cloneable handle. Completion semantics use reported queue/session state and have older-CLI limits."
+      "status": "supported",
+      "rationale": "stream_input follows Query.streamInput by default: it stops at an abort, writes behind a pending prompt hold and leaves stdin open when the hold fails, rejects with ProcessTransport is not ready for writing once the transport closed, and closes stdin when the stream ends, waiting for the run to end only when it wrote something and something needs the CLI. Under the Python style it follows the Python stream_input: it stops once the query closed, logs a failing stream or write and closes stdin anyway, and never fails. try_stream_input takes a fallible stream so a TypeScript caller sees the stream's own error with stdin left open, as a rejecting iterable does upstream. send_input and finish_input remain the queued building blocks; the goldens were recorded from sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 against a stub CLI."
     },
     {
       "id": "interrupt-receipts",

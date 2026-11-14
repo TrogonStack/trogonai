@@ -53,7 +53,7 @@ fn fixtures_decode_to_the_messages_they_name() {
 fn typescript_ends_the_run_at_the_result_or_at_idle() {
     let mut run = machine(ArgvStyle::TypeScript);
     run.prompt_written();
-    run.finish(false, true);
+    run.finish(false, true, None);
     run.observe(&task("task_started", "t"), true);
     run.observe(&state("running"), true);
     run.observe(&result(), true);
@@ -64,24 +64,41 @@ fn typescript_ends_the_run_at_the_result_or_at_idle() {
 
     let mut run = machine(ArgvStyle::TypeScript);
     run.prompt_written();
-    run.finish(false, true);
+    run.finish(false, true, None);
     run.observe(&task("task_started", "t"), true);
     run.observe(&result(), true);
     assert!(run.close_due());
+}
+
+/// `streamInput`'s `count` and `stream_input`'s `written` belong to the call: one that wrote nothing closes stdin
+/// at once, whatever the session wrote before it.
+#[test]
+fn an_input_that_wrote_nothing_closes_at_once() {
+    for style in [ArgvStyle::TypeScript, ArgvStyle::Python] {
+        let mut run = machine(style);
+        run.prompt_written();
+        run.finish(false, true, Some(0));
+        assert!(run.close_due());
+
+        let mut run = machine(style);
+        run.prompt_written();
+        run.finish(false, true, Some(1));
+        assert!(!run.close_due());
+    }
 }
 
 #[test]
 fn typescript_single_turn_closes_inside_the_run_end() {
     let mut run = machine(ArgvStyle::TypeScript);
     run.prompt_written();
-    run.finish(true, false);
+    run.finish(true, false, None);
     assert!(!run.close_due());
     run.observe(&result(), false);
     assert!(run.close_due());
 
     let mut run = machine(ArgvStyle::TypeScript);
     run.prompt_written();
-    run.finish(true, true);
+    run.finish(true, true, None);
     run.observe(&state("running"), true);
     run.observe(&result(), true);
     assert!(!run.close_due());
@@ -109,14 +126,14 @@ fn a_streamed_input_closes_when_written_unless_something_needs_the_cli() {
     for style in [ArgvStyle::TypeScript, ArgvStyle::Python] {
         let mut run = machine(style);
         run.prompt_written();
-        run.finish(false, false);
+        run.finish(false, false, None);
         assert!(run.close_due());
         let mut run = machine(style);
-        run.finish(false, true);
+        run.finish(false, true, None);
         assert!(run.close_due());
         let mut run = machine(style);
         run.prompt_written();
-        run.finish(false, true);
+        run.finish(false, true, None);
         assert!(!run.close_due());
     }
 }
@@ -126,7 +143,7 @@ fn a_streamed_input_closes_when_written_unless_something_needs_the_cli() {
 fn python_keeps_the_run_open_while_a_tracked_task_is_in_flight() {
     let mut run = machine(ArgvStyle::Python);
     run.prompt_written();
-    run.finish(false, true);
+    run.finish(false, true, None);
     run.observe(&task("task_started", "t"), true);
     run.observe(&result(), true);
     assert!(!run.close_due());
@@ -138,7 +155,7 @@ fn python_keeps_the_run_open_while_a_tracked_task_is_in_flight() {
 
     let mut run = machine(ArgvStyle::Python);
     run.prompt_written();
-    run.finish(false, true);
+    run.finish(false, true, None);
     run.observe(&task("task_started", "t"), true);
     run.observe(&state("running"), true);
     run.observe(&result(), true);
@@ -221,7 +238,7 @@ fn a_disabled_ceiling_never_arms_the_deadline() {
 fn python_final_state_is_set_and_read_where_query_py_does() {
     let mut run = machine(ArgvStyle::Python);
     run.prompt_written();
-    run.finish(false, true);
+    run.finish(false, true, None);
     run.observe(&state("running"), true);
     run.observe(&result(), true);
     assert!(run.deadline().is_some());
@@ -231,7 +248,7 @@ fn python_final_state_is_set_and_read_where_query_py_does() {
     assert!(run.deadline().is_none());
 
     let mut run = machine(ArgvStyle::Python);
-    run.finish(false, true);
+    run.finish(false, true, None);
     run.observe(&state("running"), true);
     run.observe(&result(), true);
     assert!(run.deadline().is_some());
@@ -242,7 +259,7 @@ fn python_final_state_is_set_and_read_where_query_py_does() {
 
     let mut run = machine(ArgvStyle::Python);
     run.prompt_written();
-    run.finish(false, true);
+    run.finish(false, true, None);
     run.reader_gone();
     assert!(run.close_due());
     run.observe(&assistant(), true);

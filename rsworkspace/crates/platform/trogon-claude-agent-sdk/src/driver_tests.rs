@@ -116,6 +116,7 @@ impl DriverFixture {
             deferred_messages: VecDeque::new(),
             held_observations: VecDeque::new(),
             initialize_hold: false,
+            prompt_hold: PromptHold::default(),
             held_commands: VecDeque::new(),
             next_id: 0,
             wire_ids: None,

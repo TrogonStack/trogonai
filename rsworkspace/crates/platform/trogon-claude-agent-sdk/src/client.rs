@@ -56,6 +56,7 @@ pub struct ClientHandle {
     /// The first initialize response, which `reinitialize` does not replace; `None` inside when the reply had none.
     initialization: std::sync::Arc<tokio::sync::watch::Sender<Option<InitializationOutcome>>>,
     latest_commands: driver::LatestCommands,
+    prompt_hold: driver::PromptHold,
     host: crate::remote_control::HostState,
     style: crate::ArgvStyle,
     /// Words the `TypeError`s the TypeScript getters throw on a missing initialization result.
@@ -84,6 +85,14 @@ struct CloseSignal(std::sync::Arc<std::sync::Mutex<Option<oneshot::Sender<()>>>>
 impl CloseSignal {
     fn new(sender: oneshot::Sender<()>) -> Self {
         Self(std::sync::Arc::new(std::sync::Mutex::new(Some(sender))))
+    }
+
+    /// `true` once `close` ran: TypeScript `cleanupPerformed`, Python `_closed`.
+    fn fired(&self) -> bool {
+        match self.0.lock() {
+            Ok(sender) => sender.is_none(),
+            Err(poisoned) => poisoned.into_inner().is_none(),
+        }
     }
 
     fn fire(&self) {
@@ -484,6 +493,7 @@ impl ClaudeSdkClient {
             closed,
             initialization: std::sync::Arc::new(tokio::sync::watch::channel(None).0),
             latest_commands: driver::LatestCommands::default(),
+            prompt_hold: driver::PromptHold::default(),
             host: crate::remote_control::HostState::default(),
             style: options.argv_style,
             js_runtime: options.js_runtime,
@@ -503,6 +513,7 @@ impl ClaudeSdkClient {
             initialization,
             version_check,
             latest_commands,
+            prompt_hold: handle.prompt_hold.clone(),
             host,
             startup_tap,
         })
@@ -606,11 +617,21 @@ impl ClaudeSdkClient {
         self.runtime.handle.close();
     }
 
-    pub async fn stream_input<S>(&self, mut stream: S) -> Result<(), Error>
+    /// See [`ClientHandle::stream_input`].
+    pub async fn stream_input<S>(&self, stream: S) -> Result<(), Error>
     where
         S: futures_util::Stream<Item = crate::UserInput> + Unpin,
     {
-        self.runtime.handle.stream_input(&mut stream).await
+        self.runtime.handle.stream_input(stream).await
+    }
+
+    /// See [`ClientHandle::try_stream_input`].
+    pub async fn try_stream_input<S, E>(&self, stream: S) -> Result<(), E>
+    where
+        S: futures_util::Stream<Item = Result<crate::UserInput, E>> + Unpin,
+        E: From<Error> + std::fmt::Display,
+    {
+        self.runtime.handle.try_stream_input(stream).await
     }
 
     /// Python `ClaudeSDKClient.query(prompt)`: writes the prompt in session `"default"` under the Python style, or
@@ -824,14 +845,121 @@ impl ClientHandle {
         let response = receiver.await.map_err(|_| Error::DriverStopped)??;
         Ok(ControlReply::new(response))
     }
-    pub async fn stream_input<S>(&self, mut stream: S) -> Result<(), Error>
+    /// TypeScript `Query.streamInput` and Python `Query.stream_input`: writes every input of the stream, then ends
+    /// the input. With nothing written, or nothing that needs the CLI (SDK MCP servers, hooks, a permission handler
+    /// and the other callbacks), stdin closes at once; otherwise it closes when the run ends.
+    ///
+    /// TypeScript, the default: an abort stops the loop and the call returns `Ok`, as `AbortError` resolves the
+    /// upstream promise. Behind `promptHold` (a blocking hook or managed settings waiting for initialize) the
+    /// inputs queue without waiting, a close stops the loop, and a hold that fails returns `Ok` without ending
+    /// the input. Otherwise a write after `close` fails with `Error::NotReadyForWriting`.
+    ///
+    /// Under `ArgvStyle::Python` a close stops the loop, and a failed write is logged and still ends the input;
+    /// the call returns `Ok`, as Python swallows both.
+    pub async fn stream_input<S>(&self, stream: S) -> Result<(), Error>
     where
         S: futures_util::Stream<Item = crate::UserInput> + Unpin,
     {
-        while let Some(input) = stream.next().await {
-            self.send_input(input).await?;
+        self.try_stream_input(stream.map(Ok::<_, Error>)).await
+    }
+
+    /// [`stream_input`](Self::stream_input) over a stream that can fail, as an upstream async iterable can throw.
+    /// TypeScript rejects with the stream's error and leaves stdin open. Python logs `Prompt stream failed;
+    /// closing stdin` at error level, ends the input the usual way, and returns `Ok`.
+    pub async fn try_stream_input<S, E>(&self, stream: S) -> Result<(), E>
+    where
+        S: futures_util::Stream<Item = Result<crate::UserInput, E>> + Unpin,
+        E: From<Error> + std::fmt::Display,
+    {
+        match self.style {
+            crate::ArgvStyle::Python => {
+                self.python_stream_input(stream).await;
+                Ok(())
+            }
+            crate::ArgvStyle::TypeScript => self.typescript_stream_input(stream).await,
         }
-        self.finish_input().await
+    }
+
+    /// `sdk.mjs` `Query.streamInput`, after `query()` already waited for initialize to be written.
+    async fn typescript_stream_input<S, E>(&self, mut stream: S) -> Result<(), E>
+    where
+        S: futures_util::Stream<Item = Result<crate::UserInput, E>> + Unpin,
+        E: From<Error>,
+    {
+        let mut held = Vec::new();
+        // `count`: every input taken from the stream, the one an abort stops at included.
+        let mut count = 0;
+        while let Some(item) = stream.next().await {
+            let input = item?;
+            count += 1;
+            let hold = self.prompt_hold.state();
+            // `promptHold !== undefined && cleanupPerformed`: a failed hold already ran `cleanup`.
+            let cleaned_up = hold == driver::HoldState::Failed || self.close.fired();
+            if self.abort.is_cancelled() || (hold != driver::HoldState::Clear && cleaned_up) {
+                break;
+            }
+            if hold == driver::HoldState::Clear {
+                if self.close.fired() {
+                    return Err(self.closed.write_error().unwrap_or(Error::NotReadyForWriting).into());
+                }
+                match self.send_input(input).await {
+                    Err(Error::Aborted(_)) => return Ok(()),
+                    outcome => outcome?,
+                }
+                continue;
+            }
+            // `writeBehindPromptHold`: queued now, written once initialize is confirmed.
+            let (response, receiver) = oneshot::channel();
+            match self.enqueue(Command::Prompt { input, response }).await {
+                Ok(()) => held.push(receiver),
+                // The run stopped before the write was queued: the hold resolves `false`.
+                Err(_) => return Ok(()),
+            }
+        }
+        // `Promise.all` of the held writes and the hold itself: a write the hold skipped resolves `false` and
+        // returns before `endInput()`.
+        for receiver in held {
+            match receiver.await {
+                Ok(Ok(())) => {}
+                Ok(Err(Error::Aborted(_))) | Err(_) => return Ok(()),
+                Ok(Err(error)) => return Err(error.into()),
+            }
+        }
+        if self.prompt_hold.state() == driver::HoldState::Failed {
+            return Ok(());
+        }
+        // `if (count > 0 && hasBidirectionalNeeds()) await waitForRunEnd()`, then `endInput()`: the run-end
+        // machine holds stdin open while the run needs it.
+        Ok(self.finish_written(Completion::Run, Some(count)).await?)
+    }
+
+    /// `claude_agent_sdk` `Query.stream_input`: neither a failing stream nor a failed write reaches the caller.
+    async fn python_stream_input<S, E>(&self, mut stream: S)
+    where
+        S: futures_util::Stream<Item = Result<crate::UserInput, E>> + Unpin,
+        E: std::fmt::Display,
+    {
+        // `written`: the inputs this call wrote.
+        let mut written = 0;
+        while let Some(item) = stream.next().await {
+            if self.close.fired() {
+                break;
+            }
+            let outcome = match item {
+                Ok(input) => self.send_input(input).await.map_err(|error| error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = outcome {
+                tracing::error!(%error, "Prompt stream failed; closing stdin");
+                break;
+            }
+            written += 1;
+        }
+        // `wait_for_result_and_end_input()` when something was written, else `end_input()` at once; the run-end
+        // machine makes that choice, and an error closing the input is only logged upstream.
+        if let Err(error) = self.finish_written(Completion::Run, Some(written)).await {
+            tracing::debug!(%error, "Error closing input stream");
+        }
     }
     pub async fn send_prompt(&self, prompt: Prompt) -> Result<(), Error> {
         self.send_input(prompt.into()).await
@@ -1284,7 +1412,12 @@ impl ClientHandle {
     /// Queues the end of the input without waiting for the driver to apply it.
     async fn queue_finish(&self, completion: Completion) -> Result<(), Error> {
         let (response, _receiver) = oneshot::channel();
-        match self.send_command(Command::FinishInput { completion, response }).await {
+        let command = Command::FinishInput {
+            completion,
+            written: None,
+            response,
+        };
+        match self.send_command(command).await {
             Err(_) => Err(Error::CommandQueueTimeout),
             // A stopped driver makes ending the input a no-op, as in `finish_with`.
             Ok(_) => Ok(()),
@@ -1292,8 +1425,18 @@ impl ClientHandle {
     }
 
     pub(crate) async fn finish_with(&self, completion: Completion) -> Result<(), Error> {
+        self.finish_written(completion, None).await
+    }
+
+    /// [`finish_with`](Self::finish_with) for a caller that counted its own prompts, as `streamInput` and
+    /// `stream_input` do per call.
+    async fn finish_written(&self, completion: Completion, written: Option<usize>) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
-        let command = Command::FinishInput { completion, response };
+        let command = Command::FinishInput {
+            completion,
+            written,
+            response,
+        };
         match self.send_command(command).await {
             Err(_) => Err(Error::CommandQueueTimeout),
             // Upstream `endInput()` (TypeScript) and `end_input()` (Python) only close stdin and never fail, so ending

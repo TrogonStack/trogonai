@@ -49,6 +49,9 @@ pub(crate) enum Command {
     },
     FinishInput {
         completion: Completion,
+        /// The prompts the caller wrote itself, TypeScript `streamInput`'s `count` and Python's `written`, which
+        /// count per call. `None` counts every prompt written on the session.
+        written: Option<usize>,
         response: oneshot::Sender<Result<(), Error>>,
     },
 }
@@ -310,6 +313,8 @@ where
     /// TypeScript `promptHold`: while the first initialize is unanswered and a blocking hook or managed settings
     /// need its confirmation, prompts and most controls wait behind it.
     initialize_hold: bool,
+    /// What the handles see of `initialize_hold`.
+    prompt_hold: PromptHold,
     held_commands: VecDeque<Command>,
     next_id: u64,
     /// The `mcp_message` ids of the line just read, until the Python `mcp_message` handler takes them.
@@ -386,6 +391,36 @@ fn control_value(style: crate::ArgvStyle, response: Option<serde_json::Value>) -
 
 /// The command list the CLI announced last, which TypeScript `supportedCommands()` prefers to the initialize one.
 pub(crate) type LatestCommands = Arc<std::sync::Mutex<Option<serde_json::Value>>>;
+
+/// TypeScript `promptHold` as `Query.streamInput` reads it, shared with the handles.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub(crate) enum HoldState {
+    /// `promptHold === undefined`: no hold applies, or the first initialize was confirmed.
+    Clear = 0,
+    /// The first initialize is unanswered and what is written waits behind it.
+    Pending = 1,
+    /// The first initialize failed: the hold stays set and resolves `false`.
+    Failed = 2,
+}
+
+/// See [`HoldState`]. The driver sets it; `stream_input` reads it.
+#[derive(Clone, Default)]
+pub(crate) struct PromptHold(Arc<std::sync::atomic::AtomicU8>);
+
+impl PromptHold {
+    pub(crate) fn state(&self) -> HoldState {
+        match self.0.load(std::sync::atomic::Ordering::Acquire) {
+            1 => HoldState::Pending,
+            2 => HoldState::Failed,
+            _ => HoldState::Clear,
+        }
+    }
+
+    fn set(&self, state: HoldState) {
+        self.0.store(state as u8, std::sync::atomic::Ordering::Release);
+    }
+}
 
 /// JavaScript `String(value)` of an optional boolean.
 fn javascript_string(support: crate::FeatureSupport) -> &'static str {
@@ -543,6 +578,7 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     /// The CLI path to check against the minimum version, for a transport that runs the CLI itself.
     pub version_check: Option<String>,
     pub latest_commands: LatestCommands,
+    pub prompt_hold: PromptHold,
     pub host: crate::remote_control::HostState,
     /// `startup()`: the hook and startup-mark frames, for the initialize timer. Closing the receiver ends the
     /// observation.
@@ -653,10 +689,16 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         initialization,
         version_check,
         latest_commands,
+        prompt_hold,
         host,
         startup_tap,
     } = input;
     transport.connect().await?;
+    let initialize_hold = options.argv_style == crate::ArgvStyle::TypeScript
+        && (initialization.expectations.blocking_hooks || initialization.expectations.managed_settings);
+    if initialize_hold {
+        prompt_hold.set(HoldState::Pending);
+    }
     let driver = Driver {
         transport,
         input_ended: false,
@@ -693,8 +735,8 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         mirror_flush: None,
         deferred_messages: VecDeque::new(),
         held_observations: VecDeque::new(),
-        initialize_hold: options.argv_style == crate::ArgvStyle::TypeScript
-            && (initialization.expectations.blocking_hooks || initialization.expectations.managed_settings),
+        initialize_hold,
+        prompt_hold,
         held_commands: VecDeque::new(),
         next_id: 0,
         wire_ids: None,
@@ -1371,6 +1413,9 @@ where
 
     /// The first initialize was confirmed: what waited behind it goes out in order.
     async fn release_held_commands(&mut self) -> Result<(), Error> {
+        if self.initialize_hold {
+            self.prompt_hold.set(HoldState::Clear);
+        }
         self.initialize_hold = false;
         while let Some(command) = self.held_commands.pop_front() {
             self.command(command).await?;
@@ -1382,6 +1427,9 @@ where
     /// error, and what waited behind the hold is never written: a prompt resolves quietly, the way the hold
     /// resolves `false`, and a held request rejects with the same error.
     fn abandon_initialize(&mut self, error: &std::sync::Arc<Error>) {
+        if self.initialize_hold {
+            self.prompt_hold.set(HoldState::Failed);
+        }
         self.initialize_hold = false;
         for command in self.held_commands.drain(..) {
             match command {
@@ -1541,10 +1589,15 @@ where
                 self.start_control(ControlResponder::Raw { operation, response }, request)
                     .await?;
             }
-            Command::FinishInput { completion, response } => {
+            Command::FinishInput {
+                completion,
+                written,
+                response,
+            } => {
                 self.run_state.input_done = Some(completion);
                 let needs = self.bidirectional_needs();
-                self.run_end.finish(matches!(completion, Completion::Turn), needs);
+                self.run_end
+                    .finish(matches!(completion, Completion::Turn), needs, written);
                 let _ = response.send(Ok(()));
             }
         }

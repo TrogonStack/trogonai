@@ -3948,6 +3948,50 @@
       ]
     },
     {
+      "id": "c33-stream-input",
+      "concept": "How a streamed input stops, fails and closes stdin",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/query.py",
+        "line_start": 1122,
+        "line_end": 1162,
+        "sha256": "c3b9a0a0c92cea46da831a3fd6a5b7dd3fe40546086ff83f6c67c2d1d172a618"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "[Query.streamInput] Starting to process input stream",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 24,
+        "span_after": 947,
+        "sha256": "4bc8d078fa87ce7051367d70fcec755e98891874f2f72436cefd9dea53542b5f"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Both write each streamed message in order and close stdin once the stream ends, waiting for the run to end first only when that call wrote something and, in TypeScript, something needs the CLI; each counts the prompts of its own call, so one that wrote nothing closes stdin at once. TypeScript stops at an abort and resolves, stops once a failed prompt hold cleaned the query up, writes behind a pending prompt hold and skips closing stdin when the hold resolves false, and rejects with the write error after close or with the stream's own error while leaving stdin open. Python stops once the query is closed, logs a stream or write failure and closes stdin anyway, and never raises."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect; ArgvStyle::Python reproduces the Python stream_input, and try_stream_input carries a fallible stream so both failure paths are reachable."
+      },
+      "contracts": [
+        "golden_stream_input::typescript_query_stream_input_ends_the_input_like_sdk_mjs",
+        "golden_stream_input::typescript_query_stream_input_stops_at_an_abort",
+        "golden_stream_input::typescript_query_stream_input_rejects_a_write_after_close",
+        "golden_stream_input::typescript_query_stream_input_rejects_with_a_failing_stream_and_leaves_stdin_open",
+        "golden_stream_input::typescript_query_stream_input_waits_behind_the_prompt_hold",
+        "golden_stream_input::python_query_stream_input_ends_the_input_like_claude_agent_sdk",
+        "golden_stream_input::python_query_stream_input_stops_at_a_close",
+        "golden_stream_input::python_query_stream_input_closes_stdin_after_a_failing_stream",
+        "golden_stream_input::the_infallible_stream_input_streams_like_query_stream_input",
+        "golden_stream_input::stream_input_counts_the_prompts_of_its_own_call"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/driver.rs",
+        "src/run_end.rs"
+      ]
+    },
+    {
       "id": "c34-interactive-client-default-session",
       "concept": "Session id written on a prompt that names none",
       "python": {

@@ -161,7 +161,10 @@ receive through a result and keep the owner for later input. Exhausting a user
 input stream is distinct from ending the control channel: hooks, permission
 questions and embedded MCP calls may still require replies on stdin.
 `stream_input()` calls `finish_input()` on exhaustion, rejecting further user
-input; finishing input is not an explicit close operation.
+input; finishing input is not an explicit close operation. Under the
+TypeScript dialect a failing `try_stream_input()` stream returns its error and
+leaves stdin open, as a rejecting iterable does upstream; the Python dialect
+logs the failure and finishes input anyway.
 
 `interrupt()` requests that the CLI interrupt current work. It does not close
 the owner or necessarily discard queued input. Inspect the typed receipt and
