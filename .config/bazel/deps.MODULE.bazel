@@ -3,6 +3,8 @@ bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "gazelle", version = "0.54.0")
 bazel_dep(name = "aspect_rules_js", version = "3.6.1")
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
+bazel_dep(name = "rules_python", version = "1.7.0")
 bazel_dep(name = "mise-bazel")
 local_path_override(
     module_name = "mise-bazel",
@@ -28,6 +30,14 @@ rust.toolchain(versions = [])
 register_toolchains(
     "@mise_rust//:rust_toolchain",
     "@mise_rust//:cargo_toolchain",
+)
+
+# Python targets run on a pinned interpreter that rules_python downloads, so
+# they never depend on whichever python3 a runner happens to have.
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.14",
 )
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
