@@ -632,11 +632,12 @@ pub(crate) struct Opener<'o, 't> {
 
 impl Opener<'_, '_> {
     /// `urlopen(Request(url, headers={"User-Agent": ...}))`: the body of the response.
+    #[cfg(test)]
     pub(crate) fn urlopen(&self, url: &str) -> Result<Body, RemoteSchemaError> {
         self.urlopen_text(&url.into())
     }
 
-    /// [`urlopen`](Self::urlopen) of a URL that may hold lone surrogates.
+    /// `urlopen` of a URL that may hold lone surrogates.
     pub(crate) fn urlopen_text(&self, url: &PythonString) -> Result<Body, RemoteSchemaError> {
         let mut request = Request::new(url)?;
         urlparse_text(&request.full_url()).map_err(value_error)?;

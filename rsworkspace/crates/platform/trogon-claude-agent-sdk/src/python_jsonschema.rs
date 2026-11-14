@@ -242,11 +242,12 @@ fn best_match_retrieving(
 /// validates the schema against `cls.META_SCHEMA` with its `FORMAT_CHECKER`, and the first error `iter_errors`
 /// yields (not the `best_match`) is raised as `SchemaError.create_from(error)`. Every `$ref` of a metaschema resolves
 /// within the metaschemas, so nothing is retrieved.
+#[cfg(test)]
 pub(crate) fn check_schema(draft: Draft, schema: &Value) -> Result<(), Outcome> {
     check_schema_spending(draft, schema, &mut Budget::default())
 }
 
-/// [`check_schema`] spending `budget`, whose caches the validation that follows goes on using.
+/// `check_schema` spending `budget`, whose caches the validation that follows goes on using.
 fn check_schema_spending(draft: Draft, schema: &Value, budget: &mut Budget) -> Result<(), Outcome> {
     let metaschema = referencing::metaschema(draft).map_err(|text| Outcome::Raised(text.into()))?;
     let class = drafts::validator_for(metaschema, draft).map_err(|text| Outcome::Raised(text.into()))?;

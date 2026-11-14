@@ -1,5 +1,6 @@
 use super::*;
 use crate::python_code_point::PythonCodePoint;
+use std::io::Write;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 

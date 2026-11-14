@@ -1416,18 +1416,6 @@ pub(crate) const PYTHON_DICT_TYPE: &str = "<class 'dict'>";
 /// native stack runs out.
 pub(crate) const STACK_SIZES: [usize; 3] = [512 << 20, 64 << 20, 8 << 20];
 
-/// Frames one `Validator.descend` call is charged. Every cost here is 1 until it is calibrated against CPython.
-pub(crate) const DESCEND_FRAMES: usize = 1;
-
-/// Frames one `Validator.iter_errors` call is charged.
-pub(crate) const ITER_ERRORS_FRAMES: usize = 1;
-
-/// Frames one `Validator._validate_reference` call is charged.
-pub(crate) const REFERENCE_FRAMES: usize = 1;
-
-/// Frames one `find_evaluated_item_indexes_by_schema` or `find_evaluated_property_keys_by_schema` call is charged.
-pub(crate) const FIND_EVALUATED_FRAMES: usize = 1;
-
 /// The documents `jsonschema_specifications` ships, which `jsonschema` registers under their own ids.
 pub(crate) const METASCHEMAS: [&str; 20] = [
     include_str!("upstream/metaschemas/draft3/metaschema.json"),
@@ -1704,9 +1692,6 @@ pub(crate) const MAXCODE: u128 = u32::MAX as u128;
 
 /// `_parser.MAXWIDTH`.
 pub(crate) const MAXWIDTH: u128 = 1 << 64;
-
-/// Deepest parser frame count a caller at module level reaches before CPython raises `RecursionError`.
-pub(crate) const PARSER_FRAME_LIMIT: usize = 992;
 
 /// Used by the python_re port.
 pub(crate) const RECURSION_ERROR: &str = "maximum recursion depth exceeded";
