@@ -1,6 +1,8 @@
 //! The patch queue rules the bridge worker client reaches only through the close path, which the bridge entrypoint
 //! drives from a handle the goldens do not close mid-flight (bridge.mjs offsets 1005399 to 1011500).
 
+#![allow(clippy::panic)]
+
 use std::time::Duration;
 
 use serde_json::{Value, json};

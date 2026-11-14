@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
 use serde_json::Value;

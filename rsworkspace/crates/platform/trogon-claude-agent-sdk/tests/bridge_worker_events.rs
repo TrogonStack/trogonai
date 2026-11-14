@@ -2,6 +2,8 @@
 //! request with no answer cuts, the attempt a batch is labelled with, and the retry delay (bridge.mjs offsets 988814
 //! to 1005143).
 
+#![allow(clippy::panic)]
+
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};

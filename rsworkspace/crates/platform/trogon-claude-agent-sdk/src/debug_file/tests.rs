@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
 use super::{path_for, process_debug_file};

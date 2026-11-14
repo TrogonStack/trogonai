@@ -1,6 +1,8 @@
 //! The delivery acknowledgement queue rules the recorded goldens reach only at small sizes: the batch and queue
 //! limits, what leaves alone and what leaves together, and the retry delay (bridge.mjs offsets 1042101 and 1138528).
 
+#![allow(clippy::panic)]
+
 use std::time::Duration;
 
 use serde_json::json;

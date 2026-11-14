@@ -1,3 +1,5 @@
+#![allow(clippy::panic)]
+
 use serde_json::Value;
 
 use super::*;

@@ -3,6 +3,8 @@
 //! empty result. These tests read the ambient process environment, so each one accepts both outcomes the host can
 //! produce and pins what each outcome must look like.
 
+#![allow(clippy::panic)]
+
 use std::path::Path;
 
 use trogon_claude_agent_sdk::{
