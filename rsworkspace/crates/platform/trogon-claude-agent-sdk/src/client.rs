@@ -195,7 +195,7 @@ impl ClaudeSdkClient {
         } else {
             None
         };
-        Self::connect_resolved(options, adapters, discovered, true, None).await
+        Box::pin(Self::connect_resolved(options, adapters, discovered, true, None)).await
     }
 
     /// Connects through caller-supplied adapters. The caller owns spawning, so no executable discovery runs and
@@ -211,7 +211,7 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
-        Self::connect_resolved(options, adapters, None, false, None).await
+        Box::pin(Self::connect_resolved(options, adapters, None, false, None)).await
     }
 
     /// `startup()` and `prewarm()`: connects, then waits for initialize under the startup timer. Like `connect`, an
@@ -242,7 +242,14 @@ impl ClaudeSdkClient {
         } else {
             None
         };
-        Self::connect_resolved(options, adapters, discovered, discover, Some(startup)).await
+        Box::pin(Self::connect_resolved(
+            options,
+            adapters,
+            discovered,
+            discover,
+            Some(startup),
+        ))
+        .await
     }
 
     async fn connect_resolved<E, P, F>(
@@ -265,13 +272,13 @@ impl ClaudeSdkClient {
             .clone()
             .or(discovered)
             .unwrap_or_else(|| "claude".into());
-        let session = Self::prepare_session(
+        let session = Box::pin(Self::prepare_session(
             &mut options,
             &adapters.environment,
             &adapters.process,
             adapters.filesystem,
             true,
-        )
+        ))
         .await?;
         crate::shadow_warning::emit(&options);
         let initialization = driver::Initialization::new(&options, &adapters.environment)?;
@@ -333,7 +340,7 @@ impl ClaudeSdkClient {
             }
             None => (None, None),
         };
-        Self::start(StartInput {
+        Box::pin(Self::start(StartInput {
             options,
             session,
             transport,
@@ -343,7 +350,7 @@ impl ClaudeSdkClient {
             process_id,
             startup,
             startup_tap,
-        })
+        }))
         .await
     }
 
@@ -357,7 +364,7 @@ impl ClaudeSdkClient {
         transport: T,
     ) -> Result<Self, Error> {
         let adapters: crate::adapters::RuntimeAdapters = crate::adapters::RuntimeAdapters::default();
-        Self::connect_with_transport_and_adapters(options, transport, adapters).await
+        Box::pin(Self::connect_with_transport_and_adapters(options, transport, adapters)).await
     }
 
     /// [`ClaudeSdkClient::connect_with_transport`] with caller-supplied adapters for the session store mirror.
@@ -374,7 +381,7 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
-        Self::connect_declaring(options, transport, adapters, false).await
+        Box::pin(Self::connect_declaring(options, transport, adapters, false)).await
     }
 
     /// Connects the browser query: like [`ClaudeSdkClient::connect_with_transport`], with `declare_dialog_kinds`
@@ -385,7 +392,13 @@ impl ClaudeSdkClient {
         declare_dialog_kinds: bool,
     ) -> Result<Self, Error> {
         let adapters: crate::adapters::RuntimeAdapters = crate::adapters::RuntimeAdapters::default();
-        Self::connect_declaring(options, transport, adapters, declare_dialog_kinds).await
+        Box::pin(Self::connect_declaring(
+            options,
+            transport,
+            adapters,
+            declare_dialog_kinds,
+        ))
+        .await
     }
 
     async fn connect_declaring<T, E, P, F>(
@@ -402,20 +415,20 @@ impl ClaudeSdkClient {
         P: crate::adapters::SpawnProcess<Error = std::io::Error>,
         F: crate::adapters::SessionFileSystem,
     {
-        let session = Self::prepare_session(
+        let session = Box::pin(Self::prepare_session(
             &mut options,
             &adapters.environment,
             &adapters.process,
             adapters.filesystem,
             false,
-        )
+        ))
         .await?;
         crate::shadow_warning::emit(&options);
         let mut initialization = driver::Initialization::new(&options, &adapters.environment)?;
         if declare_dialog_kinds {
             initialization.declare_dialog_kinds();
         }
-        Self::start(StartInput {
+        Box::pin(Self::start(StartInput {
             options,
             session,
             transport,
@@ -425,7 +438,7 @@ impl ClaudeSdkClient {
             process_id: None,
             startup: None,
             startup_tap: None,
-        })
+        }))
         .await
     }
 
@@ -1740,8 +1753,8 @@ where
     P: crate::adapters::SpawnProcess<Error = std::io::Error>,
     F: crate::adapters::SessionFileSystem,
 {
-    let client = ClaudeSdkClient::connect_with_adapters(options, adapters).await?;
-    start_query(client, prompt.into(), completion, PromptShape::SdkMjs).await
+    let client = Box::pin(ClaudeSdkClient::connect_with_adapters(options, adapters)).await?;
+    Box::pin(start_query(client, prompt.into(), completion, PromptShape::SdkMjs)).await
 }
 
 /// Python `query(prompt, transport=...)`.
@@ -1750,8 +1763,8 @@ pub async fn query_with_transport<T: crate::Transport>(
     options: ClaudeAgentOptions,
     transport: T,
 ) -> Result<Query, Error> {
-    let client = ClaudeSdkClient::connect_with_transport(options, transport).await?;
-    start_query(client, prompt.into(), Completion::Run, PromptShape::Python).await
+    let client = Box::pin(ClaudeSdkClient::connect_with_transport(options, transport)).await?;
+    Box::pin(start_query(client, prompt.into(), Completion::Run, PromptShape::Python)).await
 }
 
 /// [`query_with_transport`] that ends after the first result.
@@ -1760,8 +1773,14 @@ pub async fn query_turn_with_transport<T: crate::Transport>(
     options: ClaudeAgentOptions,
     transport: T,
 ) -> Result<Query, Error> {
-    let client = ClaudeSdkClient::connect_with_transport(options, transport).await?;
-    start_query(client, prompt.into(), Completion::Turn, PromptShape::Python).await
+    let client = Box::pin(ClaudeSdkClient::connect_with_transport(options, transport)).await?;
+    Box::pin(start_query(
+        client,
+        prompt.into(),
+        Completion::Turn,
+        PromptShape::Python,
+    ))
+    .await
 }
 
 /// Whose `query()` a one-shot prompt comes from, which decides how a text prompt is written under the TypeScript

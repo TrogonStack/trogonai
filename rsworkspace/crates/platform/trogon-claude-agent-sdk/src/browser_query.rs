@@ -118,12 +118,18 @@ pub async fn browser_query(options: BrowserQueryOptions) -> Result<Query, Error>
     match transport {
         BrowserTransport::WebSocket(websocket) => {
             let transport = WebSocketTransport::new(websocket).with_abort(token.clone());
-            open(agent, transport, None, (prompt, token, declare_dialog_kinds)).await
+            Box::pin(open(agent, transport, None, (prompt, token, declare_dialog_kinds))).await
         }
         BrowserTransport::Sse(sse) => {
             let transport = SseTransport::new(sse).with_abort(token.clone());
             let handle = transport.handle();
-            open(agent, transport, Some(handle), (prompt, token, declare_dialog_kinds)).await
+            Box::pin(open(
+                agent,
+                transport,
+                Some(handle),
+                (prompt, token, declare_dialog_kinds),
+            ))
+            .await
         }
     }
 }
@@ -134,7 +140,7 @@ async fn open<T: Transport>(
     sse: Option<SseHandle>,
     (prompt, token, declare_dialog_kinds): (BrowserPrompt, CancellationToken, bool),
 ) -> Result<Query, Error> {
-    let client = ClaudeSdkClient::connect_browser(agent, transport, declare_dialog_kinds).await?;
+    let client = Box::pin(ClaudeSdkClient::connect_browser(agent, transport, declare_dialog_kinds)).await?;
     let handle = client.handle();
     tokio::spawn(async move {
         if handle.stream_input(prompt).await.is_err() {

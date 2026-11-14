@@ -816,7 +816,7 @@ where
 {
     async fn run(mut self, first_initialize: ControlSender, terminal: oneshot::Sender<Result<(), Error>>) {
         let primary = match self.start(first_initialize).await {
-            Ok(()) => self.event_loop().await,
+            Ok(()) => Box::pin(self.event_loop()).await,
             Err(error) => Err(error),
         };
         let primary = match primary {
@@ -838,7 +838,7 @@ where
                 Err(error)
             }
         };
-        let mirror_cleanup = self.finalize_mirror().await;
+        let mirror_cleanup = Box::pin(self.finalize_mirror()).await;
         if let Some(materialized) = self.session.as_mut().and_then(|session| session.materialized.take()) {
             materialized.cleanup().await;
         }
@@ -968,7 +968,7 @@ where
                     self.wire_ids = self.transport.take_wire_ids();
                     self.tap_startup(&message);
                     let parsed = self.decode_message(message)?;
-                    self.frame(parsed).await?;
+                    Box::pin(self.frame(parsed)).await?;
                 }
                 flushed = async { match self.mirror_flush.as_mut() { Some(flush) => flush.await, None => pending().await } }, if self.mirror_flush.is_some() => {
                     self.mirror_flush = None;
@@ -979,13 +979,13 @@ where
                 }
                 outbound = self.mcp.inbound.recv() => {
                     if let Some(event) = outbound {
-                        self.mcp_transport_event(event).await?;
+                        Box::pin(self.mcp_transport_event(event)).await?;
                     }
                 }
                 _ = self.mcp.tasks.join_next(), if !self.mcp.tasks.is_empty() => {}
                 command = self.commands.recv() => {
                     let Some(command) = command else { return Ok(()); };
-                    self.command(command).await?;
+                    Box::pin(self.command(command)).await?;
                 }
                 callback = self.callbacks.join_next_with_id(), if !self.callbacks.is_empty() => {
                     match callback {
@@ -2171,7 +2171,7 @@ where
                 },
                 event = self.mcp.inbound.recv() => {
                     if let Some(event) = event {
-                        self.mcp_transport_event(event).await?;
+                        Box::pin(self.mcp_transport_event(event)).await?;
                     }
                 }
                 () = &mut deadline => {
