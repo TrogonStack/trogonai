@@ -1236,6 +1236,50 @@ handled('a_carried_write_is_not_delivered_back_by_the_new_stream', { stream: [co
 handled('a_rebuild_that_fails_closes_nothing_and_drops_the_old_worker', { events: [raw(500, ''), json(200, {})], steps: [{ op: 'reconnect', epoch: 7, badBase: 'not a url', writes: [note('a', 'u1')], afterMs: 200 }, post(0, [note('b', 'u2')])] });
 handled('closing_while_the_rebuild_is_awaited', { steps: [post(1, [note('a', 'u1')]), { op: 'reconnect', epoch: 7, thenClose: true }, post(0, [note('b', 'u2')])] });
 
+// What the worker client does while a request is open: the order the server saw each request start (`in`) and end
+// (`out`). The server holds the first events post until the thing the case waits for has happened, so the order is
+// the order of the client, not of a race.
+async function concurrencyCase(mode) {
+  const log = [];
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  let eventsSeen = 0;
+  const server = await listen((req, res) => {
+    const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
+    req.resume();
+    req.on('end', async () => {
+      if (route === '/worker/events') {
+        eventsSeen += 1;
+        log.push('events in');
+        if (eventsSeen === 1) await held;
+        log.push('events out');
+      } else if (route === '/worker/heartbeat') {
+        log.push('heartbeat in');
+      }
+      res.setHeader('content-type', 'application/json');
+      res.end('{}');
+      if (route === '/worker/heartbeat') {
+        log.push('heartbeat out');
+        if (mode === 'heartbeat_during_upload') release();
+      }
+    });
+  });
+  const handle = await bridge.attachBridgeSession({ sessionId: 'cse_abc', apiBaseUrl: `http://127.0.0.1:${portOf(server)}`, ingressToken: 'tok', outboundOnly: true, epoch: 2, heartbeatIntervalMs: 200 });
+  const note = (uuid) => ({ type: 'user', uuid, message: { role: 'user', content: 'x' } });
+  handle.write(note('u1'));
+  if (mode === 'heartbeat_during_upload') {
+    await until(() => log.length >= 4, 3000);
+  } else {
+    await until(() => log.includes('events in'), 1500);
+    handle.write(note('u2'));
+    release();
+    await until(() => log.filter((line) => line === 'events out').length === 2, 3000);
+  }
+  try { handle.close(); } catch {}
+  await stop(server);
+  return { name: mode, mode, log };
+}
+
 // `--only=<case name>` records just that case, as many times as `--times=<n>` says, and prints the results.
 const only = flags.find((flag) => flag.startsWith('--only='))?.slice('--only='.length);
 if (only !== undefined) {
@@ -1250,7 +1294,7 @@ if (only !== undefined) {
   process.exit(0);
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [], handle: [], network: [], fetch_failures: [] };
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], control: [], attach: [], handle: [], network: [], fetch_failures: [], concurrency: [] };
 // `--section=<name>` records only that section and keeps every other part of the existing goldens file as it is.
 const sectionOnly = flags.find((flag) => flag.startsWith('--section='))?.slice('--section='.length);
 const existing = sectionOnly === undefined ? null : JSON.parse(fs.readFileSync(out, 'utf8'));
@@ -1276,8 +1320,11 @@ for (const spec of sectionOnly === undefined ? cases.control : []) {
 if (existing === null) {
   for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
   for (const mode of ['destroy', 'truncated', 'hang']) goldens.fetch_failures.push(await fetchFailureCase(mode));
+  for (const mode of ['heartbeat_during_upload', 'events_while_a_batch_is_open']) goldens.concurrency.push(await concurrencyCase(mode));
 } else {
   for (const key of ['pure', 'control', 'network', 'fetch_failures']) goldens[key] = existing[key];
+  if (sectionOnly === 'concurrency') for (const mode of ['heartbeat_during_upload', 'events_while_a_batch_is_open']) goldens.concurrency.push(await concurrencyCase(mode));
+  else goldens.concurrency = existing.concurrency ?? [];
 }
 fs.rmSync(work, { recursive: true, force: true });
 

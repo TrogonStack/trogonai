@@ -1,5 +1,6 @@
 //! The worker client lets calls overlap the way the upstream timers and uploads do: a heartbeat goes out while an
-//! upload waits for its answer, and events are accepted while a batch is in flight.
+//! upload waits for its answer, and events are accepted while a batch is in flight. The orders are the ones the pinned
+//! upstream bundle produced (the `concurrency` section of the recorded goldens).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,6 +12,18 @@ use tokio::sync::Notify;
 use trogon_claude_agent_sdk::{ClientEvent, NonOrigin403, SensitiveString, TokioPacing, WorkerClient, WorkerConfig};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+const GOLDENS: &str = include_str!("fixtures/bridge_worker/goldens.json");
+
+/// The order of requests the upstream bundle showed for the case `mode`.
+fn recorded(mode: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let goldens: serde_json::Value = serde_json::from_str(GOLDENS)?;
+    let case = goldens["concurrency"]
+        .as_array()
+        .and_then(|cases| cases.iter().find(|case| case["mode"] == mode))
+        .ok_or("no such recorded case")?;
+    Ok(serde_json::from_value(case["log"].clone())?)
+}
 
 /// What the server saw, in the order it saw it: `<path> in` when a request arrived, `<path> out` when it was answered.
 type Log = Arc<Mutex<Vec<String>>>;
@@ -58,11 +71,12 @@ async fn server(log: Log, beat: Arc<Notify>, release: Arc<Notify>) -> Result<Str
                 let name = path
                     .rsplit_once("/v1/code/sessions/cse_abc")
                     .map_or(path.as_str(), |(_, rest)| rest);
+                let name = name.trim_start_matches("/worker/");
                 note(&log, format!("{name} in"));
-                if name == "/worker/heartbeat" {
+                if name == "heartbeat" {
                     beat.notify_one();
                 }
-                if name == "/worker/events" {
+                if name == "events" {
                     release.notified().await;
                 }
                 note(&log, format!("{name} out"));
@@ -120,15 +134,7 @@ async fn heartbeat_runs_while_an_upload_is_in_flight() -> TestResult {
         tokio::time::timeout(Duration::from_secs(10), async { tokio::join!(upload, beating) }).await?;
     assert!(matches!(uploaded, Ok(true)));
     assert!(outcome.is_ok());
-    assert_eq!(
-        seen(&log),
-        [
-            "/worker/events in",
-            "/worker/heartbeat in",
-            "/worker/heartbeat out",
-            "/worker/events out"
-        ]
-    );
+    assert_eq!(seen(&log), recorded("heartbeat_during_upload")?);
     Ok(())
 }
 
@@ -150,14 +156,6 @@ async fn events_are_accepted_while_a_batch_is_in_flight() -> TestResult {
         tokio::time::timeout(Duration::from_secs(10), async { tokio::join!(upload, writing) }).await?;
     assert!(matches!(uploaded, Ok(true)));
     assert!(accepted.is_ok());
-    assert_eq!(
-        seen(&log),
-        [
-            "/worker/events in",
-            "/worker/events out",
-            "/worker/events in",
-            "/worker/events out"
-        ]
-    );
+    assert_eq!(seen(&log), recorded("events_while_a_batch_is_open")?);
     Ok(())
 }

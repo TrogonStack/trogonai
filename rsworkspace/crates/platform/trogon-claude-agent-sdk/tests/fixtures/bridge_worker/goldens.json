@@ -479,5 +479,9 @@
 {"name":"destroy","mode":"destroy","reason":"fetch_failed:TypeError","connected":true,"closes":[]},
 {"name":"truncated","mode":"truncated","reason":null,"connected":true,"closes":[]},
 {"name":"hang","mode":"hang","reason":"fetch_failed:TimeoutError","connected":true,"closes":[]}
+],
+"concurrency": [
+{"name":"heartbeat_during_upload","mode":"heartbeat_during_upload","log":["events in","heartbeat in","heartbeat out","events out"]},
+{"name":"events_while_a_batch_is_open","mode":"events_while_a_batch_is_open","log":["events in","events out","events in","events out"]}
 ]
 }
