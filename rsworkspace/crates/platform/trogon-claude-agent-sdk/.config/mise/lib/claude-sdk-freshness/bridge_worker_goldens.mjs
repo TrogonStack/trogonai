@@ -307,6 +307,10 @@ const fullPolicy = {
   control_traffic_keeps_hold: true, empty_checkpoint_keeps_hold: true, first_turn_holds_each_call: true, settings_answers_max_wait_ms: 1000, init_max_wait_ms: 1000,
   metadata_waits_for_status: ['task_summary'], metadata_never_sent: ['recap'], metadata_max_wait_ms: 1000, cost_report_max_wait_ms: 1000, policy_version: 'v1',
 };
+// ---- control traffic: the urgent lane needs servedCallRequestsJumpQueue, which attachBridgeSession never passes ----
+// A control request, response or cancel written behind two events in flight must arrive behind them, in write order.
+const control = (via, payload) => ({ via, payload });
+const permission = { type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'tu1' } };
 const served = (name, spec) => add('served', name, { epoch: 6, interval: 100, prompt: true, gated: true, ...spec });
 const burst3 = post(2, [note('b', 'u2'), note('c', 'u3'), note('d', 'u4')]);
 served('a_served_policy_holds_nothing', { steps: [beat(policy()), running, post(1, [note('a', 'u1')]), burst3, post(1, [note('e', 'u5')])] });
@@ -323,6 +327,12 @@ served('reports_that_flip_between_watched_and_not_hold_nothing', { events: [subs
 served('an_unreadable_report_holds_nothing', { events: [json(200, { has_subscribers: 'no' }), json(200, { has_subscribers: null })], steps: [running, post(1, [note('a', 'u1')]), burst3, post(1, [note('e', 'u5')])] });
 served('a_served_policy_and_an_unwatched_session_hold_nothing', { events: [subscribers(false), subscribers(false), subscribers(true)], steps: [beat(policy()), running, post(1, [note('a', 'u1')]), burst3, post(2, [note('e', 'u5'), thinking('t1')]), post(1, [note('f', 'u6')])] });
 served('a_full_policy_and_an_unwatched_session_hold_nothing', { events: [subscribers(false)], steps: [beat(json(200, { event_flush_policy: fullPolicy })), running, post(1, [note('a', 'u1')]), burst3, post(1, [note('e', 'u5')])] });
+served('a_control_request_does_not_jump_the_queue', { steps: [running, post(1, [note('a', 'u1')]), post(2, [note('b', 'u2'), note('c', 'u3'), control('sendControlRequest', permission)])] });
+served('a_control_request_first_goes_out_alone_in_order', { steps: [running, post(2, [control('sendControlRequest', permission), note('b', 'u2'), note('c', 'u3')])] });
+served('a_control_response_does_not_jump_the_queue', { steps: [running, post(1, [note('a', 'u1')]), post(2, [note('b', 'u2'), note('c', 'u3'), control('sendControlResponse', { type: 'control_response', response: { subtype: 'success', request_id: 'r1', response: { behavior: 'allow' } } })])] });
+served('a_control_cancel_does_not_jump_the_queue', { steps: [running, post(1, [note('a', 'u1')]), post(2, [note('b', 'u2'), note('c', 'u3'), control('sendControlCancelRequest', { type: 'control_cancel_request', request_id: 'r1' })])] });
+served('a_request_with_a_held_model_call_policy_does_not_jump_the_queue', { steps: [beat(policy({ hold_across_model_calls: true, max_age_ms: 60000 })), running, post(1, [note('a', 'u1')]), post(2, [note('b', 'u2'), note('c', 'u3'), control('sendControlRequest', permission)])] });
+served('the_handle_reaches_no_internal_hooks', { handleKeys: true, steps: [running] });
 
 // ---- runner ----
 const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq', 'x-ccr-upload-attempt']);
@@ -393,7 +403,10 @@ async function run(spec) {
         const seen = () => requests.filter((r) => r.path.endsWith('/worker/events')).length;
         const start = seen();
         const wroteAt = Date.now();
-        for (const item of step.writes) handle.write(item);
+        for (const item of step.writes) {
+          if (item.via === undefined) handle.write(item);
+          else handle[item.via](item.via === 'sendControlCancelRequest' ? item.payload.request_id : item.payload);
+        }
         await until(() => seen() >= start + step.expect, 12000);
         if (spec.prompt && Date.now() - wroteAt > 600) throw new Error(`${spec.name}: a post was held for ${Date.now() - wroteAt} ms`);
         if (seen() < start + step.expect) throw new Error(`${spec.name}: expected ${step.expect} event posts`);
@@ -433,6 +446,7 @@ async function run(spec) {
       result.quiet = count('/worker/heartbeat') === seen;
       if (result.quiet !== spec.quiet) throw new Error(`${spec.name}: expected quiet=${spec.quiet}`);
     }
+    if (spec.handleKeys) result.handle_keys = Object.keys(handle).sort();
     result.connected = handle.isConnected();
     result.epoch = handle.getEpoch();
   }

@@ -590,6 +590,8 @@ async fn post_events(
 ) -> Result<Result<(), MismatchReason>, Box<dyn std::error::Error>> {
     let mut events = Vec::new();
     for item in queue(step, "writes") {
+        // A write through one of the handle's control methods is recorded as `{via, payload}`.
+        let item = item.get("payload").cloned().unwrap_or(item);
         let mut payload = item.as_object().cloned().ok_or("event")?;
         payload.insert("session_id".to_owned(), json!("cse_abc"));
         let ephemeral = field(&item, "subtype").as_str() == Some("thinking_tokens");
@@ -662,7 +664,66 @@ async fn client_events_match_the_upstream_client() -> TestResult {
 /// recorded runs leaves at once, the same as the runs without those answers.
 #[tokio::test]
 async fn served_hold_inputs_hold_nothing_like_the_upstream_client() -> TestResult {
-    replay("served", 15).await
+    replay("served", 20).await
+}
+
+/// `servedCallRequestsJumpQueue` is never passed to the client, so a control request, response or cancel written
+/// behind events in flight is posted behind them, in write order, and not ahead of them as the urgent lane would. The
+/// replay above compares every request; this pins the order the recorded runs show.
+#[test]
+fn control_traffic_is_posted_in_write_order() -> TestResult {
+    let goldens: Value = serde_json::from_str(GOLDENS)?;
+    let cases = goldens["served"].as_array().ok_or("missing section")?;
+    let mut seen = 0;
+    for case in cases {
+        let name = field(case, "name").as_str().unwrap_or_default();
+        if !name.starts_with("a_control_") || name.contains("first") {
+            continue;
+        }
+        let posts: Vec<&Value> = field(case, "requests")
+            .as_array()
+            .ok_or("requests")?
+            .iter()
+            .filter(|request| field(request, "path").as_str() == Some("/worker/events"))
+            .collect();
+        let last = posts.last().ok_or("a second post")?;
+        let body: Value = serde_json::from_str(field(last, "body").as_str().ok_or("body")?)?;
+        let types: Vec<&str> = body["events"]
+            .as_array()
+            .ok_or("events")?
+            .iter()
+            .map(|event| event["payload"]["type"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(types.len(), 2, "{name}");
+        assert_eq!(types[0], "assistant", "{name}");
+        assert!(types[1].starts_with("control_"), "{name}: {types:?}");
+        seen += 1;
+    }
+    assert!(seen >= 3);
+    Ok(())
+}
+
+/// The handle `attachBridgeSession` returns has no method that reaches the internal events uploader
+/// (`getInternalEventWriter`) or notes an unrun event (`noteUnrun`), so neither is ever used.
+#[test]
+fn the_handle_offers_no_internal_hooks() -> TestResult {
+    let goldens: Value = serde_json::from_str(GOLDENS)?;
+    let cases = goldens["served"].as_array().ok_or("missing section")?;
+    let case = cases
+        .iter()
+        .find(|case| field(case, "name").as_str() == Some("the_handle_reaches_no_internal_hooks"))
+        .ok_or("the case")?;
+    let keys: Vec<&str> = field(case, "handle_keys")
+        .as_array()
+        .ok_or("handle_keys")?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(keys.contains(&"reportDelivery"));
+    for key in ["getInternalEventWriter", "noteUnrun", "takeUnrun"] {
+        assert!(!keys.contains(&key), "{key}");
+    }
+    Ok(())
 }
 
 #[test]
