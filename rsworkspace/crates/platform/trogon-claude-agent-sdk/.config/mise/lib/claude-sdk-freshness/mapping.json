@@ -2068,6 +2068,7 @@
         "InMemorySessionStore",
         "SessionKey",
         "SessionKey::checked",
+        "SessionProjectKey::checked",
         "SessionSubpath::checked",
         "SessionEntry",
         "InMemorySessionStore::with_clock",
@@ -2131,6 +2132,38 @@
         {
           "path": "tests/session_values.rs",
           "name": "session_keys_take_any_identifier_as_upstream_does_and_checked_rejects_unsafe_ones"
+        },
+        {
+          "path": "tests/session_project_key.rs",
+          "name": "explicit_project_keys_take_any_name_as_upstream_does_and_checked_rejects_unsafe_ones"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_transcript_path_keys_match_the_typescript_sdk"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_python_dialect_keys_match_the_python_sdk_and_differ_from_typescript_at_drive_like_parts"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_typescript_resume_guard_matches_the_sdk"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_python_resume_guard_matches_the_sdk_and_checked_only_adds_rust_rules"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "windows_transcript_paths_outside_the_projects_or_misshapen_report_typed_errors"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "checked_subpath_reads_drives_as_the_platform_does"
+        },
+        {
+          "path": "tests/session_key_windows.rs",
+          "name": "directory_names_fold_as_both_sdks_do_on_windows_only"
         },
         {
           "path": "tests/session_values.rs",

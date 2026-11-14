@@ -555,14 +555,27 @@ backend or use `InMemorySessionStore`. Entries are keyed by project/session and
 optional subagent path; the in-memory backend deduplicates stable UUIDs.
 [The store example](examples/session_store.rs) needs no Claude or network.
 
-As upstream, `SessionKey::new` and `SessionSubpath::new` take any text, and
-`SessionKey::from_transcript_path` resolves a relative path or projects
-directory against the working directory and validates nothing in the path
-beyond its shape. Upstream checks a subpath only where resume turns it into a
-file, and each SDK checks it its own way, so resume applies the rule of the
-selected dialect. `SessionKey::checked` and `SessionSubpath::checked` are the
-opt-in constructors that reject an id or subpath that is not a safe file name
-component, with typed errors.
+As upstream, `SessionKey::new`, `SessionProjectKey::new` and
+`SessionSubpath::new` take any text, and `SessionKey::from_transcript_path`
+resolves a relative path or projects directory against the working directory
+and validates nothing in the path beyond its shape. On Windows the transcript
+path compares case-insensitively, accepts both separators, drives and UNC
+shares, and keeps the case of the names it returns. Upstream checks a subpath
+only where resume turns it into a file, and each SDK checks it its own way, so
+resume applies the rule of the selected dialect. `SessionKey::checked`,
+`SessionProjectKey::checked` and `SessionSubpath::checked` are the opt-in
+constructors that reject an id, project key or subpath that is not a safe file
+name component, with typed errors; `SessionSubpath::checked` reads a drive
+prefix as the platform does (any character before a colon on Windows, a letter
+on POSIX) and only on Windows also rejects empty components and reserved device
+names. On Windows Python reads a part such as `a:x` as a drive, so
+`SessionKey::from_transcript_path_with` and the mirror give a Python-dialect
+store the key CPython 3.12 derives; TypeScript is the default.
+`SessionStoreOptions::project_key` is an opt-in override that defaults to `None`,
+which derives the key from the working directory exactly as upstream does
+(TypeScript's `CLAUDE_CODE_PROJECT_DIR_NAME` is its only upstream analogue). A
+key you set is joined to the projects directory as given, so build it with
+`SessionProjectKey::checked` when it does not come from trusted code.
 
 Mirroring follows CLI local writes. Each result waits for its own store barrier
 while controls remain serviceable. Failures appear as `mirror_error` messages

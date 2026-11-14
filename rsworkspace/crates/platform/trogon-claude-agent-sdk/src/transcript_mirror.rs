@@ -146,6 +146,7 @@ impl MirrorFlush {
 #[derive(Clone)]
 pub struct TranscriptMirror {
     projects_dir: PathBuf,
+    dialect: crate::SummaryDialect,
     commands: mpsc::UnboundedSender<MirrorCommand>,
     flush_timeout: Option<std::time::Duration>,
     owner: Arc<WorkerOwner>,
@@ -176,6 +177,7 @@ impl TranscriptMirror {
         ));
         Self {
             projects_dir,
+            dialect: options.dialect,
             commands,
             flush_timeout: options.limits.flush_timeout.map(crate::Timeout::as_duration),
             owner: Arc::new(WorkerOwner(worker.abort_handle())),
@@ -187,7 +189,7 @@ impl TranscriptMirror {
     }
 
     pub fn enqueue(&self, file_path: &Path, entries: Vec<SessionEntry>) -> Result<(), MirrorEnqueueError> {
-        let key = SessionKey::from_transcript_path(file_path, &self.projects_dir)?;
+        let key = SessionKey::from_transcript_path_with(file_path, &self.projects_dir, self.dialect)?;
         if entries.is_empty() {
             return Ok(());
         }

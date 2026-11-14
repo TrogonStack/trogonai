@@ -109,7 +109,7 @@ async fn a_remote_session_mirrors_its_transcript_into_an_external_store() -> Tes
     let store = Arc::new(RecordingStore::default());
     let mut store_options = SessionStoreOptions::from(store.clone() as Arc<dyn SessionStore>);
     store_options.config_directory = Some(directory.path().to_path_buf());
-    store_options.project_key = Some(SessionProjectKey::new("remote-project")?);
+    store_options.project_key = Some(SessionProjectKey::new("remote-project"));
     let mut options = ClaudeAgentOptions::default();
     options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(5)));
     options.session_store = Some(store_options);

@@ -19,7 +19,7 @@ impl SessionSubpath {
     /// A subpath that stays inside the session directory when joined to it.
     pub fn checked(value: impl Into<String>) -> Result<Self, SessionSubpathError> {
         let value = value.into();
-        if !is_safe(&value) {
+        if !is_safe(&value, cfg!(windows)) {
             return Err(SessionSubpathError);
         }
         Ok(Self(value))
@@ -30,20 +30,33 @@ impl SessionSubpath {
     }
 }
 
-fn is_safe(value: &str) -> bool {
-    if value.is_empty() || value.starts_with(['/', '\\']) || value.contains('\0') || has_drive_prefix(value) {
+/// Upstream Python's resume guard, without the file-system resolution it ends with: not empty, no leading separator,
+/// no NUL, no drive (any character before a colon, as `ntpath.splitdrive` reads it, on every host) and no `.` or `..`
+/// component on either separator.
+pub(crate) fn python_accepts(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with(['/', '\\'])
+        && !value.contains('\0')
+        && value.chars().nth(1) != Some(':')
+        && value.split(['/', '\\']).all(|part| part != "." && part != "..")
+}
+
+/// The [`SessionSubpath::checked`] rule, which is Rust's own and follows the platform. A drive prefix is a letter and
+/// a colon on POSIX and, as `ntpath.splitdrive` reads it, any character and a colon on Windows. Windows also rejects
+/// empty components and names it cannot create as files.
+pub(crate) fn is_safe(value: &str, windows: bool) -> bool {
+    let drive = if windows {
+        value.chars().nth(1) == Some(':')
+    } else {
+        let mut chars = value.chars();
+        matches!((chars.next(), chars.next()), (Some(drive), Some(':')) if drive.is_ascii_alphabetic())
+    };
+    if drive || value.is_empty() || value.starts_with(['/', '\\']) || value.contains('\0') {
         return false;
     }
     value.split(['/', '\\']).all(|part| {
-        part != "."
-            && part != ".."
-            && (!cfg!(windows) || (!part.is_empty() && crate::session_path_component::is_safe(part)))
+        part != "." && part != ".." && (!windows || (!part.is_empty() && crate::session_path_component::is_safe(part)))
     })
-}
-
-fn has_drive_prefix(value: &str) -> bool {
-    let mut chars = value.chars();
-    matches!((chars.next(), chars.next()), (Some(drive), Some(':')) if drive.is_ascii_alphabetic())
 }
 
 impl std::fmt::Display for SessionSubpath {

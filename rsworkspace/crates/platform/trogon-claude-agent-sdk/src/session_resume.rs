@@ -548,22 +548,16 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
         }
         let session_dir = project_dir.join(self.id.as_str());
         for subpath in subpaths {
-            if self.ts && unsafe_subpath_ts(&subpath, &session_dir) {
+            if self.ts && unsafe_subpath_ts(&subpath, &session_dir, cfg!(windows)) {
                 tracing::warn!(%subpath, "skipping unsafe subpath from list_subkeys");
                 continue;
             }
-            let subpath = if self.ts {
-                // `Jtt` writes every subpath its check above lets through, `./agent` and `C:agent` included.
-                SessionSubpath::new(subpath)
-            } else {
-                match SessionSubpath::checked(subpath) {
-                    Ok(subpath) => subpath,
-                    Err(error) => {
-                        tracing::warn!(%error, "skipping unsafe subpath from list_subkeys");
-                        continue;
-                    }
-                }
-            };
+            if !self.ts && !crate::session_subpath::python_accepts(&subpath) {
+                tracing::warn!(%subpath, "skipping unsafe subpath from list_subkeys");
+                continue;
+            }
+            // `Jtt` writes every subpath its check above lets through, `./agent` and `C:agent` included.
+            let subpath = SessionSubpath::new(subpath);
             let subkey = key.clone().with_subpath(subpath.clone());
             let entries = timeout(options.limits.load_timeout.as_duration(), options.store.load(&subkey))
                 .await
@@ -665,15 +659,22 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
     }
 }
 
-/// Upstream TypeScript `Jtt` safety check: a subpath must be non-empty, not absolute on the host (so a leading
+/// Upstream TypeScript `Jtt` safety check: a subpath must be non-empty, not absolute on the platform (so a leading
 /// backslash is an ordinary character on POSIX), free of `..` segments and resolve inside the session directory.
-fn unsafe_subpath_ts(subpath: &str, session_dir: &Path) -> bool {
-    if subpath.is_empty()
-        || Path::new(subpath).is_absolute()
-        || (cfg!(windows) && subpath.starts_with(['/', '\\']))
-        || subpath.split(['/', '\\']).any(|segment| segment == "..")
-    {
+/// `windows` selects the `path.win32` rules, which run on any host.
+pub(crate) fn unsafe_subpath_ts(subpath: &str, session_dir: &Path, windows: bool) -> bool {
+    let absolute = if windows {
+        crate::windows_path::is_absolute(subpath)
+    } else {
+        Path::new(subpath).is_absolute()
+    };
+    if subpath.is_empty() || absolute || subpath.split(['/', '\\']).any(|segment| segment == "..") {
         return true;
+    }
+    if windows {
+        let directory = session_dir.to_string_lossy();
+        let resolved = crate::windows_path::resolve_to_string(&directory, &format!("{subpath}.jsonl"));
+        return !resolved.starts_with(&format!("{directory}\\"));
     }
     let resolved = lexical_resolve(&session_dir.join(format!("{subpath}.jsonl")));
     let mut prefix = session_dir.as_os_str().to_os_string();

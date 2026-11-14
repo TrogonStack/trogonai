@@ -168,6 +168,8 @@ pub struct SessionStoreOptions {
     /// [`SessionError::UnsafeConfigPath`](crate::SessionError::UnsafeConfigPath). Both upstream SDKs join a relative
     /// path as given, so the default accepts it.
     pub require_absolute_config_paths: bool,
+    /// Opt-in override of the project key a store-backed resume loads from. `None`, the default, derives it from the
+    /// working directory as both upstream SDKs do. A key set here is joined to the projects directory as given.
     pub project_key: Option<SessionProjectKey>,
     pub limits: SessionStoreLimits,
     pub flush: SessionStoreFlush,

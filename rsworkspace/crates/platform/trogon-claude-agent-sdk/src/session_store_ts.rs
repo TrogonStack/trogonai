@@ -37,7 +37,7 @@ use crate::{
 /// `Wn(directory)` together with the canonical path `CD(directory)` it was derived from.
 pub(crate) fn project(directory: Option<&Path>) -> Result<(SessionProjectKey, String), SessionStoreHelperError> {
     let canonical = canonicalize_lenient_in(directory.unwrap_or_else(|| Path::new(".")), SummaryDialect::TypeScript);
-    let key = SessionProjectKey::new(project_name_ts(&canonical))?;
+    let key = SessionProjectKey::new(project_name_ts(&canonical));
     Ok((key, canonical))
 }
 

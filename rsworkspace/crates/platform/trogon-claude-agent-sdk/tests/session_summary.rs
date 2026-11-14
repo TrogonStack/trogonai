@@ -21,7 +21,7 @@ const SESSION: &str = "123e4567-e89b-42d3-a456-426614174000";
 
 fn key() -> Result<SessionKey, Box<dyn Error>> {
     Ok(SessionKey::new(
-        SessionProjectKey::new("project")?,
+        SessionProjectKey::new("project"),
         SessionId::from(SESSION),
     ))
 }

@@ -1413,7 +1413,7 @@ fn configured_store(
     let mut configured = options()?;
     let mut store_options = SessionStoreOptions::from(store);
     store_options.config_directory = Some(directory.to_path_buf());
-    store_options.project_key = Some(SessionProjectKey::new("project")?);
+    store_options.project_key = Some(SessionProjectKey::new("project"));
     store_options.limits.append_timeout = Timeout::new(Duration::from_secs(10));
     store_options.limits.flush_timeout = Some(Timeout::new(Duration::from_millis(100)));
     configured.cwd = Some(directory.to_path_buf());
@@ -1477,7 +1477,7 @@ async fn m13_s19_unmappable_and_oversized_mirror_frames_are_never_rejected() -> 
     cli.send(eager_mirror_frame(directory.path())).await?;
     control_barrier(&client, &mut cli).await?;
     cli.disconnect(client).await?;
-    let key = SessionKey::new(SessionProjectKey::new("project")?, "memory-session".into());
+    let key = SessionKey::new(SessionProjectKey::new("project"), "memory-session".into());
     let stored = store.load(&key).await?.ok_or("oversized frame was not mirrored")?;
     assert_eq!(stored.len(), 2);
     assert_ne!(events.load(Ordering::SeqCst), 0);
