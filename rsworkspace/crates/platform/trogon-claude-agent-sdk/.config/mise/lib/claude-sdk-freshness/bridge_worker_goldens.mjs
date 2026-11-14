@@ -140,7 +140,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -240,6 +240,16 @@ add('auth', 'edge_403_never_exhausts', { epoch: 2, interval: 30, beat: [edgeRefu
 add('auth', 'non_origin_401_still_counts', { epoch: 2, interval: 30, beat: [edgeRefusal(401)], waitClose: true });
 add('auth', 'non_origin_403_does_not_reset_the_count', { epoch: 2, interval: 30, beat: [...Array(9).fill(originRefusal(403)), ...Array(5).fill(raw(403, '')), originRefusal(403)], waitClose: true });
 
+const burst = (expect, ...ops) => ({ op: 'burst', expect, ops });
+add('queue', 'burst_merges_metadata_while_a_state_is_in_flight', { epoch: 6, steps: [burst(2, { state: 'running' }, { metadata: { a: 1 } }, { metadata: { b: 2 } }, { metadata: { a: 3 } })] });
+add('queue', 'burst_of_states_keeps_the_last_one_waiting', { epoch: 6, steps: [burst(2, { state: 'running' }, { state: 'requires_action' }, { state: 'idle' })] });
+add('queue', 'failures_retry_with_a_doubling_delay', { epoch: 6, puts: [json(200, {}), raw(500, ''), raw(429, '', [['retry-after', '3']]), raw(503, ''), json(200, {})], retryBases: [500, 1000, 2000], steps: [burst(4, { state: 'running' })] });
+add('queue', 'refused_state_is_dropped', { epoch: 6, puts: [json(200, {}), raw(400, ''), json(200, {})], steps: [burst(1, { state: 'running' }), burst(1, { state: 'idle' })] });
+add('queue', 'refused_metadata_is_dropped', { epoch: 6, puts: [json(200, {}), raw(413, ''), json(200, {})], steps: [burst(1, { metadata: { a: 1 } }), burst(1, { metadata: { b: 1 } })] });
+add('queue', 'refused_mixed_patch_requeues_the_status', { epoch: 6, puts: [json(200, {}), json(200, {}), raw(422, ''), json(200, {})], steps: [burst(3, { state: 'running' }, { state: 'idle' }, { metadata: { a: 1 } })] });
+add('queue', 'refused_mixed_patch_requeues_owed_metadata', { epoch: 6, puts: [json(200, {}), json(200, {}), raw(422, ''), json(200, {})], steps: [burst(4, { state: 'running' }, { state: 'idle' }, { metadata: { plan_doc: 'x', model: 'm' } })] });
+add('queue', 'a_later_patch_joins_the_retry', { epoch: 6, puts: [json(200, {}), raw(500, ''), json(200, {})], steps: [burst(2, { state: 'running' }, { metadata: { a: 1 }, afterMs: 100 })] });
+
 // ---- runner ----
 const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq']);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -263,7 +273,7 @@ async function run(spec) {
       const headers = [];
       for (let i = 0; i < req.rawHeaders.length; i += 2) if (KEPT.has(req.rawHeaders[i].toLowerCase())) headers.push([req.rawHeaders[i], req.rawHeaders[i + 1]]);
       const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
-      if (!(req.method === 'GET' && route === '/worker')) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString() });
+      if (!(req.method === 'GET' && route === '/worker')) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: Date.now() });
       let response = json(200, {});
       if (route === '/worker/landing') response = pick('landing');
       else if (route === '/worker/register') response = pick('register');
@@ -294,6 +304,16 @@ async function run(spec) {
     await until(() => count('/worker') + count('/worker/register') > 0 && requests.some((r) => r.method === 'PUT') || closes.length > 0, 8000);
     for (const step of spec.steps ?? []) {
       const before = requests.filter((r) => r.method === 'PUT').length;
+      if (step.op === 'burst') {
+        for (const item of step.ops) {
+          if (item.afterMs) await sleep(item.afterMs);
+          if (item.state !== undefined) handle.reportState(item.state);
+          else handle.reportMetadata(item.metadata);
+        }
+        await until(() => requests.filter((r) => r.method === 'PUT').length >= before + step.expect, 12000);
+        await sleep(250);
+        continue;
+      }
       if (step.op === 'state') handle.reportState(step.state);
       else handle.reportMetadata(step.value);
       if (step.sends) await until(() => requests.filter((r) => r.method === 'PUT').length > before, 3000);
@@ -321,7 +341,14 @@ async function run(spec) {
     kept = requests.filter((r) => !r.path.endsWith('/worker/heartbeat') || ++seen <= limit);
   }
   result.beats = kept.filter((r) => r.path.endsWith('/worker/heartbeat')).length;
-  result.requests = kept.map((r) => ({ ...r, path: r.path.replace(/^\/v1\/code\/sessions\/cse_abc/, '') }));
+  if (spec.retryBases !== undefined) {
+    const puts = requests.filter((r) => r.method === 'PUT').slice(1);
+    const gaps = puts.slice(1).map((r, i) => r.at - puts[i].at);
+    const ok = gaps.length === spec.retryBases.length && gaps.every((gap, i) => gap >= spec.retryBases[i] - 5 && gap < spec.retryBases[i] + 500 + 400);
+    if (!ok) throw new Error(`${spec.name}: retry gaps ${gaps} outside ${spec.retryBases}`);
+    result.retry_base_ms = spec.retryBases;
+  }
+  result.requests = kept.map(({ at, ...r }) => ({ ...r, path: r.path.replace(/^\/v1\/code\/sessions\/cse_abc/, '') }));
   result.closes = [...closes];
   result.reason = reasons[0] ?? null;
   try { handle?.close(); } catch {}
@@ -404,8 +431,8 @@ async function fetchFailureCase(mode) {
   return result;
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], network: [], fetch_failures: [] };
-for (const section of ['register', 'init', 'state', 'heartbeat', 'auth']) {
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], network: [], fetch_failures: [] };
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
 for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));

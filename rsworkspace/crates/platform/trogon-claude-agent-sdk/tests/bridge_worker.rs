@@ -323,9 +323,10 @@ async fn run_case(case: &Value) -> TestResult {
         queue(case, "landing"),
     )
     .await?;
+    let pacing = Recorded::new(0.0);
     let mut worker = WorkerClient::new(
         reqwest::Client::new(),
-        Recorded::new(0.0),
+        pacing.clone(),
         WorkerConfig {
             session_access_token: text(field(case, "session_token")).map(SensitiveString::from),
             ..config(&base, "tok")
@@ -371,6 +372,15 @@ async fn run_case(case: &Value) -> TestResult {
     }
     if connected {
         for step in field(case, "steps").as_array().into_iter().flatten() {
+            if field(step, "op").as_str() == Some("burst") {
+                match burst(&mut worker, step).await? {
+                    Ok(()) => continue,
+                    Err(reason) => {
+                        ending = Ending::mismatch(reason);
+                        break;
+                    }
+                }
+            }
             let outcome = match field(step, "op").as_str() {
                 Some("state") => {
                     let state = state_named(field(step, "state").as_str().unwrap_or_default())?;
@@ -410,6 +420,11 @@ async fn run_case(case: &Value) -> TestResult {
     if let Some(expected) = field(case, "epoch").as_i64() {
         assert_eq!(worker.epoch(), expected, "{name} epoch");
     }
+    if let Some(bases) = field(case, "retry_base_ms").as_array() {
+        let waited: Vec<u128> = pacing.delays().iter().map(Duration::as_millis).collect();
+        let want: Vec<u128> = bases.iter().filter_map(Value::as_u64).map(u128::from).collect();
+        assert_eq!(waited, want, "{name} retry delays");
+    }
     let expected = queue(case, "requests");
     let captured = log.lock().map_err(|_| "poisoned log")?;
     assert_eq!(captured.len(), expected.len(), "{name} request count");
@@ -417,6 +432,28 @@ async fn run_case(case: &Value) -> TestResult {
         assert_request(&format!("{name} #{position}"), want, got);
     }
     Ok(())
+}
+
+/// Queues the patches of one burst, then sends them. An item that carries `afterMs` is queued while the first
+/// request is waiting to be retried.
+async fn burst(
+    worker: &mut WorkerClient<reqwest::Client, Recorded>,
+    step: &Value,
+) -> Result<Result<(), MismatchReason>, Box<dyn std::error::Error>> {
+    for item in queue(step, "ops") {
+        if item.get("afterMs").is_some()
+            && let Err(reason) = worker.pump(Some(1)).await
+        {
+            return Ok(Err(reason));
+        }
+        match item.get("state").and_then(Value::as_str) {
+            Some(state) => {
+                worker.submit_state(state_named(state)?, None);
+            }
+            None => worker.submit_metadata(field(&item, "metadata").as_object().ok_or("metadata")?),
+        }
+    }
+    Ok(worker.flush().await.map(|_| ()))
 }
 
 async fn replay(section: &str, minimum: usize) -> TestResult {
@@ -456,6 +493,11 @@ async fn heartbeats_match_the_upstream_client() -> TestResult {
 #[tokio::test]
 async fn token_expiry_and_refusal_sources_match_the_upstream_client() -> TestResult {
     replay("auth", 14).await
+}
+
+#[tokio::test]
+async fn queued_reports_match_the_upstream_client() -> TestResult {
+    replay("queue", 8).await
 }
 
 #[test]
