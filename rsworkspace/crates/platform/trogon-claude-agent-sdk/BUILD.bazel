@@ -164,6 +164,7 @@ workspace_crate(
         "golden_inbound_control": {
             "compile_data": glob([
                 "tests/fixtures/auth_callbacks/*.json",
+                "tests/fixtures/permission_suggestions/*.json",
                 "tests/support/*.rs",
             ]),
             "data": [":claude_sdk_relay"],

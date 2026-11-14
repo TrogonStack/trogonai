@@ -110,6 +110,7 @@ mod options;
 mod output_schema;
 mod permission;
 mod permission_mode;
+mod permission_suggestions;
 mod permission_update;
 mod plugin;
 mod prewarm;
