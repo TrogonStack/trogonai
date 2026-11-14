@@ -237,3 +237,45 @@ fn the_body_carries_the_epoch_and_flags_only_the_live_view_rows() {
         "an empty batch has no rows"
     );
 }
+
+#[test]
+fn a_closed_queue_counts_what_was_waiting_and_what_came_after() {
+    let mut queue = EventQueue::default();
+    queue.enqueue(Vec::new());
+    assert_eq!(queue.pending_count(), 0);
+    queue.enqueue(vec![event("a"), event("b")]);
+    assert_eq!(queue.pending_count(), 2);
+    assert_eq!(queue.close(false), 2);
+    assert_eq!(queue.pending_count(), 2, "the count is the one at the close");
+    queue.enqueue(vec![event("c")]);
+    assert_eq!(queue.handed_over_after_close(), 1);
+    assert!(
+        queue.take_undelivered().is_empty(),
+        "a close without retain keeps nothing"
+    );
+    assert_eq!(queue.close(true), 0, "a second close does nothing");
+}
+
+#[test]
+fn an_answer_with_no_batch_in_flight_changes_nothing() {
+    let mut queue = EventQueue::default();
+    assert_eq!(queue.keep_only(|_| false), 0);
+    queue.failed(0.0, None, true);
+    assert_eq!(queue.poll(), EventNext::Idle);
+    assert!(queue.is_idle());
+    assert!(queue.in_flight_events().is_empty());
+}
+
+#[test]
+fn a_cut_batch_with_no_answer_is_measured_again_and_resent() -> TestResult {
+    let mut queue = EventQueue::default();
+    queue.enqueue(vec![event("a"), thinking()]);
+    sends(queue.poll())?;
+    assert_eq!(queue.keep_only(|event| !event.ephemeral), 1);
+    queue.failed(0.0, None, true);
+    assert_eq!(queue.poll(), EventNext::Pause(Duration::from_millis(500)));
+    let retry = sends(queue.poll())?;
+    assert_eq!(texts(&retry), vec!["a".to_owned()]);
+    assert_eq!(retry.attempt, Attempt::Resend);
+    Ok(())
+}

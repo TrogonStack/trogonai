@@ -275,9 +275,6 @@ impl PatchQueue {
             let mut marker = Patch::new();
             marker.insert("internal_metadata".to_owned(), Value::Object(alone));
             let others = subtract_patches(&owed, &marker);
-            if others.is_none() && self.pending.is_some() {
-                return;
-            }
             let source = others.as_ref().unwrap_or(&owed);
             let first = source.iter().next().map(|(group, value)| {
                 let mut single = Patch::new();
@@ -310,12 +307,8 @@ impl PatchQueue {
     /// failed patch is given its backoff, so a poll that sends or finds nothing to do leaves the sequence alone.
     pub fn poll_with(&mut self, jitter: &mut dyn FnMut() -> f64) -> Next {
         loop {
-            if self.claim.is_none() {
-                self.drain();
-                if self.claim.is_none() {
-                    return Next::Idle;
-                }
-            }
+            // `drain` only claims a patch when none is claimed yet.
+            self.drain();
             let Some(claim) = self.claim.clone() else {
                 return Next::Idle;
             };
@@ -406,9 +399,6 @@ impl PatchQueue {
     fn hands_back_without_status(&mut self, patch: &Patch) -> bool {
         if !self.closed_to_new_patches || !has_status(patch) {
             return false;
-        }
-        if self.closed {
-            return true;
         }
         self.has_dropped_something = true;
         self.cut_kept_metadata |= self

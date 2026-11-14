@@ -355,12 +355,10 @@ impl EventQueue {
     /// `retry_after_ms` is what a `429` asked for; `unanswered` is true when no answer came, which halves the byte
     /// limit from [`SHRINK_FROM_BYTES`] on.
     pub fn failed(&mut self, jitter: f64, retry_after_ms: Option<f64>, unanswered: bool) {
+        // A closed queue holds no batch in flight: `close` takes it.
         let Some(batch) = self.in_flight.take() else {
             return;
         };
-        if self.closed {
-            return;
-        }
         self.failures += 1;
         for queued in &batch.items {
             self.sent_before.insert(queued.id);
