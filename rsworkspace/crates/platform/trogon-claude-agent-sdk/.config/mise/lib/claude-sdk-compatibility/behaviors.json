@@ -57,15 +57,18 @@
         "behavior": "Both skip non-JSON lines. Python raises on a line that starts with '{' and does not parse; TypeScript logs and skips every unparseable line."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "With line framing a corrupt '{' line is a lost protocol message, such as a control_response, so skipping it silently can hang a pending request. Non-JSON noise is still skipped."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect and skips every stdout line that does not decode. ArgvStyle::Python skips only the lines that do not start with '{', fails on a corrupt '{' line with JsonDecodeError as CLIJSONDecodeError does, and drops a corrupt unterminated tail at the end of the stream as Python does."
       },
       "contracts": [
+        "shutdown_errors::e03_json_decode_error_carries_the_line_and_the_original_error",
+        "shutdown_errors::t03_a_corrupt_end_of_stream_tail_is_dropped_by_both_styles",
+        "shutdown_errors::t03_typescript_skips_a_corrupt_line_and_python_fails_on_it",
         "subprocess::s02_non_json_stdout_lines_are_skipped"
       ],
       "rust": [
-        "src/driver.rs",
-        "src/wire.rs"
+        "src/framing.rs",
+        "src/process_transport.rs"
       ]
     },
     {
@@ -1086,10 +1089,11 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "A duplicate name makes tools/list and tools/call disagree in Python; rejecting at registration is the only unambiguous outcome."
+        "reason": "TypeScript is the default: SdkTools::new rejects a repeated name with McpServer.registerTool's error. SdkTools::with_duplicates keeps every definition, lists them all and runs the last one with the name, as Python's create_sdk_mcp_server does."
       },
       "contracts": [
-        "sdk_tools::m01_exact_duplicate_tool_names_are_rejected_with_the_validated_name"
+        "sdk_tools::m01_exact_duplicate_tool_names_are_rejected_with_the_validated_name",
+        "sdk_tools::python_collections_keep_repeated_names"
       ],
       "rust": [
         "src/sdk_tools.rs"
@@ -2503,18 +2507,22 @@
         "reason": "sdk.mjs resolves a platform package instead of a bundled directory."
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "Python checks <package>/_bundled/claude (claude.exe on Windows) before any other discovery and accepts it only when it exists and is a file."
+        "verdict": "disagree",
+        "behavior": "Python checks <package>/_bundled/claude (claude.exe on Windows) before any other discovery and accepts it only when it exists and is a file. TypeScript has no bundled directory and resolves the native binary from its platform package."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A Rust crate ships no binary and has no package directory, so find_bundled_cli takes the directory that holds _bundled from the caller and is not part of connect's discovery."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and has no bundled lookup. ClaudeAgentOptions::bundled_cli_root names the directory that holds _bundled, Python's package directory, and connect then takes the bundled executable before PATH as _find_cli does."
       },
       "contracts": [
-        "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory"
+        "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory",
+        "subprocess::connect_spawns_the_bundled_cli_under_the_configured_root"
       ],
       "rust": [
-        "src/bundled_cli.rs"
+        "src/bundled_cli.rs",
+        "src/cli_discovery.rs",
+        "src/client.rs",
+        "src/options.rs"
       ]
     },
     {
@@ -2538,16 +2546,16 @@
         "behavior": "TypeScript resolves <package>-<platform>-<arch>/claude (claude.exe on win32) through Node module resolution, tries the musl variant first on musl Linux and the glibc one first otherwise, uses a dedicated linux-<arch>-android package for Android, skips a candidate whose resolution throws or whose file is missing, and fails with a message naming the platform when none is found."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Node module resolution is a ResolveNodeModule adapter with a default that searches the same relative node_modules, NODE_PATH and home or prefix directories. Musl is read from the compile target because a Rust process has no Node process report."
+        "kind": "upstream"
       },
       "contracts": [
-        "bundled_cli::linux_orders_the_libc_variants_by_preference",
-        "bundled_cli::other_platforms_have_one_package_and_only_windows_adds_exe",
-        "bundled_cli::a_resolved_path_must_exist_and_later_candidates_are_tried",
         "bundled_cli::a_miss_names_the_platform_and_the_upstream_remedy",
+        "bundled_cli::a_resolved_path_must_exist_and_later_candidates_are_tried",
+        "bundled_cli::host_target_prefers_musl_on_linux_unless_the_process_runs_against_glibc",
+        "bundled_cli::linux_orders_the_libc_variants_by_preference",
         "bundled_cli::lookup_directories_follow_node_order",
-        "bundled_cli::lookup_resolves_the_nearest_file_to_its_canonical_path"
+        "bundled_cli::lookup_resolves_the_nearest_file_to_its_canonical_path",
+        "bundled_cli::other_platforms_have_one_package_and_only_windows_adds_exe"
       ],
       "rust": [
         "src/bundled_cli.rs"
@@ -2594,12 +2602,12 @@
         "reason": "sdk.mjs derives no client app label from the executable that it spawns."
       },
       "upstream": {
-        "verdict": "agree",
-        "behavior": "A label is derived only when the SDK package pin (__cli_version__) meets the minimum, the spawned CLI is the bundled executable, and the claude.version file beside it records a version that meets the minimum. Any other CLI counts as too old, a bundled one with no readable record does too, and a failure to read never breaks connect."
+        "verdict": "disagree",
+        "behavior": "Python derives a label only when the SDK package pin (__cli_version__) meets the minimum, the spawned CLI is the bundled executable, and the claude.version file beside it records a version that meets the minimum. Any other CLI counts as too old, a bundled one with no readable record does too, and a failure to read never breaks connect. TypeScript derives no label."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "bundled_cli_derives_client_app answers the trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__. connect asks it only when ClaudeAgentOptions::client_app_derivation names a BundledCli, so TypeScript's behavior stays the default, and the label names this crate because Rust has no Python distribution metadata."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and derives no label. ClaudeAgentOptions::client_app_derivation set to ClientAppDerivation::Bundled(BundledCli) selects Python's trigger for a caller-supplied package root and pin, because a Rust crate has no package directory or __cli_version__, and the label names this crate because Rust has no Python distribution metadata."
       },
       "contracts": [
         "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
@@ -2839,7 +2847,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default dialect. ClaudeAgentOptions::SummaryDialect::Python on the session store selects Python's argv and request, and the prompt forms that exist in only one SDK (a list of texts, a prompt file) are refused in the other dialect instead of being dropped."
+        "reason": "TypeScript is the default dialect. ArgvStyle::Python selects Python's argv and request, and the prompt forms that exist in only one SDK (a list of texts, a prompt file) are refused in the other dialect instead of being dropped."
       },
       "contracts": [
         "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects",

@@ -281,6 +281,24 @@ async fn interactive_client_reuses_one_process_for_multiple_turns() -> TestResul
     Ok(())
 }
 
+/// Python's `_find_cli` takes `<package>/_bundled/claude` before anything else; `bundled_cli_root` names that
+/// directory, and the executable it holds is the one `connect` spawns.
+#[cfg(unix)]
+#[tokio::test]
+async fn connect_spawns_the_bundled_cli_under_the_configured_root() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut options = options("normal")?;
+    let fixture = options.cli_path.take().ok_or("the fixture has a path")?;
+    std::fs::create_dir(root.path().join("_bundled"))?;
+    std::os::unix::fs::symlink(fixture, root.path().join("_bundled/claude"))?;
+    options.bundled_cli_root = Some(root.path().to_path_buf());
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("bundled")).await?;
+    assert_eq!(read_result(&mut client).await?, "bundled");
+    client.disconnect().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn argv_binds_values_and_forwards_cwd() -> TestResult {
     let directory = tempfile::tempdir()?;

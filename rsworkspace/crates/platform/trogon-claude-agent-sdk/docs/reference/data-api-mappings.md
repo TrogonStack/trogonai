@@ -89,6 +89,7 @@ integrity-verified published `0.3.319` declaration archive.
 | `claude_code_marker: ClaudeCodeMarker` | removes `CLAUDECODE` | keeps inherited value |
 | `entrypoint: Option<String>` | `CLAUDE_CODE_ENTRYPOINT` | `CLAUDE_CODE_ENTRYPOINT` |
 | `client_app: Option<String>` | `CLAUDE_AGENT_SDK_CLIENT_APP` | `CLAUDE_AGENT_SDK_CLIENT_APP` |
+| `bundled_cli_root: Option<PathBuf>` | `_find_bundled_cli` (`<package>/_bundled/claude`, tried first during discovery) | none (default: no bundled lookup) |
 | `client_app_derivation: ClientAppDerivation` | `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` (bundled CLI at 999.0.0 or later; this crate's identity replaces the distribution metadata) | none |
 | `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
 | `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |

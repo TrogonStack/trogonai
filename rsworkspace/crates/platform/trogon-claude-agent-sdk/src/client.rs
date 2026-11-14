@@ -110,6 +110,7 @@ impl ClaudeSdkClient {
                 &inherited,
                 &adapters.filesystem,
                 cfg!(windows),
+                options.bundled_cli_root.as_deref(),
             )?)
         } else {
             None
