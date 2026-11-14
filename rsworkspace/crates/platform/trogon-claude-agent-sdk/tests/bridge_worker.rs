@@ -1211,7 +1211,7 @@ async fn requests_that_cannot_be_made_do_not_reach_the_service() -> TestResult {
     )?;
     let outcome = bad_token.report_metadata(&Map::new()).await;
     assert_eq!(outcome, Ok(Some(type_error())));
-    let mut relative = client("", Recorded::new(0.0))?;
+    let relative = client("", Recorded::new(0.0))?;
     assert_eq!(relative.heartbeat().await, Ok(type_error()));
     let refused = client(&closed_port().await?, Recorded::new(0.0))?;
     assert_eq!(refused.heartbeat().await, Ok(type_error()));
