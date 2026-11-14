@@ -1958,8 +1958,13 @@ where
                         Ok(()) => {}
                         Err(crate::MirrorEnqueueError::Key(error)) => {
                             // One line for the same reason as the control response above.
-                            let projects_dir = session.mirror.projects_dir();
+                            let projects_dir = session.mirror.projects_dir().unwrap_or(std::path::Path::new(""));
                             tracing::warn!(file_path = %file_path.display(), projects_dir = %projects_dir.display(), %error, "dropping transcript mirror frame whose file path is not under the projects directory");
+                        }
+                        Err(error @ crate::MirrorEnqueueError::MissingConfigDirectory) => {
+                            // Upstream TypeScript's append throws from `os.homedir()`, is logged at error level, and
+                            // its `onError` throws again before it can report a `mirror_error`.
+                            tracing::error!(file_path = %file_path.display(), %error, "dropping transcript mirror frame");
                         }
                         Err(crate::MirrorEnqueueError::Closed) => {
                             return Err(Error::Session(crate::SessionError::MirrorStopped));

@@ -320,6 +320,8 @@ async fn injected_session_adapters_resolve_resume_and_clean_up() -> Result<(), B
     Ok(())
 }
 
+/// Python's `build_mirror_batcher` resolves the projects directory at connect, so `Path.home()` raises before the
+/// child starts.
 #[tokio::test]
 async fn missing_injected_config_stops_before_process_creation() -> Result<(), Box<dyn std::error::Error>> {
     let filesystem = RecordingFileSystem::new()?;
@@ -327,7 +329,7 @@ async fn missing_injected_config_stops_before_process_creation() -> Result<(), B
     let (process, _harness) = ScriptedProcessSpawner::new();
     let observer = process.observer();
     let options = ClaudeAgentOptions {
-        session_store: Some(session_options(SummaryDialect::default())),
+        session_store: Some(session_options(SummaryDialect::Python)),
         ..ClaudeAgentOptions::default()
     };
     let result = ClaudeSdkClient::connect_with_adapters(
@@ -354,6 +356,26 @@ async fn missing_injected_config_stops_before_process_creation() -> Result<(), B
             EnvironmentAccess::Variable("HOME".into()),
         ]
     );
+    Ok(())
+}
+
+/// TypeScript resolves `CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")` only when a mirror frame arrives,
+/// so a session without a resume starts the child with no home to find.
+#[tokio::test]
+async fn missing_injected_config_still_starts_a_typescript_session_without_a_resume() -> TestResult {
+    let filesystem = RecordingFileSystem::new()?;
+    let environment = TrackedEnvironment::new(&filesystem);
+    let command = connect_with_tracked_environment(
+        &filesystem,
+        ClaudeAgentOptions {
+            cwd: Some(filesystem.path("project")),
+            session_store: Some(session_options(SummaryDialect::TypeScript)),
+            ..ClaudeAgentOptions::default()
+        },
+        environment,
+    )
+    .await?;
+    assert_eq!(command.directory, Some(filesystem.path("project")));
     Ok(())
 }
 

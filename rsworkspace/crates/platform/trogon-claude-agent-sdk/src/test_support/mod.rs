@@ -64,6 +64,13 @@ impl<E: TemporaryDirectory> TemporaryDirectory for WithPasswd<E> {
     }
 }
 
+impl<E: CurrentDirectory> CurrentDirectory for WithPasswd<E> {
+    type Error = E::Error;
+    fn current_dir(&self) -> Result<PathBuf, Self::Error> {
+        self.environment.current_dir()
+    }
+}
+
 impl CurrentDirectory for FixedEnvironment {
     type Error = std::io::Error;
     fn current_dir(&self) -> Result<PathBuf, Self::Error> {

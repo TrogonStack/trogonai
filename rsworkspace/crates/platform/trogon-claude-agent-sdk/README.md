@@ -819,7 +819,11 @@ non-UUID, empty and sidechain sessions. File checkpointing cannot be combined
 with a session store. As upstream, a relative configuration or home directory
 is used as given and store loads are unbounded;
 `SessionStoreOptions::require_absolute_config_paths` and the resume limits in
-`SessionStoreLimits` opt into typed errors instead.
+`SessionStoreLimits` opt into typed errors instead. Without a home directory,
+Python fails the connect with `SessionError::MissingConfigDirectory`, while
+TypeScript, which finds the projects directory per mirror frame, connects and
+drops each frame with `MirrorEnqueueError::MissingConfigDirectory`; a store
+resume without a configured directory needs it in both.
 
 Project-key sanitization uses the pinned TypeScript SDK’s UTF-16 replacement
 behavior. Native hashing can differ for long project paths; use an explicit

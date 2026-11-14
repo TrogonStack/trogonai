@@ -107,7 +107,9 @@ pub struct SessionRuntime<F: SessionFileSystem = NativeFileSystem> {
     pub materialized: Option<MaterializedSession<F>>,
     /// The `CLAUDE_CONFIG_DIR` the subprocess runs with, when the session runtime decides it.
     pub config_dir: Option<PathBuf>,
-    pub projects_dir: PathBuf,
+    /// Where the mirror places transcript frames. `None` only for a TypeScript session with no resume and no home
+    /// directory: upstream resolves it per mirror frame, so the connect goes ahead and each frame is dropped.
+    pub projects_dir: Option<PathBuf>,
     pub resume_session_id: Option<SessionId>,
 }
 
@@ -168,9 +170,16 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
         let environment_mode = environment_mode.resolve(subprocess_environment);
         let ts = options.dialect == SummaryDialect::TypeScript;
         let caller_config_dir = caller_config_dir(options, environment, ts)?;
+        // Python's `build_mirror_batcher` resolves the projects directory at connect and raises without a home.
+        // TypeScript's mirror closure `() => path.join(env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"),
+        // "projects")` runs per frame, so only a resume, which copies auth out of it, needs the home up front.
         let source_config_dir = match &caller_config_dir {
-            Some(directory) => directory.clone(),
-            None => home_join(environment, ts, options.require_absolute_config_paths, ".claude")?,
+            Some(directory) => Some(directory.clone()),
+            None => match home_join(environment, ts, options.require_absolute_config_paths, ".claude") {
+                Ok(directory) => Some(directory),
+                Err(SessionError::MissingConfigDirectory) if ts => None,
+                Err(error) => return Err(error),
+            },
         };
         let project = match (&options.project_key, ts) {
             (Some(key), _) => key.clone(),
@@ -191,9 +200,13 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
             StoreResume::Latest => latest_candidate(options, &project).await?,
         };
         let Some((id, entries)) = resolved else {
-            let projects_dir = source_config_dir.join("projects");
+            let projects_dir = source_config_dir.map(|directory| directory.join("projects"));
+            let mirror = match &projects_dir {
+                Some(directory) => TranscriptMirror::new(options, directory.clone()),
+                None => TranscriptMirror::without_projects_dir(options),
+            };
             return Ok(SessionRuntime {
-                mirror: TranscriptMirror::new(options, projects_dir.clone()),
+                mirror,
                 materialized: None,
                 config_dir: options.config_directory.clone(),
                 projects_dir,
@@ -223,15 +236,15 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
             ts,
             budget: ResumeBudget::default(),
         };
-        let auth = AuthSources {
+        let auth = source_config_dir.as_deref().map(|source_config_dir| AuthSources {
             caller_config_dir: caller_config_dir.as_deref(),
-            source_config_dir: &source_config_dir,
+            source_config_dir,
             subprocess_environment,
             environment_mode,
             environment,
             process,
             keychain: cfg!(target_os = "macos"),
-        };
+        });
         if let Err(error) = materialization.run(entries, auth).await {
             lease.cleanup().await;
             return Err(error);
@@ -242,7 +255,7 @@ impl<F: SessionFileSystem> SessionRuntime<F> {
             mirror: TranscriptMirror::new(options, projects_dir.clone()),
             materialized: Some(lease),
             config_dir: Some(config_dir),
-            projects_dir,
+            projects_dir: Some(projects_dir),
             resume_session_id: Some(id),
         })
     }
@@ -524,7 +537,13 @@ struct AuthSources<'a, E, P> {
 }
 
 impl<F: SessionFileSystem> Materialization<'_, F> {
-    async fn run<E, P>(mut self, entries: Vec<SessionEntry>, auth: AuthSources<'_, E, P>) -> Result<(), SessionError>
+    /// `auth` is `None` when TypeScript has no home to copy auth from; upstream's `os.homedir()` throws once the
+    /// transcript is written, and the temporary directory is removed.
+    async fn run<E, P>(
+        mut self,
+        entries: Vec<SessionEntry>,
+        auth: Option<AuthSources<'_, E, P>>,
+    ) -> Result<(), SessionError>
     where
         E: EnvironmentVariable,
         P: SpawnProcess<Error = io::Error>,
@@ -538,6 +557,7 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
             &project_dir.join(format!("{}.jsonl", self.id.as_str())),
             &contents,
         )?;
+        let auth = auth.ok_or(SessionError::MissingConfigDirectory)?;
         if self.ts {
             copy_auth_files_ts(filesystem, &self.lease.path, auth).await?;
         } else {
