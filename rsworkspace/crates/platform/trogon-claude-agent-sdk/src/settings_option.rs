@@ -140,9 +140,27 @@ fn merge(base: Option<&Value>, patch: &Map<String, Value>, path: &str) -> Map<St
     merged
 }
 
-fn looks_like_json(text: &str) -> bool {
-    let trimmed = text.trim();
+/// Whether settings text, once trimmed the way the dialect trims it, is braced like a JSON object.
+fn looks_like_json(trimmed: &str) -> bool {
     trimmed.starts_with('{') && trimmed.ends_with('}')
+}
+
+/// The sandbox option with every finite number that holds an infinity marker's value kept as the equal integer, so
+/// the merge does not read it as an infinity.
+fn unmark_numbers(value: &mut Value) {
+    match value {
+        Value::Number(number) if number.is_f64() => {
+            if let Some(float) = number
+                .as_f64()
+                .filter(|float| crate::settings_numbers::is_marker_value(*float))
+            {
+                *value = crate::settings_numbers::finite_number(float);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(unmark_numbers),
+        Value::Object(entries) => entries.values_mut().for_each(unmark_numbers),
+        _ => {}
+    }
 }
 
 fn domain_rules_set(network: Option<&Value>) -> bool {
@@ -157,17 +175,20 @@ fn domain_rules_set(network: Option<&Value>) -> bool {
     network.contains_key("allowedDomains") || denied > 0 || network.get("strictAllowlist") == Some(&Value::Bool(true))
 }
 
-/// `_8`: the settings document with `sandbox` merged in.
-fn merge_sandbox(settings: Option<&OsString>, sandbox: &Map<String, Value>) -> Result<String, Error> {
+/// `_8`: the settings document with `sandbox` merged in. The text is trimmed as `String.prototype.trim` trims and
+/// read as `JSON.parse` reads it, so a number past the double range is `Infinity` and prints as `null`.
+fn merge_sandbox(settings: Option<&OsString>, mut sandbox: Map<String, Value>) -> Result<String, Error> {
+    sandbox.values_mut().for_each(unmark_numbers);
+    let sandbox = &sandbox;
     let text = settings.map(|value| value.to_string_lossy().into_owned());
     let text = text.filter(|text| !text.is_empty());
     if let Some(text) = &text
-        && !looks_like_json(text)
+        && !looks_like_json(crate::session_prompt::js_trim(text))
     {
         return Err(OptionError::new(SETTINGS_PATH_WITH_SANDBOX_ERROR).into());
     }
     let mut document = text
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|text| crate::settings_parse::parse_json(&text).ok())
         .and_then(|value| match value {
             Value::Object(map) => Some(map),
             _ => None,
@@ -210,7 +231,9 @@ fn merge_sandbox(settings: Option<&OsString>, sandbox: &Map<String, Value>) -> R
         merged.insert("failIfUnavailable".into(), Value::Bool(true));
     }
     document.insert("sandbox".into(), Value::Object(merged));
-    Ok(js_stringify(&Value::Object(document)))
+    let mut document = Value::Object(document);
+    crate::settings_numbers::infinities_to_null(&mut document);
+    Ok(js_stringify(&document))
 }
 
 fn sandbox_object(sandbox: &SandboxSettings) -> Result<Map<String, Value>, Error> {
@@ -259,7 +282,7 @@ pub(crate) fn typescript_extra_entries(options: &ClaudeAgentOptions) -> Result<V
             .iter()
             .find(|(flag, _)| flag == "settings")
             .and_then(|(_, value)| value.as_ref());
-        let merged = merge_sandbox(current, &sandbox_object(sandbox)?)?;
+        let merged = merge_sandbox(current, sandbox_object(sandbox)?)?;
         set(&mut entries, OsString::from(merged));
     }
     Ok(entries)
@@ -315,7 +338,7 @@ where
     let failed = |reason: String| -> Error { OptionError::new(format!("Failed to load settings: {reason}")).into() };
     let mut document = PythonJsonValue::Object(IndexMap::new());
     if let Some(settings) = settings {
-        let trimmed = settings.trim().to_owned();
+        let trimmed = crate::session_mutations::py_strip(&settings).to_owned();
         let text = if looks_like_json(&trimmed) {
             trimmed
         } else {
