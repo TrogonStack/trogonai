@@ -830,8 +830,11 @@ impl ClientHandle {
                 () = tokio::time::sleep_until(deadline) => {
                     let now = tokio::time::Instant::now();
                     if let Some(error) = timer.fire(now) {
+                        // `startupMarkAgeMs` is how long before the timeout the last mark arrived. The timer is due
+                        // at `deadline`; the runtime wakes this task at or after it, rounded up to its next tick,
+                        // and that lateness is not part of the mark's age.
                         let age = mark.map(|(name, at)| {
-                            let micros = now.saturating_duration_since(at).as_micros();
+                            let micros = deadline.saturating_duration_since(at).as_micros();
                             (name, u64::try_from((micros + 500) / 1000).unwrap_or(u64::MAX))
                         });
                         return Err(error.with_mark(age).into());
