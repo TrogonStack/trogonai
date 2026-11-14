@@ -106,6 +106,10 @@ workspace_crate(
         "builtin_tool_name": {},
         "builtin_tool_name_storage": {},
         "bundled_cli": {},
+        "bundled_cli_discovery": {
+            "data": [":claude_sdk_fixture"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
+        },
         "callback_handlers": {},
         "callback_options": {
             "compile_data": glob([

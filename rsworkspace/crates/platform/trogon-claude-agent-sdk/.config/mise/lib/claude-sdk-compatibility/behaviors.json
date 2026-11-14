@@ -2649,6 +2649,7 @@
       },
       "contracts": [
         "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory",
+        "bundled_cli_discovery::only_a_named_bundled_root_is_searched_before_path",
         "subprocess::connect_spawns_the_bundled_cli_under_the_configured_root"
       ],
       "rust": [
@@ -2745,7 +2746,8 @@
       "contracts": [
         "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
         "bundled_cli::a_bundled_cli_without_a_record_counts_as_too_old",
-        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label"
+        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label",
+        "golden_argv_env::s34_only_the_python_derivation_labels_the_bundled_cli"
       ],
       "rust": [
         "src/bundled_cli.rs"
