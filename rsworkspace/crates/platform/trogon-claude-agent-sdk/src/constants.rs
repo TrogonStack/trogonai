@@ -1380,3 +1380,6 @@ pub(crate) const CLAIM_FOLLOWING_SETTINGS: [&str; 6] = [
     "availableModels",
     "disableAutoMode",
 ];
+
+/// The session id Python's `ClaudeSDKClient.connect(str)` and `query` write when the caller names none.
+pub(crate) const PYTHON_DEFAULT_SESSION: &str = "default";

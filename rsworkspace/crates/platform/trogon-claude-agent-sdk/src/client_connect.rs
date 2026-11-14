@@ -4,11 +4,8 @@
 use futures_util::{StreamExt, stream::BoxStream};
 
 use super::ClaudeSdkClient;
+use crate::constants::PYTHON_DEFAULT_SESSION;
 use crate::{ClaudeAgentOptions, Error, Prompt, SessionId, UserInput};
-
-mod constants;
-
-use constants::PYTHON_DEFAULT_SESSION;
 
 /// The prompt of Python's `ClaudeSDKClient.connect(prompt)`.
 #[derive(Default)]
