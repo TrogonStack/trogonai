@@ -39,9 +39,9 @@ fn identity_u_escapes(source: &str) -> String {
     while let Some(&character) = characters.get(index) {
         match (character, characters.get(index + 1).copied()) {
             ('\\', Some('u'))
-                if !characters
+                if characters
                     .get(index + 2..)
-                    .is_some_and(|rest| rest.iter().take(4).filter(|digit| digit.is_ascii_hexdigit()).count() == 4) =>
+                    .is_none_or(|rest| rest.iter().take(4).filter(|digit| digit.is_ascii_hexdigit()).count() != 4) =>
             {
                 read.push('u');
                 index += 2;
