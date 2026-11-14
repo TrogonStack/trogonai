@@ -244,14 +244,31 @@ pub(crate) fn share_refused(text: &str, base: &str) -> bool {
     name.is_none() || name != server_name(base)
 }
 
-/// `path.posix.dirname` for the paths the walker builds.
+/// `path.posix.dirname`: cuts at the last separator before the final name and keeps any separators run in front of it,
+/// so `a//b` answers `a/` and `//a` answers `//`.
 pub(crate) fn dirname(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
-    match trimmed.rfind('/') {
-        None if path.starts_with('/') => "/".to_owned(),
+    let bytes = path.as_bytes();
+    let Some(&first) = bytes.first() else {
+        return ".".to_owned();
+    };
+    let rooted = first == b'/';
+    let mut end = None;
+    let mut matched_slash = true;
+    for (index, &byte) in bytes.iter().enumerate().skip(1).rev() {
+        if byte == b'/' {
+            if !matched_slash {
+                end = Some(index);
+                break;
+            }
+        } else {
+            matched_slash = false;
+        }
+    }
+    match end {
+        None if rooted => "/".to_owned(),
         None => ".".to_owned(),
-        Some(0) => "/".to_owned(),
-        Some(index) => trimmed[..index].trim_end_matches('/').to_owned(),
+        Some(1) if rooted => "//".to_owned(),
+        Some(index) => path[..index].to_owned(),
     }
 }
 
