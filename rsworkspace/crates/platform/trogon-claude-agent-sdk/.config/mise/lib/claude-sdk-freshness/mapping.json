@@ -4652,6 +4652,203 @@
       ],
       "status": "supported",
       "rationale": "The first-party names each Python module imports are reachable from the crate root."
+    },
+    {
+      "id": "control-request-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "sdk.SDKControlApplyFlagSettingsRequest",
+            "sdk.SDKControlBackgroundTasksRequest",
+            "sdk.SDKControlCancelAsyncMessageRequest",
+            "sdk.SDKControlCancelRequest",
+            "sdk.SDKControlElicitationRequest",
+            "sdk.SDKControlFileSuggestionsRequest",
+            "sdk.SDKControlGetBinaryVersionRequest",
+            "sdk.SDKControlGetContextUsageRequest",
+            "sdk.SDKControlGetHooksListingRequest",
+            "sdk.SDKControlGetSessionCostRequest",
+            "sdk.SDKControlGetSettingsRequest",
+            "sdk.SDKControlGetTaskOutputRequest",
+            "sdk.SDKControlGetUsageRequest",
+            "sdk.SDKControlInitializeRequest",
+            "sdk.SDKControlInterruptRequest",
+            "sdk.SDKControlListModelsRequest",
+            "sdk.SDKControlListPermissionRulesRequest",
+            "sdk.SDKControlMcpCallRequest",
+            "sdk.SDKControlMcpMessageRequest",
+            "sdk.SDKControlMcpReadResourceRequest",
+            "sdk.SDKControlMcpReconnectRequest",
+            "sdk.SDKControlMcpSetServersRequest",
+            "sdk.SDKControlMcpStatusRequest",
+            "sdk.SDKControlMcpToggleRequest",
+            "sdk.SDKControlPermissionRequest",
+            "sdk.SDKControlReadFileRequest",
+            "sdk.SDKControlRegisterRepoRootRequest",
+            "sdk.SDKControlReloadOutputStylesRequest",
+            "sdk.SDKControlReloadPluginsRequest",
+            "sdk.SDKControlReloadSkillsRequest",
+            "sdk.SDKControlRenameSessionRequest",
+            "sdk.SDKControlRequestUserDialogRequest",
+            "sdk.SDKControlRewindFilesRequest",
+            "sdk.SDKControlSeedReadStateRequest",
+            "sdk.SDKControlSetColorRequest",
+            "sdk.SDKControlSetHasSubscribersRequest",
+            "sdk.SDKControlSetMaxThinkingTokensRequest",
+            "sdk.SDKControlSetModelRequest",
+            "sdk.SDKControlSetPermissionModeRequest",
+            "sdk.SDKControlStopTaskRequest",
+            "sdk.SDKControlUpdateSettingsRequest"
+          ]
+        }
+      },
+      "rust_api": [
+        "upstream::control::SDKControlRequest",
+        "upstream::control::SDKControlRequestInner",
+        "upstream::control::SDKControlCancelRequest"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "every_control_wire_type_round_trips"
+        },
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "every_request_type_is_its_own_member_of_the_request_union"
+        },
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "the_fixtures_hold_exactly_the_listed_roots"
+        }
+      ],
+      "status": "supported",
+      "rationale": "Every SDKControl request type, SDKControlCancelRequest included, is generated from the pinned declarations as a serde type that keeps undeclared keys and key order. Each one decodes as its own member of SDKControlRequestInner inside the control_request envelope and encodes back to the same bytes; the cancel request is a message of its own on the stream, not a member of that union. The request and response behavior of the control channel is covered by the control protocol rows."
+    },
+    {
+      "id": "control-response-types",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "sdk.ControlResponse",
+            "sdk.ControlErrorResponse"
+          ]
+        }
+      },
+      "rust_api": [
+        "upstream::control::ControlResponse",
+        "upstream::control::ControlErrorResponse",
+        "upstream::control::SDKControlResponse"
+      ],
+      "tests": [
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "every_control_wire_type_round_trips"
+        },
+        {
+          "path": "tests/upstream_control.rs",
+          "name": "the_fixtures_hold_exactly_the_listed_roots"
+        }
+      ],
+      "status": "supported",
+      "rationale": "ControlResponse and ControlErrorResponse are the two members of SDKControlResponse.response. Both are generated from the pinned declarations, including the pending request lists, and round trip byte for byte with their undeclared keys."
+    },
+    {
+      "id": "sandbox-config-schemas",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "sdk.SandboxNetworkConfigSchema",
+            "sdk.SandboxFilesystemConfigSchema",
+            "sdk.SandboxCredentialsConfigSchema"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "SandboxConfigSchema",
+        "SandboxConfigRejected"
+      ],
+      "tests": [
+        {
+          "path": "tests/sandbox_schemas.rs",
+          "name": "the_network_schema_answers_like_zod"
+        },
+        {
+          "path": "tests/sandbox_schemas.rs",
+          "name": "the_filesystem_schema_answers_like_zod"
+        },
+        {
+          "path": "tests/sandbox_schemas.rs",
+          "name": "the_credentials_schema_answers_like_zod"
+        }
+      ],
+      "status": "supported",
+      "rationale": "The three Zod schemas are read from the pinned bundle by the settings schema extraction and run by the same interpreter as the settings document. SandboxConfigSchema::parse accepts and rejects the documents the real schemas do and returns the parsed output with the same keys in the same order, which goldens recorded from the real schemas pin for valid, invalid and undefined inputs."
+    },
+    {
+      "id": "create-sdk-mcp-server-options",
+      "upstream": {
+        "typescript": {
+          "symbols": [],
+          "prefixes": [
+            "sdk.CreateSdkMcpServerOptions"
+          ]
+        }
+      },
+      "rust_api": [
+        "LocalMcpServerOptions",
+        "McpSdkServerOptions::for_server"
+      ],
+      "tests": [
+        {
+          "path": "tests/create_sdk_mcp_server_options.rs",
+          "name": "every_create_sdk_mcp_server_field_has_a_rust_home"
+        },
+        {
+          "path": "tests/create_sdk_mcp_server_options.rs",
+          "name": "the_server_config_carries_the_name_and_a_positive_timeout"
+        },
+        {
+          "path": "tests/create_sdk_mcp_server_options.rs",
+          "name": "a_zero_timeout_is_left_out_like_upstream_does"
+        }
+      ],
+      "status": "supported",
+      "rationale": "name, version, instructions, tools and alwaysLoad are fields of LocalMcpServerOptions. timeout belongs to the sdk config the server is registered with, as createSdkMcpServer returns it next to the instance, so McpSdkServerOptions::for_server keeps it only when it is positive, like upstream."
+    },
+    {
+      "id": "core-types-module",
+      "upstream": {
+        "typescript": {
+          "symbols": [
+            "sdk.coreTypes"
+          ],
+          "prefixes": []
+        }
+      },
+      "rust_api": [
+        "upstream::messages",
+        "upstream::hooks",
+        "upstream::control"
+      ],
+      "tests": [
+        {
+          "path": "tests/core_types_module.rs",
+          "name": "a_message_decodes_as_the_core_types_union_and_round_trips"
+        },
+        {
+          "path": "tests/core_types_module.rs",
+          "name": "a_hook_event_name_decodes_as_the_core_types_union"
+        },
+        {
+          "path": "tests/core_types_module.rs",
+          "name": "the_control_family_lives_next_to_the_core_types"
+        }
+      ],
+      "status": "supported",
+      "rationale": "coreTypes is a namespace that re-exports declarations of the same file. The generated upstream modules hold those declarations under the same names, and the members of the namespace are mapped one by one by the rows of the families they belong to."
     }
   ]
 }
