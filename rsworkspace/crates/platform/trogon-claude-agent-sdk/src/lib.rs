@@ -425,7 +425,7 @@ pub use runtime_options::{
 };
 pub use schema_pointer::{SchemaPointer, SchemaPointerError};
 pub use sdk_mcp_choices::{
-    LengthChoice, NullabilityChoice, NumberFormatChoice, RefineFailure, Refinement, SchemaCallback,
+    LengthChoice, NullabilityChoice, NumberFormatChoice, ObjectChoice, RefineFailure, Refinement, SchemaCallback,
     SchemaCallbackOptions, SchemaChoice, StringCheckKind, StringFormatChoice, Transformation, UnionChoice,
 };
 pub use sdk_mcp_server::{

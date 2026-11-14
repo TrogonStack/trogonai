@@ -307,6 +307,10 @@ of a string in the order they were declared, which is the order of its issues;
 or `number().int().min(..).max(..)` (`safeint`); `StringFormatChoice` picks
 `iso.time()` (format `time`) or a plain `regex` pattern; and
 `SchemaChoice::RegexFlags` gives the flags the listed `pattern` loses.
+`ObjectChoice`, recorded in `tests/fixtures/sdk_mcp/typescript_zod.json`, picks
+the bundled object a raw shape is wrapped in (an absent required key whose
+schema takes `undefined`, such as a zod 4.1.12 `catch`, reports `nonoptional`)
+or the author's own `z.object` (the key keeps the value its schema gives).
 `SchemaCallbackOptions` opts a schema node in to a `refine` and a `transform`
 callback, which run where zod runs them: the refinement after the node's checks
 unless one aborted them, as a `custom` issue with its path and message, and the

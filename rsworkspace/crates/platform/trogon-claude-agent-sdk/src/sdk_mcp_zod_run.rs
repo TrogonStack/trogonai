@@ -695,7 +695,7 @@ fn object(node: &ObjectNode, input: Input<'_>) -> Outcome {
     let mut out = JsonObject::new();
     for (key, child, required) in &node.properties {
         let result = run(child, lookup(map, key));
-        if *required && !has(map, key) {
+        if *required && !node.author && !has(map, key) {
             if result.issues.is_empty() {
                 issues.push(Issue::invalid_type_code_first("nonoptional", "undefined").at(Value::from(key.as_str())));
             } else {

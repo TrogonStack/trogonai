@@ -9,11 +9,12 @@
 //!
 //! Where JSON Schema cannot tell two zod schemas apart, the result is the one zod's own mapping makes
 //! most likely: a discriminated union is a plain union, `nullable` and a union with `null` are the same,
-//! `length(n)` is `min(n).max(n)`, regular expression flags are lost, and transforms and refinements are
-//! invisible. The tool author overrides each of these with the `x-trogon-*` keywords that
-//! `ValidationChoices::prepare` writes into a copy of the schema, which `tools/list` never sees; the
-//! choices are checked by `tests/fixtures/sdk_mcp/typescript_choices.json`. The Rust regular expression and
-//! URL engines stand in for the JavaScript ones.
+//! `length(n)` is `min(n).max(n)`, regular expression flags are lost, an object is the bundled one a raw shape
+//! is wrapped in, and transforms and refinements are invisible. The tool author overrides each of these with
+//! the `x-trogon-*` keywords that `ValidationChoices::prepare` writes into a copy of the schema, which
+//! `tools/list` never sees; the choices are checked by `tests/fixtures/sdk_mcp/typescript_choices.json`, and
+//! the object choice by `tests/fixtures/sdk_mcp/typescript_zod.json`. The Rust regular expression and URL
+//! engines stand in for the JavaScript ones.
 
 use crate::{
     JsonObject, constants,
@@ -122,6 +123,9 @@ pub(crate) enum ObjectMode {
 pub(crate) struct ObjectNode {
     pub(crate) properties: Vec<(String, Node, bool)>,
     pub(crate) mode: ObjectMode,
+    /// The tool author's zod 4.1.12 object rather than the bundled zod 4.6.2 one: an absent required key keeps
+    /// the value its schema gives `undefined` instead of reporting `nonoptional`.
+    pub(crate) author: bool,
 }
 
 pub(crate) enum Node {
@@ -533,7 +537,11 @@ fn object(schema: &JsonObject, callbacks: Callbacks<'_>) -> Node {
         _ if schema.get("properties").is_none() => ObjectMode::Catchall(Box::new(Node::Any)),
         _ => ObjectMode::Strip,
     };
-    Node::Object(ObjectNode { properties, mode })
+    Node::Object(ObjectNode {
+        properties,
+        mode,
+        author: schema.contains_key("x-trogon-author-object"),
+    })
 }
 
 /// `CallToolResultSchema` of the bundle, as the JSON Schema `zod` itself derives from it (with the one

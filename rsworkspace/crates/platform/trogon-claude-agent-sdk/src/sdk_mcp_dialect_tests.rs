@@ -10,10 +10,10 @@
 
 use super::*;
 use crate::{
-    LengthChoice, McpToolName, McpToolOutput, McpToolRequest, NullabilityChoice, NumberFormatChoice, RefineFailure,
-    Refinement, SchemaCallback, SchemaCallbackOptions, SchemaChoice, SchemaPointer, SdkTool, SdkToolOptions,
-    StringCheckKind, StringFormatChoice, ToolResultStatus, Transformation, UnionChoice, ValidationChoices,
-    ValidationChoicesOptions, settings_json::js_stringify,
+    LengthChoice, McpToolName, McpToolOutput, McpToolRequest, NullabilityChoice, NumberFormatChoice, ObjectChoice,
+    RefineFailure, Refinement, SchemaCallback, SchemaCallbackOptions, SchemaChoice, SchemaPointer, SdkTool,
+    SdkToolOptions, StringCheckKind, StringFormatChoice, ToolResultStatus, Transformation, UnionChoice,
+    ValidationChoices, ValidationChoicesOptions, settings_json::js_stringify,
 };
 use serde_json::json;
 use tokio::sync::Notify;
@@ -131,6 +131,10 @@ fn choice(definition: &Value) -> Result<SchemaChoice, Box<dyn std::error::Error>
             _ => StringFormatChoice::PlainPattern,
         }),
         "regex_flags" => SchemaChoice::RegexFlags(word()?.to_owned()),
+        "object" => SchemaChoice::Object(match word()? {
+            "author" => ObjectChoice::Author,
+            _ => ObjectChoice::Bundled,
+        }),
         other => return Err(format!("unknown choice {other}").into()),
     })
 }
