@@ -42,6 +42,8 @@ pub struct ClientHandle {
     /// Only a bounded command queue can be full, so the wait applies only when the caller opted into both.
     timeout: Option<std::time::Duration>,
     aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The caller's `abortController` token, which aborts like [`ClientHandle::abort`] once cancelled.
+    abort_signal: Option<crate::CancellationToken>,
     closed: Closed,
     /// The first initialize response, which `reinitialize` does not replace; `None` when the reply had none.
     initialization: std::sync::Arc<std::sync::OnceLock<Option<serde_json::Value>>>,
@@ -347,6 +349,10 @@ impl ClaudeSdkClient {
             closed,
             process_id,
         } = input;
+        let aborted_at_start = options
+            .abort_signal
+            .as_ref()
+            .is_some_and(crate::CancellationToken::is_cancelled);
         let (command_tx, command_rx) = crate::channel::channel(options.limits.command_queue_capacity);
         let (message_tx, message_rx) = crate::channel::channel(options.limits.message_buffer.capacity());
         let (terminal_tx, terminal_rx) = oneshot::channel();
@@ -359,6 +365,7 @@ impl ClaudeSdkClient {
                 .and(options.limits.command_queue_timeout)
                 .map(crate::Timeout::as_duration),
             aborted: std::sync::Arc::default(),
+            abort_signal: options.abort_signal.clone(),
             closed,
             initialization: std::sync::Arc::default(),
             latest_commands: driver::LatestCommands::default(),
@@ -386,6 +393,11 @@ impl ClaudeSdkClient {
             driver: Some(driver),
             process_id,
         };
+        if aborted_at_start {
+            // TypeScript spawns, finds the signal already aborted and closes the process before initializing.
+            let cleanup = runtime.finish().await;
+            return Err(connection_failure(Error::DriverStopped, cleanup));
+        }
         match runtime.handle.initialize(true).await {
             Ok(response) => {
                 let connection_info = crate::ConnectionInfo::from_response(response.clone());
@@ -1042,7 +1054,12 @@ impl ClientHandle {
     /// sent afterwards.
     fn stopped_error(&self) -> Error {
         // TypeScript: a write after the abort signal fired throws `AbortError("Operation aborted")`.
-        if self.aborted.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.aborted.load(std::sync::atomic::Ordering::SeqCst)
+            || self
+                .abort_signal
+                .as_ref()
+                .is_some_and(crate::CancellationToken::is_cancelled)
+        {
             crate::AbortError::OPERATION.into()
         } else {
             self.closed.write_error().unwrap_or(Error::DriverStopped)

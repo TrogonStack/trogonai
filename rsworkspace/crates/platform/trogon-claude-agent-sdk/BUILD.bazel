@@ -136,6 +136,16 @@ workspace_crate(
         "message_id": {},
         "message_id_storage": {},
         "message_origin": {},
+        "native_options_golden": {
+            "compile_data": glob([
+                "tests/fixtures/native_options/*.json",
+                "tests/support/*.rs",
+                "tests/*.rs",
+                "src/process_transport/run_as_tests.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "owned_string_values": {},
         "permission_mode": {},
         "permission_values": {},

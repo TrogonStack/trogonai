@@ -302,6 +302,8 @@ where
     F: crate::adapters::SessionFileSystem,
 {
     transport: T,
+    /// The caller's `abortController` token; once cancelled the run ends like `Command::Abort`.
+    abort_signal: Option<crate::CancellationToken>,
     /// `end_input` has been called, so nothing more is written whatever `Transport::is_ready` says.
     input_ended: bool,
     commands: crate::channel::Receiver<Command>,
@@ -480,7 +482,11 @@ fn initialize_config(
                 .map_err(ProtocolError::from)?,
         )
     };
-    let supported_dialog_kinds = (!options.supported_dialog_kinds.is_empty()).then(|| {
+    // TypeScript sends a `hooks` object and a `supportedDialogKinds` list whenever the caller gave one, even empty.
+    let send_empty = |when_empty: crate::EmptyCollection| typescript && when_empty == crate::EmptyCollection::Sent;
+    let supported_dialog_kinds = (!options.supported_dialog_kinds.is_empty()
+        || send_empty(options.supported_dialog_kinds_when_empty))
+    .then(|| {
         options
             .supported_dialog_kinds
             .iter()
@@ -505,7 +511,7 @@ fn initialize_config(
             .collect()
     });
     let request = InitializeRequest {
-        hooks: (!options.hooks.is_empty()).then_some(hooks),
+        hooks: (!options.hooks.is_empty() || send_empty(options.hooks_when_empty)).then_some(hooks),
         sdk_mcp_servers,
         json_schema: options.output_schema.as_ref().map(crate::OutputSchema::as_json),
         system_prompt: prompt.system_prompt,
@@ -704,6 +710,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
     transport.connect().await?;
     let driver = Driver {
         transport,
+        abort_signal: options.abort_signal,
         input_ended: false,
         commands,
         messages,
@@ -881,8 +888,12 @@ where
             // Python stops reading stdout while its message buffer is full, so nothing else on stdout is handled
             // until the caller takes a message.
             let reading = self.overflow.is_empty() && !self.deferred_full();
+            let abort_signal = self.abort_signal.clone();
             tokio::select! {
                 _ = &mut self.shutdown => { self.shutdown_seen = true; return Ok(()); }
+                () = async { match &abort_signal { Some(signal) => signal.cancelled().await, None => pending::<()>().await } } => {
+                    return Err(crate::AbortError::PROCESS.into());
+                }
                 ready = self.messages.ready(), if !self.overflow.is_empty() => {
                     if !ready { return Err(Error::DriverStopped); }
                     self.drain_overflow()?;

@@ -294,8 +294,14 @@ pub struct ClaudeAgentOptions {
     pub limits: Limits,
     pub permission_handler: Option<Arc<dyn ToolPermissionHandler>>,
     pub hooks: Vec<HookRegistration>,
+    /// TypeScript `hooks: {}`: with [`crate::EmptyCollection::Sent`] an empty `hooks` reaches `initialize` as `{}`.
+    pub hooks_when_empty: crate::EmptyCollection,
     pub agents: BTreeMap<AgentName, AgentDefinition>,
     pub agent: Option<AgentName>,
+    /// TypeScript `abortController`: cancelling the token stops the CLI process like [`crate::ClientHandle::abort`],
+    /// including when it is already cancelled at connect. Python has no such option; a caller that never sets it
+    /// gets its behavior.
+    pub abort_signal: Option<crate::CancellationToken>,
     /// Servers the CLI connects to itself, sent in insertion order like a TypeScript object.
     pub mcp_servers: McpServers,
     /// In-process servers. A name also present in `mcp_servers` resolves to the in-process server, the
@@ -319,6 +325,9 @@ pub struct ClaudeAgentOptions {
     pub elicitation_handler: Option<Arc<dyn ElicitationHandler>>,
     pub user_dialog_handler: Option<Arc<dyn UserDialogHandler>>,
     pub supported_dialog_kinds: Vec<DialogKind>,
+    /// TypeScript `supportedDialogKinds: []`: with [`crate::EmptyCollection::Sent`] an empty list reaches
+    /// `initialize` as `[]`.
+    pub supported_dialog_kinds_when_empty: crate::EmptyCollection,
     /// TypeScript `getOAuthToken`. Setting it also sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH=1`. Without a handler a
     /// token request is answered with `getOAuthToken callback is not provided.`.
     pub oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
