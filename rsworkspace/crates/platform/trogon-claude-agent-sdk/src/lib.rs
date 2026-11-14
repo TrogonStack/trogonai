@@ -14,6 +14,7 @@ mod auth_token;
 mod bridge_client;
 mod bridge_git;
 mod bridge_js;
+mod bridge_packed;
 mod bridge_refs;
 mod bridge_types;
 mod bridge_unicode;

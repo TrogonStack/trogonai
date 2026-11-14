@@ -276,17 +276,7 @@ fn read_ref(directory: &Path, name: &str, depth: u32) -> bool {
 
 /// Whether the packed references list `name` with an object id.
 fn packed_ref(packed: &Path, name: &str) -> bool {
-    let Some(text) = read_text(packed) else {
-        return false;
-    };
-    text.split('\n')
-        .filter(|line| !line.starts_with(['#', '^']))
-        .any(|line| {
-            [40, 64].iter().any(|&length| {
-                line.get(..length).is_some_and(is_object_id)
-                    && line.get(length..).and_then(|rest| rest.strip_prefix(' ')) == Some(name)
-            })
-        })
+    fs::read(packed).is_ok_and(|data| crate::bridge_packed::contains(&data, name))
 }
 
 #[cfg(test)]

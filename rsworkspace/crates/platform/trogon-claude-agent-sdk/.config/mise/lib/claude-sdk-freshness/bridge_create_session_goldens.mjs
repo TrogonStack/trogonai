@@ -209,6 +209,30 @@ const gitWith = (extra, prefix = 'work/.git') => {
 };
 const head = (name) => ({ 'refs/remotes/origin/HEAD': `ref: refs/remotes/origin/${name}\n` });
 const remote = (name, content = `${sha}\n`) => ({ [`refs/remotes/origin/${name}`]: content });
+// Packed reference files large enough that the upstream reader bisects them, sorted and not, with peeled lines mixed in.
+const packedLines = (names, peeled) =>
+  names.map((n, i) => `${sha} refs/remotes/origin/${n}\n${peeled && i % 3 === 0 ? `^${sha}\n` : ''}`).join('');
+const packedBisectScenarios = () => {
+  const names = Array.from({ length: 100 }, (_, i) => `topic-${String(i).padStart(4, '0')}`);
+  const scenarios = [];
+  const add = (name, order, branch, peeled = false, header = '# pack-refs with: peeled fully-peeled sorted\n') =>
+    scenarios.push({
+      name: `packed_bisect_${name}`,
+      files: gitWith({ ...head(branch), 'packed-refs': header + packedLines(order, peeled) }),
+    });
+  for (const [label, branch] of [['first', names[0]], ['middle', names[50]], ['last', names[99]], ['absent', 'topic-9999']]) {
+    add(`sorted_${label}`, names, branch);
+    add(`sorted_peeled_${label}`, names, branch, true);
+    add(`reversed_${label}`, [...names].reverse(), branch);
+    add(`rotated_${label}`, [...names.slice(50), ...names.slice(0, 50)], branch);
+    add(`no_header_${label}`, names, branch, false, '');
+  }
+  const shuffled = names.map((n, i) => names[(i * 7919) % names.length]);
+  for (const branch of [names[1], names[23], names[75]]) add(`shuffled_${branch}`, shuffled, branch);
+  add('prefix_names', ['a', 'ab', 'abc', 'abcd'], 'ab');
+  add('prefix_missing', ['a', 'abc', 'abcd'], 'ab');
+  return scenarios;
+};
 const scenarios = [
   { name: 'not_a_repository', files: {}, dirs: ['work'] },
   { name: 'empty_git_directory', files: gitWith({}) },
@@ -240,6 +264,7 @@ const scenarios = [
   { name: 'packed_refs_bad_hash', files: gitWith({ ...head('develop'), 'packed-refs': 'zzzz refs/remotes/origin/develop\n' }) },
   { name: 'packed_refs_sha256', files: gitWith({ ...head('develop'), 'packed-refs': `${sha64} refs/remotes/origin/develop\n` }) },
   { name: 'packed_refs_crlf', files: gitWith({ ...head('develop'), 'packed-refs': `${sha} refs/remotes/origin/develop\r\n` }) },
+  ...packedBisectScenarios(),
   { name: 'subdirectory_of_the_repository', files: gitWith({ ...head('develop'), ...remote('develop') }), dirs: ['work/a/b'], cwd: 'work/a/b' },
   { name: 'git_file_to_worktree_gitdir', files: { 'work/.git': 'gitdir: ../real/worktrees/wt\n', 'real/worktrees/wt/HEAD': 'ref: refs/heads/feat\n', 'real/worktrees/wt/commondir': '../..\n', 'real/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'real/refs/remotes/origin/develop': `${sha}\n` } },
   { name: 'git_file_absolute_gitdir', files: { 'work/.git': 'gitdir: <root>/real\n', 'real/refs/remotes/origin/HEAD': 'ref: refs/remotes/origin/develop\n', 'real/refs/remotes/origin/develop': `${sha}\n` } },
