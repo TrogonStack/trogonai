@@ -3,8 +3,6 @@
 //! empty result. These tests read the ambient process environment, so each one accepts both outcomes the host can
 //! produce and pins what each outcome must look like.
 
-#![allow(clippy::panic)]
-
 use std::path::Path;
 
 use trogon_claude_agent_sdk::{
@@ -16,17 +14,20 @@ use trogon_claude_agent_sdk::{
 const PYTHON_MESSAGE: &str = "Could not determine home directory.";
 const UNKNOWN: &str = "not-a-session-id";
 
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
 fn missing_home(error: &HomeDirectoryError) {
     assert_eq!(error.message(), PYTHON_MESSAGE);
     assert_eq!(error.to_string(), PYTHON_MESSAGE);
 }
 
-fn mutation_outcome(result: Result<(), SessionMutationError>) {
+fn mutation_outcome(result: Result<(), SessionMutationError>) -> Result<(), String> {
     match result {
         Err(SessionMutationError::InvalidSessionIdError(id)) => assert_eq!(id, UNKNOWN),
         Err(SessionMutationError::HomeDirectory(error)) => missing_home(&error),
-        other => panic!("unexpected outcome {other:?}"),
+        other => return Err(format!("unexpected outcome {other:?}")),
     }
+    Ok(())
 }
 
 #[test]
@@ -59,12 +60,13 @@ fn reading_one_session_never_turns_a_missing_home_into_none() {
 }
 
 #[test]
-fn reading_messages_reports_a_missing_home_through_the_messages_error() {
+fn reading_messages_reports_a_missing_home_through_the_messages_error() -> TestResult {
     match get_session_messages(UNKNOWN, None, MessagePage::default()) {
         Ok(messages) => assert!(messages.is_empty()),
         Err(MessagesError::HomeDirectory(error)) => missing_home(&error),
-        Err(other) => panic!("unexpected error {other:?}"),
+        Err(other) => return Err(format!("unexpected error {other:?}").into()),
     }
+    Ok(())
 }
 
 #[test]
@@ -80,9 +82,10 @@ fn subagent_readers_never_turn_a_missing_home_into_an_empty_result() {
 }
 
 #[test]
-fn mutations_report_a_missing_home_instead_of_a_missing_session() {
-    mutation_outcome(rename_session(UNKNOWN, "title", None));
-    mutation_outcome(tag_session(UNKNOWN, Some("tag"), None));
-    mutation_outcome(delete_session(UNKNOWN, None));
-    mutation_outcome(fork_session(UNKNOWN, None, None, None).map(|_| ()));
+fn mutations_report_a_missing_home_instead_of_a_missing_session() -> TestResult {
+    mutation_outcome(rename_session(UNKNOWN, "title", None))?;
+    mutation_outcome(tag_session(UNKNOWN, Some("tag"), None))?;
+    mutation_outcome(delete_session(UNKNOWN, None))?;
+    mutation_outcome(fork_session(UNKNOWN, None, None, None).map(|_| ()))?;
+    Ok(())
 }

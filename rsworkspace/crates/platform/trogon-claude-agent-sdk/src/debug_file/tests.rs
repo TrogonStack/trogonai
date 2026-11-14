@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used)]
-
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
 use super::{path_for, process_debug_file};
@@ -7,6 +5,8 @@ use crate::{
     environment_plan::Inherited,
     test_support::{FixedEnvironment, WithPasswd},
 };
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 fn inherited(entries: &[(&str, &str)]) -> Inherited {
     entries
@@ -107,9 +107,11 @@ fn the_config_dir_is_normalized_to_nfc() {
 }
 
 #[test]
-fn a_missing_home_fails_like_the_node_constructor() {
+fn a_missing_home_fails_like_the_node_constructor() -> TestResult {
     let debug = inherited(&[("DEBUG_CLAUDE_AGENT_SDK", "1")]);
-    let error = path_for(&environment(None, None), &debug, uuid::Uuid::nil()).expect_err("no home directory");
+    let Err(error) = path_for(&environment(None, None), &debug, uuid::Uuid::nil()) else {
+        return Err("a missing home directory was accepted".into());
+    };
     assert_eq!(
         error.message(),
         "A system error occurred: uv_os_homedir returned ENOENT (no such file or directory)"
@@ -119,21 +121,24 @@ fn a_missing_home_fails_like_the_node_constructor() {
         path_for(&environment(None, None), &inherited(&[]), uuid::Uuid::nil()),
         Ok(None)
     );
+    Ok(())
 }
 
 #[test]
-fn the_first_successful_call_decides_for_the_process() {
-    let directory = tempfile::tempdir().expect("temporary directory");
+fn the_first_successful_call_decides_for_the_process() -> TestResult {
+    let directory = tempfile::tempdir()?;
     let config = directory.path().join("config");
     let debug = inherited(&[
         ("DEBUG_CLAUDE_AGENT_SDK", "1"),
-        ("CLAUDE_CONFIG_DIR", config.to_str().expect("utf-8 path")),
+        (
+            "CLAUDE_CONFIG_DIR",
+            config.to_str().ok_or("the temporary path is not UTF-8")?,
+        ),
     ]);
     let environment = environment(None, None);
-    let first = process_debug_file(&environment, &debug)
-        .expect("derived")
-        .expect("a path");
+    let first = process_debug_file(&environment, &debug)?.ok_or("no debug file was derived")?;
     assert!(first.starts_with(config.join("debug")));
     assert!(config.join("debug").is_dir());
     assert_eq!(process_debug_file(&environment, &inherited(&[])), Ok(Some(first)));
+    Ok(())
 }

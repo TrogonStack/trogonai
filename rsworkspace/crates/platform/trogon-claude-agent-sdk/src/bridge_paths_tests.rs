@@ -1,5 +1,3 @@
-#![allow(clippy::panic)]
-
 use serde_json::Value;
 
 use super::*;
@@ -8,12 +6,14 @@ use crate::bridge_flavor::{join, resolve, split_runs};
 
 const PLATFORM_GOLDENS: &str = include_str!("../tests/fixtures/bridge_create_session/platform.json");
 
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
 fn text(case: &Value, index: usize) -> &str {
     case["args"][index].as_str().unwrap_or_default()
 }
 
 #[test]
-fn answers_path_checks_like_the_upstream_bridge_on_every_platform() {
+fn answers_path_checks_like_the_upstream_bridge_on_every_platform() -> TestResult {
     let cases: Vec<Value> = serde_json::from_str(PLATFORM_GOLDENS).unwrap_or_default();
     assert!(cases.len() > 500);
     for case in &cases {
@@ -69,9 +69,10 @@ fn answers_path_checks_like_the_upstream_bridge_on_every_platform() {
                     assert_eq!(Value::String(resolved), expected["resolved"], "{name}");
                 }
             }
-            other => panic!("{name}: unknown function {other}"),
+            other => return Err(format!("{name}: unknown function {other}").into()),
         }
     }
+    Ok(())
 }
 
 #[test]

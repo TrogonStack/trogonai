@@ -1,14 +1,14 @@
 //! The patch queue rules the bridge worker client reaches only through the close path, which the bridge entrypoint
 //! drives from a handle the goldens do not close mid-flight (bridge.mjs offsets 1005399 to 1011500).
 
-#![allow(clippy::panic)]
-
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
     Next, Patch, PatchQueue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches, without_status,
 };
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 fn patch(value: Value) -> Patch {
     value.as_object().cloned().unwrap_or_default()
@@ -24,10 +24,10 @@ fn metadata(key: &str) -> Patch {
     patch(json!({"external_metadata": {key: 1}}))
 }
 
-fn sends(next: Next) -> Patch {
+fn sends(next: Next) -> Result<Patch, String> {
     match next {
-        Next::Send(patch) => patch,
-        other => panic!("expected a send, got {other:?}"),
+        Next::Send(patch) => Ok(patch),
+        other => Err(format!("expected a send, got {other:?}")),
     }
 }
 
@@ -86,7 +86,7 @@ fn the_retry_delay_doubles_to_a_ceiling_and_adds_the_jitter() {
 }
 
 #[test]
-fn closing_to_new_patches_drops_a_waiting_status_and_keeps_what_outlives_it() {
+fn closing_to_new_patches_drops_a_waiting_status_and_keeps_what_outlives_it() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("a"));
     queue.enqueue(status());
@@ -96,13 +96,13 @@ fn closing_to_new_patches_drops_a_waiting_status_and_keeps_what_outlives_it() {
     assert!(queue.has_dropped_something());
     queue.enqueue(metadata("late"));
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"external_metadata": {"a": 1}}),
         "the patch that was already sending goes out unchanged"
     );
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"internal_metadata": {"card_turn_stamp": null}}),
         "the waiting status is cut down to what outlives it"
     );
@@ -110,10 +110,11 @@ fn closing_to_new_patches_drops_a_waiting_status_and_keeps_what_outlives_it() {
     queue.sent(true);
     assert_eq!(queue.poll(0.0), Next::Idle);
     assert!(!queue.owes_metadata());
+    Ok(())
 }
 
 #[test]
-fn a_status_that_fails_after_the_queue_closed_is_handed_back_without_it() {
+fn a_status_that_fails_after_the_queue_closed_is_handed_back_without_it() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(patch(json!({
         "worker_status": "running",
@@ -123,10 +124,11 @@ fn a_status_that_fails_after_the_queue_closed_is_handed_back_without_it() {
     queue.close_to_new_patches();
     queue.sent(false);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"internal_metadata": {"last_served_model": "m"}})
     );
     assert!(queue.has_dropped_something());
+    Ok(())
 }
 
 #[test]
@@ -148,7 +150,7 @@ fn closing_drops_everything_that_has_not_gone_out() {
 }
 
 #[test]
-fn a_failed_patch_waits_before_it_is_sent_again() {
+fn a_failed_patch_waits_before_it_is_sent_again() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("a"));
     assert!(matches!(queue.poll(0.0), Next::Send(_)));
@@ -156,12 +158,13 @@ fn a_failed_patch_waits_before_it_is_sent_again() {
     assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(500)));
     queue.enqueue(metadata("b"));
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"external_metadata": {"a": 1, "b": 1}}),
         "what was queued during the wait joins the retry"
     );
     queue.sent(false);
     assert_eq!(queue.poll(0.0), Next::Pause(Duration::from_millis(1000)));
+    Ok(())
 }
 
 #[test]
@@ -192,7 +195,7 @@ fn a_refusal_gives_back_the_metadata_and_the_bare_status() {
 }
 
 #[test]
-fn a_requeued_status_gives_way_to_one_that_is_waiting() {
+fn a_requeued_status_gives_way_to_one_that_is_waiting() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("a"));
     queue.enqueue(status());
@@ -200,14 +203,15 @@ fn a_requeued_status_gives_way_to_one_that_is_waiting() {
     assert!(matches!(queue.poll(0.0), Next::Send(_)));
     queue.sent(true);
     assert_eq!(
-        sends(queue.poll(0.0)).get("worker_status"),
+        sends(queue.poll(0.0))?.get("worker_status"),
         Some(&json!("running")),
         "the status that was already waiting wins"
     );
+    Ok(())
 }
 
 #[test]
-fn requeued_metadata_goes_out_after_the_waiting_patch_and_skips_what_it_carries() {
+fn requeued_metadata_goes_out_after_the_waiting_patch_and_skips_what_it_carries() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("x"));
     queue.requeue_metadata(patch(json!({"external_metadata": {"plan_doc": 1, "x": 2}})));
@@ -215,19 +219,20 @@ fn requeued_metadata_goes_out_after_the_waiting_patch_and_skips_what_it_carries(
     assert!(matches!(queue.poll(0.0), Next::Send(_)));
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"external_metadata": {"x": 1}})
     );
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"external_metadata": {"plan_doc": 1}}),
         "a key a later patch carries is not sent from the requeue"
     );
+    Ok(())
 }
 
 #[test]
-fn requeued_metadata_sends_the_switched_off_servers_alone() {
+fn requeued_metadata_sends_the_switched_off_servers_alone() -> TestResult {
     let mut queue = PatchQueue::new();
     queue.enqueue(metadata("seed"));
     queue.requeue_metadata(patch(
@@ -236,12 +241,13 @@ fn requeued_metadata_sends_the_switched_off_servers_alone() {
     assert!(matches!(queue.poll(0.0), Next::Send(_)));
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"internal_metadata": {"cost_state": 1}})
     );
     queue.sent(true);
     assert_eq!(
-        Value::Object(sends(queue.poll(0.0))),
+        Value::Object(sends(queue.poll(0.0))?),
         json!({"internal_metadata": {"disabled_mcp_servers": ["a"]}})
     );
+    Ok(())
 }
