@@ -763,6 +763,12 @@ impl Transport for SseTransport {
         self.shared.state().ready && !self.shared.is_closed()
     }
 
+    /// TypeScript `write` awaits the first readiness instead of failing, and the browser query never checks
+    /// `isReady()`, so a document written before the stream opens waits for it.
+    fn accepts_writes(&self) -> bool {
+        !self.shared.is_closed()
+    }
+
     async fn end_input(&mut self) -> Result<(), Error> {
         Ok(())
     }

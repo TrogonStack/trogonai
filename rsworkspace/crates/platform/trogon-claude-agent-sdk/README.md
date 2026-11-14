@@ -482,7 +482,9 @@ upstream SDKs).
 - `Transport` is Python's transport interface: `connect`, `write`, `read_message`
   (one object per call, `None` at the end of the stream, in place of Python's
   `read_messages` iterator), `close`, `is_ready` and `end_input`, plus a provided
-  `kill` that `abort()` calls before `close` (TypeScript's abort signal). It is a
+  `kill` that `abort()` calls before `close` (TypeScript's abort signal) and a
+  provided `accepts_writes`, `is_ready` unless the transport's `write` waits for
+  its own connection, as the SSE transport's does. It is a
   generic bound, not a trait object. `ClaudeSdkClient::connect_with_transport`,
   `connect_with_transport_and_adapters`, `query_with_transport` and
   `query_turn_with_transport` inject one; the subprocess implementation is the

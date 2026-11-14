@@ -888,9 +888,9 @@ where
         .await
     }
 
-    /// Whether another document may be written: the transport is ready and input has not been ended.
+    /// Whether another document may be written: the transport accepts writes and input has not been ended.
     fn input_open(&self) -> bool {
-        !self.input_ended && self.transport.is_ready()
+        !self.input_ended && self.transport.accepts_writes()
     }
 
     /// Python `end_input`. A failure to end input is not an error of the run.
