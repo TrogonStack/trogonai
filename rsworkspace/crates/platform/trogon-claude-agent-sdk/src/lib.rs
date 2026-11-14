@@ -22,6 +22,7 @@ mod bridge_worker_control;
 mod bridge_worker_control_async;
 mod bridge_worker_delivery;
 mod bridge_worker_events;
+mod bridge_worker_heartbeat;
 mod bridge_worker_inbound;
 mod bridge_worker_queue;
 mod bridge_worker_stream;
@@ -225,6 +226,7 @@ pub use bridge_worker_events::{
     POST_TIMEOUT_CEILING_MS, POST_TIMEOUT_FLOOR_MS, SHRINK_FROM_BYTES, lane_for_path, refused_for_good,
     retry_delay as event_retry_delay, upload_body, upload_timeout,
 };
+pub use bridge_worker_heartbeat::{HeartbeatDriver, heartbeat_delay};
 pub use bridge_worker_inbound::{INBOUND_DEDUP_CAPACITY, Inbound, InboundRouter, NOTIFICATION_ORIGIN, UuidSet};
 pub use bridge_worker_queue::{
     Next, Patch, PatchQueue, Requeue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches,

@@ -7345,6 +7345,7 @@ name = "trogon-claude-agent-sdk"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "http",
  "icu_collator",
  "indexmap 2.14.0",
  "jsonschema",

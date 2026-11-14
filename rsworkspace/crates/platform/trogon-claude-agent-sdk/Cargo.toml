@@ -37,6 +37,7 @@ tracing = { workspace = true }
 libc = "=0.2.186"
 
 [dev-dependencies]
+http = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt-multi-thread", "test-util"] }
 

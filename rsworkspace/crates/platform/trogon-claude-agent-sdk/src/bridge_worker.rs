@@ -640,6 +640,11 @@ impl<H, P> WorkerClient<H, P> {
         self.lock().heartbeat_interval_ms
     }
 
+    /// What the worker waits with, for the timers that run beside it.
+    pub fn pacing(&self) -> &P {
+        &self.pacing
+    }
+
     fn authorization(&self, for_fetch: bool) -> Option<HeaderValue> {
         header_value(&format!("Bearer {}", self.lock().token.expose()), for_fetch)
     }
