@@ -286,3 +286,7 @@ pub(crate) fn registry_tool_writable<H: SettingsHost>(host: &H, kind: PlatformKi
 #[cfg(test)]
 #[path = "settings_resolve_writable_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "settings_resolve_writable_walk_tests.rs"]
+mod walk_tests;
