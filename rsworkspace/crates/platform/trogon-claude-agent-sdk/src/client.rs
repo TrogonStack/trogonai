@@ -982,7 +982,13 @@ impl ClientHandle {
             }
             // `writeBehindPromptHold`: queued now, written once initialize is confirmed.
             let (response, receiver) = oneshot::channel();
-            match self.enqueue(Command::Prompt { input, response }).await {
+            match self
+                .enqueue(Command::Prompt {
+                    input: Box::new(input),
+                    response,
+                })
+                .await
+            {
                 Ok(()) => held.push(receiver),
                 // The run stopped before the write was queued: the hold resolves `false`.
                 Err(_) => return Ok(()),
@@ -1040,7 +1046,11 @@ impl ClientHandle {
     /// Writes one user input. The CLI queues it when a turn is already running.
     pub async fn send_input(&self, input: crate::UserInput) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
-        self.enqueue(Command::Prompt { input, response }).await?;
+        self.enqueue(Command::Prompt {
+            input: Box::new(input),
+            response,
+        })
+        .await?;
         receiver.await.map_err(|_| self.stopped_error())?
     }
 
@@ -1479,7 +1489,11 @@ impl ClientHandle {
     /// Queues a prompt without waiting for the driver to write it.
     async fn queue_input(&self, input: crate::UserInput) -> Result<(), Error> {
         let (response, _receiver) = oneshot::channel();
-        self.enqueue(Command::Prompt { input, response }).await
+        self.enqueue(Command::Prompt {
+            input: Box::new(input),
+            response,
+        })
+        .await
     }
 
     /// Queues the end of the input without waiting for the driver to apply it.

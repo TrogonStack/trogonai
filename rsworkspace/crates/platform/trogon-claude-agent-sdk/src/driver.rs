@@ -40,7 +40,7 @@ pub(crate) enum Command {
         response: ControlSender,
     },
     Prompt {
-        input: crate::UserInput,
+        input: Box<crate::UserInput>,
         response: oneshot::Sender<Result<(), Error>>,
     },
     Control {

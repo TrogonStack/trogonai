@@ -230,7 +230,7 @@ async fn initialization_owns_admission_until_the_handshake_completes() -> Result
     fixture
         .driver
         .command(Command::Prompt {
-            input: crate::Prompt::from("before handshake").into(),
+            input: Box::new(crate::Prompt::from("before handshake").into()),
             response,
         })
         .await?;
@@ -619,7 +619,7 @@ async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects
             },
         );
         fixture.driver.held_commands.push_back(Command::Prompt {
-            input: crate::Prompt::from("hi").into(),
+            input: Box::new(crate::Prompt::from("hi").into()),
             response: prompt,
         });
         fixture.driver.held_commands.push_back(Command::Control {
