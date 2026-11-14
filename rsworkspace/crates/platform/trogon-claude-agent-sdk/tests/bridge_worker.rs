@@ -529,11 +529,44 @@ fn pure_rules_match_the_upstream_client() -> TestResult {
     Ok(())
 }
 
+/// Answers every lookup as a missing host, so a name fails the way it does without a network.
+struct NoSuchHost;
+
+impl reqwest::dns::Resolve for NoSuchHost {
+    fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async {
+            let missing: Box<dyn std::error::Error + Send + Sync> =
+                Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "no such host"));
+            Err(missing)
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_failure_with_no_node_equivalent_is_a_network_error() -> TestResult {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let tls = format!("https://{}", listener.local_addr()?);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+            let _ = stream.shutdown().await;
+        }
+    });
+    let failure = client(&tls, Recorded::new(0.0))?
+        .register_worker()
+        .await
+        .err()
+        .ok_or("expected a failure")?;
+    assert_eq!(failure.message(), "Network Error".to_owned());
+    assert_eq!(failure.code(), Some("ERR_NETWORK"));
+    Ok(())
+}
+
 #[tokio::test]
 async fn register_failures_carry_the_node_error_text() -> TestResult {
     let goldens: Value = serde_json::from_str(GOLDENS)?;
     let cases = goldens["network"].as_array().ok_or("no network cases")?;
-    assert!(cases.len() >= 6, "the network corpus shrank");
+    assert!(cases.len() >= 8, "the network corpus shrank");
     for case in cases {
         let mode = field(case, "mode").as_str().unwrap_or_default();
         let mut base = String::new();
@@ -541,6 +574,25 @@ async fn register_failures_carry_the_node_error_text() -> TestResult {
         match mode {
             "refused" => base = closed_port().await?,
             "invalid" => {}
+            "localhost" => base = closed_port().await?.replace("127.0.0.1", "localhost"),
+            "notfound" => {
+                let failure = WorkerClient::new(
+                    reqwest::Client::builder().dns_resolver(Arc::new(NoSuchHost)).build()?,
+                    Recorded::new(0.0),
+                    config("http://nonexistent.invalid", "tok"),
+                )?
+                .register_worker()
+                .await
+                .err()
+                .ok_or("expected a failure")?;
+                assert_eq!(
+                    Some(failure.message()),
+                    text(field(case, "message")).as_deref(),
+                    "notfound message"
+                );
+                assert_eq!(failure.code(), field(case, "code").as_str(), "notfound code");
+                continue;
+            }
             "ftp" => base = "ftp://h".to_owned(),
             "destroy" => register = Some(json!("destroy")),
             "loop" => {
