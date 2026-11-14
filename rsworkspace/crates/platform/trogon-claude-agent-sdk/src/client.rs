@@ -585,6 +585,11 @@ impl ClaudeSdkClient {
             process_id,
             outcome: None,
         };
+        // TypeScript: a process spawned under an aborted signal never hands back a Query; it ends with "Claude Code
+        // process aborted by user".
+        if runtime.handle.abort.is_cancelled() {
+            return Err(Self::failed_start(runtime, crate::AbortError::PROCESS.into()).await);
+        }
         // `startup()` and `prewarm()` wait for initialize under the startup timer, whichever dialect.
         if let Some(watch) = startup {
             return match runtime.handle.initialize_watched(receiver, watch).await {
