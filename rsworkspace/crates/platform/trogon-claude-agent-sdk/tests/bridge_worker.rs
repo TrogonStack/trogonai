@@ -11,10 +11,10 @@ use tokio::net::{TcpListener, TcpStream};
 use trogon_claude_agent_sdk::{
     AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
     HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
-    InitError, InitFailure, InvalidSessionId, MismatchReason, NOT_FOUND_BEFORE_EXIT, RegisterFailure, RequestFailure,
-    RequestOutcome, RequiresActionDetails, SensitiveString, SessionState, StatusClass, TokioPacing, WorkerClient,
-    WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, retry_after_ms,
-    session_url,
+    InitError, InitFailure, InvalidSessionId, MismatchReason, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RegisterFailure,
+    RequestFailure, RequestOutcome, RequiresActionDetails, SensitiveString, SessionState, StatusClass, TokioPacing,
+    WorkerClient, WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout,
+    refusal_source, retry_after_ms, session_url, token_expiry,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -133,7 +133,7 @@ async fn read_request(stream: &mut TcpStream) -> Option<Captured> {
     })
 }
 
-async fn write_response(stream: &mut TcpStream, response: &Value) -> TestResult {
+async fn write_response(stream: &mut TcpStream, response: &Value, base: &str) -> TestResult {
     let status = field(response, "status").as_u64().unwrap_or(200);
     let body = field(response, "body").as_str().unwrap_or("");
     let mut head = format!("HTTP/1.1 {status} Status\r\n");
@@ -141,7 +141,7 @@ async fn write_response(stream: &mut TcpStream, response: &Value) -> TestResult 
     for pair in field(response, "headers").as_array().into_iter().flatten() {
         if let (Some(name), Some(value)) = (pair[0].as_str(), pair[1].as_str()) {
             has_length |= name.eq_ignore_ascii_case("content-length");
-            head.push_str(&format!("{name}: {value}\r\n"));
+            head.push_str(&format!("{name}: {}\r\n", value.replace("{base}", base)));
         }
     }
     if !has_length {
@@ -165,14 +165,25 @@ fn next_response(queue: &[Value], taken: &mut usize) -> Value {
 }
 
 /// Serves the worker endpoints: each queue answers in order and then repeats its last answer. The string `"hang"`
-/// holds the connection open without answering.
+/// holds the connection open without answering and `"destroy"` closes it at once.
 async fn serve(register: Option<Value>, puts: Vec<Value>, beats: Vec<Value>) -> Result<(String, Log), std::io::Error> {
+    serve_all(register, puts, beats, vec![]).await
+}
+
+/// `serve`, plus the answers `PUT /worker/landing` gives (where a redirect may point), in `{base}` header values.
+async fn serve_all(
+    register: Option<Value>,
+    puts: Vec<Value>,
+    beats: Vec<Value>,
+    landings: Vec<Value>,
+) -> Result<(String, Log), std::io::Error> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
+    let origin = base.clone();
     let log: Log = Arc::default();
     let shared = log.clone();
     tokio::spawn(async move {
-        let (mut put_count, mut beat_count) = (0, 0);
+        let (mut put_count, mut beat_count, mut landing_count) = (0, 0, 0);
         let mut held = Vec::new();
         while let Ok((mut stream, _)) = listener.accept().await {
             let Some(mut request) = read_request(&mut stream).await else {
@@ -189,6 +200,7 @@ async fn serve(register: Option<Value>, puts: Vec<Value>, beats: Vec<Value>) -> 
                     .clone()
                     .unwrap_or_else(|| json!({"status": 200, "headers": [], "body": "{\"worker_epoch\":1}"})),
                 "PUT /worker" => next_response(&puts, &mut put_count),
+                "PUT /worker/landing" => next_response(&landings, &mut landing_count),
                 "POST /worker/heartbeat" => next_response(&beats, &mut beat_count),
                 _ => json!({"status": 404, "headers": [], "body": ""}),
             };
@@ -199,7 +211,11 @@ async fn serve(register: Option<Value>, puts: Vec<Value>, beats: Vec<Value>) -> 
                 held.push(stream);
                 continue;
             }
-            let _ = write_response(&mut stream, &response).await;
+            if response == "destroy" {
+                drop(stream);
+                continue;
+            }
+            let _ = write_response(&mut stream, &response, &origin).await;
         }
     });
     Ok((base, log))
@@ -217,6 +233,8 @@ fn config(base: &str, token: &str) -> WorkerConfig {
         token: SensitiveString::from(token),
         entrypoint: None,
         heartbeat_interval_ms: None,
+        session_access_token: None,
+        non_origin_403: NonOrigin403::default(),
     }
 }
 
@@ -298,8 +316,21 @@ impl Ending {
 async fn run_case(case: &Value) -> TestResult {
     let name = text(field(case, "name")).ok_or("unnamed case")?;
     let register = case.get("register").filter(|response| !response.is_null()).cloned();
-    let (base, log) = serve(register.clone(), queue(case, "puts"), queue(case, "beat")).await?;
-    let mut worker = client(&base, Recorded::new(0.0))?;
+    let (base, log) = serve_all(
+        register.clone(),
+        queue(case, "puts"),
+        queue(case, "beat"),
+        queue(case, "landing"),
+    )
+    .await?;
+    let mut worker = WorkerClient::new(
+        reqwest::Client::new(),
+        Recorded::new(0.0),
+        WorkerConfig {
+            session_access_token: text(field(case, "session_token")).map(SensitiveString::from),
+            ..config(&base, "tok")
+        },
+    )?;
     let mut epoch = field(case, "epoch_option").as_i64();
     let mut ending = Ending {
         closes: Vec::new(),
@@ -422,6 +453,11 @@ async fn heartbeats_match_the_upstream_client() -> TestResult {
     replay("heartbeat", 28).await
 }
 
+#[tokio::test]
+async fn token_expiry_and_refusal_sources_match_the_upstream_client() -> TestResult {
+    replay("auth", 14).await
+}
+
 #[test]
 fn pure_rules_match_the_upstream_client() -> TestResult {
     let goldens: Value = serde_json::from_str(GOLDENS)?;
@@ -489,6 +525,186 @@ fn pure_rules_match_the_upstream_client() -> TestResult {
     for case in pure["metadata"].as_array().ok_or("no metadata")? {
         let input: Map<String, Value> = case["input"].as_object().cloned().ok_or("metadata input")?;
         assert_eq!(Value::Object(external_metadata_patch(&input)), case["output"], "{case}");
+    }
+    Ok(())
+}
+
+/// Answers every lookup as a missing host, so a name fails the way it does without a network.
+struct NoSuchHost;
+
+impl reqwest::dns::Resolve for NoSuchHost {
+    fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async {
+            let missing: Box<dyn std::error::Error + Send + Sync> =
+                Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "no such host"));
+            Err(missing)
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_failure_with_no_node_equivalent_is_a_network_error() -> TestResult {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let tls = format!("https://{}", listener.local_addr()?);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+            let _ = stream.shutdown().await;
+        }
+    });
+    let failure = client(&tls, Recorded::new(0.0))?
+        .register_worker()
+        .await
+        .err()
+        .ok_or("expected a failure")?;
+    assert_eq!(failure.message(), "Network Error".to_owned());
+    assert_eq!(failure.code(), Some("ERR_NETWORK"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn register_failures_carry_the_node_error_text() -> TestResult {
+    let goldens: Value = serde_json::from_str(GOLDENS)?;
+    let cases = goldens["network"].as_array().ok_or("no network cases")?;
+    assert!(cases.len() >= 8, "the network corpus shrank");
+    for case in cases {
+        let mode = field(case, "mode").as_str().unwrap_or_default();
+        let mut base = String::new();
+        let mut register = None;
+        match mode {
+            "refused" => base = closed_port().await?,
+            "invalid" => {}
+            "localhost" => base = closed_port().await?.replace("127.0.0.1", "localhost"),
+            "notfound" => {
+                let failure = WorkerClient::new(
+                    reqwest::Client::builder().dns_resolver(Arc::new(NoSuchHost)).build()?,
+                    Recorded::new(0.0),
+                    config("http://nonexistent.invalid", "tok"),
+                )?
+                .register_worker()
+                .await
+                .err()
+                .ok_or("expected a failure")?;
+                assert_eq!(
+                    Some(failure.message()),
+                    text(field(case, "message")).as_deref(),
+                    "notfound message"
+                );
+                assert_eq!(failure.code(), field(case, "code").as_str(), "notfound code");
+                continue;
+            }
+            "ftp" => base = "ftp://h".to_owned(),
+            "destroy" => register = Some(json!("destroy")),
+            "loop" => {
+                let location = json!([["location", "{base}/v1/code/sessions/cse_abc/worker/register"]]);
+                register = Some(json!({"status": 302, "headers": location, "body": ""}));
+            }
+            "truncated" => {
+                let headers = json!([["content-length", "100"], ["content-type", "application/json"]]);
+                register = Some(json!({"status": 200, "headers": headers, "body": "{\"wor"}));
+            }
+            other => return Err(format!("unknown network mode {other}").into()),
+        }
+        if register.is_some() {
+            base = serve(register, vec![], vec![]).await?.0;
+        }
+        let failure = client(&base, Recorded::new(0.0))?
+            .register_worker()
+            .await
+            .err()
+            .ok_or("expected a failure")?;
+        let port = base.rsplit(':').next().unwrap_or_default();
+        let expected = text(field(case, "message")).unwrap_or_default().replace("<port>", port);
+        assert_eq!(failure.message(), expected, "{mode} message");
+        assert_eq!(failure.code(), field(case, "code").as_str(), "{mode} code");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn requests_that_fail_before_headers_report_the_fetch_error() -> TestResult {
+    let goldens: Value = serde_json::from_str(GOLDENS)?;
+    for case in goldens["fetch_failures"].as_array().ok_or("no fetch failures")? {
+        let mode = field(case, "mode").as_str().unwrap_or_default();
+        if mode == "hang" {
+            continue;
+        }
+        let answer = if mode == "truncated" {
+            json!({"status": 200, "headers": [["content-length", "10"]], "body": "ab"})
+        } else {
+            json!(mode)
+        };
+        let (base, _) = serve(None, vec![], vec![answer]).await?;
+        let mut worker = client(&base, Recorded::new(0.0))?;
+        let outcome = worker.heartbeat().await;
+        match field(case, "reason").as_str() {
+            Some(reason) => match outcome {
+                Ok(RequestOutcome::Failed(failure)) => assert_eq!(failure.reason, reason, "{mode}"),
+                other => return Err(format!("{mode}: {other:?}").into()),
+            },
+            None => assert_eq!(outcome, Ok(RequestOutcome::Accepted(None)), "{mode}"),
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn refusal_sources_and_token_expiry_match_the_upstream_client() -> TestResult {
+    let goldens: Value = serde_json::from_str(GOLDENS)?;
+    let pure = &goldens["pure"];
+    for case in pure["refusal_sources"].as_array().ok_or("no refusal sources")? {
+        let mut headers = reqwest::header::HeaderMap::new();
+        for (name, value) in field(case, "headers").as_object().ok_or("no headers")? {
+            headers.insert(
+                reqwest::header::HeaderName::from_bytes(name.as_bytes())?,
+                reqwest::header::HeaderValue::from_str(value.as_str().unwrap_or_default())?,
+            );
+        }
+        let source = refusal_source(&headers);
+        assert_eq!(Some(source.as_str()), field(case, "source").as_str(), "{case}");
+        assert_eq!(
+            Some(source.is_non_origin()),
+            field(case, "non_origin").as_bool(),
+            "{case}"
+        );
+    }
+    for case in pure["token_expiry"].as_array().ok_or("no token expiry")? {
+        let token = field(case, "token").as_str().unwrap_or_default();
+        assert_eq!(token_expiry(token), field(case, "exp").as_f64(), "{case}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn held_tickets_follow_the_token_in_use() -> TestResult {
+    let ticketed = json!({"status": 200, "headers": [["x-ccr-ticket-session", "t1"]], "body": "{}"});
+    let (base, _) = serve(None, vec![], vec![ticketed]).await?;
+    let mut worker = client(&base, Recorded::new(0.0))?;
+    worker.heartbeat().await.map_err(|reason| reason.as_str())?;
+    assert_eq!(worker.session_ticket(), Some("t1"));
+    worker.set_token(SensitiveString::from("other"));
+    assert_eq!(worker.session_ticket(), None);
+    worker.set_session_access_token(Some(SensitiveString::from("h.e30.s")));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_transient_non_origin_403_never_exhausts_the_session() -> TestResult {
+    let refusal = json!({"status": 403, "headers": [["cf-ray", "abc-LHR"]], "body": ""});
+    let (base, _) = serve(None, vec![], vec![refusal]).await?;
+    let mut worker = WorkerClient::new(
+        reqwest::Client::new(),
+        Recorded::new(0.0),
+        WorkerConfig {
+            non_origin_403: NonOrigin403::Transient,
+            ..config(&base, "tok")
+        },
+    )?;
+    for _ in 0..(AUTH_FAILURES_BEFORE_EXIT + 2) {
+        match worker.heartbeat().await {
+            Ok(RequestOutcome::Failed(failure)) => assert!(failure.non_origin_refusal),
+            other => return Err(format!("{other:?}").into()),
+        }
     }
     Ok(())
 }
@@ -617,13 +833,19 @@ async fn a_client_error_clears_the_held_tickets_but_a_429_does_not() -> TestResu
 async fn register_worker_fails_when_the_request_cannot_be_made() -> TestResult {
     let worker = client("", Recorded::new(0.0))?;
     let failure = worker.register_worker().await.err().ok_or("expected a failure")?;
-    assert_eq!(failure, RegisterFailure::Unreachable);
-    assert_eq!(failure.to_string(), "Network Error");
-    assert_eq!(failure.code(), Some("ERR_NETWORK"));
-    let bad_token = WorkerClient::new(reqwest::Client::new(), Recorded::new(0.0), config("http://h", "a\nb"))?;
-    assert_eq!(bad_token.register_worker().await, Err(RegisterFailure::Unreachable));
-    let refused = client(&closed_port().await?, Recorded::new(0.0))?;
-    assert_eq!(refused.register_worker().await, Err(RegisterFailure::Unreachable));
+    assert_eq!(failure.to_string(), "Invalid URL");
+    assert_eq!(failure.code(), Some("ERR_INVALID_URL"));
+    let wide_token = WorkerClient::new(
+        reqwest::Client::new(),
+        Recorded::new(0.0),
+        config("http://h", "a\u{100}"),
+    )?;
+    let failure = wide_token.register_worker().await.err().ok_or("expected a failure")?;
+    assert_eq!(
+        failure.to_string(),
+        "Invalid character in header content [\"Authorization\"]"
+    );
+    assert_eq!(failure.code(), Some("ERR_INVALID_CHAR"));
     Ok(())
 }
 
@@ -637,7 +859,11 @@ async fn register_worker_reads_a_body_that_starts_with_a_byte_order_mark() -> Te
 
 #[tokio::test]
 async fn requests_that_cannot_be_made_do_not_reach_the_service() -> TestResult {
-    let mut bad_token = WorkerClient::new(reqwest::Client::new(), Recorded::new(0.0), config("http://h", "a\nb"))?;
+    let mut bad_token = WorkerClient::new(
+        reqwest::Client::new(),
+        Recorded::new(0.0),
+        config("http://h", "a\u{100}"),
+    )?;
     let outcome = bad_token.report_metadata(&Map::new()).await;
     assert_eq!(outcome, Ok(type_error()));
     let mut relative = client("", Recorded::new(0.0))?;
@@ -653,15 +879,16 @@ fn type_error() -> RequestOutcome {
         reason: "fetch_failed:TypeError".to_owned(),
         retry_after_ms: None,
         fetch_failed: true,
+        non_origin_refusal: false,
     })
 }
 
 #[tokio::test]
-async fn a_body_that_ends_early_counts_as_no_answer() -> TestResult {
+async fn a_body_that_ends_early_is_accepted_without_its_data() -> TestResult {
     let truncated = json!({"status": 200, "headers": [["content-length", "10"]], "body": "ab"});
     let (base, _) = serve(None, vec![], vec![truncated]).await?;
     let mut worker = client(&base, Recorded::new(0.0))?;
-    assert_eq!(worker.heartbeat().await, Ok(type_error()));
+    assert_eq!(worker.heartbeat().await, Ok(RequestOutcome::Accepted(None)));
     Ok(())
 }
 
@@ -681,6 +908,7 @@ async fn a_silent_service_times_the_request_out() -> TestResult {
             reason: "fetch_failed:TimeoutError".to_owned(),
             retry_after_ms: None,
             fetch_failed: true,
+            non_origin_refusal: false,
         }))
     );
     Ok(())
