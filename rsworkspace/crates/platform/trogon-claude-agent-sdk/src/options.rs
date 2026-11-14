@@ -344,6 +344,8 @@ pub struct ClaudeAgentOptions {
     pub limits: Limits,
     pub permission_handler: Option<Arc<dyn ToolPermissionHandler>>,
     pub hooks: Vec<HookRegistration>,
+    /// TypeScript `hooks: {}`: with [`crate::EmptyCollection::Sent`] an empty `hooks` reaches `initialize` as `{}`.
+    pub hooks_when_empty: crate::EmptyCollection,
     /// Agents in insertion order, like the object either SDK sends.
     pub agents: indexmap::IndexMap<AgentName, AgentDefinition>,
     pub agent: Option<AgentName>,
@@ -370,6 +372,9 @@ pub struct ClaudeAgentOptions {
     pub elicitation_handler: Option<Arc<dyn ElicitationHandler>>,
     pub user_dialog_handler: Option<Arc<dyn UserDialogHandler>>,
     pub supported_dialog_kinds: Vec<DialogKind>,
+    /// TypeScript `supportedDialogKinds: []`: with [`crate::EmptyCollection::Sent`] an empty list reaches
+    /// `initialize` as `[]`.
+    pub supported_dialog_kinds_when_empty: crate::EmptyCollection,
     /// TypeScript `getOAuthToken`. Setting it also sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH=1`. Without a handler a
     /// token request is answered with `getOAuthToken callback is not provided.`.
     pub oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
