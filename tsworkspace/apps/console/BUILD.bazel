@@ -84,7 +84,15 @@ vite_bin.vite(
 
 vitest_bin.vitest_test(
     name = "test",
-    args = ["run"],
+    timeout = "long",
+    # Bazel runs this beside Rust compiles, which slowed its DOM tests past the
+    # 20s vite.config.ts timeout and the whole suite past the default 300s, so
+    # the timeouts are raised here instead of tagging the target, as tags change
+    # its copy actions and conflict with the other targets that copy src/.
+    args = [
+        "run",
+        "--testTimeout=60000",
+    ],
     chdir = package_name(),
     data = [
         ":app_config",
@@ -93,18 +101,9 @@ vitest_bin.vitest_test(
         ":sources",
         "//tsworkspace:node_modules/vitest",
     ],
-    env = {"VITE_PRESERVE_SYMLINKS": "1"},
-    # React is CommonJS. Node resolves require() through the rules_js fs
-    # patches, which stop at the runfiles tree, but resolves ESM imports
-    # without them, so those follow the symlinks into the output tree
-    # (https://github.com/aspect-build/rules_js/issues/362). React reached
-    # both ways loads twice and hooks fail with "Invalid hook call". Without
-    # the patches both loaders resolve to the same file, and because data is
-    # copied to the output tree, that file is still a declared input.
-    patch_node_fs = False,
-    # The Bazel job shares the runner with Rust compiles and the typecheck, so
-    # the suites take far longer than the 300 second default allows.
-    timeout = "long",
+    # No VITE_PRESERVE_SYMLINKS here: Node loads the dependencies vitest keeps
+    # external from their real paths, so Vite resolving the same packages
+    # through runfiles symlinks loaded React and testing-library twice.
 )
 
 oxlint_bin.oxlint_test(

@@ -20,16 +20,15 @@ workspace_crate(
             "tags": ["manual"],
         },
     },
-    # test-support turns on the optional buffa, but no Cargo crate enables that
-    # feature for the library, so crate_universe leaves buffa out of its dependencies.
-    # Tests already get it as a dev-dependency, and workspace_crate drops the repeat.
+    # The @crates labels are optional dependencies of the enabled features. No
+    # workspace member enables those features, so crate_universe leaves them out.
     deps = [
-        "@crates//buffa-0.9.2",
         "//rsworkspace/crates/decider/trogon-decider",
         "//rsworkspace/crates/decider/trogon-decider-guest-sdk",
         "//rsworkspace/crates/decider/trogon-decider-wasm-runtime",
         "//rsworkspace/crates/decider/trogon-decider-wit",
         "//rsworkspace/crates/platform/trogon-std",
         "//rsworkspace/crates/platform/trogonai-proto",
+        "@crates//:buffa",
     ],
 )

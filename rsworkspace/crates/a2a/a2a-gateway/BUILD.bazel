@@ -2,9 +2,11 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     name = "a2a-gateway",
+    # The workspace imports spicedb-grpc-tonic under the name authzed.
+    aliases = {"@crates//:spicedb-grpc-tonic": "authzed"},
     binaries = {"a2a-gateway": {}},
-    # crate_universe resolves only default features, so it leaves out the optional
-    # crates spicedb turns on and Bazel builds the default-features gateway.
+    # Cargo CI tests every feature at once; the default-features run is not mirrored.
+    crate_features = ["spicedb"],
     dev_deps = ["//rsworkspace/crates/platform/trogonai-proto"],
     integration_tests = {
         # Runs the docker CLI against the repository's devops/ directory, which
@@ -38,6 +40,8 @@ workspace_crate(
     ],
     # Some tests start a NATS server in a container through Docker.
     unit_test_tags = ["requires-network"],
+    # The @crates labels are optional dependencies of the enabled features. No
+    # workspace member enables those features, so crate_universe leaves them out.
     deps = [
         "//rsworkspace/crates/a2a/a2a-auth-callout",
         "//rsworkspace/crates/a2a/a2a-nats",
@@ -49,5 +53,7 @@ workspace_crate(
         "//rsworkspace/crates/platform/trogon-semconv",
         "//rsworkspace/crates/platform/trogon-std",
         "//rsworkspace/crates/platform/trogon-telemetry",
+        "@crates//:spicedb-grpc-tonic",
+        "@crates//:tonic",
     ],
 )
