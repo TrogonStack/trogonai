@@ -58,8 +58,14 @@ async fn only_a_named_bundled_root_is_searched_before_path() -> Result<(), Box<d
 
     let mut client = ClaudeSdkClient::connect(options(None)).await?;
     client.send_prompt(Prompt::from("from path")).await?;
-    assert_eq!(read_result(&mut client).await?, "from path");
-    client.disconnect().await?;
+    let observed = read_result(&mut client).await;
+    let cleanup = client.disconnect().await;
+    if let (Err(read), Err(disconnect)) = (&observed, &cleanup) {
+        return Err(format!("reading the result failed: {read}; disconnecting failed: {disconnect}").into());
+    }
+    let text = observed?;
+    cleanup?;
+    assert_eq!(text, "from path");
 
     let error = ClaudeSdkClient::connect(options(Some(package))).await.err();
     assert!(matches!(error, Some(SdkError::Spawn(_))), "{error:?}");
