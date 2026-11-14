@@ -529,6 +529,8 @@ fn object(schema: &JsonObject, callbacks: Callbacks<'_>) -> Node {
         Some(Value::Bool(false)) => ObjectMode::Strict,
         Some(Value::Object(catchall)) if catchall.is_empty() => ObjectMode::Catchall(Box::new(Node::Any)),
         Some(catchall @ Value::Object(_)) => ObjectMode::Catchall(Box::new(build(catchall, true, callbacks))),
+        // A schema that declares no `properties` has no shape to strip against, so its keys pass through.
+        _ if schema.get("properties").is_none() => ObjectMode::Catchall(Box::new(Node::Any)),
         _ => ObjectMode::Strip,
     };
     Node::Object(ObjectNode { properties, mode })
