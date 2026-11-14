@@ -257,13 +257,6 @@ fn an_empty_sealing_key_seed_refuses_to_start() {
 }
 
 #[test]
-#[cfg_attr(
-    dylint_lib = "trogon_dylint_lints",
-    expect(
-        error_string_comparison,
-        reason = "display redaction is the contract under test; typed variants separately prove error classification"
-    )
-)]
 fn a_sealing_key_seed_that_is_not_a_curve_seed_refuses_to_start_without_quoting_it() {
     let account_seed = KeyPair::new_account().seed().unwrap();
 
@@ -388,13 +381,6 @@ fn every_refusal_names_its_setting() {
 }
 
 #[test]
-#[cfg_attr(
-    dylint_lib = "trogon_dylint_lints",
-    expect(
-        error_string_comparison,
-        reason = "display redaction is the contract under test; typed variants separately prove error classification"
-    )
-)]
 fn no_refusal_quotes_the_secret_id() {
     let mut config = seed_in_file();
     config.openbao_role_id = String::new();
