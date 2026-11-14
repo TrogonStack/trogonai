@@ -62,6 +62,8 @@ if (!/var x9=2000;/.test(source) || !source.includes('mHe=512,hHe="upgrade_relay
 const classify = evaluate(`${between('function tC(', 'function m4e(')}`, ['tC']).tC;
 const requiresAction = evaluate(between('function F5(', 'var gHe='), ['F5']).F5;
 const metadataTable = evaluate(between('function p4e(', 'async function eC('), ['p4e']).p4e;
+const streamTable = evaluate(`${between('function fl(', 'class ml{')};var ${between('W4e=1000,j4e=30000,', ',E9=new DOMException').replace(',K4e=60000', '')};var ${between('S9=3,X4e=', ',y9=25')};var b9=2000,t$e=new Set([401,403,404]);`, ['fl', 'W4e', 'j4e', 'V4e', 'bC', 'z4e', 'S9', 'X4e', 'b9', 't$e']);
+const frameParser = evaluate(`${between('var T4e={stream:!0};', 'var e9=30000')}`, ['dC']).dC;
 const statuses = [undefined, 0, 200, 399, 400, 404, 499, 500, 599];
 
 const sessionUrl = evaluate(`const GX=/^[a-zA-Z0-9_-]+$/;${between('function sd(', 'function UD(')}${between('function TC(', 'async function R9(')}`, ['TC']).TC;
@@ -134,6 +136,54 @@ const pure = {
     { tool_name: 'Bash', display_tool_name: 'Run', action_description: 'a', raw_command: 'ls', request_id: 'r', tool_use_id: 't', extra: 1 },
     { tool_name: 'Bash', action_description: 'a', request_id: 'r', tool_use_id: 't' },
   ].map((input) => ({ input, output: JSON.parse(JSON.stringify(requiresAction(input))) })),
+  stream: {
+    reconnect_base_ms: streamTable.W4e,
+    reconnect_cap_ms: streamTable.j4e,
+    keepalive_seconds: streamTable.bC,
+    keepalive_ceiling_seconds: streamTable.z4e,
+    keepalive_tolerance_factor: streamTable.S9,
+    keepalive_tolerance_param: streamTable.X4e,
+    liveness_grace_ms: streamTable.V4e,
+    silent_connection_ms: streamTable.b9,
+    permanent_statuses: [...streamTable.t$e],
+    // jitter 0 is the middle of the symmetric 25% band: random 0.5, the low end random 0 and the high end random 1.
+    backoff: [1, 2, 3, 4, 5, 6, 7, 8].map((attempt) => [attempt, ...[0, 0.5, 1].map((random) => streamTable.fl({ attempt, baseMs: streamTable.W4e, capMs: streamTable.j4e, jitter: { kind: 'symmetric', ratio: 0.25 }, random: () => random }))]),
+    frames: [
+      ['id: 1\nevent: e\ndata: x\n\n'],
+      ['id: 1\r\nevent: e\r\ndata: x\r\n\r\n'],
+      ['id: 1\revent: e\rdata: x\r\r'],
+      ['id: 1\nev', 'ent: e\nda', 'ta: x\n', '\n'],
+      ['id: 1\r', '\nevent: e\r', '\ndata: x\r', '\n\r', '\n'],
+      ['id: 1\nevent: e\ndata: x\n'],
+      ['id: 1\nevent: e\ndata: x\n\nid: 2\nevent: e\ndata: y\n\n'],
+      ['id: 1\nevent: e\ndata: x\n\nid: 2\nevent: e\ndata: y\n', '\n'],
+      [': keepalive\n\n'],
+      [': keepalive\n\nevent: e\ndata: x\n\n'],
+      ['event: e\ndata: a\ndata: b\ndata: c\n\n'],
+      ['event: e\ndata:\ndata: b\n\n'],
+      ['event: e\ndata:\n\n'],
+      ['event: e\ndata: x\n\n\n\nevent: f\ndata: y\n\n'],
+      ['\n\nevent: e\ndata: x\n\n'],
+      ['\r\n\r\nevent: e\ndata: x\n\n'],
+      ['data: x\n\n'],
+      ['event: e\n\n'],
+      ['   \n\n'],
+      ['id:7\nevent:e\ndata:x\n\n'],
+      ['id:  7\nevent:  e\ndata:  x\n\n'],
+      ['id: 1\nid: 2\nevent: e\nevent: f\ndata: x\n\n'],
+      ['unknown: 1\nevent: e\ndata: x\nno colon line\n\n'],
+      ['event: e\ndata: caf\u00e9 \u{1F600}\n\n'],
+      [new Uint8Array(Buffer.from('event: e\ndata: caf\u00e9\n\n')).slice(0, 18), new Uint8Array(Buffer.from('event: e\ndata: caf\u00e9\n\n')).slice(18)],
+      ['event: e\r\rdata: x\n\n'],
+      ['event: e\ndata: x\r\n\n'],
+      ['event: e\ndata: x\n\r\nevent: f\ndata: y\n\r\n'],
+    ].map((chunks) => {
+      const parser = new frameParser();
+      const frames = [];
+      for (const chunk of chunks) for (const frame of parser.push(chunk)) frames.push(frame);
+      return { chunks: chunks.map((chunk) => (typeof chunk === 'string' ? chunk : { bytes: [...chunk] })), frames, pending: parser.buffered() };
+    }),
+  },
   metadata: [
     { model: 'm' },
     {},
@@ -148,7 +198,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -354,8 +404,49 @@ served('a_control_cancel_does_not_jump_the_queue', { steps: [running, post(1, [n
 served('a_request_with_a_held_model_call_policy_does_not_jump_the_queue', { steps: [beat(policy({ hold_across_model_calls: true, max_age_ms: 60000 })), running, post(1, [note('a', 'u1')]), post(2, [note('b', 'u2'), note('c', 'u3'), control('sendControlRequest', permission)])] });
 served('the_handle_reaches_no_internal_hooks', { handleKeys: true, steps: [running] });
 
+// ---- the read stream (GET /worker/events/stream), reached when `outboundOnly` is false ----
+// Each case serves a script of connections to the real `attachBridgeSession`: a connection answers with a status and
+// then either streams its chunks and stays open (`hold`) or ends. The recording keeps the stream requests, the
+// acknowledgements and heartbeats the frames cause, what the bundle handed to `onInboundMessage` and the sequence
+// number the handle reports.
+const sseFrame = (id, event, data) => `${id === null ? '' : `id: ${id}\n`}event: ${event}\ndata: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`;
+const clientEvent = (sequence, eventId, payload, extra = {}) => sseFrame(sequence, 'client_event', { event_id: eventId, sequence_num: sequence, event_type: payload.type, source: 'client', payload, ...extra });
+const userPayload = (uuid, text = 'hi') => ({ type: 'user', uuid, session_id: 'cse_abc', message: { role: 'user', content: text } });
+const ephemeral = (kind) => sseFrame(null, 'ephemeral_event', { event_type: kind });
+const connection = (chunks, then = 'hold', extra = {}) => ({ status: 200, headers: [['content-type', 'text/event-stream']], chunks, then, ...extra });
+const refused = (status, headers = []) => ({ status, headers, chunks: [], body: '', then: 'end' });
+const streamed = (name, connections, spec = {}) => add('stream', name, { epoch: 6, stream: connections, ...spec });
+const delivered = (count) => ['/worker/events/delivery', count];
+streamed('the_stream_opens_with_the_session_headers', [connection([])], { waitFor: [['/worker/events/stream', 1]] });
+streamed('a_client_event_is_delivered_and_acknowledged', [connection([clientEvent(1, 'e1', userPayload('u1'))])], { waitFor: [delivered(2)] });
+streamed('events_in_one_chunk_are_acknowledged_in_order', [connection([clientEvent(1, 'e1', userPayload('u1')) + clientEvent(2, 'e2', userPayload('u2'))])], { waitFor: [delivered(2)] });
+streamed('events_in_separate_chunks_are_acknowledged_one_by_one', [connection([clientEvent(1, 'e1', userPayload('u1')), clientEvent(2, 'e2', userPayload('u2'))], 'hold', { gapMs: 150 })], { waitFor: [delivered(4)] });
+streamed('a_frame_split_across_chunks_is_read_whole', [connection(['id: 1\r\nevent: client_event\r\nda', `ta: ${JSON.stringify({ event_id: 'e1', sequence_num: 1, event_type: 'user', source: 'client', payload: userPayload('u1') })}\r`, '\n\r', '\n'], 'hold', { gapMs: 60 })], { waitFor: [delivered(2)] });
+streamed('a_payload_on_several_data_lines_is_joined', [connection(['id: 1\nevent: client_event\ndata: {"event_id":"e1","sequence_num":1,\ndata: "event_type":"user","source":"client",\ndata: "payload":{"type":"user","uuid":"u1","message":{"role":"user","content":"hi"}}}\n\n'])], { waitFor: [delivered(2)] });
+streamed('comments_and_frames_without_an_event_are_dropped', [connection([': keepalive\n\n', 'data: {"event_id":"x"}\n\n', sseFrame(2, 'something_else', { event_id: 'x' }), clientEvent(3, 'e3', userPayload('u3'))])], { waitFor: [delivered(2)] });
+streamed('a_frame_that_is_not_json_is_dropped', [connection([sseFrame(1, 'client_event', 'not json'), clientEvent(2, 'e2', userPayload('u2'))])], { waitFor: [delivered(2)] });
+streamed('a_worker_control_request_is_acknowledged_and_not_delivered', [connection([clientEvent(1, 'e1', { type: 'control_request', request_id: 'r1', request: { subtype: 'interrupt' } }, { source: 'worker' }), clientEvent(2, 'e2', userPayload('u2'))])], { waitFor: [delivered(2)] });
+streamed('a_server_only_type_that_does_not_match_is_acknowledged_and_not_delivered', [connection([clientEvent(1, 'e1', { type: 'session_notice', text: 'n' }, { event_type: 'user' }), clientEvent(2, 'e2', userPayload('u2'))])], { waitFor: [delivered(2)] });
+streamed('a_client_event_without_a_typed_payload_is_acknowledged', [connection([clientEvent(1, 'e1', { text: 'no type' }), clientEvent(2, 'e2', userPayload('u2'))])], { waitFor: [delivered(2)] });
+streamed('a_repeated_user_uuid_is_delivered_once', [connection([clientEvent(1, 'e1', userPayload('u1')), clientEvent(2, 'e2', userPayload('u1')), clientEvent(3, 'e3', userPayload('u3'))], 'hold', { gapMs: 100 })], { waitFor: [delivered(6)] });
+streamed('a_repeated_sequence_is_still_acknowledged', [connection([clientEvent(5, 'e5', userPayload('u5')), clientEvent(5, 'e5b', userPayload('u6')), clientEvent(3, 'e3', userPayload('u7'))], 'hold', { gapMs: 100 })], { waitFor: [delivered(6)] });
+streamed('ephemeral_frames_do_not_move_the_sequence', [connection([sseFrame(9, 'ephemeral_event', { event_type: 'owner_present' }), clientEvent(2, 'e2', userPayload('u2'))])], { waitFor: [delivered(2)] });
+streamed('a_heartbeat_probe_sends_a_heartbeat_at_once', [connection([ephemeral('heartbeat_probe')])], { waitFor: [['/worker/heartbeat', 1]] });
+streamed('a_second_probe_waits_for_the_beat_spacing', [connection([ephemeral('heartbeat_probe'), ephemeral('heartbeat_probe')], 'hold', { gapMs: 150 })], { waitFor: [['/worker/heartbeat', 2]], waitMs: 15000 });
+streamed('other_ephemeral_frames_send_nothing', [connection([ephemeral('owner_present'), ephemeral('checkpoint_request'), ephemeral('session_claimed'), ephemeral('something_new'), sseFrame(null, 'ephemeral_event', 'not json'), sseFrame(null, 'ephemeral_event', { no_type: 1 })])], { waitFor: [['/worker/events/stream', 1]], settleMs: 800 });
+streamed('a_stream_that_ends_is_reopened_after_the_last_sequence', [connection([clientEvent(4, 'e4', userPayload('u4'))], 'end'), connection([])], { waitFor: [['/worker/events/stream', 2], delivered(2)], reconnectBases: [1000] });
+streamed('a_failed_open_is_retried_with_a_growing_delay', [refused(500), refused(502), refused(503), connection([])], { waitFor: [['/worker/events/stream', 4]], reconnectBases: [1000, 2000, 4000], settleMs: 200 });
+streamed('a_throttled_open_is_retried_like_any_other_failure', [refused(429, [['retry-after', '5']]), connection([])], { waitFor: [['/worker/events/stream', 2]], reconnectBases: [1000], settleMs: 200 });
+streamed('a_reconnect_after_a_good_stream_starts_the_delay_over', [connection([], 'end'), refused(500), connection([clientEvent(1, 'e1', userPayload('u1'))], 'end'), connection([])], { waitFor: [['/worker/events/stream', 4]], reconnectBases: [1000, 2000, 1000], settleMs: 200 });
+streamed('a_reconnect_resumes_from_the_highest_sequence', [connection([clientEvent(7, 'e7', userPayload('u7')), clientEvent(6, 'e6', userPayload('u6'))], 'end'), connection([])], { waitFor: [['/worker/events/stream', 2], delivered(4)], reconnectBases: [1000] });
+streamed('an_unauthorized_stream_closes_the_session', [refused(401)], { waitClose: true });
+streamed('a_forbidden_stream_closes_the_session', [refused(403)], { waitClose: true });
+streamed('a_forbidden_stream_from_the_edge_closes_the_session', [refused(403, [['cf-ray', 'abc-LHR']])], { waitClose: true });
+streamed('a_missing_stream_closes_the_session', [refused(404)], { waitClose: true });
+streamed('a_stream_that_is_not_event_stream_is_still_read', [connection([clientEvent(1, 'e1', userPayload('u1'))], 'hold', { headers: [['content-type', 'text/plain']] })], { waitFor: [delivered(2)] });
+
 // ---- runner ----
-const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq', 'x-ccr-upload-attempt']);
+const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'last-event-id', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq', 'x-ccr-upload-attempt']);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const until = async (predicate, ms) => {
   const end = Date.now() + ms;
@@ -365,7 +456,7 @@ const until = async (predicate, ms) => {
 async function run(spec) {
   const requests = [];
   const gate = { on: spec.gated === true || (spec.steps ?? []).some((step) => step.op === 'beat'), pending: false, answer: null, current: null };
-  const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], events: [...(spec.events ?? [])], deliveries: [...(spec.deliveries ?? [])], landing: [...(spec.landing ?? [])] };
+  const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], events: [...(spec.events ?? [])], deliveries: [...(spec.deliveries ?? [])], landing: [...(spec.landing ?? [])], stream: [...(spec.stream ?? [])] };
   const pick = (key) => {
     const queue = queues[key];
     if (queue.length === 0) return json(200, {});
@@ -379,6 +470,22 @@ async function run(spec) {
       for (let i = 0; i < req.rawHeaders.length; i += 2) if (KEPT.has(req.rawHeaders[i].toLowerCase())) headers.push([req.rawHeaders[i], req.rawHeaders[i + 1]]);
       const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
       const isRead = req.method === 'GET' && route === '/worker';
+      if (req.method === 'GET' && route.startsWith('/worker/events/stream')) {
+        requests.push({ method: req.method, path: req.url, headers, body: '', at: Date.now() });
+        const script = queues.stream.length > 1 ? queues.stream.shift() : (queues.stream[0] ?? { status: 200, chunks: [], then: 'hold' });
+        res.statusCode = script.status;
+        for (const [name, value] of script.headers ?? [['content-type', 'text/event-stream']]) res.setHeader(name, value);
+        if (script.chunks.length === 0 && script.then === 'end') { res.end(script.body ?? ''); return; }
+        res.flushHeaders();
+        (async () => {
+          for (const chunk of script.chunks) {
+            res.write(chunk);
+            await sleep(script.gapMs ?? 30);
+          }
+          if (script.then === 'end') res.end();
+        })();
+        return;
+      }
       const gated = gate.on && route === '/worker/heartbeat';
       const background = gated && !gate.pending;
       if (!isRead && !background) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: Date.now() });
@@ -403,11 +510,12 @@ async function run(spec) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const closes = [];
+  const inbound = [];
   const logStart = fs.existsSync(debugLog) ? fs.statSync(debugLog).size : 0;
-  const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: true, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code) };
+  const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: spec.stream === undefined, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code), onInboundMessage: (message) => inbound.push({ type: message.type, uuid: message.uuid ?? null }) };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
-  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
+  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), ...(spec.stream !== undefined && { stream: spec.stream }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
   if (spec.sessionToken !== undefined) process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = spec.sessionToken;
   try {
@@ -468,6 +576,12 @@ async function run(spec) {
       if (step.sends) await until(() => requests.filter((r) => r.method === 'PUT').length > before, 3000);
       else await sleep(150);
     }
+    if (spec.waitFor !== undefined) {
+      const reached = () => spec.waitFor.every(([suffix, wanted]) => requests.filter((r) => r.path.includes(suffix)).length >= wanted);
+      await until(reached, spec.waitMs ?? 12000);
+      if (!reached()) throw new Error(`${spec.name}: the awaited requests did not arrive`);
+      await sleep(spec.settleMs ?? 400);
+    }
     if (spec.beats !== undefined) await until(() => count('/worker/heartbeat') >= spec.beats, 5000);
     if (spec.waitClose) await until(() => closes.length > 0, 8000);
     else await sleep(80);
@@ -478,6 +592,7 @@ async function run(spec) {
       if (result.quiet !== spec.quiet) throw new Error(`${spec.name}: expected quiet=${spec.quiet}`);
     }
     if (spec.handleKeys) result.handle_keys = Object.keys(handle).sort();
+    if (spec.stream !== undefined) { result.inbound = inbound; result.last_sequence = handle.getSequenceNum(); }
     result.connected = handle.isConnected();
     result.epoch = handle.getEpoch();
   }
@@ -511,6 +626,13 @@ async function run(spec) {
     const ok = gaps.length === spec.deliveryGaps.length && gaps.every((gap, i) => spec.deliveryGaps[i] === null || (gap >= spec.deliveryGaps[i] - 5 && gap < spec.deliveryGaps[i] + 500 + 400));
     if (!ok) throw new Error(`${spec.name}: delivery gaps ${gaps} outside ${spec.deliveryGaps}`);
     result.delivery_gaps_ms = spec.deliveryGaps;
+  }
+  if (spec.reconnectBases !== undefined) {
+    const opens = requests.filter((r) => r.path.includes('/worker/events/stream'));
+    const gaps = opens.slice(1).map((r, i) => r.at - opens[i].at);
+    const ok = gaps.length === spec.reconnectBases.length && gaps.every((gap, i) => gap >= spec.reconnectBases[i] * 0.75 - 10 && gap <= spec.reconnectBases[i] * 1.25 + 500);
+    if (!ok) throw new Error(`${spec.name}: reconnect gaps ${gaps} outside ${spec.reconnectBases}`);
+    result.reconnect_base_ms = spec.reconnectBases;
   }
   if (spec.eventGaps !== undefined) {
     const posts = requests.filter((r) => r.path.endsWith('/worker/events'));
@@ -618,8 +740,8 @@ if (only !== undefined) {
   process.exit(0);
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], network: [], fetch_failures: [] };
-for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'delivery', 'served']) {
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], stream: [], network: [], fetch_failures: [] };
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'delivery', 'served', 'stream']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
 for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));

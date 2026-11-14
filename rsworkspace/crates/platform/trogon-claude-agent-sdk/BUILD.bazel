@@ -58,6 +58,7 @@ workspace_crate(
         "bridge_worker_delivery": {},
         "bridge_worker_events": {},
         "bridge_worker_queue": {},
+        "bridge_worker_stream": {"compile_data": ["tests/fixtures/bridge_worker/goldens.json"]},
         "builtin_tool_name": {},
         "builtin_tool_name_storage": {},
         "bundled_cli": {},

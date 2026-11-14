@@ -14,8 +14,9 @@
 //! upstream client look out of reach there and are not ported yet:
 //!
 //! - the worker socket (`workerSocket`, `O?"origin"`, offsets 1051556 to 1052200), which no attach option creates;
-//! - the heartbeat probe and the token-lifetime extras (`advertiseHeartbeatProbeSupport`, `skipRedundantHeartbeats`,
-//!   offset 1048000), which the attach options leave off;
+//! - the token-lifetime extras and the advertising of probe support (`advertiseHeartbeatProbeSupport`,
+//!   `skipRedundantHeartbeats`, offset 1048000), which the attach options leave off; the probe itself is reached by a
+//!   `heartbeat_probe` frame on the read stream and is ported in [`crate::StreamSession`];
 //! - the flush policy (`flushPolicy`: `waitsForStatus`, `mergesSameRun`, `metadataNeverSent`, offsets 1032337 and
 //!   1057745), which is only set by a policy the attach options never deliver;
 //! - `e3()` for `reply_degraded` (offset 856241), which evaluates to false for an attached session;

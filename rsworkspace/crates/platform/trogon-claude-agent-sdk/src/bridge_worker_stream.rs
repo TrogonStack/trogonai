@@ -1,0 +1,342 @@
+//! The read side of the worker client (`GET <session>/worker/events/stream`, the `SSETransport` class `AC` in
+//! bridge.mjs, offset 1010000 to 1030000): how the stream is opened, how its bytes become frames, what each frame
+//! does, and how a lost stream is reopened.
+//!
+//! The session does no I/O. A caller opens the request [`StreamSession::request`] describes, reports the status with
+//! [`StreamSession::opened`], pushes the body with [`StreamSession::push`] and acts on the [`StreamEffect`] values it
+//! returns, and reports a stream that ended or failed to open with [`StreamSession::lost`], which says how long to
+//! wait before the next request. The recorded goldens (`stream` section) drive all of it through the real
+//! `attachBridgeSession` against a local server.
+//!
+//! `attachBridgeSession` never passes the options of the transport that would change this: `nonOrigin403` (the
+//! windowed refusal policy), `selfHealHeartbeats`, `causeTypedCloseCodes` (the 4093 and 4094 close codes),
+//! `longPollFallback`, `streamOpener`, `leavesPool`, the attestation filter and the held-for-renewal gate. None is
+//! ported. The inbound router behind `onInboundMessage` (it drops a user message whose `uuid` was seen) is not part
+//! of the transport and is not ported here either.
+
+use std::collections::BTreeSet;
+use std::time::Duration;
+
+use serde_json::Value;
+
+use crate::bridge_js::js_parse_int;
+
+/// The reconnect delay of the first failure (`W4e`).
+pub const RECONNECT_BASE_MS: u64 = 1_000;
+/// The longest reconnect delay before jitter (`j4e`).
+pub const RECONNECT_CAP_MS: u64 = 30_000;
+/// The jitter ratio of the reconnect delay (`symmetric`, `0.25`).
+pub const RECONNECT_JITTER_RATIO: f64 = 0.25;
+/// The statuses that close the session instead of being retried (`t$e`).
+pub const PERMANENT_STREAM_STATUSES: [u16; 3] = [401, 403, 404];
+/// The silence the service keeps between frames, in seconds, when it advertises nothing else (`bC`).
+pub const KEEPALIVE_SECONDS: u64 = 15;
+/// The grace added to the silence before the stream is called dead (`V4e`).
+pub const LIVENESS_GRACE_MS: u64 = 30_000;
+/// The `event_type` values only the service may send: a payload of such a type under another `event_type` is vetoed.
+const SERVER_ONLY_TYPES: [&str; 3] = ["workflow_launch", "queued_notification", "session_notice"];
+/// The most sequence numbers remembered for the duplicate log before the old ones are dropped.
+const SEEN_LIMIT: usize = 1_000;
+/// How far below the highest sequence number a remembered one may sit when the old ones are dropped.
+const SEEN_WINDOW: i64 = 200;
+
+/// The wait before reconnect `attempt` (1 for the first), for a random draw in `[0, 1)` (`fl` with `symmetric`).
+pub fn reconnect_delay(attempt: u32, random: f64) -> Duration {
+    let exponent = i32::try_from(attempt.saturating_sub(1)).unwrap_or(i32::MAX);
+    let raw = (RECONNECT_BASE_MS as f64 * 2f64.powi(exponent)).min(RECONNECT_CAP_MS as f64);
+    let ms = (raw + raw * RECONNECT_JITTER_RATIO * (2.0 * random - 1.0)).max(0.0);
+    Duration::from_secs_f64(ms / 1_000.0)
+}
+
+/// How long the stream may stay silent before it is reopened (`livenessTimeoutMs`): the keepalive interval plus the
+/// grace.
+pub fn liveness_timeout() -> Duration {
+    Duration::from_millis(KEEPALIVE_SECONDS * 1_000 + LIVENESS_GRACE_MS)
+}
+
+/// One frame of the stream, as `dC` parses it. A field a frame lacks (or leaves empty, for `data`) is `None`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SseFrame {
+    pub id: Option<String>,
+    pub event: Option<String>,
+    pub data: Option<String>,
+}
+
+/// The line terminator at `at`: its length, `Some(0)` for none, `None` when a lone `\r` ends the text and the next
+/// byte could still make it `\r\n` (`J5`).
+fn terminator(text: &[u8], at: usize) -> Option<usize> {
+    match text.get(at) {
+        Some(b'\n') => Some(1),
+        Some(b'\r') => match text.get(at + 1) {
+            None => None,
+            Some(b'\n') => Some(2),
+            Some(_) => Some(1),
+        },
+        _ => Some(0),
+    }
+}
+
+/// The first blank line in `text`: where the frame ends and where the next begins (`R4e`).
+fn blank_line(text: &[u8]) -> Option<(usize, usize)> {
+    let mut at = 0;
+    while at < text.len() {
+        let first = terminator(text, at)?;
+        if first == 0 {
+            at += 1;
+            continue;
+        }
+        let next = at + first;
+        if next >= text.len() {
+            return None;
+        }
+        let second = terminator(text, next)?;
+        if second > 0 {
+            return Some((at, next + second));
+        }
+        at = next;
+    }
+    None
+}
+
+/// One frame's text to its fields (`Q5`): `None` for blank text and for a frame with no data and no comment.
+fn parse_frame(text: &str) -> Option<SseFrame> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    let mut frame = SseFrame::default();
+    let mut commented = false;
+    let mut data = String::new();
+    for line in text.replace("\r\n", "\n").replace('\r', "\n").split('\n') {
+        if line.starts_with(':') {
+            commented = true;
+            continue;
+        }
+        let Some((name, rest)) = line.split_once(':') else {
+            continue;
+        };
+        let value = rest.strip_prefix(' ').unwrap_or(rest);
+        match name {
+            "event" => frame.event = Some(value.to_owned()),
+            "id" => frame.id = Some(value.to_owned()),
+            "data" => {
+                data = if data.is_empty() {
+                    value.to_owned()
+                } else {
+                    format!("{data}\n{value}")
+                }
+            }
+            _ => {}
+        }
+    }
+    if !data.is_empty() {
+        frame.data = Some(data);
+    }
+    (frame.data.is_some() || commented).then_some(frame)
+}
+
+/// Turns the bytes of one response body into frames (`dC`). A frame ends at a blank line; a text that stops in the
+/// middle of a frame, of a UTF-8 character or after a lone `\r` waits for the next push.
+#[derive(Debug, Default)]
+pub struct FrameParser {
+    carry: Vec<u8>,
+    pending: String,
+}
+
+impl FrameParser {
+    /// Adds a chunk of the body.
+    pub fn push_bytes(&mut self, bytes: &[u8]) -> Vec<SseFrame> {
+        self.carry.extend_from_slice(bytes);
+        let valid = match std::str::from_utf8(&self.carry) {
+            Ok(text) => text.len(),
+            Err(error) if error.error_len().is_none() => error.valid_up_to(),
+            Err(_) => self.carry.len(),
+        };
+        let rest = self.carry.split_off(valid);
+        let decoded = String::from_utf8_lossy(&std::mem::replace(&mut self.carry, rest)).into_owned();
+        self.push_str(&decoded)
+    }
+
+    /// Adds a chunk of text.
+    pub fn push_str(&mut self, text: &str) -> Vec<SseFrame> {
+        if text.is_empty() {
+            return Vec::new();
+        }
+        self.pending.push_str(text);
+        let mut frames = Vec::new();
+        let mut from = 0;
+        while let Some((end, after)) = blank_line(&self.pending.as_bytes()[from..]) {
+            if let Some(frame) = parse_frame(&self.pending[from..from + end]) {
+                frames.push(frame);
+            }
+            from += after;
+        }
+        self.pending.drain(..from);
+        frames
+    }
+
+    /// The text of the frame not yet complete.
+    pub fn buffered(&self) -> &str {
+        &self.pending
+    }
+}
+
+/// What a caller does for a frame.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StreamEffect {
+    /// Hand this line (the payload as JSON and a newline) to the inbound reader (`onData`).
+    Deliver(String),
+    /// Acknowledge the event as `received` and then `processed` (`reportDelivery`).
+    Acknowledge { event_id: String },
+    /// Send a heartbeat now (`heartbeatNow("probe")`).
+    HeartbeatProbe,
+}
+
+/// The answer to the request for the stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamOpen {
+    /// Read the body.
+    Read,
+    /// Wait [`StreamSession::lost`] and ask again.
+    Retry,
+    /// Close the session with this code.
+    Close(u16),
+}
+
+/// What the request for the stream carries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StreamRequest {
+    /// The query of the URL after `/worker/events/stream`: `from_sequence_num=<n>` once an event arrived.
+    pub query: Option<String>,
+    /// The `Last-Event-ID` header, set with the query.
+    pub last_event_id: Option<String>,
+}
+
+/// The state of one session's read stream: the sequence numbers seen, the reconnect attempts and the parser of the
+/// body being read.
+#[derive(Debug, Default)]
+pub struct StreamSession {
+    last_sequence: i64,
+    seen: BTreeSet<i64>,
+    attempts: u32,
+    parser: FrameParser,
+}
+
+impl StreamSession {
+    /// The highest sequence number of a durable event seen (`getSequenceNum`).
+    pub fn last_sequence(&self) -> i64 {
+        self.last_sequence
+    }
+
+    /// The request to open the stream with: it resumes after the last sequence number seen.
+    pub fn request(&self) -> StreamRequest {
+        if self.last_sequence <= 0 {
+            return StreamRequest {
+                query: None,
+                last_event_id: None,
+            };
+        }
+        StreamRequest {
+            query: Some(format!("from_sequence_num={}", self.last_sequence)),
+            last_event_id: Some(self.last_sequence.to_string()),
+        }
+    }
+
+    /// Takes the status the service answered with. Any success status is read, whatever the content type; the
+    /// statuses of [`PERMANENT_STREAM_STATUSES`] close the session with the status as the code, and every other
+    /// status is retried. A stream that opens starts the reconnect delay over.
+    pub fn opened(&mut self, status: u16) -> StreamOpen {
+        if (200..300).contains(&status) {
+            self.attempts = 0;
+            self.parser = FrameParser::default();
+            return StreamOpen::Read;
+        }
+        if PERMANENT_STREAM_STATUSES.contains(&status) {
+            return StreamOpen::Close(status);
+        }
+        StreamOpen::Retry
+    }
+
+    /// Takes a stream that ended, broke or never opened and says how long to wait before the next request, for a
+    /// random draw in `[0, 1)`.
+    pub fn lost(&mut self, random: f64) -> Duration {
+        self.attempts += 1;
+        reconnect_delay(self.attempts, random)
+    }
+
+    /// Takes a chunk of the body and says what the frames in it ask for.
+    pub fn push(&mut self, bytes: &[u8]) -> Vec<StreamEffect> {
+        let frames = self.parser.push_bytes(bytes);
+        let mut effects = Vec::new();
+        for frame in frames {
+            self.frame(frame, &mut effects);
+        }
+        effects
+    }
+
+    fn frame(&mut self, frame: SseFrame, effects: &mut Vec<StreamEffect>) {
+        let event = frame.event.as_deref();
+        if let Some(id) = frame.id.as_deref().filter(|id| !id.is_empty())
+            && event != Some("ephemeral_event")
+            && let Some(sequence) = js_parse_int(id)
+        {
+            self.note_sequence(sequence as i64);
+        }
+        let (Some(event), Some(data)) = (event, frame.data.as_deref()) else {
+            return;
+        };
+        match event {
+            "ephemeral_event" => ephemeral(data, effects),
+            "client_event" => client_event(data, effects),
+            _ => {}
+        }
+    }
+
+    fn note_sequence(&mut self, sequence: i64) {
+        if self.seen.insert(sequence) && self.seen.len() > SEEN_LIMIT {
+            let floor = self.last_sequence.saturating_sub(SEEN_WINDOW);
+            self.seen.retain(|seen| *seen >= floor);
+        }
+        self.last_sequence = self.last_sequence.max(sequence);
+    }
+}
+
+fn ephemeral(data: &str, effects: &mut Vec<StreamEffect>) {
+    let Ok(value) = serde_json::from_str::<Value>(data) else {
+        return;
+    };
+    if value.get("event_type").and_then(Value::as_str) == Some("heartbeat_probe") {
+        effects.push(StreamEffect::HeartbeatProbe);
+    }
+}
+
+fn client_event(data: &str, effects: &mut Vec<StreamEffect>) {
+    let Ok(event) = serde_json::from_str::<Value>(data) else {
+        return;
+    };
+    let payload = event.get("payload");
+    let Some(payload_type) = payload.and_then(Value::as_object).and_then(|object| object.get("type")) else {
+        acknowledge(&event, effects);
+        return;
+    };
+    let server_only = payload_type
+        .as_str()
+        .is_some_and(|name| SERVER_ONLY_TYPES.contains(&name))
+        && event.get("event_type") != Some(payload_type);
+    let worker_control = payload_type.as_str() == Some("control_request")
+        && event.get("source").and_then(Value::as_str) == Some("worker");
+    if !server_only
+        && !worker_control
+        && let Some(payload) = payload
+    {
+        effects.push(StreamEffect::Deliver(format!("{payload}\n")));
+    }
+    acknowledge(&event, effects);
+}
+
+fn acknowledge(event: &Value, effects: &mut Vec<StreamEffect>) {
+    if let Some(event_id) = event.get("event_id").and_then(Value::as_str) {
+        effects.push(StreamEffect::Acknowledge {
+            event_id: event_id.to_owned(),
+        });
+    }
+}

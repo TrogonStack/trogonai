@@ -19,6 +19,7 @@ mod bridge_worker;
 mod bridge_worker_delivery;
 mod bridge_worker_events;
 mod bridge_worker_queue;
+mod bridge_worker_stream;
 mod bridge_worker_types;
 mod builtin_tool_name;
 mod bundled_cli;
@@ -207,6 +208,11 @@ pub use bridge_worker_events::{
 pub use bridge_worker_queue::{
     Next, Patch, PatchQueue, Requeue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches,
     without_status,
+};
+pub use bridge_worker_stream::{
+    FrameParser, KEEPALIVE_SECONDS, LIVENESS_GRACE_MS, PERMANENT_STREAM_STATUSES, RECONNECT_BASE_MS, RECONNECT_CAP_MS,
+    RECONNECT_JITTER_RATIO, SseFrame, StreamEffect, StreamOpen, StreamRequest, StreamSession, liveness_timeout,
+    reconnect_delay,
 };
 pub use bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
