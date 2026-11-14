@@ -1,0 +1,39 @@
+name: Claude SDK Native Captures
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/claude-sdk-native-captures.yml'
+      - '.github/claude-sdk-native-captures/**'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: capture (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            runs-on: ubuntu-24.04
+            container: node:24.13.1-bookworm
+    runs-on: ${{ matrix.runs-on }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the goldens on this host
+        shell: bash
+        run: .github/claude-sdk-native-captures/capture.sh captures
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: claude-sdk-native-captures-${{ matrix.name }}
+          path: captures
+          if-no-files-found: error
