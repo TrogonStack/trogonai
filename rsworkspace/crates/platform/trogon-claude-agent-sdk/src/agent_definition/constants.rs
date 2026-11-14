@@ -1,9 +1,10 @@
-/// The declaration order of TypeScript `AgentDefinition`, which a caller writing every field in order sends.
+/// The order a TypeScript caller writing the object literal sends: `description` and `prompt` first, then the rest
+/// of the fields in declaration order. The SDK forwards the caller's object as is, so the order is the caller's.
 pub(super) const TYPESCRIPT_ORDER: &[&str] = &[
     "description",
+    "prompt",
     "tools",
     "disallowedTools",
-    "prompt",
     "model",
     "mcpServers",
     "criticalSystemReminder_EXPERIMENTAL",
