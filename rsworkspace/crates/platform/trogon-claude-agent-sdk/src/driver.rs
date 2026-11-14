@@ -806,7 +806,10 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
             driver.mcp.forward(name, session);
         }
     }
-    Ok(tokio::spawn(driver.run(first_initialize, terminal)))
+    // `sdk.mjs` writes the initialize request while it constructs the Query, so it is on stdin before the caller
+    // holds anything; the outcome travels into the task so a failed write ends the run like any other error.
+    let started = driver.start(first_initialize).await;
+    Ok(tokio::spawn(driver.run(started, terminal)))
 }
 
 impl<T, F> Driver<T, F>
@@ -814,8 +817,8 @@ where
     T: Transport,
     F: crate::adapters::SessionFileSystem,
 {
-    async fn run(mut self, first_initialize: ControlSender, terminal: oneshot::Sender<Result<(), Error>>) {
-        let primary = match self.start(first_initialize).await {
+    async fn run(mut self, started: Result<(), Error>, terminal: oneshot::Sender<Result<(), Error>>) {
+        let primary = match started {
             Ok(()) => Box::pin(self.event_loop()).await,
             Err(error) => Err(error),
         };
