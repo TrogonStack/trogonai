@@ -21,7 +21,7 @@ fn object(value: Value) -> Result<JsonObject, Box<dyn std::error::Error>> {
 }
 
 /// `sdk.mjs` wraps a string prompt in a text block, Python writes it as a string; both put `session_id` ahead of
-/// `message`, and blocks stay an array either way.
+/// `message`. Any other input is a streamed message, which both write as given, with no session added.
 #[test]
 fn a_query_prompt_follows_each_sdk() -> Result<(), Box<dyn std::error::Error>> {
     let text = || UserInput::from(Prompt::from("hi"));
@@ -40,11 +40,13 @@ fn a_query_prompt_follows_each_sdk() -> Result<(), Box<dyn std::error::Error>> {
         wire(&named)?,
         r#"{"type":"user","session_id":"s","message":{"role":"user","content":[{"type":"text","text":"hi"}]},"parent_tool_use_id":null,"uuid":"u"}"#
     );
-    let blocks = UserInput::blocks(vec![InputBlock::text("b")]).into_query_prompt(false);
-    assert_eq!(
-        wire(&blocks)?,
-        r#"{"type":"user","session_id":"","message":{"role":"user","content":[{"type":"text","text":"b"}]},"parent_tool_use_id":null}"#
-    );
+    for text_block in [true, false] {
+        let blocks = UserInput::blocks(vec![InputBlock::text("b")]).into_query_prompt(text_block);
+        assert_eq!(
+            wire(&blocks)?,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"b"}]},"parent_tool_use_id":null}"#
+        );
+    }
     let raw = UserInput::from_json(object(json!({"type": "user", "x": 1}))?).into_query_prompt(true);
     assert_eq!(wire(&raw)?, r#"{"type":"user","x":1}"#);
     Ok(())
