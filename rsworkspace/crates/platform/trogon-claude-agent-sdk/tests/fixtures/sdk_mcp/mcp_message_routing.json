@@ -58,6 +58,66 @@
     "initialize",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -200,6 +260,66 @@
     "control_response",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -363,6 +483,66 @@
     "control_response",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -526,6 +706,66 @@
     "control_response",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -689,6 +929,66 @@
     "control_response",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -858,6 +1158,66 @@
     "control_response",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -981,6 +1341,66 @@
     "initialize",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1130,6 +1550,122 @@
     "control_response",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ],
+    "t": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1226,6 +1762,66 @@
    "order": [
     "initialize"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1295,6 +1891,66 @@
     "initialize",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1363,6 +2019,66 @@
     "initialize",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1431,6 +2147,66 @@
     "initialize",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1529,6 +2305,66 @@
     "mcp_message",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1636,6 +2472,66 @@
     "mcp_message",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1756,6 +2652,66 @@
     "control_response",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -1884,6 +2840,66 @@
     "mcp_message",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -2011,6 +3027,66 @@
     "control_response",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -2105,6 +3181,66 @@
    "order": [
     "initialize"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -2174,6 +3310,66 @@
     "initialize",
     "control_response"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -2255,6 +3451,66 @@
     "mcp_message",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -2283,6 +3539,136 @@
    "order": [
     "initialize"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ],
+    "t": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -2395,6 +3781,136 @@
     "mcp_message",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ],
+    "t": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -2473,6 +3989,136 @@
     "initialize",
     "mcp_message"
    ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ],
+    "t": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
    "initialize_manifests": {
     "s": {
      "initializeResult": {
@@ -2504,6 +4150,1300 @@
       },
       "serverInfo": {
        "name": "t",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_tools_server",
+   "capture": {
+    "s": {
+     "tools": true
+    }
+   },
+   "servers": [
+    "s"
+   ],
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_server_without_tools",
+   "servers": [
+    "s"
+   ],
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ]
+   },
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_initialize_error_leaves_the_server_to_the_cli",
+   "capture": {
+    "s": {
+     "init_error": true
+    },
+    "t": {
+     "tools": true
+    }
+   },
+   "servers": [
+    "s",
+    "t"
+   ],
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "error": {
+        "code": -32603,
+        "message": "initialize failed"
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     }
+    ],
+    "t": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
+   "initialize_manifests": {
+    "t": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "t",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_tools_list_error_leaves_the_server_to_the_cli",
+   "capture": {
+    "s": {
+     "tools": true,
+     "tools_error": true
+    },
+    "t": {
+     "tools": true
+    }
+   },
+   "servers": [
+    "s",
+    "t"
+   ],
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "error": {
+        "code": -32603,
+        "message": "tools/list failed"
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ],
+    "t": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
+   "initialize_manifests": {
+    "t": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "t",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_tools_list_next_cursor_keeps_only_the_initialize_result",
+   "capture": {
+    "s": {
+     "tools": true,
+     "next_cursor": true
+    }
+   },
+   "servers": [
+    "s"
+   ],
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ],
+        "nextCursor": "page-2"
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_slow_server_is_left_out_after_the_deadline",
+   "capture": {
+    "s": {
+     "tools": true,
+     "delay_ms": 400
+    },
+    "t": {
+     "tools": true
+    }
+   },
+   "servers": [
+    "s",
+    "t"
+   ],
+   "quiet_ms": 600,
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 400,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 400,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     }
+    ],
+    "t": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
+   "initialize_manifests": {
+    "t": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "t",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_is_skipped_when_the_disable_variable_is_set",
+   "capture": {
+    "s": {
+     "tools": true
+    },
+    "t": {
+     "tools": true
+    }
+   },
+   "disable_env": "1",
+   "servers": [
+    "s",
+    "t"
+   ],
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {},
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_tools_list_changed_during_capture_trims_the_manifest",
+   "capture": {
+    "s": {
+     "tools": true,
+     "delay_ms": 60
+    }
+   },
+   "connect_send": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/tools/list_changed"
+     }
+    ]
+   },
+   "servers": [
+    "s"
+   ],
+   "steps": [],
+   "expect": [
+    {
+     "type": "control_request",
+     "request_id": "<uuid>",
+     "request": {
+      "subtype": "mcp_message",
+      "server_name": "s",
+      "message": {
+       "jsonrpc": "2.0",
+       "method": "notifications/tools/list_changed"
+      }
+     }
+    }
+   ],
+   "expect_text": [
+    "{\"type\":\"control_request\",\"request_id\":\"<uuid>\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"s\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}}}"
+   ],
+   "order": [
+    "initialize",
+    "mcp_message"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 60,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
+   "server_received": [],
+   "query_outcome": "ended"
+  },
+  {
+   "name": "capture_several_servers_mixed",
+   "capture": {
+    "s": {
+     "tools": true
+    },
+    "t": {},
+    "u": {
+     "tools": true,
+     "delay_ms": 30
+    }
+   },
+   "servers": [
+    "s",
+    "t",
+    "u"
+   ],
+   "steps": [],
+   "expect": [],
+   "expect_text": [],
+   "order": [
+    "initialize"
+   ],
+   "capture_replies": {
+    "s": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "s",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "t": {
+     "initialize": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "serverInfo": {
+         "name": "t",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 0,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    },
+    "u": {
+     "initialize": {
+      "delay_ms": 30,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:initialize",
+       "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+         "tools": {}
+        },
+        "serverInfo": {
+         "name": "u",
+         "version": "1.0.0"
+        }
+       }
+      }
+     },
+     "tools/list": {
+      "delay_ms": 30,
+      "message": {
+       "jsonrpc": "2.0",
+       "id": "sdk-manifest-capture:tools-list",
+       "result": {
+        "tools": [
+         {
+          "name": "echo",
+          "inputSchema": {
+           "type": "object"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "capture_received": {
+    "s": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ],
+    "t": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     }
+    ],
+    "u": [
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:initialize",
+      "method": "initialize",
+      "params": {
+       "protocolVersion": "2025-11-25",
+       "capabilities": {},
+       "clientInfo": {
+        "name": "claude-code",
+        "title": "Claude Code",
+        "description": "Anthropic's agentic coding tool",
+        "websiteUrl": "https://claude.com/claude-code",
+        "version": "0.3.323"
+       }
+      }
+     },
+     {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+     },
+     {
+      "jsonrpc": "2.0",
+      "id": "sdk-manifest-capture:tools-list",
+      "method": "tools/list"
+     }
+    ]
+   },
+   "initialize_manifests": {
+    "s": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "s",
+       "version": "1.0.0"
+      }
+     },
+     "toolsListResult": {
+      "tools": [
+       {
+        "name": "echo",
+        "inputSchema": {
+         "type": "object"
+        }
+       }
+      ]
+     }
+    },
+    "t": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "serverInfo": {
+       "name": "t",
+       "version": "1.0.0"
+      }
+     }
+    },
+    "u": {
+     "initializeResult": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+       "tools": {}
+      },
+      "serverInfo": {
+       "name": "u",
        "version": "1.0.0"
       }
      },

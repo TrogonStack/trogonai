@@ -161,3 +161,46 @@ fn changed_manifests_keep_only_the_initialize_result_like_the_typescript_golden(
     assert_eq!(none["sdkMcpServerManifests"], captured);
     Ok(())
 }
+
+#[test]
+fn manifests_follow_the_server_configs_like_build_initialize_request() -> TestResult {
+    let manifests = object(json!({"s":{"initializeResult":{}}}))?;
+    let mut with_configs = json!({"type":"x","sdkMcpServers":["s"],"sdkMcpServerConfigs":{"s":{}},"hooks":{}});
+    insert_manifests(&mut with_configs, manifests.clone());
+    let keys: Vec<_> = with_configs
+        .as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+    assert_eq!(
+        keys,
+        [
+            "type",
+            "sdkMcpServers",
+            "sdkMcpServerConfigs",
+            "sdkMcpServerManifests",
+            "hooks"
+        ]
+    );
+    let mut without = json!({"sdkMcpServers":["s"],"hooks":{}});
+    insert_manifests(&mut without, manifests.clone());
+    let keys: Vec<_> = without
+        .as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+    assert_eq!(keys, ["sdkMcpServers", "sdkMcpServerManifests", "hooks"]);
+    let mut carried = json!({"sdkMcpServers":["s"],"hooks":{},"sdkMcpServerManifests":{"s":{"stale":true}}});
+    insert_manifests(&mut carried, manifests.clone());
+    assert_eq!(
+        carried,
+        json!({"sdkMcpServers":["s"],"sdkMcpServerManifests":{"s":{"initializeResult":{}}},"hooks":{}})
+    );
+    let keys: Vec<_> = carried
+        .as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+    assert_eq!(keys, ["sdkMcpServers", "sdkMcpServerManifests", "hooks"]);
+    let mut bare = json!({"hooks":{}});
+    insert_manifests(&mut bare, manifests);
+    assert_eq!(bare["sdkMcpServerManifests"], json!({"s":{"initializeResult":{}}}));
+    Ok(())
+}

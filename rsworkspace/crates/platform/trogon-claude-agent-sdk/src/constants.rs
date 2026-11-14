@@ -1178,3 +1178,12 @@ pub(crate) const RAW_JSON_MAX_DEPTH: usize = 200;
 
 /// The prefix of the placeholder text a request id that a `Value` cannot hold stands for until it is written.
 pub(crate) const PYTHON_ID_MARKER_PREFIX: &str = "\u{0}pyid:";
+
+/// `OE`: the prefix of every request id the manifest capture sends, which marks a late reply for dropping.
+pub(crate) const MCP_MANIFEST_CAPTURE_ID_PREFIX: &str = "sdk-manifest-capture:";
+
+/// `$8`: how long the manifest capture waits for every server before the CLI is left to handshake the rest.
+pub(crate) const MCP_MANIFEST_CAPTURE_DEADLINE: Duration = Duration::from_millis(250);
+
+/// `F8`: the protocol version the manifest capture's `initialize` asks for.
+pub(crate) const MCP_MANIFEST_CAPTURE_PROTOCOL_VERSION: &str = "2025-11-25";
