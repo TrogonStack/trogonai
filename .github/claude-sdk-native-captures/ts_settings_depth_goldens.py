@@ -137,15 +137,15 @@ PROFILES = {
         "index_compile": 1304, "index_compile_onto": 1304,
     },
     "linux x86_64": {
-        "merge": 1307, "read_objects": [1648, 1650], "merge_arrays": 1306, "read_arrays": 3297, "mixed_100": 3198,
+        "merge": 1307, "read_objects": 1649, "merge_arrays": 1306, "read_arrays": 3297, "mixed_100": 3198,
         "mixed_999": 1202, "mixed_1447": 1001, "copy": 1565, "copy_104": 1466, "union_objects": 1646,
-        "leaf_empty_object": 1648, "leaf_empty_array": 1648, "leaf_true_array": 1648, "leaf_true": [1648, 1650],
+        "leaf_empty_object": 1648, "leaf_empty_array": 1648, "leaf_true_array": 1648, "leaf_true": 1649,
         "leaf_object_in_arrays": 3296, "copy_empty_object": 1565, "copy_scalar_object": 1564, "copy_inner": 104,
         "merge_empty_object": 1307, "merge_empty_array": 1306, "merge_held_array": 1305, "merge_true": 1307,
         "merge_after_array": 1307, "merge_after_scalar": 1308, "merge_after_held_arrays": 1307,
         "merge_after_held_array": 1305, "merge_after_nested_held_arrays": 1307, "merge_after_held_arrays_of_source": 1307,
         "merge_after_array_like_copies": 1307, "merge_after_empty_array": 1306, "index_compile_inside": 1333,
-        "index_compile": [1361, 1363], "index_compile_onto": [1361, 1363],
+        "index_compile": 1362, "index_compile_onto": 1362,
     },
 }
 

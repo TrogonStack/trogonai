@@ -19,6 +19,7 @@ jobs:
           - name: linux-x64
             runs-on: ubuntu-24.04
             container: node:24.13.1-bookworm
+            focus-depth: 'merge_index_compile(_onto)?_136[0-4]|(objects|leaf_true)_16(4[89]|5[01])'
     runs-on: ${{ matrix.runs-on }}
     container: ${{ matrix.container }}
     timeout-minutes: 120
@@ -29,6 +30,9 @@ jobs:
 
       - name: Record the goldens on this host
         shell: bash
+        env:
+          FOCUS_DEPTH: ${{ matrix.focus-depth }}
+          FOCUS_MANAGED: ${{ matrix.focus-managed }}
         run: .github/claude-sdk-native-captures/capture.sh captures
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

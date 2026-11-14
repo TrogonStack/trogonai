@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Records the TypeScript settings goldens on the host the job runs on, and a widened scan of each boundary, into OUT.
 # usage: capture.sh OUT
+# FOCUS_DEPTH and FOCUS_MANAGED, when set, name the cases (a Python regular expression over case names) to run
+# FOCUS_RUNS times more, each run in its own file.
 set -euo pipefail
 out=$1
 here=$(cd "$(dirname "$0")" && pwd)
@@ -28,4 +30,15 @@ done
 for run in 1 2 3; do
   python3 -I "$here/scan_depth.py" "$node" "$package" "$out/scan_depth_${platform}_run${run}.json"
   python3 -I "$here/scan_managed.py" "$node" "$package" "$out/scan_managed_${platform}_run${run}.json"
+done
+focus_runs=${FOCUS_RUNS:-25}
+for kind in depth managed; do
+  var="FOCUS_${kind^^}"
+  pattern=${!var:-}
+  if [ -n "$pattern" ]; then
+    python3 -I "$here/focus.py" "$here/scan_${kind}.py" "$here/focus_${kind}.py" "$pattern"
+    for run in $(seq 1 "$focus_runs"); do
+      python3 -I "$here/focus_${kind}.py" "$node" "$package" "$out/focus_${kind}_${platform}_run${run}.json"
+    done
+  fi
 done
