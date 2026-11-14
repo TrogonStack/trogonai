@@ -84,6 +84,7 @@ impl DriverFixture {
             overflow: VecDeque::new(),
             shutdown: shutdown_rx,
             shutdown_seen: false,
+            abort: crate::CancellationToken::new(),
             limits: Limits::default(),
             handler,
             message_decoding: crate::MessageDecoding::TypeScript,
@@ -103,22 +104,28 @@ impl DriverFixture {
                 .to_value()?,
             initialize_expectations: InitializeExpectations::default(),
             initialize_timeout: None,
-            run_end: Some(Duration::from_millis(600_000)),
             version_check: None,
             latest_commands: LatestCommands::default(),
+            startup_tap: None,
             verbatim_prompts: false,
             warn_unsupported_verbatim: false,
             elicitation_handler: None,
             user_dialog_handler: None,
             oauth_token_handler: None,
             host_auth_token_handler: None,
+            host: crate::remote_control::HostState::default(),
             session: None,
             mirror_flush: None,
             deferred_messages: VecDeque::new(),
+            held_observations: VecDeque::new(),
+            initialize_hold: false,
+            prompt_hold: PromptHold::default(),
+            held_commands: VecDeque::new(),
             next_id: 0,
             wire_ids: None,
             state: State::Idle,
             run_state: RunState::default(),
+            run_end: crate::run_end::RunEnd::new(crate::ArgvStyle::TypeScript, Some(Duration::from_secs(600))),
             argv_style: crate::ArgvStyle::TypeScript,
             last_error_result: None,
         };
@@ -218,6 +225,7 @@ async fn stale_permission_completion_cannot_remove_replacement() -> Result<(), B
 async fn initialization_owns_admission_until_the_handshake_completes() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     fixture.driver.state = State::Initializing;
+    fixture.driver.argv_style = crate::ArgvStyle::Python;
     let (response, receiver) = oneshot::channel();
     fixture
         .driver
@@ -399,6 +407,33 @@ async fn eof_mirror_drain_publishes_failures_before_deferred_messages() -> Resul
     fixture.finish().await
 }
 
+/// Both upstream readers wait for the transcript flush before they handle a result, so the run ends, and stdin
+/// closes, only after it; a frame after the result waits behind it.
+#[tokio::test]
+async fn a_result_reaches_the_run_end_machine_only_after_its_flush() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let decode = |value: serde_json::Value| {
+        let raw = value.as_object().cloned().unwrap_or_default();
+        crate::message_decode::typed(&raw, crate::MessageDecoding::TypeScript)
+    };
+    let result = decode(serde_json::json!({
+        "type": "result", "subtype": "success", "is_error": false, "duration_ms": 1, "duration_api_ms": 1,
+        "num_turns": 1, "session_id": "s", "result": "done",
+    }));
+    let later = decode(serde_json::json!({
+        "type": "system", "subtype": "session_state_changed", "state": "idle", "session_id": "s",
+    }));
+    fixture.driver.run_end.prompt_written();
+    fixture.driver.run_end.finish(false, true);
+    fixture.driver.held_observations.push_back((result, true));
+    fixture.driver.held_observations.push_back((later, false));
+    assert!(!fixture.driver.run_end.close_due());
+    fixture.driver.release_observations();
+    assert!(fixture.driver.held_observations.is_empty());
+    assert!(fixture.driver.run_end.close_due());
+    fixture.finish().await
+}
+
 #[test]
 fn tool_lists_reach_the_cli_verbatim() -> Result<(), Error> {
     let options = ClaudeAgentOptions {
@@ -546,6 +581,69 @@ async fn an_initialize_armed_only_by_managed_settings_expires_with_their_message
     ));
     assert!(matches!(receiver.await?, Err(Error::ManagedSettingsNotConfirmed)));
     fixture.finish().await
+}
+
+/// What the TypeScript SDK shows for a request that waited behind an initialize that never answered: the
+/// timer's own message, and nothing held was ever written.
+#[tokio::test(start_paused = true)]
+async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects_what_was_held()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(TYPESCRIPT_INITIALIZE_TIMEOUT, Duration::from_secs(660));
+    for (blocking_hooks, expected) in [
+        (
+            true,
+            "Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session.",
+        ),
+        (
+            false,
+            "Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session.",
+        ),
+    ] {
+        let mut fixture = DriverFixture::new()?;
+        fixture.driver.initialize_hold = true;
+        fixture.driver.initialize_expectations.blocking_hooks = blocking_hooks;
+        fixture.driver.initialize_expectations.managed_settings = !blocking_hooks;
+        fixture.driver.initialize_timeout = Some(TYPESCRIPT_INITIALIZE_TIMEOUT);
+        let (initialize, initialized) = oneshot::channel();
+        let (prompt, prompted) = oneshot::channel();
+        let (control, controlled) = oneshot::channel();
+        let started = Instant::now();
+        fixture.driver.pending.insert(
+            ControlRequestId::from("initialize"),
+            PendingControl {
+                response: ControlResponder::Initialize {
+                    first: true,
+                    response: initialize,
+                },
+                deadline: fixture.driver.control_deadline(ControlOperation::Initialize),
+            },
+        );
+        fixture.driver.held_commands.push_back(Command::Prompt {
+            input: crate::Prompt::from("hi").into(),
+            response: prompt,
+        });
+        fixture.driver.held_commands.push_back(Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        });
+        let outcome = fixture.driver.event_loop().await;
+        assert_eq!(started.elapsed(), TYPESCRIPT_INITIALIZE_TIMEOUT);
+        assert_eq!(outcome.err().map(|error| error.to_string()).as_deref(), Some(expected));
+        assert_eq!(
+            initialized.await?.err().map(|error| error.to_string()).as_deref(),
+            Some(expected)
+        );
+        // The prompt is dropped unsent, and the held control fails with the same message.
+        assert!(matches!(prompted.await?, Ok(())));
+        assert!(matches!(
+            controlled.await?,
+            Err(Error::InitializationFailed(inner)) if inner.to_string() == expected
+        ));
+        assert!(fixture.driver.held_commands.is_empty());
+        fixture.finish().await?;
+    }
+    Ok(())
 }
 
 #[tokio::test(start_paused = true)]

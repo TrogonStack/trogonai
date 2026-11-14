@@ -92,11 +92,14 @@ integrity-verified published `0.3.319` declaration archive.
 | `client_app_derivation: ClientAppDerivation` | `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` (bundled CLI at 999.0.0 or later; this crate's identity replaces the distribution metadata) | none |
 | `trace_context: Option<TraceContext>` | `TRACEPARENT`, `TRACESTATE` | `TRACEPARENT`, `TRACESTATE` |
 | `stderr_handler: Option<StderrHandler>` | `stderr` callback (lines) | `stderr` callback (chunks) |
+| `abort_controller: Option<CancellationToken>` | not applicable | `abortController` |
+| `spawn_claude_code_process: Option<SpawnClaudeCodeProcess>` | not applicable | `spawnClaudeCodeProcess` (returns a tokio `Child` in place of `SpawnedProcess`) |
+| `on_process_spawned: Option<OnProcessSpawned>` | not applicable | `onProcessSpawned` (runtime option, not declared) |
 | `extra_args: Vec<ExtraArgument>` | `extra_args` | `extraArgs` |
 | `tools: ToolSet` (`CliDefault`, `Only`, `ClaudeCodePreset`) | `tools` list, empty list or `{type: "preset", preset: "claude_code"}` | `tools` list or preset object |
 | `script_runtime: ScriptRuntime` | not applicable | `executable`, `executableArgs` (a native path runs directly with the arguments first; a path ending in `.js`, `.mjs`, `.ts`, `.tsx` or `.jsx`, matched case-sensitively, runs under the executable) |
 | `oauth_token_handler: Option<Arc<dyn OAuthTokenHandler>>` | not applicable | `getOAuthToken` (with `onDecline` as `OAuthTokenResponse::decline_reason`); sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH`. `ArgvStyle::Python` sets no variable and answers the request as an unsupported subtype, like Python. |
-| `host_auth_token_handler: Option<Arc<dyn HostAuthTokenHandler>>` | not applicable | `getHostAuthToken`; sets `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`, except under `ArgvStyle::Python`, which answers like Python. A handler returns a string or none, never the bare number the bundle would forward. Both token callbacks use `limits.callback_timeout` when that opt-in limit is set. |
+| `host_auth_token_handler: Option<Arc<dyn HostAuthTokenHandler>>` | not applicable | `getHostAuthToken`; sets `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`, except under `ArgvStyle::Python`, which answers like Python. A handler returns a `HostAuthToken`: a token, null, or a `Raw` JSON value that is sent whole unless it is a string or null, like the bundle. Both token callbacks use `limits.callback_timeout` when that opt-in limit is set. |
 | `tool_config: ToolConfig` | not applicable | `toolConfig.askUserQuestion` as `CLAUDE_CODE_QUESTION_*` variables; ignored under the Python dialect |
 | `workload: Option<String>` | not applicable | `workload`, merged into the extra arguments in place; an empty value is skipped |
 | `SessionStoreOptions::load_timeout`, `dialect` | `load_timeout_ms` (resume materialization wording) | `loadTimeoutMs` (default wording) |
@@ -107,7 +110,18 @@ integrity-verified published `0.3.319` declaration archive.
 | `Error::WorkingDirectoryMissing(path)` | `CLIConnectionError` (cwd) | not applicable |
 | `Error::Process { .. }`, `exit_code()`, `typescript_message()` | `ProcessError` | exit-code error text |
 | `Error::Result(ResultError)` | `ResultError` | error result text |
-| `Error::Aborted(AbortError)`, `abort()` | not applicable | `AbortError` |
+| `Error::Aborted(AbortError)`, `abort()` | not applicable | `AbortError`, `abortController.abort()` |
+| `close()` on `Query`, `ClaudeSdkClient` or `ClientHandle` | `close()` without waiting | `Query.close()` |
+| `disconnect(self)` on `Query` or `ClaudeSdkClient` | `disconnect()` | `close()` plus waiting for the process; the iterator's `return()`, `Symbol.asyncDispose` and a `for await` that breaks, which discard messages not read yet |
+| `Stream` for `Query` and `ClaudeSdkClient`, `ClaudeSdkClient::receive_messages` | `receive_messages()` | `for await (const message of query)` |
+| `ClaudeSdkClient::receive_response` | `receive_response()` (through the next `ResultMessage`) | not applicable |
+| `ClaudeSdkClient::new(options)`, `UnconnectedClient::with_transport`, `with_adapters` | `ClaudeSDKClient(options, transport)` | not applicable |
+| `UnconnectedClient::connect(ConnectPrompt)` (`Empty`, `Text`, `Stream`) | `connect(prompt)` with `None`, a `str` or an `AsyncIterable` | `query({prompt})` with a string or an `AsyncIterable` |
+| `UnconnectedClient::scope(body)`, `Error::Cleanup` when the body and the disconnect both fail | `async with ClaudeSDKClient() as client:`, the disconnect exception chained to the body's | not applicable |
+| `query(prompt)`, `query_in_session(prompt, session_id)` | `query(prompt, session_id="default")` | a string prompt with `session_id: ""` |
+| `query_stream(stream)`, `query_stream_in_session(stream, session_id)` | `query(AsyncIterable, session_id)`, the session set only where a message has none | not applicable |
+| `stream_input(stream)`, `try_stream_input(stream)` on `ClaudeSdkClient` or `ClientHandle` | `Query.stream_input` under `ArgvStyle::Python`: stops once closed, logs a failing stream or write, closes stdin and never fails | `Query.streamInput()`: stops at an abort, waits behind the prompt hold, rejects with the write or stream error and then leaves stdin open |
+| `Error::QueryClosed` | a waiting control request runs out its timeout | "Query closed before response received" |
 | `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
 | `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |
 | `Error::WriteFailed(io::Error)` | `CLIConnectionError` (write failed) | same text |
@@ -128,6 +142,23 @@ integrity-verified published `0.3.319` declaration archive.
 | `ClaudeSdkClient::connect_with_transport`, `query_with_transport` | `ClaudeSDKClient(transport=...)`, `query(transport=...)` | not applicable |
 | `Error::Transport(..)` | exception raised by the transport | not applicable |
 
+## Pre-warming
+
+| Rust | Python | TypeScript |
+| --- | --- | --- |
+| `startup`, `startup_with_adapters`, `StartupOptions` | not applicable | `startup({options, initializeTimeoutMs})` |
+| `WarmQuery::query` (consumes `self`) | not applicable | `WarmQuery.query` (throws on a second call) |
+| `WarmQuery::close`, `WarmQuery::dispose` | not applicable | `close`, `Symbol.asyncDispose` |
+| `StartupOptions.initialize_timeout` (`None`: 60000 ms, hook time uncounted up to 10 minutes) | not applicable | `initializeTimeoutMs` |
+| `StartupOptions.on_startup_hooks_running`, `StartupHooksRunning` | not applicable | `onStartupHooksRunning` |
+| `Error::InitializeTimeout`, `InitializeTimeoutError` | not applicable | `errorClass: "initialize_timeout"`, `startupMark`, `startupMarkAgeMs` |
+| `ResultError::startup_failure_reason` | not applicable | `startupFailureReason` |
+| `prewarm`, `prewarm_with_adapters` | not applicable | `prewarm({options, initializeTimeoutMs})` (`--await-claim`) |
+| `SpareProcess::claim`, `ClaimOptions` | not applicable | `SpareProcess.claim({prompt, options})` (prompt is `UserInput`, `settings` is a JSON object) |
+| `SpareProcess::claimed`, `ClaimInfo` | not applicable | `claimed` (`cwd`, `sessionId`, `parkedMs`, `sdkMcpSettled`) |
+| `SpareProcess::exited`, `close`, `dispose` | not applicable | `exited`, `close`, `Symbol.asyncDispose` |
+| `ClaimError` | not applicable | `settings_not_applied`, `option_not_applied` |
+
 ## Query controls
 
 All methods are on `ClientHandle`. Requests match `sdk.mjs` by default and
@@ -138,7 +169,7 @@ TypeScript returns `undefined`, `decode()` reads the generated type).
 | Rust | Python | TypeScript |
 | --- | --- | --- |
 | `initialization_result`, `reinitialize` | `get_server_info` (cached result only) | `initializationResult`, `reinitialize` |
-| `supported_commands`, `supported_models`, `supported_agents`, `account_info` | not applicable | `supportedCommands` (latest `commands_changed` list first), `supportedModels`, `supportedAgents`, `accountInfo` |
+| `supported_commands`, `supported_models`, `supported_agents`, `account_info` | not applicable | `supportedCommands` (latest `commands_changed` list first, after the initialization result is read), `supportedModels`, `supportedAgents`, `accountInfo`; a missing or `null` initialize response fails each with the engine `TypeError` (`Error::TypeError`) |
 | `set_model(Option<String>)` | `set_model` (`model: null` when unset) | `setModel` (`model` omitted when unset) |
 | `set_mcp_permission_mode_override`, `McpPermissionModeOverride` | not applicable | `setMcpPermissionModeOverride` (`{}` for an absent response) |
 | `set_max_thinking_tokens`, `set_max_thinking_tokens_with_display`, `MaxThinkingTokensDisplay` | not applicable | `setMaxThinkingTokens` |
@@ -170,6 +201,8 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | `PermissionUpdate` in `updatedPermissions` | `PermissionUpdate.to_dict` (`type`, `destination`, then the fields); an update without a destination is a `PermissionUpdate::Unknown` raw object | the update in declaration order |
 | `ElicitationRequest`, `ElicitationMode::Other` | no elicitation support: unsupported-subtype error | `onElicitation` with any `mode`; `{"action":"decline"}` without a handler |
 | `UserDialogRequest`, `supported_dialog_kinds` | no dialog support: unsupported-subtype error | `onUserDialog` for every kind; no response without a handler |
+| `RemoteControlOptions`, `WorkSecretRefresher`, `ClientHandle::enable_remote_control` | no remote control: unsupported-subtype error | `enableRemoteControl` and `remote_control_work_secret` answered for the attached session; enabling without a `response` throws a `TypeError` (`Error::Protocol`) while it is the latest call |
+| `UiHost`, `UiHandler`, `ClientHandle::set_ui_host` | no UI host: unsupported-subtype error | `uiHost` methods for the six `ui_*` subtypes; the return value is the response, and `Ok(None)` answers success without a `response` like `undefined` |
 | `signal` on each request | the handler task is cancelled and nothing is written | the signal aborts and the answer is still written |
 | `DuplicateControlRequests` | `RunBoth`: both run and answer | `Skip` (default): the redelivered id is ignored |
 | unknown and unhandled subtypes | `Unsupported control request subtype: <subtype>`, no `error_code` | `error_code` `unsupported_request`; remote tool subtypes unanswered; missing auth callbacks named |

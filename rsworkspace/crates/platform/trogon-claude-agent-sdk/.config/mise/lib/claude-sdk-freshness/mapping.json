@@ -131,7 +131,8 @@
       "rust_api": [
         "Error",
         "AbortError",
-        "ResultError"
+        "ResultError",
+        "ClaudeAgentOptions.abort_controller"
       ],
       "tests": [
         {
@@ -181,10 +182,22 @@
         {
           "path": "tests/shutdown_errors.rs",
           "name": "t14_a_write_after_the_cli_exited_with_an_error_reports_the_upstream_state"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "cancelling_the_abort_controller_stops_the_process_like_typescript"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "an_abort_controller_cancelled_before_connect_fails_the_connection"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "abort_cancels_the_supplied_controller"
         }
       ],
       "status": "supported",
-      "rationale": "Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data."
+      "rationale": "Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data. abort_controller is TypeScript's abortController: cancelling it stops the process and ends the run with Claude Code process aborted by user, a controller cancelled before connect fails the connection, later writes fail with Operation aborted, and abort() cancels the supplied controller; without one a fresh token is used. Python has no abort controller."
     },
     {
       "id": "permission-modes",
@@ -302,26 +315,92 @@
       },
       "rust_api": [
         "ClaudeSdkClient.connect",
-        "ClaudeSdkClient.disconnect"
+        "ClaudeSdkClient.new",
+        "UnconnectedClient.with_transport",
+        "UnconnectedClient.with_adapters",
+        "UnconnectedClient.connect",
+        "UnconnectedClient.scope",
+        "ConnectPrompt",
+        "ClientConnector",
+        "NativeCli",
+        "CustomTransport",
+        "ClaudeSdkClient.close",
+        "ClientHandle.close",
+        "Query.close",
+        "ClaudeSdkClient.disconnect",
+        "Query.disconnect",
+        "Error.QueryClosed",
+        "Error.Cleanup"
       ],
       "tests": [
         {
           "path": "tests/public_api.rs",
-          "name": "connect_waits_for_initialization_and_disconnect_closes_input"
+          "name": "python_connect_waits_for_initialization_and_disconnect_closes_input"
         },
         {
           "path": "tests/runtime_adapters.rs",
           "name": "injected_process_runs_protocol_and_closes_input_on_disconnect"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "close_rejects_a_waiting_control_like_typescript_and_ends_the_run_cleanly"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "close_leaves_a_waiting_control_to_its_timeout_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "close_while_iterating_keeps_received_messages_and_ends_the_stream_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "breaking_out_and_return_map_to_disconnect_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_without_a_prompt_writes_nothing_after_initialize"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_text_writes_it_in_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_verbatim_text_stamps_it"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_text_under_typescript_uses_the_empty_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_a_stream_streams_it_in_the_background"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_connects_runs_the_body_and_disconnects"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_returns_the_body_error_after_disconnecting"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_reports_a_failed_disconnect_beside_the_body_error"
         }
       ],
-      "status": "rust_difference",
-      "rationale": "Rust follows Python lifecycle names with an async connect factory and consuming async disconnect(self), rather than methods on an existing Python client. TypeScript Query.close is the cleanup counterpart. Memory-process fixtures require initialization before returning an owner and verify the child input is closed on disconnect; named references alone do not prove test execution or native conformance."
+      "status": "supported",
+      "rationale": "connect is an async factory: under the TypeScript style it returns once the initialize request is queued, as the Query constructor does, and the initialize outcome is read through the async metadata getters; under the Python style it returns only after initialization is answered, as Python's connect does. close(&self) on a Query, the client or any handle is TypeScript Query.close: idempotent and callable while the stream is read, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) on the query or the client is Python's awaitable disconnect and what the TypeScript iterator's return(), Symbol.asyncDispose and a for await that breaks await: it closes, waits for the process to stop and discards messages not read yet; consuming the owner makes a second disconnect or a read after it unrepresentable instead of a no-op. ClaudeSdkClient::new(options) is Python's ClaudeSDKClient(options), with with_transport and with_adapters for its transport argument; the UnconnectedClient it returns has no methods but connect and scope, so Python's \"Not connected\" error is unrepresentable. UnconnectedClient::connect(prompt) goes through the same factory as ClaudeSdkClient::connect and then writes a ConnectPrompt::Text as query does, or streams a ConnectPrompt::Stream from a background task, as Python's connect(str | AsyncIterable) does; when writing the prompt fails it disconnects and returns the error. sdk.mjs has no separate connect: its query({prompt}) writes a string prompt and streams an AsyncIterable the same way, aborting the query when streaming fails, which the TypeScript style follows, while the Python style drops the failure and leaves the client running, where Python's stream_input logs it and carries on. UnconnectedClient::scope is Python's async with: it connects with no prompt, runs the body and always disconnects; when both fail it returns Error::Cleanup with the body's error as primary and the disconnect's as cleanup, the pair Python chains as the disconnect exception's __context__."
     },
     {
       "id": "interactive-client",
       "upstream": {
         "python": {
-          "symbols": [],
+          "symbols": [
+            "ClaudeSDKClient.receive_messages",
+            "ClaudeSDKClient.receive_response"
+          ],
           "prefixes": [
             "ClaudeSDKClient"
           ]
@@ -336,16 +415,56 @@
       },
       "rust_api": [
         "ClaudeSdkClient",
-        "ClientHandle"
+        "ClientHandle",
+        "ClaudeSdkClient.receive_messages",
+        "ClaudeSdkClient.receive_response",
+        "ClaudeSdkClient.next_message",
+        "Query.next_message",
+        "ClaudeSdkClient.query",
+        "ClaudeSdkClient.query_in_session",
+        "ClaudeSdkClient.query_stream",
+        "ClaudeSdkClient.query_stream_in_session"
       ],
       "tests": [
         {
           "path": "tests/subprocess.rs",
           "name": "interactive_client_reuses_one_process_for_multiple_turns"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "receive_response_stops_after_the_result_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "receive_response_ends_with_the_stream_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "the_query_ends_with_the_stream_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_stream.rs",
+          "name": "the_opt_in_limit_fails_a_clean_exit_without_a_result"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_writes_in_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_in_session_writes_in_that_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_stream_fills_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_stream_in_session_keeps_named_sessions"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Only explicitly mapped operations have focused evidence."
+      "status": "supported",
+      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Query and ClaudeSdkClient are futures_util Streams of Result<Message, Error>, the TypeScript async iterator, ending where next_message returns None; receive_messages() and receive_response() are Python's, the latter yielding through the next result and leaving later messages queued. Python's get_server_info() is ClientHandle::initialization_result, mapped under initialization. Every other ClaudeSDKClient and Query method is mapped by its own row. Python __init__, __aenter__ and __aexit__ are ClaudeSdkClient::new, UnconnectedClient::connect and scope under client-lifecycle. query(prompt, session_id) is query_in_session; query writes in Python's \"default\" session under the Python style and in the empty session sdk.mjs writes under the TypeScript style. query_stream and query_stream_in_session fill the session only on inputs that name none and leave stdin open, as Python's query(AsyncIterable) does. A CLI that exits with status 0 in the middle of a turn ends the messages quietly in both styles, as sdk.mjs and Python do; Limits::end_without_result set to EndWithoutResult::Fail keeps Error::UnexpectedEof as an opt-in."
     },
     {
       "id": "full-run-query",
@@ -406,18 +525,69 @@
         }
       },
       "rust_api": [
+        "ClaudeSdkClient.stream_input",
+        "ClaudeSdkClient.try_stream_input",
         "ClientHandle.stream_input",
+        "ClientHandle.try_stream_input",
         "ClientHandle.send_input",
         "ClientHandle.finish_input"
       ],
       "tests": [
         {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_ends_the_input_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_stops_at_an_abort"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_rejects_a_write_after_close"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_rejects_with_a_failing_stream_and_leaves_stdin_open"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "typescript_query_stream_input_waits_behind_the_prompt_hold"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_ends_the_input_like_claude_agent_sdk"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_stops_at_a_close"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "python_query_stream_input_closes_stdin_after_a_failing_stream"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "the_infallible_stream_input_streams_like_query_stream_input"
+        },
+        {
+          "path": "tests/golden_stream_input.rs",
+          "name": "stream_input_counts_the_prompts_of_its_own_call"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_closes_stdin_at_once_for_a_stream_that_writes_nothing"
+        },
+        {
           "path": "tests/runtime_sessions.rs",
           "name": "coalesced_input_count_ends_the_run_after_one_result"
         }
       ],
-      "status": "partial",
-      "rationale": "Streaming and queued structured sends are exposed through a cloneable handle. Completion semantics use reported queue/session state and have older-CLI limits."
+      "status": "supported",
+      "rationale": "stream_input follows Query.streamInput by default: it stops at an abort, writes behind a pending prompt hold and leaves stdin open when the hold fails, rejects with ProcessTransport is not ready for writing once the transport closed, and closes stdin when the stream ends, waiting for the run to end only when it wrote something and something needs the CLI. Under the Python style it follows the Python stream_input: it stops once the query closed, logs a failing stream or write and closes stdin anyway, and never fails. try_stream_input takes a fallible stream so a TypeScript caller sees the stream's own error with stdin left open, as a rejecting iterable does upstream. send_input and finish_input remain the queued building blocks; the goldens were recorded from sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 against a stub CLI."
     },
     {
       "id": "interrupt-receipts",
@@ -822,7 +992,6 @@
         }
       },
       "rust_api": [
-        "ClaudeSdkClient.connection_info",
         "ConnectionInfo",
         "ConnectionInfo.from_json",
         "ConnectionInfo.as_json",
@@ -892,10 +1061,14 @@
         {
           "path": "tests/golden_controls.rs",
           "name": "supported_commands_follow_commands_changed"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "the_getters_throw_the_engine_type_error_on_a_missing_or_null_initialize_response"
         }
       ],
       "status": "supported",
-      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands prefers the latest commands_changed list; reinitialize sends a non-first initialize and replaces the cache."
+      "rationale": "The initialize request matches sdk.mjs 0.3.323 byte for byte by default (request id, envelope order, hooks, matcher, timeout and onFailure spelling, jsonSchema, systemPrompt, appendSystemPrompt, supportedDialogKinds) and claude_agent_sdk 0.2.181 under ArgvStyle::Python (req_N_hex ids, hooks null, matcher null, json.dumps spelling). The response is read without validation like both SDKs: typed fields of an unexpected type read as absent, as_json keeps the value as sent (Python style reads a non-object as an empty object), and the TypeScript checks run in its order: blocking hooks need hook_on_failure_supported, a first initialize with blocking hooks fails on hooks_applied false, managed settings need managed_settings_applied, and unconfirmed plugins log a warning. initializationResult, supportedModels, supportedAgents and accountInfo read the cached response like sdk.mjs; supportedCommands reads the cached response first and then prefers the latest commands_changed list; when initialize answered without a response or with null the getters fail with Error::TypeError carrying the engine text JsRuntime selects; reinitialize sends a non-first initialize and replaces the cache. With the TypeScript dialect connect and query return once the initialize request is queued, as sdk.mjs does, and the metadata getters (initialization_result, supported_commands, supported_models, supported_agents, account_info) are async and wait for the response; a failed initialize is raised by them and by the message stream as InitializationFailed carrying the same error. Prompts, interrupts, and settings-bearing controls written before initialize resolves are held behind it when blocking hooks or managed settings are set, as sdk.mjs holds them, and are released in order on success or answered as closed on failure. The Python dialect waits for the initialize response inside connect, as claude_agent_sdk 0.2.181 does."
     },
     {
       "id": "budget",
@@ -1694,7 +1867,13 @@
         "UserDialogHandler",
         "UserDialogRequest",
         "UserDialogResponse",
-        "DialogKind"
+        "DialogKind",
+        "WorkSecretRefresher",
+        "WorkSecretRefreshRequest",
+        "ClientHandle.set_ui_host",
+        "UiHost",
+        "UiHandler",
+        "UiRequest"
       ],
       "tests": [
         {
@@ -1716,10 +1895,86 @@
         {
           "path": "tests/golden_inbound_control.rs",
           "name": "every_dialog_kind_reaches_the_handler_and_a_null_answer_writes_nothing"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "remote_control_work_secret_is_answered_for_the_attached_session"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "an_attach_that_names_another_session_removes_the_work_secret_answerer"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "ui_requests_reach_the_matching_host_method"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_blocking_hook_holds_the_prompt_and_an_interrupt_behind_initialize_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "managed_settings_hold_every_request_behind_initialize_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_failed_initialize_writes_no_prompt_and_rejects_what_waited_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "a_failed_initialize_with_managed_settings_writes_nothing_after_it_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_initialize_hold.rs",
+          "name": "the_captured_timer_matches_the_duration_and_messages_the_driver_uses"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_single_turn_ends_at_its_result_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_single_prompt_keeps_yielding_after_its_result_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "a_streamed_input_keeps_yielding_after_its_result_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_closes_stdin_once_the_prompt_is_written_and_keeps_yielding"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "without_a_result_stdin_closes_when_the_input_is_written_unless_something_needs_the_cli"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_without_a_result_closes_stdin_once_the_prompt_is_written_unless_something_needs_the_cli"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "typescript_closes_stdin_at_idle_or_the_ceiling_whatever_tasks_and_continuations_are_reported"
+        },
+        {
+          "path": "tests/golden_run_end.rs",
+          "name": "python_closes_stdin_at_idle_or_the_ceiling_unless_a_tracked_task_is_in_flight"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "python_answers_ui_requests_as_unsupported_even_with_a_host_set"
+        },
+        {
+          "path": "tests/golden_inbound_control.rs",
+          "name": "python_answers_work_secret_requests_as_unsupported_even_with_an_answerer_set"
         }
       ],
       "status": "supported",
-      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect."
+      "rationale": "As in sdk.mjs 0.3.323, supportedDialogKinds is only advertised in initialize and every request_user_dialog reaches the handler whatever its kind. AnsweredOutOfBand and a missing handler write nothing; a redelivered in-flight id is skipped. claude_agent_sdk 0.2.181 has no dialog handler and answers with its unsupported-subtype error in the Python dialect. It also routes the TypeScript-only uiHost subtypes (ui_copy, ui_prompt_read, ui_prompt_fill, ui_prompt_paint, ui_prompt_suggest, ui_read_selection) to the matching method installed through ClientHandle.set_ui_host, and a subtype whose method is absent falls through to the unsupported request error; claude_agent_sdk 0.2.181 has no uiHost and answers each with its unsupported-subtype error, host set or not. It answers the TypeScript-only refreshWorkSecret (remote_control_work_secret) only for the session enableRemoteControl attached; claude_agent_sdk 0.2.181 answers it with its unsupported-subtype error, answerer set or not. The run ends as hasBidirectionalNeeds decides: a streamed input closes stdin as soon as it is written when nothing needs the CLI, and query() with a prompt follows sdk.mjs's single user turn, ending at its result when nothing needs the CLI and otherwise at session idle. The Python dialect knows only SDK MCP servers, hooks and the permission handler as needs and closes stdin once the prompt was written when there are none, as claude_agent_sdk 0.2.181 does. The moment stdin closes is that dialect's run-end machine in src/run_end.rs and nothing else: sdk.mjs runEnded with resultReceived, session_state_changed and the ceiling armed by CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS (read here from options.env or the environment as each SDK does, 0 or less disabling it), where reported tasks and queued turns play no part, and Python's run-ended event with its tracked local_agent and local_workflow tasks, its turn-in-progress guard and the same ceiling. Both readers keep yielding what the CLI sends after the result until it exits, and so do query() and the client here; query_turn is the Rust-only call that stops at the first result."
     },
     {
       "id": "embedded-mcp",
@@ -3343,7 +3598,9 @@
         "ClientHandle.seed_read_state",
         "ClientHandle.background_tasks",
         "ControlReply",
-        "ControlRejectionError"
+        "ControlRejectionError",
+        "ClientHandle.enable_remote_control",
+        "RemoteControlOptions"
       ],
       "tests": [
         {
@@ -3369,10 +3626,22 @@
         {
           "path": "tests/error_contracts.rs",
           "name": "control_timeout_diagnostics_identify_each_wire_operation"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "enable_remote_control_writes_the_typescript_request_bytes"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "connect_returns_before_initialize_is_answered_like_sdk_mjs"
+        },
+        {
+          "path": "tests/golden_controls.rs",
+          "name": "an_undefined_remote_control_response_follows_sdk_mjs"
         }
       ],
       "status": "supported",
-      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods."
+      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods. enableRemoteControl writes the remote_control request with the optional name, reattach_session_id, keep_session_on_exit and work_secret fields in the TypeScript order, returns the response as sdk.mjs does, and while it is still the latest call, enabling with an absent or null response fails as sdk.mjs does reading bridge_session_id. It installs the work secret answerer only for the attached session, cleared by a failed or superseded call; connect returns once the initialize request is queued for the TypeScript dialect, so a call made right after connect is written right behind the initialize request and before its response, as sdk.mjs writes it. enableRemoteControl is not published in the upstream declaration files."
     },
     {
       "id": "custom-transport",
@@ -3388,13 +3657,24 @@
             "Options.spawnClaudeCodeProcess",
             "core.Options.spawnClaudeCodeProcess"
           ],
-          "prefixes": []
+          "prefixes": [
+            "SpawnOptions",
+            "core.SpawnOptions",
+            "SpawnedProcess",
+            "core.SpawnedProcess"
+          ]
         }
       },
       "rust_api": [
         "adapters::RuntimeAdapters",
         "adapters::SpawnProcess",
         "adapters::TokioProcessSpawner",
+        "ClaudeAgentOptions.spawn_claude_code_process",
+        "SpawnClaudeCodeProcess",
+        "SpawnOptions",
+        "ClaudeAgentOptions.on_process_spawned",
+        "OnProcessSpawned",
+        "ProcessSpawnInfo",
         "Transport",
         "ClaudeSdkClient::connect_with_adapters",
         "ClaudeSdkClient::connect_with_transport",
@@ -3460,10 +3740,30 @@
         {
           "path": "tests/transport.rs",
           "name": "t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_failing_custom_spawner_is_a_spawn_error"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "the_forwarded_signal_is_cancelled_only_once_an_aborted_client_has_closed"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "on_process_spawned_reports_the_pid_of_the_sdk_spawn"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "a_panicking_on_process_spawned_does_not_stop_the_query"
         }
       ],
       "status": "supported",
-      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default and the SpawnProcess adapter stays TypeScript's spawnClaudeCodeProcess. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
+      "rationale": "The public Transport trait is Python's Transport (connect, write, read_message in place of read_messages, close, is_ready, end_input) with a provided kill for TypeScript's abort. ClaudeSdkClient::connect_with_transport, query_with_transport and query_turn_with_transport inject one; the subprocess implementation is the default. ClaudeAgentOptions.spawn_claude_code_process is TypeScript's spawnClaudeCodeProcess: it gets SpawnOptions with the command, arguments, working directory, the whole child environment and the forwarded abort signal, which is cancelled only when the client closes after its abort controller was cancelled, past the close grace. It returns a tokio Child in place of SpawnedProcess (stdin and stdout piped, stderr read when piped), so it runs anything a local command reaches, such as a container or remote shell; a peer that is not a process uses the Transport trait. As upstream, a custom spawn derives no default debug file and gets no onProcessSpawned call. ClaudeAgentOptions.on_process_spawned is TypeScript's onProcessSpawned, a runtime option its declarations omit: it gets the pid and spawnSyncMs of the SDK's own spawn, and a panic in it is logged and ignored as TypeScript ignores a throw. SpawnOptions.uid carries Python's user or run_as_uid for a spawner on Unix. The SpawnProcess adapter remains the injection seam for tests and hosts. A custom transport gets no CLI discovery, argument list or store-backed resume materialization (the mirror still runs), as upstream."
     },
     {
       "id": "browser-websocket-transport",
@@ -4127,6 +4427,7 @@
         "ToolConfig",
         "OAuthTokenHandler",
         "HostAuthTokenHandler",
+        "HostAuthToken",
         "SessionLoadTimeout"
       ],
       "tests": [
@@ -4163,6 +4464,10 @@
           "name": "a_non_string_token_state_reaches_the_oauth_handler_as_no_hint"
         },
         {
+          "path": "tests/golden_initialize_ordering.rs",
+          "name": "refresh_requests_are_answered_around_the_initialize_answer_like_sdk_mjs"
+        },
+        {
           "path": "tests/session_store.rs",
           "name": "python_dialect_reports_the_resume_materialization_text"
         },
@@ -4172,7 +4477,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
+      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. A host token handler can return any JSON value through HostAuthToken::Raw, which is sent whole unless it is a string or null, like the bundle. Known limit: token callbacks use the opt-in callback_timeout limit."
     },
     {
       "id": "core-options",
@@ -4880,6 +5185,276 @@
       ],
       "status": "supported",
       "rationale": "The first-party names each Python module imports are reachable from the crate root."
+    },
+    {
+      "id": "startup",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "startup",
+            "core.startup",
+            "SDKStartupFailureReason",
+            "core.SDKStartupFailureReason",
+            "sdk.coreTypes.SDKStartupFailureReason"
+          ],
+          "prefixes": [
+            "WarmQuery",
+            "core.WarmQuery"
+          ]
+        }
+      },
+      "rust_api": [
+        "startup",
+        "startup_with_adapters",
+        "StartupOptions",
+        "WarmQuery",
+        "WarmQuery.query",
+        "WarmQuery.close",
+        "WarmQuery.dispose",
+        "InitializeTimeoutError",
+        "ResultError.startup_failure_reason",
+        "StartupHooksRunning"
+      ],
+      "tests": [
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "a_passed_timeout_counts_from_the_start_and_names_the_last_mark"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "closing_a_warm_query_sends_no_prompt"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_writes_the_handshake_then_the_prompt"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_leaves_a_marks_flag_the_caller_already_has"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "startup_marks_are_kept_up_to_sixty_four_characters"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_timeout_says_what_the_reported_hooks_did"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_exit_names_why_startup_failed"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_waits_sixty_seconds_when_no_hook_is_reported"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_does_not_count_one_hooks_time"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_counts_overlapping_hooks_once"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_default_timeout_stops_not_counting_hook_time_after_ten_minutes"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_after_a_prompt_is_a_message_and_a_nonzero_exit_then_names_it"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "an_error_result_after_a_prompt_ends_the_stream_cleanly_when_the_process_exits_zero"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "a_reason_the_sdk_does_not_list_is_kept_and_a_non_string_is_dropped"
+        },
+        {
+          "path": "tests/golden_startup.rs",
+          "name": "the_error_result_text_trims_and_joins_the_errors_or_uses_the_result_of_a_success_subtype"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "a_passed_limit_counts_hook_time"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "the_default_limit_does_not_count_hook_time"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "uncounted_time_stops_at_ten_minutes"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "uncounted_seconds_round_half_up"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "hook_summaries_follow_the_upstream_wording"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "hooks_past_the_followed_limit_are_only_counted"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "frames_map_to_startup_events"
+        },
+        {
+          "path": "src/startup_timeout_tests.rs",
+          "name": "an_error_result_exposes_the_startup_failure_reason"
+        }
+      ],
+      "status": "supported",
+      "rationale": "startup() returns a WarmQuery after the initialize handshake, with the TypeScript initialize timer (60000 ms default, SessionStart and Setup hook time uncounted for at most 10 minutes only when no value is passed), startup marks and the SDKStartupFailureReason on the error result exit. Every golden, including the error result exit text and the default timer hook accounting, was captured live from the real sdk.mjs 0.3.323 talking to a scripted CLI (the default timer runs about 60 seconds there and under paused time here). Python 0.2.181 has no pre-warming. WarmQuery::query consumes self instead of throwing on a second call, so the once-only rule is enforced by Rust's type system."
+    },
+    {
+      "id": "prewarm",
+      "upstream": {
+        "python": {
+          "symbols": [],
+          "prefixes": []
+        },
+        "typescript": {
+          "symbols": [
+            "prewarm",
+            "core.prewarm",
+            "ClaimOptions",
+            "core.ClaimOptions",
+            "SpareProcess",
+            "core.SpareProcess"
+          ],
+          "prefixes": [
+            "SpareProcess",
+            "core.SpareProcess"
+          ]
+        }
+      },
+      "rust_api": [
+        "prewarm",
+        "prewarm_with_adapters",
+        "SpareProcess",
+        "SpareProcess.claim",
+        "SpareProcess.claimed",
+        "SpareProcess.exited",
+        "SpareProcess.close",
+        "SpareProcess.dispose",
+        "ClaimOptions",
+        "ClaimInfo",
+        "ClaimError"
+      ],
+      "tests": [
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_times_out_with_the_startup_texts_and_marks"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "prewarm_rejects_options_that_describe_a_session"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_plain_claim_writes_the_claim_and_the_prompt_before_any_answer"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "every_claim_option_keeps_the_upstream_key_order"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_that_sets_the_model_and_thinking_writes_them_before_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "settings_surround_the_claim_and_the_prompt_waits_for_every_answer"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "failed_settings_close_the_process_without_sending_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "failed_options_report_what_was_not_applied_after_sending_the_prompt"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_refused_claim_carries_the_cli_text_and_still_gets_a_result"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claimed_spare_yields_the_error_result_then_names_it_on_a_nonzero_exit"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "hook_settings_are_refused_without_sending_anything_and_the_spare_stays_claimable"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_can_be_claimed_only_once_and_not_after_it_closed"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_relative_claim_directory_resolves_against_the_process_and_a_home_one_is_sent_as_is"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "the_claim_answer_replaces_the_initialization_result_and_keeps_the_applied_flags"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_over_a_missing_initialize_response_rejects_the_initialization_result"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_claim_initialize_of_any_type_is_spread_and_keeps_the_earlier_flags"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_spare_without_a_directory_parks_under_the_config_home_until_it_is_claimed"
+        },
+        {
+          "path": "tests/golden_prewarm.rs",
+          "name": "a_relative_config_home_falls_back_to_the_process_home"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "settings_split_into_what_precedes_and_what_follows_the_claim"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "hook_settings_are_the_keys_a_claim_cannot_apply"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_directory_resolves_only_plain_relative_paths"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_directory_reports_an_unreadable_process_directory"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "the_claim_request_keeps_upstream_key_order"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "workspace_trust_is_sent_only_when_accepted_with_an_absolute_directory"
+        },
+        {
+          "path": "src/prewarm_tests.rs",
+          "name": "claim_errors_carry_the_upstream_messages"
+        }
+      ],
+      "status": "supported",
+      "rationale": "prewarm() starts a spare with --await-claim and SpareProcess::claim writes the claim_session request, applies model, thinking and settings around it and fails with settings_not_applied or option_not_applied like sdk.mjs 0.3.323; the claim initialize answer replaces the initialization result and keeps the four applied flags, and a spare without a directory parks under the config home spares directory, named spare- plus six characters of A-Z, a-z and 0-9 like Node's mkdtemp, until claimed. Goldens were captured from the real sdk.mjs. Python 0.2.181 has no pre-warming. A spare can be claimed only once, which Rust's type system and an internal flag enforce instead of a thrown error on reuse. ClaimOptions.settings takes a JSON object like TypeScript, whose declaration types it as the parameter of Query.applyFlagSettings. The claim prompt is a UserInput rather than an async iterable, consistent with the crate's query()."
     },
     {
       "id": "control-request-types",

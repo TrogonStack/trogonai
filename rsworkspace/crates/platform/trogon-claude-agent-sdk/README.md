@@ -54,6 +54,12 @@ information.
 
 For interactive use, create a `ClaudeSdkClient`, send a prompt and receive
 through `Message::Result`. The next prompt reuses the process.
+`receive_response()` is Python's `receive_response()`: a `Stream` that yields
+messages through the next `Message::Result` and then ends, leaving later
+messages queued. `receive_messages()` streams on without stopping. `Query` and
+`ClaudeSdkClient` are themselves `futures_util::Stream`s of
+`Result<Message, Error>`, TypeScript's `for await`, ending where `next_message`
+returns `None`.
 `send_input(UserInput)` accepts structured content and message identity.
 `InputBlock` is a transparent JSON-object wrapper forwarded verbatim, with a
 `text` convenience constructor; the CLI and the Messages API validate block shapes.
@@ -63,10 +69,59 @@ queued input or `stream_input`, and receive on the owner concurrently. Call
 `finish_input()` when no more user messages will be sent. Reported queue counts
 handle CLIs that coalesce queued sends into a turn.
 
-Call `disconnect().await` to wait for shutdown and receive cleanup errors. Dropping
-the owner requests shutdown even when a handle survives, but does not call or
-await `disconnect()`. Cleanup needs a running Tokio runtime; the child also has a
-`kill_on_drop` fallback.
+`stream_input` follows TypeScript's `Query.streamInput()` by default: an abort
+ends it quietly, a write after close fails with `Error::NotReadyForWriting`, and
+stdin closes once the stream ends. When a callback needs the CLI and the call
+wrote a prompt, stdin stays open until the run ends; both SDKs count the
+prompts of each call, so a call that wrote nothing closes stdin at once even
+while an earlier call's run is open. `try_stream_input` takes a fallible stream;
+under TypeScript its error is returned and stdin stays open. Under
+`ArgvStyle::Python` both log a failure, close stdin and return `Ok`, like
+Python's `stream_input`.
+
+`close()` on a `Query`, the client or any `ClientHandle` is TypeScript's
+`Query.close()`: it takes `&self`, so it can be called while the stream is being
+read, shuts the process down without waiting and is idempotent. Messages already
+received stay readable before `next_message` returns `None`, and a control
+request still waiting fails with `Error::QueryClosed` ("Query closed before
+response received"); under `ArgvStyle::Python` it runs out its timeout instead,
+as Python's `close()` leaves it. Call `disconnect().await` on the query or the
+client to close and wait for shutdown and cleanup errors. A TypeScript
+`for await` that breaks, the iterator's `return()` and `Symbol.asyncDispose`
+are `disconnect().await`, which discards messages not read yet; `throw(error)`
+is `disconnect().await` followed by returning the caller's own error, or
+`abort()` to stop the process at once. Dropping the owner closes even when a
+handle survives, but does not await cleanup. Cleanup needs a running Tokio runtime; the
+child also has a `kill_on_drop` fallback.
+
+## Pre-warming with startup
+
+`startup(StartupOptions)` follows TypeScript `startup()`: it starts the CLI, completes the initialize handshake and
+returns a `WarmQuery`. `WarmQuery::query(prompt)` writes the prompt to that process and returns a `Query`;
+`close()` discards the process without a prompt, and `dispose()` closes it and waits for the cleanup. Python
+0.2.181 has no pre-warming. `query` takes `self`, so a second call cannot compile where TypeScript throws.
+
+`initialize_timeout` of `None` waits 60000 ms and does not count the time in which Claude Code reports a
+SessionStart or Setup hook running, for at most 10 minutes; a value you pass counts throughout. A timeout is
+`Error::InitializeTimeout` with the upstream text, the `initialize_timeout` error class, the last startup mark
+(or `none`) and its age. The process gets `CLAUDE_CODE_SDK_READS_STARTUP_MARKS=1` unless the environment has that
+key in any letter case. An error result exit carries `ResultError::startup_failure_reason`.
+
+## Spare processes with prewarm
+
+`prewarm(StartupOptions)` follows TypeScript `prewarm()`: it starts the CLI with `--await-claim`, completes the
+initialize handshake and returns a `SpareProcess` that is not tied to a session yet.
+`SpareProcess::claim(prompt, ClaimOptions)` writes one `claim_session` request (working directory, permission mode,
+environment, extra directories, system prompt addition, title, agents, accepted workspace trust and the SDK MCP server
+names), applies the model, thinking budget and settings around it and then sends the prompt, returning a `Query`.
+`claimed()` yields the `ClaimInfo`, `exited()` resolves when the process ends, and `close()` or `dispose()`
+discard the spare. A claim fails with `ClaimError` carrying the upstream text: `settings_not_applied` closes the
+process and sends no prompt, `option_not_applied` sends the prompt and says which options were skipped. A spare
+started without a directory parks under `spares/spare-XXXXXX` (mode 0700) in the config home until it is claimed.
+Settings that register hooks cannot be applied by a claim and are refused before anything is written.
+The claim answer's `initialize` replaces the initialization result as `sdk.mjs` merges it: the applied flags it
+omits or sends as `null` keep their first values, and a first result that was missing or `null`, or an `initialize`
+of `null`, fails the initialization result with `Error::TypeError` while `claimed()` still succeeds.
 
 ## Messages and controls
 
@@ -83,9 +138,14 @@ message missing a key. Goldens from both pinned SDKs pin the two modes; see
 compact when another dependency enables `serde_json`'s `preserve_order` feature.
 Pattern matching exposes the same fields through the box.
 
-`connect().await` completes the CLI initialization handshake before returning.
-`connection_info()` borrows the cached `ConnectionInfo` from that handshake,
-including support flags and additional metadata. Reading it is non-fallible and
+Under the default TypeScript dialect `connect().await` and `query()` return as soon as the initialize
+request is queued, the way `sdk.mjs` hands back its `Query`; anything sent next is written right behind
+the initialize bytes. Under `ArgvStyle::Python`, `connect()` and `query()` wait for the initialize
+response, as `claude_agent_sdk` does. `ClientHandle::initialization_result().await` returns the
+`ConnectionInfo` of the first initialize response, including support flags and additional metadata, and
+waits for it when it has not arrived. A failed initialize rejects it with `Error::InitializationFailed`,
+which prints the underlying error; the run ends with that error too when a blocking hook or managed
+settings made the prompt wait for the confirmation, and otherwise it carries on, as `sdk.mjs` does. It
 sends no protocol messages; `ConnectionInfo::as_json()` retains the original
 response, including omitted or explicitly null fields, or `None` when the reply
 has no `response` field, where TypeScript `initializationResult()` resolves to
@@ -116,7 +176,11 @@ a shape check, or `None` when the reply has none, where TypeScript returns
 (`read_file` is `None` on any failure, `background_tasks` is `true` when the CLI
 omits `backgrounded`), and a rejected request keeps a well-formed TypeScript
 `error_code`.
-`supported_commands()` follows the latest `commands_changed` system message.
+`supported_commands()` follows the latest `commands_changed` system message,
+after reading the initialization result as `sdk.mjs` does. When initialize
+answered without a `response` or with `null`, `supported_commands`,
+`supported_models`, `supported_agents` and `account_info` fail with
+`Error::TypeError`, the engine text `ClaudeAgentOptions.js_runtime` selects.
 Legacy interrupt replies remain distinct from reported empty queues. Newer
 controls depend on installed CLI support.
 
@@ -150,6 +214,40 @@ and a cancellation signal. As in `sdk.mjs`, every elicitation mode and dialog
 kind reaches the handler and `supported_dialog_kinds` is only advertised to the
 CLI. Without a handler an elicitation is declined and a dialog is left for
 another client to answer.
+
+Under the default TypeScript dialect, `ClientHandle::set_ui_host` takes a
+`UiHost` whose methods answer the CLI's six `ui_*` requests; a missing method
+falls through to the unsupported subtype error. Under `ArgvStyle::Python` every
+`ui_*` request gets that error.
+
+`ClientHandle::enable_remote_control` takes `RemoteControlOptions` and, under
+the default TypeScript dialect, answers `remote_control_work_secret` for the
+session it attached, matched as `sdk.mjs` does. It returns the `response` as
+sent: `None` is `undefined` and `Some(null)` is `null`. Enabling with either one
+fails with `Error::Protocol` while it is still the latest call, as `sdk.mjs`
+throws reading `bridge_session_id`. `sdk.mjs` can call `enableRemoteControl`
+before `initialize` resolves, which writes it right behind the initialize
+request. The TypeScript dialect's `connect` returns at that point, so a call
+made on the returned client lands at the same place on the wire. Under
+`ArgvStyle::Python` a work secret request gets the unsupported subtype error.
+
+The run ends as `hasBidirectionalNeeds` decides. When nothing needs the CLI to keep
+asking (no embedded MCP server, hook or permission handler, and under TypeScript
+no elicitation or dialog handler, auth callback or work secret answerer), a streamed
+input closes stdin as soon as it is written. Otherwise stdin closes when the run
+ends, and only the frames decide that, per dialect (`src/run_end.rs`). Under
+TypeScript a result ends the run when the session reported no state or is idle, and
+otherwise `idle` does, or the ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, read
+from `options.env` or the environment as the dialect's SDK does, 600000 ms by default and
+disabled by 0) when no `idle` follows; reported tasks
+and queued turns play no part. `query()` with a prompt is `sdk.mjs`'s single user turn,
+which closes stdin the moment its run ends. With a session store, a result reaches that machine only after its transcript flush, as in both
+readers; the ceiling and a finished input do not wait for a flush. Under `ArgvStyle::Python` the prompt waits
+the same way, but a tracked `local_agent` or `local_workflow` task still in flight keeps
+the run open at a result, at `idle` and at the ceiling. `query()` and the client keep
+yielding what the CLI sends after the result until the CLI exits; only `query_turn()`
+stops at the first result. A CLI that never sends a result still gets its stdin closed
+after the last prompt when nothing needs it.
 
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the
@@ -400,6 +498,16 @@ upstream SDKs).
   upstream text and the input path is returned. `extract_from_bunfs_with` takes an
   `ExtractHost` for tests. Warning texts name errnos from a fixed table, and
   hard link counts and file ids are only read on Unix.
+- `spawn_claude_code_process` is TypeScript's `spawnClaudeCodeProcess`: the SDK
+  builds the command and hands `SpawnOptions` (command, arguments, working
+  directory, the whole child environment, a forwarded abort signal and, on Unix,
+  the uid from `user` or `run_as_uid`) to the callback, which returns a tokio
+  `Child` with piped stdin and stdout, so a container or remote shell can host the
+  CLI. The forwarded signal is cancelled only when the client closes after its
+  abort controller was cancelled, past the close grace. As in TypeScript, a
+  custom spawn gets no default debug file. `on_process_spawned` is TypeScript's
+  undeclared `onProcessSpawned`: after the SDK's own spawn it receives the pid
+  and `spawn_sync_ms`, and a panic in it is logged and ignored.
 - Bundled executables are caller-driven lookups, not part of `connect`.
   `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check.
   `bundled_cli_derives_client_app` and `meets_derived_client_app_minimum` port
@@ -421,7 +529,10 @@ upstream SDKs).
   unsuccessfully after an `is_error` result, the error is `Error::Result`
   (`ResultError`): Python's text always, TypeScript's text when it is non-empty.
   `abort()` stops the process and ends the run with `Error::Aborted`
-  (`AbortError`). Closing follows `limits.shutdown`: TypeScript's ladder by
+  (`AbortError`, "Claude Code process aborted by user"). It cancels
+  `abort_controller`, TypeScript's `abortController`: a caller's token cancelled
+  from anywhere does the same, a token already cancelled fails `connect` with
+  that error, and `close()` leaves it untouched. Closing follows `limits.shutdown`: TypeScript's ladder by
   default (stdin close, 2 seconds, SIGTERM, SIGKILL 5 seconds later without
   waiting), Python's 5/5/5 second ladder, or `Shutdown::Strict`, which reports
   `Error::ShutdownTimeout` and `Error::StderrDrainTimeout`.
@@ -524,10 +635,20 @@ A Windows `.bat` or `.cmd` CLI path starts, as in TypeScript;
 fires only on Windows, as in Python.
 Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
 and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
-on an existing client. Rust intentionally uses an async factory for `connect`
-and consumes the client in `disconnect(self)` to observe cleanup errors. Published
-[TypeScript `0.3.319`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/0.3.319)
-uses `Query` and `WarmQuery` with `close()` instead.
+on an existing client; Rust's `connect` is the async factory that returns the
+connected client, and `disconnect(self)` consumes it, so a second disconnect
+cannot be written rather than being a no-op. TypeScript's `Query.close()` is
+`close()` on the query, the client or a handle. Python's `get_server_info()` is
+`ClientHandle::initialization_result()`.
+`ClaudeSdkClient::new(options)` keeps Python's construct-then-connect shape: the
+`UnconnectedClient` it returns takes a transport or adapters and then
+`connect(prompt)` with no prompt, a string, or a stream that a background task
+writes, through the same factories. `scope(body)` is `async with`: it connects,
+runs the body and always disconnects, returning `Error::Cleanup` when both fail.
+`query` writes a string prompt in Python's `"default"` session under
+`ArgvStyle::Python` and in the empty session `sdk.mjs` writes otherwise;
+`query_in_session` names the session, and `query_stream_in_session` sets it only
+on inputs that name none.
 
 Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.
@@ -557,7 +678,9 @@ buffer that stops reading stdout while full, and its initialize wait, shutdown
 ladder and `int()` parse of that variable. `RunEndTimeout::Fixed` opts into a
 fixed run-end wait. Every other bound (pending controls, inbound callbacks, tracked
 tasks, queued inputs, a failing message queue, command queue room) is opt-in and
-keeps its typed error. Stderr debug output omits its contents. `QueueCapacity`
+keeps its typed error. A CLI that exits with status 0 before a result ends the
+messages quietly, as both SDKs do; `EndWithoutResult::Fail` reports it as
+`Error::UnexpectedEof` instead. Stderr debug output omits its contents. `QueueCapacity`
 validates Tokio's range; `Timeout::checked` rejects zero and values past 24
 hours.
 

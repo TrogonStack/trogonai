@@ -9,7 +9,9 @@ queries convenient. It is the lifecycle contract for this crate.
 
 The reviewed Python SDK positions `ClaudeSDKClient` for interactive sessions,
 follow-up prompts and interrupts. Its constructor stores configuration;
-`await connect()` starts the transport and initializes the protocol.
+`await connect()` starts the transport and initializes the protocol, and returns once the response arrived.
+`sdk.mjs` returns its `Query` earlier, once the initialize request is written, and so does the TypeScript
+dialect here.
 `async with ClaudeSDKClient(...)` pairs connection with `disconnect()`.
 Python also offers a top-level `query()` async iterator for predetermined
 inputs. Both facades use bidirectional streaming internally.
@@ -40,7 +42,7 @@ and error boundaries.
 | Interactive ownership | Reusable `ClaudeSDKClient` | A streaming `Query` also has controls and streamed input | Reusable `ClaudeSdkClient` owns one CLI process |
 | Readiness | Await `connect()` or enter `async with` | Ordinary `query()` starts asynchronously; `startup()` awaits readiness | Await `connect()` before receiving a client |
 | Simple queries | `query()` async iterator | `query()` returns an async generator with controls | `query()` returns an owned query over the same driver |
-| Cleanup | Await `disconnect()` or leave the context | `Query.close()` starts cleanup; generator return/disposal can await it | Consuming `disconnect().await` observes cleanup and errors |
+| Cleanup | Await `disconnect()` or leave the context | `Query.close()` starts cleanup; generator return/disposal can await it | `close(&self)` starts cleanup while the stream is read; consuming `disconnect().await` observes cleanup and errors |
 
 Rust avoids exposing a usable but disconnected client. The constructor future
 can report startup errors before the caller sends input. Consuming the owner
@@ -104,7 +106,7 @@ for other SDK APIs. Simple value-object constructors retain their single value.
 | --- | --- |
 | Configure | Supply optional cli_path, settings, limits, hooks, permissions and MCP registrations before connecting. |
 | Initialize | Prepare any store-backed resume, spawn the CLI, start the driver and exchange initialization/control messages. |
-| Ready | `connect().await` returns after successful initialization and required blocking-hook checks. No user prompt is required. |
+| Ready | Under the TypeScript dialect `connect().await` returns once the initialize request is queued; the Python dialect returns after the response. Required blocking-hook checks run when the response arrives, and a refusal ends the run. No user prompt is required. |
 | Work | Send input and consume messages while the driver routes controls and callback requests. Reuse the process for subsequent turns. |
 | Finish input | Declare that no further user messages will be sent; allow remaining turns and callback-capable work to settle. |
 | Disconnect | Request shutdown, cancel callbacks, close input, reap the process and finish accepted storage work, reporting the outcome. |
@@ -125,9 +127,10 @@ Python's `repr` does. The wait has a 60 second floor. This is separate from how
 long a model turn may execute.
 
 The initialization exchange is internal to `connect()`. It configures the
-protocol and checks requested blocking-hook support before returning the
-client. `connection_info()` borrows the cached `ConnectionInfo` reported by that
-exchange; it cannot fail or initialize the process again. The metadata is a
+protocol and checks requested blocking-hook support when the response arrives.
+`initialization_result()` awaits the cached `ConnectionInfo` reported by that
+exchange and fails with `Error::InitializationFailed` when it failed; it does not
+initialize the process again. The metadata is a
 startup snapshot, so later control changes do not update it.
 `ConnectionInfo::as_json()` preserves the original response, including unknown
 fields and the distinction between omitted and explicitly null fields.
@@ -173,7 +176,10 @@ receive through a result and keep the owner for later input. Exhausting a user
 input stream is distinct from ending the control channel: hooks, permission
 questions and embedded MCP calls may still require replies on stdin.
 `stream_input()` calls `finish_input()` on exhaustion, rejecting further user
-input; finishing input is not an explicit close operation.
+input; finishing input is not an explicit close operation. Under the
+TypeScript dialect a failing `try_stream_input()` stream returns its error and
+leaves stdin open, as a rejecting iterable does upstream; the Python dialect
+logs the failure and finishes input anyway.
 
 `interrupt()` requests that the CLI interrupt current work. It does not close
 the owner or necessarily discard queued input. Inspect the typed receipt and

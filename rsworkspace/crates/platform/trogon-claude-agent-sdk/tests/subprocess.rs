@@ -4,10 +4,10 @@ use std::{error::Error as StdError, sync::Arc, time::Duration};
 
 use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
-    BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, Error, FeatureSupport,
-    FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages, PermissionDecision, Prompt,
-    QueueCapacity, RunEndTimeout, SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout,
-    ToolPermissionRequest, ToolRule, ToolSet, adapters::SystemClock, query,
+    BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, EndWithoutResult, Error,
+    FeatureSupport, FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages,
+    PermissionDecision, Prompt, QueueCapacity, RunEndTimeout, SessionId, SessionStore, SessionStoreOptions,
+    SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet, adapters::SystemClock, query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -97,9 +97,14 @@ async fn s02_non_json_stdout_lines_are_skipped() -> TestResult {
 }
 
 /// Both upstream SDKs end the run quietly when no idle state follows the last result before the run-end ceiling.
+/// The ceiling only applies while a permission callback keeps the CLI talking; without any bidirectional need both
+/// SDKs close the input at once and the run ends when the CLI exits.
 #[tokio::test]
 async fn s05_a_missing_idle_state_ends_the_run_quietly_at_the_ceiling() -> TestResult {
     let mut options = options("stuck-running")?;
+    options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        std::future::pending::<PermissionDecision>().await
+    }));
     options.limits.run_end_timeout = RunEndTimeout::Fixed(Timeout::new(Duration::from_millis(300)));
     let mut response = query(Prompt::from("stuck"), options).await?;
     let results = timeout(Duration::from_secs(5), async {
@@ -225,7 +230,7 @@ async fn known_message_metadata_survives_decoding() -> TestResult {
 #[tokio::test]
 async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
     let mut client = ClaudeSdkClient::connect(options("connection-info")?).await?;
-    let info = client.connection_info();
+    let info = client.handle().initialization_result().await?;
     assert_eq!(info.commands[0]["name"], "review");
     assert_eq!(info.models[0]["value"], "fixture-model");
     assert_eq!(info.agents[0]["name"], "reviewer");
@@ -251,19 +256,20 @@ async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
         "future_metadata":{"nested":[1,null]},
     });
     assert_eq!(serde_json::to_value(info.as_json())?, raw);
-    assert!(std::ptr::eq(info, client.connection_info()));
+    assert_eq!(client.handle().initialization_result().await?.as_json(), info.as_json());
     client.send_prompt(Prompt::from("after metadata")).await?;
     assert_eq!(read_result(&mut client).await?, "after metadata");
-    assert_eq!(serde_json::to_value(client.connection_info().as_json())?, raw);
+    assert_eq!(
+        serde_json::to_value(client.handle().initialization_result().await?.as_json())?,
+        raw
+    );
     client.disconnect().await?;
 
     let client = ClaudeSdkClient::connect(options("normal")?).await?;
-    assert_eq!(client.connection_info().hooks_applied, FeatureSupport::NotReported);
-    assert_eq!(
-        client.connection_info().hook_on_failure_supported,
-        FeatureSupport::NotReported
-    );
-    assert_eq!(client.connection_info().as_json(), Some(&serde_json::json!({})));
+    let info = client.handle().initialization_result().await?;
+    assert_eq!(info.hooks_applied, FeatureSupport::NotReported);
+    assert_eq!(info.hook_on_failure_supported, FeatureSupport::NotReported);
+    assert_eq!(info.as_json(), Some(&serde_json::json!({})));
     client.disconnect().await?;
     Ok(())
 }
@@ -583,26 +589,40 @@ async fn malformed_initialization_is_accepted_like_upstream() -> TestResult {
         ("init-malformed-known", serde_json::json!({"models":"invalid"})),
     ] {
         let client = ClaudeSdkClient::connect(options(mode)?).await?;
-        assert!(client.connection_info().models.is_empty());
-        assert_eq!(client.connection_info().as_json(), Some(&raw));
+        let info = client.handle().initialization_result().await?;
+        assert!(info.models.is_empty());
+        assert_eq!(info.as_json(), Some(&raw));
         client.disconnect().await?;
     }
     Ok(())
 }
 
-#[tokio::test]
-async fn successful_process_exit_without_a_result_is_not_success() -> TestResult {
-    let mut client = ClaudeSdkClient::connect(options("no-result")?).await?;
+/// Reads every message after a prompt the CLI exits on with status 0 and never answers with a result.
+async fn read_without_a_result(options: ClaudeAgentOptions) -> Result<Result<(), Error>, Box<dyn StdError>> {
+    let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("missing result")).await?;
-    let error = loop {
+    let ended = loop {
         match client.next_message().await {
             Ok(Some(_)) => {}
-            Err(error) => break error,
-            Ok(None) => return Err(std::io::Error::other("missing terminal error").into()),
+            Ok(None) => break Ok(()),
+            Err(error) => break Err(error),
         }
     };
-    assert!(matches!(error, Error::UnexpectedEof));
     client.disconnect().await?;
+    Ok(ended)
+}
+
+/// TypeScript and Python treat only a failed exit as an error, so a clean exit in the middle of a turn ends the
+/// messages; `EndWithoutResult::Fail` keeps `UnexpectedEof` as an opt-in.
+#[tokio::test]
+async fn a_clean_exit_without_a_result_ends_the_messages_unless_the_limit_fails_it() -> TestResult {
+    let ended = read_without_a_result(options("no-result")?).await?;
+    assert!(ended.is_ok(), "{ended:?}");
+
+    let mut failing = options("no-result")?;
+    failing.limits.end_without_result = EndWithoutResult::Fail;
+    let ended = read_without_a_result(failing).await?;
+    assert!(matches!(ended, Err(Error::UnexpectedEof)), "{ended:?}");
     Ok(())
 }
 
@@ -721,8 +741,17 @@ async fn initialization_timeout_reaps_process() -> TestResult {
     options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
     options.limits.initialize_timeout =
         trogon_claude_agent_sdk::InitializeTimeout::Fixed(Timeout::new(Duration::from_millis(100)));
+    // TypeScript hands the client out before initialize is answered, so the timeout rejects the initialization
+    // result and ends the run.
+    let client = ClaudeSdkClient::connect(options).await?;
+    let rejected = client.handle().initialization_result().await;
     assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
+        &rejected,
+        Err(Error::InitializationFailed(inner))
+            if matches!(**inner, Error::ControlTimeout { operation: ControlOperation::Initialize })
+    ));
+    assert!(matches!(
+        client.disconnect().await,
         Err(Error::ControlTimeout {
             operation: ControlOperation::Initialize
         })
@@ -739,6 +768,8 @@ async fn cancelling_connect_reaps_the_started_process() -> TestResult {
     let marker = directory.path().join("pid");
     let mut options = options("init-timeout")?;
     options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
+    // Only Python waits for the initialize response inside `connect`, so only there is there something to cancel.
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
     let connect = tokio::spawn(ClaudeSdkClient::connect(options));
     timeout(Duration::from_secs(3), async {
         while !marker.exists() {
@@ -842,5 +873,188 @@ async fn compatibility_stream_event_retains_outer_metadata_separately() -> TestR
             "type":"content_block_delta","delta":{"type":"text_delta","text":"streamed"},"future":{"inside":null}
         })
     );
+    Ok(())
+}
+
+type Recorded<T> = Arc<std::sync::Mutex<Vec<T>>>;
+
+fn recorded<T: Clone>(slot: &Recorded<T>) -> Result<Vec<T>, Box<dyn StdError>> {
+    Ok(slot.lock().map_err(|_| std::io::Error::other("poisoned"))?.clone())
+}
+
+/// A `spawn_claude_code_process` that records what it was given and runs it as the SDK would.
+fn recording_spawner(
+    seen: Recorded<trogon_claude_agent_sdk::SpawnOptions>,
+) -> trogon_claude_agent_sdk::SpawnClaudeCodeProcess {
+    trogon_claude_agent_sdk::SpawnClaudeCodeProcess(Arc::new(move |spawn: trogon_claude_agent_sdk::SpawnOptions| {
+        let mut command = tokio::process::Command::new(&spawn.command);
+        command.args(&spawn.args).env_clear().envs(&spawn.env);
+        if let Some(cwd) = &spawn.cwd {
+            command.current_dir(cwd);
+        }
+        command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        if let Ok(mut seen) = seen.lock() {
+            seen.push(spawn);
+        }
+        command.spawn()
+    }))
+}
+
+fn spawn_reporter(calls: Recorded<(u32, f64)>) -> trogon_claude_agent_sdk::OnProcessSpawned {
+    trogon_claude_agent_sdk::OnProcessSpawned(Arc::new(
+        move |pid: u32, info: trogon_claude_agent_sdk::ProcessSpawnInfo| {
+            if let Ok(mut calls) = calls.lock() {
+                calls.push((pid, info.spawn_sync_ms));
+            }
+        },
+    ))
+}
+
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    allow(
+        std_env_access,
+        reason = "The spawner must receive the inherited PATH, so the test reads the real process environment."
+    )
+)]
+#[tokio::test]
+async fn a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let seen = Recorded::default();
+    let calls = Recorded::default();
+    let mut options = options("normal")?;
+    options.cwd = Some(directory.path().to_path_buf());
+    options.env.insert("SPAWN_MARKER".into(), "custom".into());
+    options.spawn_claude_code_process = Some(recording_spawner(seen.clone()));
+    options.on_process_spawned = Some(spawn_reporter(calls.clone()));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("through the spawner")).await?;
+    assert_eq!(read_result(&mut client).await?, "through the spawner");
+    client.disconnect().await?;
+    let seen = recorded(&seen)?;
+    let [spawn] = seen.as_slice() else {
+        return Err(std::io::Error::other(format!("expected one spawn, got {}", seen.len())).into());
+    };
+    assert_eq!(
+        std::path::Path::new(&spawn.command),
+        std::path::absolute(env!("CARGO_BIN_EXE_claude-sdk-fixture"))?
+    );
+    assert!(
+        spawn
+            .args
+            .iter()
+            .any(|arg| arg.to_string_lossy().contains("fixture:normal"))
+    );
+    // TypeScript derives no default debug file for a custom spawner.
+    assert!(
+        !spawn
+            .args
+            .iter()
+            .any(|arg| arg.to_string_lossy().starts_with("--debug-file"))
+    );
+    assert_eq!(spawn.cwd.as_deref(), Some(directory.path()));
+    assert_eq!(
+        spawn
+            .env
+            .get(std::ffi::OsStr::new("SPAWN_MARKER"))
+            .map(|value| value.as_os_str()),
+        Some(std::ffi::OsStr::new("custom"))
+    );
+    // The spawner gets the whole environment, the caller's included, not only the SDK's changes.
+    if let Some(path) = std::env::var_os("PATH") {
+        assert_eq!(spawn.env.get(std::ffi::OsStr::new("PATH")), Some(&path));
+    }
+    assert_eq!(spawn.uid, None);
+    // Closing without an abort leaves the forwarded signal alone, and TypeScript reports no spawn it did not make.
+    assert!(!spawn.signal.is_cancelled());
+    assert!(recorded(&calls)?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failing_custom_spawner_is_a_spawn_error() -> TestResult {
+    let mut options = options("normal")?;
+    options.spawn_claude_code_process = Some(trogon_claude_agent_sdk::SpawnClaudeCodeProcess(Arc::new(
+        |_: trogon_claude_agent_sdk::SpawnOptions| -> std::io::Result<tokio::process::Child> {
+            Err(std::io::Error::other("no machine"))
+        },
+    )));
+    let error = ClaudeSdkClient::connect(options)
+        .await
+        .err()
+        .ok_or_else(|| std::io::Error::other("connect succeeded without a process"))?;
+    assert!(
+        matches!(&error, Error::Spawn(source) if source.to_string() == "no machine"),
+        "{error:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_forwarded_signal_is_cancelled_only_once_an_aborted_client_has_closed() -> TestResult {
+    let seen = Recorded::default();
+    let controller = trogon_claude_agent_sdk::CancellationToken::new();
+    let mut options = options("blocked-stdin")?;
+    options.abort_controller = Some(controller.clone());
+    options.spawn_claude_code_process = Some(recording_spawner(seen.clone()));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    let signal = recorded(&seen)?
+        .first()
+        .map(|spawn| spawn.signal.clone())
+        .ok_or_else(|| std::io::Error::other("the spawner was not called"))?;
+    controller.cancel();
+    // The forwarded signal is not the caller's: it waits for the close.
+    assert!(!signal.is_cancelled());
+    let end = timeout(Duration::from_secs(10), async {
+        loop {
+            match client.next_message().await {
+                Ok(Some(_)) => {}
+                Ok(None) => return None,
+                Err(error) => return Some(error),
+            }
+        }
+    })
+    .await?;
+    assert!(matches!(end, Some(Error::Aborted(_))), "{end:?}");
+    let _ = client.disconnect().await;
+    assert!(signal.is_cancelled());
+    Ok(())
+}
+
+#[tokio::test]
+async fn on_process_spawned_reports_the_pid_of_the_sdk_spawn() -> TestResult {
+    let calls = Recorded::default();
+    let mut options = options("normal")?;
+    options.on_process_spawned = Some(spawn_reporter(calls.clone()));
+    let client = ClaudeSdkClient::connect(options).await?;
+    let process_id = client.process_id();
+    client.disconnect().await?;
+    let calls = recorded(&calls)?;
+    let [(pid, spawn_sync_ms)] = calls.as_slice() else {
+        return Err(std::io::Error::other(format!("expected one report, got {}", calls.len())).into());
+    };
+    assert_eq!(Some(*pid), process_id);
+    assert!(spawn_sync_ms.is_finite() && *spawn_sync_ms >= 0.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_panicking_on_process_spawned_does_not_stop_the_query() -> TestResult {
+    let mut options = options("normal")?;
+    options.on_process_spawned = Some(trogon_claude_agent_sdk::OnProcessSpawned(Arc::new(
+        |pid: u32, _: trogon_claude_agent_sdk::ProcessSpawnInfo| {
+            if pid > 0 {
+                std::panic::resume_unwind(Box::new("scripted onProcessSpawned failure"));
+            }
+        },
+    )));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("still runs")).await?;
+    assert_eq!(read_result(&mut client).await?, "still runs");
+    client.disconnect().await?;
     Ok(())
 }

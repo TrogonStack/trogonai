@@ -76,20 +76,24 @@ mod permission;
 mod permission_mode;
 mod permission_update;
 mod plugin;
+mod prewarm;
 mod process_options;
 mod process_transport;
 mod prompt;
 mod pydantic_int_string;
 mod pydantic_validation_error;
+mod python_int;
 mod python_json;
 mod python_json_value;
 mod python_value_repr;
 mod python_text;
 mod queue_capacity;
 mod raw_json_id;
+mod remote_control;
 #[cfg(unix)]
 mod run_as;
 mod run_end_ceiling;
+mod run_end;
 mod runtime_options;
 mod schema_pointer;
 mod sdk_mcp_choices;
@@ -164,6 +168,7 @@ mod settings_schema_ports;
 mod settings_schema_regexp;
 mod shadow_warning;
 mod skills;
+mod startup_timeout;
 mod stderr_tail;
 mod summary_dialect;
 mod system_prompt;
@@ -175,6 +180,7 @@ mod tool_rule;
 mod tool_use_id;
 mod transcript_mirror;
 mod transport;
+mod ui_host;
 mod usd_budget;
 mod user_input;
 mod validation_choices;
@@ -198,8 +204,9 @@ pub use bundled_cli::{
 pub use cli_discovery::CliNotFoundError;
 pub use cli_path::{CliPathError, WindowsBatchCli};
 pub use client::{
-    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_turn_with_transport,
-    query_with_adapters, query_with_transport,
+    ClaudeSdkClient, ClientConnector, ClientHandle, ConnectPrompt, CustomTransport, NativeCli, Query,
+    UnconnectedClient, query, query_turn, query_turn_with_adapters, query_turn_with_transport, query_with_adapters,
+    query_with_transport,
 };
 pub use client_app::{format_client_app, normalize_client_app};
 pub use client_app_derivation::{BundledCli, ClientAppDerivation};
@@ -221,8 +228,9 @@ pub use effort_level::EffortLevel;
 pub use environment::Environment;
 pub use environment_plan::EnvironmentPlan;
 pub use error::{
-    AbortError, ControlOperation, ControlRejectionError, Error, JsonDecodeError, JsonDecodeSourceError,
-    MessageParseError, ProtocolError, ResultError, python_cli_not_found_text, python_process_error_text,
+    AbortError, ControlOperation, ControlRejectionError, Error, InitializeTimeoutError, JsonDecodeError,
+    JsonDecodeSourceError, MessageParseError, ProtocolError, ResultError, python_cli_not_found_text,
+    python_process_error_text,
 };
 pub use extract_from_bunfs::{extract_from_bunfs, extract_from_bunfs_with};
 pub use hooks::{
@@ -253,10 +261,10 @@ pub use model_name::ModelName;
 pub use node_path::NodePathDialect;
 pub use option_error::OptionError;
 pub use options::{
-    ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
-    InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, McpServers, MessageBuffer, PartialMessages,
-    RequestIdExhaustion, RunEndTimeout, SdkMcpServers, SessionFork, SessionPersistence, Shutdown, SystemPrompt,
-    ToolSet, VerbatimPrompts,
+    ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, EndWithoutResult,
+    FileCheckpointing, InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, McpServers, MessageBuffer,
+    PartialMessages, RequestIdExhaustion, RunEndTimeout, SdkMcpServers, SessionFork, SessionPersistence, Shutdown,
+    SystemPrompt, ToolSet, VerbatimPrompts,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{
@@ -268,9 +276,13 @@ pub use permission_update::{
     PermissionBehavior, PermissionRuleValue, PermissionUpdate, PermissionUpdateDestination, PermissionUpdateError,
 };
 pub use plugin::{LocalPlugin, PluginDelivery};
+pub use prewarm::{
+    ClaimError, ClaimInfo, ClaimOptions, SpareProcess, StartupOptions, WarmQuery, prewarm, prewarm_with_adapters,
+    startup, startup_with_adapters,
+};
 pub use process_options::{
-    ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrDelivery, StderrHandler,
-    TraceContext,
+    ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, OnProcessSpawned, ProcessSpawnInfo, ScriptRuntime,
+    SpawnClaudeCodeProcess, SpawnOptions, StderrDelivery, StderrHandler, TraceContext,
 };
 pub use prompt::Prompt;
 pub use python_json_value::{
@@ -279,6 +291,7 @@ pub use python_json_value::{
 };
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use raw_json_id::{RawJsonId, RawJsonIdError};
+pub use remote_control::{RemoteControlOptions, WorkSecretFuture, WorkSecretRefreshRequest, WorkSecretRefresher};
 pub use runtime_options::{
     DangerousPermissionSkip, DebugOutput, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig,
     ThinkingDisplay,
@@ -343,6 +356,7 @@ pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
 pub use settings_sandbox_schema::{SandboxConfigRejected, SandboxConfigSchema};
+pub use startup_timeout::StartupHooksRunning;
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
 pub use system_prompt::{CustomPrompt, PresetPrompt};
@@ -355,6 +369,7 @@ pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use transport::Transport;
+pub use ui_host::{UiFuture, UiHandler, UiHost, UiRequest};
 pub use upstream::hooks::{EXIT_REASONS, ExitReason, HOOK_EVENTS, HookInput, HookJSONOutput};
 pub use upstream::settings::Settings;
 pub use upstream::settings_resolution::{

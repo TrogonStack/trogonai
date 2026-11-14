@@ -225,6 +225,18 @@ pub(crate) enum RequestPayload<'a> {
         server_name: &'a str,
         message: &'a JsonObject,
     },
+    /// TypeScript `enableRemoteControl`: `JSON.stringify` drops the keys that are `undefined`.
+    RemoteControl {
+        enabled: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reattach_session_id: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        keep_session_on_exit: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        work_secret: Option<&'a str>,
+    },
 }
 
 impl RequestPayload<'_> {
@@ -258,6 +270,11 @@ pub(crate) enum CallbackResponse<'a, T> {
     Success {
         request_id: &'a str,
         response: T,
+    },
+    /// A handler that returned `undefined`: `JSON.stringify` leaves the `response` key out.
+    #[serde(rename = "success")]
+    SuccessWithoutResponse {
+        request_id: &'a str,
     },
     Error {
         request_id: &'a str,

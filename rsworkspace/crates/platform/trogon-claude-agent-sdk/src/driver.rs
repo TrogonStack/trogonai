@@ -6,7 +6,7 @@ use std::{
 };
 
 use tokio::{
-    sync::oneshot,
+    sync::{mpsc::UnboundedSender, oneshot},
     task::{AbortHandle, JoinHandle, JoinSet},
     time::{Instant, sleep, sleep_until, timeout},
 };
@@ -52,10 +52,11 @@ pub(crate) enum Command {
     },
     FinishInput {
         completion: Completion,
+        /// The prompts the caller wrote itself, TypeScript `streamInput`'s `count` and Python's `written`, which
+        /// count per call. `None` counts every prompt written on the session.
+        written: Option<usize>,
         response: oneshot::Sender<Result<(), Error>>,
     },
-    /// TypeScript `abortController.abort()`: stop the process now and end the run with an `AbortError`.
-    Abort,
 }
 
 #[derive(Clone, Copy)]
@@ -64,25 +65,13 @@ pub(crate) enum Completion {
     Run,
 }
 
+/// What the Rust limits count: inputs the CLI still owes a result and tracked tasks. When stdin closes is
+/// `RunEnd`'s alone.
 #[derive(Default)]
 struct RunState {
     input_done: Option<Completion>,
-    result_received: bool,
-    turn_active: bool,
-    session_state: Option<SessionState>,
     tasks: HashSet<String>,
-    awaiting_continuation: bool,
-    deadline: Option<Instant>,
     pending_inputs: VecDeque<Option<crate::MessageId>>,
-}
-
-#[derive(Clone, Copy)]
-enum SessionState {
-    Idle,
-    Running,
-    RequiresAction,
-    /// A state this SDK does not know yet. It is treated as not idle.
-    Unknown,
 }
 
 impl RunState {
@@ -94,9 +83,6 @@ impl RunState {
     ) -> Result<(), Error> {
         match message {
             Message::Result(message) => {
-                self.result_received = true;
-                self.turn_active = false;
-                self.awaiting_continuation = false;
                 if let Some(count) = message.queued_turn_count {
                     let count = usize::try_from(count).unwrap_or(usize::MAX);
                     if queued_limit.is_some_and(|limit| count > limit) {
@@ -105,36 +91,11 @@ impl RunState {
                     while self.pending_inputs.len() > count {
                         self.pending_inputs.pop_front();
                     }
-                    if count > 0 {
-                        self.awaiting_continuation = true;
-                    }
                 } else {
                     self.pending_inputs.pop_front();
                 }
             }
-            Message::Assistant(message) if message.parent_tool_use_id.is_none() => {
-                self.turn_active = true;
-                self.deadline = None;
-            }
-            Message::StreamEvent(message) if message.parent_tool_use_id.is_none() => {
-                self.turn_active = true;
-                self.deadline = None;
-            }
             Message::System(message) => match message.subtype.as_str() {
-                "session_state_changed" => {
-                    self.session_state = Some(match message.data.get("state").and_then(serde_json::Value::as_str) {
-                        Some("idle") => SessionState::Idle,
-                        Some("running") => SessionState::Running,
-                        Some("requires_action") => SessionState::RequiresAction,
-                        _ => SessionState::Unknown,
-                    });
-                    if matches!(self.session_state, Some(SessionState::Idle)) && self.result_received {
-                        self.awaiting_continuation = false;
-                    }
-                    if matches!(self.session_state, Some(SessionState::RequiresAction)) {
-                        self.deadline = None;
-                    }
-                }
                 "task_started"
                     if matches!(
                         message.data.get("task_type").and_then(serde_json::Value::as_str),
@@ -158,11 +119,8 @@ impl RunState {
                                 .and_then(serde_json::Value::as_str),
                             Some("completed" | "failed" | "stopped" | "killed")
                         );
-                    if terminal
-                        && let Some(id) = message.data.get("task_id").and_then(serde_json::Value::as_str)
-                        && self.tasks.remove(id)
-                    {
-                        self.awaiting_continuation = true;
+                    if terminal && let Some(id) = message.data.get("task_id").and_then(serde_json::Value::as_str) {
+                        self.tasks.remove(id);
                     }
                 }
                 _ => {}
@@ -170,22 +128,6 @@ impl RunState {
             _ => {}
         }
         Ok(())
-    }
-
-    fn settled(&self, callbacks: usize) -> bool {
-        self.result_received
-            && match self.input_done {
-                Some(Completion::Turn) => callbacks == 0,
-                Some(Completion::Run) => {
-                    !self.turn_active
-                        && self.pending_inputs.is_empty()
-                        && callbacks == 0
-                        && self.tasks.is_empty()
-                        && !self.awaiting_continuation
-                        && matches!(self.session_state, None | Some(SessionState::Idle))
-                }
-                None => false,
-            }
     }
 }
 
@@ -231,6 +173,28 @@ impl ControlResponder {
                 let _ = response.send(Err(error));
             }
         }
+    }
+
+    /// Python `close()` cancels the reader without failing the requests still waiting, so each one runs out its own
+    /// timeout. Without a deadline it waits until the caller stops waiting.
+    fn time_out_at(self, deadline: Option<Instant>) {
+        let operation = self.operation();
+        let (Self::Initialize { mut response, .. } | Self::Control { mut response, .. }) = self;
+        tokio::spawn(async move {
+            let expired = match deadline {
+                Some(deadline) => tokio::select! {
+                    () = sleep_until(deadline) => true,
+                    () = response.closed() => false,
+                },
+                None => {
+                    response.closed().await;
+                    false
+                }
+            };
+            if expired {
+                let _ = response.send(Err(Error::ControlTimeout { operation }));
+            }
+        });
     }
 }
 
@@ -337,6 +301,8 @@ where
     shutdown: oneshot::Receiver<()>,
     /// The shutdown signal has been taken, so the receiver must not be polled again.
     shutdown_seen: bool,
+    /// TypeScript `abortController`: once cancelled, the process is stopped and the run ends with an `AbortError`.
+    abort: crate::CancellationToken,
     limits: Limits,
     handler: Option<Arc<dyn ToolPermissionHandler>>,
     pending: HashMap<ControlRequestId, PendingControl>,
@@ -357,19 +323,31 @@ where
     initialize_request: serde_json::Value,
     initialize_expectations: InitializeExpectations,
     initialize_timeout: Option<Duration>,
-    run_end: Option<Duration>,
     elicitation_handler: Option<Arc<dyn crate::ElicitationHandler>>,
     user_dialog_handler: Option<Arc<dyn crate::UserDialogHandler>>,
     oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
     host_auth_token_handler: Option<Arc<dyn crate::HostAuthTokenHandler>>,
+    /// The work secret answerer and `uiHost` that `ClientHandle` installs.
+    host: crate::remote_control::HostState,
     session: Option<crate::SessionRuntime<F>>,
     mirror_flush: Option<MirrorBarrier>,
     deferred_messages: VecDeque<(Message, Option<MirrorBarrier>)>,
+    /// Frames the run-end machine has not seen yet. Both upstream readers wait for the transcript flush before they
+    /// handle a result, so the machine sees a result, and every frame after it, only once that flush finished. The flag
+    /// marks a result that starts a flush.
+    held_observations: VecDeque<(Message, bool)>,
+    /// TypeScript `promptHold`: while the first initialize is unanswered and a blocking hook or managed settings
+    /// need its confirmation, prompts and most controls wait behind it.
+    initialize_hold: bool,
+    /// What the handles see of `initialize_hold`.
+    prompt_hold: PromptHold,
+    held_commands: VecDeque<Command>,
     next_id: u64,
     /// The `mcp_message` ids of the line just read, until the Python `mcp_message` handler takes them.
     wire_ids: Option<crate::McpWireIds>,
     state: State,
     run_state: RunState,
+    run_end: crate::run_end::RunEnd,
     argv_style: crate::ArgvStyle,
     message_decoding: crate::MessageDecoding,
     js_runtime: crate::JsRuntime,
@@ -379,6 +357,8 @@ where
     /// The CLI path until the first `system`/`init` message has been checked, then `None`.
     version_check: Option<String>,
     latest_commands: LatestCommands,
+    /// See [`SpawnOptions::startup_tap`].
+    startup_tap: Option<UnboundedSender<crate::startup_timeout::StartupEvent>>,
     /// `verbatim_prompts`: every user message is marked `client_composed`.
     verbatim_prompts: bool,
     /// Python warns at the first init message when the CLI predates `client_composed`; TypeScript does not.
@@ -437,6 +417,36 @@ fn control_value(style: crate::ArgvStyle, response: Option<serde_json::Value>) -
 
 /// The command list the CLI announced last, which TypeScript `supportedCommands()` prefers to the initialize one.
 pub(crate) type LatestCommands = Arc<std::sync::Mutex<Option<serde_json::Value>>>;
+
+/// TypeScript `promptHold` as `Query.streamInput` reads it, shared with the handles.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub(crate) enum HoldState {
+    /// `promptHold === undefined`: no hold applies, or the first initialize was confirmed.
+    Clear = 0,
+    /// The first initialize is unanswered and what is written waits behind it.
+    Pending = 1,
+    /// The first initialize failed: the hold stays set and resolves `false`.
+    Failed = 2,
+}
+
+/// See [`HoldState`]. The driver sets it; `stream_input` reads it.
+#[derive(Clone, Default)]
+pub(crate) struct PromptHold(Arc<std::sync::atomic::AtomicU8>);
+
+impl PromptHold {
+    pub(crate) fn state(&self) -> HoldState {
+        match self.0.load(std::sync::atomic::Ordering::Acquire) {
+            1 => HoldState::Pending,
+            2 => HoldState::Failed,
+            _ => HoldState::Clear,
+        }
+    }
+
+    fn set(&self, state: HoldState) {
+        self.0.store(state as u8, std::sync::atomic::Ordering::Release);
+    }
+}
 
 /// JavaScript `String(value)` of an optional boolean.
 fn javascript_string(support: crate::FeatureSupport) -> &'static str {
@@ -587,12 +597,18 @@ pub(crate) struct SpawnOptions<T, F: crate::adapters::SessionFileSystem> {
     pub commands: crate::channel::Receiver<Command>,
     pub messages: crate::channel::Sender<Message>,
     pub shutdown: oneshot::Receiver<()>,
+    pub abort: crate::CancellationToken,
     pub terminal: oneshot::Sender<Result<(), Error>>,
     pub transport: T,
     pub initialization: Initialization,
     /// The CLI path to check against the minimum version, for a transport that runs the CLI itself.
     pub version_check: Option<String>,
     pub latest_commands: LatestCommands,
+    pub prompt_hold: PromptHold,
+    pub host: crate::remote_control::HostState,
+    /// `startup()`: the hook and startup-mark frames, for the initialize timer. Closing the receiver ends the
+    /// observation.
+    pub startup_tap: Option<UnboundedSender<crate::startup_timeout::StartupEvent>>,
 }
 
 /// The initialize request and the callbacks it registers, built before any transport exists so that a bad
@@ -604,6 +620,8 @@ pub(crate) struct Initialization {
     timeout: Option<Duration>,
     /// The run-end ceiling, or `None` when the environment asks for no limit.
     run_end: Option<Duration>,
+    /// The run-end ceiling, `None` when disabled.
+    run_end_ceiling: Option<Duration>,
 }
 
 impl Initialization {
@@ -628,6 +646,7 @@ impl Initialization {
             expectations,
             timeout,
             run_end: crate::run_end_ceiling::resolve(options, environment),
+            run_end_ceiling: crate::run_end::configured_ceiling(options, environment),
         })
     }
 }
@@ -675,15 +694,24 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         commands,
         messages,
         shutdown,
+        abort,
         terminal,
         mut transport,
         initialization,
         version_check,
         latest_commands,
+        prompt_hold,
+        host,
+        startup_tap,
     } = input;
     transport.connect().await?;
     let capture_manifests = options.argv_style == crate::ArgvStyle::TypeScript
         && options.captures_sdk_mcp_manifests(std::env::var_os("CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS").as_deref());
+    let initialize_hold = options.argv_style == crate::ArgvStyle::TypeScript
+        && (initialization.expectations.blocking_hooks || initialization.expectations.managed_settings);
+    if initialize_hold {
+        prompt_hold.set(HoldState::Pending);
+    }
     let driver = Driver {
         transport,
         input_ended: false,
@@ -692,6 +720,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         overflow: VecDeque::new(),
         shutdown,
         shutdown_seen: false,
+        abort,
         limits: options.limits,
         handler: options.permission_handler,
         pending: HashMap::new(),
@@ -711,24 +740,30 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         initialize_request: initialization.request,
         initialize_expectations: initialization.expectations,
         initialize_timeout: initialization.timeout,
-        run_end: initialization.run_end,
         elicitation_handler: options.elicitation_handler,
         user_dialog_handler: options.user_dialog_handler,
         oauth_token_handler: options.oauth_token_handler,
         host_auth_token_handler: options.host_auth_token_handler,
+        host,
         session,
         mirror_flush: None,
         deferred_messages: VecDeque::new(),
+        held_observations: VecDeque::new(),
+        initialize_hold,
+        prompt_hold,
+        held_commands: VecDeque::new(),
         next_id: 0,
         wire_ids: None,
         state: State::Initializing,
         run_state: RunState::default(),
+        run_end: crate::run_end::RunEnd::new(options.argv_style, initialization.run_end_ceiling),
         argv_style: options.argv_style,
         message_decoding: options.message_decoding,
         js_runtime: options.js_runtime,
         last_error_result: None,
         version_check,
         latest_commands,
+        startup_tap,
         verbatim_prompts: options.verbatim_prompts == crate::VerbatimPrompts::Enabled,
         warn_unsupported_verbatim: options.verbatim_prompts == crate::VerbatimPrompts::Enabled
             && options.argv_style == crate::ArgvStyle::Python,
@@ -789,7 +824,12 @@ where
         let outcome = combine_outcomes(outcome, mirror_cleanup);
         self.flush_overflow().await;
         for (_, pending) in self.pending.drain() {
-            pending.response.send_error(Error::DriverStopped);
+            match (self.shutdown_seen, self.argv_style) {
+                // TypeScript `close()` rejects what is still unanswered with "Query closed before response received".
+                (true, crate::ArgvStyle::TypeScript) => pending.response.send_error(Error::QueryClosed),
+                (true, crate::ArgvStyle::Python) => pending.response.time_out_at(pending.deadline),
+                (false, _) => pending.response.send_error(Error::DriverStopped),
+            }
         }
         self.commands.close();
         drop(self.messages);
@@ -841,32 +881,24 @@ where
                 self.shutdown_seen = true;
                 return Ok(());
             }
+            if self.abort.is_cancelled() {
+                return Err(crate::AbortError::PROCESS.into());
+            }
             if let Some(error) = self.expired_control() {
                 return Err(error);
             }
-            if self.run_state.settled(self.running_callbacks()) && self.mirror_flush.is_none() {
+            if self.run_end.close_due() {
+                self.run_end.closing_input();
                 self.end_input().await;
             }
-            let between_turns = self.run_state.input_done.is_some()
-                && self.run_state.result_received
-                && !self.run_state.turn_active
-                && self.running_callbacks() == 0
-                && self.run_state.tasks.is_empty()
-                && !matches!(self.run_state.session_state, Some(SessionState::RequiresAction));
-            if between_turns && self.input_open() {
-                if self.run_state.deadline.is_none() {
-                    self.run_state.deadline = self.run_end.and_then(|ceiling| Instant::now().checked_add(ceiling));
-                }
-            } else {
-                self.run_state.deadline = None;
-            }
             let deadline = self.pending.values().filter_map(|request| request.deadline).min();
-            let run_deadline = self.run_state.deadline;
+            let run_deadline = self.run_end.deadline();
             // Python stops reading stdout while its message buffer is full, so nothing else on stdout is handled
             // until the caller takes a message.
             let reading = self.overflow.is_empty() && !self.deferred_full();
             tokio::select! {
                 _ = &mut self.shutdown => { self.shutdown_seen = true; return Ok(()); }
+                () = self.abort.cancelled() => return Err(crate::AbortError::PROCESS.into()),
                 ready = self.messages.ready(), if !self.overflow.is_empty() => {
                     if !ready { return Err(Error::DriverStopped); }
                     self.drain_overflow()?;
@@ -874,14 +906,24 @@ where
                 message = self.transport.read_message(), if reading => {
                     let Some(message) = message? else {
                         self.finish_mirror().await?;
-                        return if matches!(self.state, State::Running | State::Initializing) || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
+                        self.run_end.reader_gone();
+                        // A clean exit in the middle of a turn ends the messages in both SDKs; only a failed exit
+                        // is an error, and the process close reports it.
+                        let unfinished = match self.state {
+                            State::Initializing => true,
+                            State::Running => self.limits.end_without_result == crate::EndWithoutResult::Fail,
+                            State::Idle => false,
+                        };
+                        return if unfinished || !self.pending.is_empty() { Err(Error::UnexpectedEof) } else { Ok(()) };
                     };
                     self.wire_ids = self.transport.take_wire_ids();
+                    self.tap_startup(&message);
                     let parsed = self.decode_message(message)?;
                     self.frame(parsed).await?;
                 }
                 flushed = async { match self.mirror_flush.as_mut() { Some(flush) => flush.await, None => pending().await } }, if self.mirror_flush.is_some() => {
                     self.mirror_flush = None;
+                    self.release_observations();
                     let failures = flushed?;
                     for failure in failures { self.publish(failure.into_message().map_err(ProtocolError::from)?)?; }
                     self.publish_deferred()?;
@@ -924,11 +966,44 @@ where
                     if let Some(error) = self.expired_control() { return Err(error); }
                 }
                 _ = async { match run_deadline { Some(deadline) => sleep_until(deadline).await, None => pending::<()>().await } } => {
-                    tracing::debug!(timeout = ?self.run_end, "no idle state after the last result; ending the run");
-                    self.run_state.deadline = None;
-                    self.end_input().await;
+                    self.run_end.ceiling_elapsed();
                 }
             }
+        }
+    }
+
+    /// `hasBidirectionalNeeds()`. TypeScript: SDK MCP servers, hooks, a permission, elicitation or user dialog
+    /// handler, an auth callback or a work secret answerer. Python's `_has_bidirectional_needs` knows only SDK MCP
+    /// servers, hooks and the permission callback, because it has no other callback.
+    fn bidirectional_needs(&self) -> bool {
+        let hooks = self
+            .initialize_request
+            .get("hooks")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|hooks| !hooks.is_empty());
+        let common = !self.sdk_mcp_servers.is_empty() || hooks || self.handler.is_some();
+        match self.argv_style {
+            crate::ArgvStyle::Python => common,
+            crate::ArgvStyle::TypeScript => {
+                common
+                    || self.elicitation_handler.is_some()
+                    || self.user_dialog_handler.is_some()
+                    || self.oauth_token_handler.is_some()
+                    || self.host_auth_token_handler.is_some()
+                    || self.host.answerer().is_some()
+            }
+        }
+    }
+
+    /// Hands the frames the startup timer follows to `startup()` while it still waits for initialize.
+    fn tap_startup(&mut self, frame: &JsonObject) {
+        let Some(tap) = &self.startup_tap else {
+            return;
+        };
+        if tap.is_closed() {
+            self.startup_tap = None;
+        } else if let Some(event) = crate::startup_timeout::StartupEvent::from_frame(frame, Instant::now()) {
+            let _ = tap.send(event);
         }
     }
 
@@ -960,7 +1035,12 @@ where
                 Error::ControlTimeout { operation }
             }
         };
+        let first_initialize = matches!(request.response, ControlResponder::Initialize { first: true, .. });
         request.response.send_error(error());
+        // The timer calls `cleanup(error)`, which ends the run.
+        if first_initialize && self.initialize_hold {
+            self.abandon_initialize(&std::sync::Arc::new(error()));
+        }
         Some(error())
     }
 
@@ -1249,11 +1329,146 @@ where
                     }
                 });
             }
+            IncomingControl::RemoteControlWork { session_id } => {
+                let Some(answerer) = self.host.answerer().filter(|_| !python) else {
+                    if let Some(response) = wire::unsupported_response(&id, "remote_control_work_secret", style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                match crate::remote_control::same_requested_session(&answerer.session_id, session_id.as_ref()) {
+                    Err(message) => return self.write_response(wire::callback_error_response(&id, &message)).await,
+                    Ok(false) => {
+                        return self
+                            .write_response(wire::callback_error_response(
+                                &id,
+                                "remote_control_work_secret names a session this host did not attach.",
+                            ))
+                            .await;
+                    }
+                    Ok(true) => {}
+                }
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::WorkSecretRefreshRequest {
+                    session_id: answerer.session_id.clone(),
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "refreshWorkSecret callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match answerer.refresh.call(request).await {
+                        Ok(secret) => {
+                            let secret = secret.filter(|secret| !secret.is_empty());
+                            let mut response = JsonObject::new();
+                            response.insert("work_secret".into(), secret.map_or(serde_json::Value::Null, Into::into));
+                            wire::success_response(&response_id, response).map(Some)
+                        }
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
+            IncomingControl::Ui { subtype, payload } => {
+                let handler = self
+                    .host
+                    .ui_host()
+                    .filter(|_| !python)
+                    .and_then(|host| host.handler(&subtype));
+                let Some(handler) = handler else {
+                    if let Some(response) = wire::unsupported_response(&id, &subtype, style) {
+                        self.write_response(response).await?;
+                    }
+                    return Ok(());
+                };
+                if !self.admit_capacity(&id).await? {
+                    return Ok(());
+                }
+                let signal = crate::CancellationToken::new();
+                let request = crate::UiRequest {
+                    payload,
+                    signal: signal.clone(),
+                };
+                let response_id = id.clone();
+                let fallback = wire::callback_error_response(&id, "uiHost callback timed out").map(Some);
+                self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
+                    match handler.call(request).await {
+                        Ok(Some(response)) => wire::success_response(&response_id, response).map(Some),
+                        Ok(None) => wire::success_without_response(&response_id).map(Some),
+                        Err(error) => wire::handler_error_response(&response_id, &error, style),
+                    }
+                });
+            }
         }
         Ok(())
     }
 
+    /// `sdk.mjs` `writeBehindPromptHold`: what waits for the first initialize to be confirmed. A prompt always
+    /// does, `interrupt` and `cancel_async_message` do, and with managed settings every request but `initialize`
+    /// and `get_binary_version` does. Ending the input waits behind a held prompt, since the stream writes in
+    /// order.
+    fn held_by_initialize(&self, command: &Command) -> bool {
+        if !self.initialize_hold {
+            return false;
+        }
+        let managed = self.initialize_expectations.managed_settings;
+        match command {
+            Command::Prompt { .. } => true,
+            Command::Control { request, .. } | Command::RawControl { request, .. } => {
+                let subtype = request.get("subtype").and_then(serde_json::Value::as_str);
+                matches!(subtype, Some("interrupt" | "cancel_async_message"))
+                    || (managed && !matches!(subtype, Some("initialize" | "get_binary_version")))
+            }
+            Command::SetMcpServers { .. } => managed,
+            Command::FinishInput { .. } => !self.held_commands.is_empty(),
+            Command::Initialize { .. } => false,
+        }
+    }
+
+    /// The first initialize was confirmed: what waited behind it goes out in order.
+    async fn release_held_commands(&mut self) -> Result<(), Error> {
+        if self.initialize_hold {
+            self.prompt_hold.set(HoldState::Clear);
+        }
+        self.initialize_hold = false;
+        while let Some(command) = self.held_commands.pop_front() {
+            self.command(command).await?;
+        }
+        Ok(())
+    }
+
+    /// The first initialize failed. `sdk.mjs` `cleanup(error)` rejects every request still unanswered with that
+    /// error, and what waited behind the hold is never written: a prompt resolves quietly, the way the hold
+    /// resolves `false`, and a held request rejects with the same error.
+    fn abandon_initialize(&mut self, error: &std::sync::Arc<Error>) {
+        if self.initialize_hold {
+            self.prompt_hold.set(HoldState::Failed);
+        }
+        self.initialize_hold = false;
+        for command in self.held_commands.drain(..) {
+            match command {
+                Command::Prompt { response, .. } | Command::FinishInput { response, .. } => {
+                    let _ = response.send(Ok(()));
+                }
+                Command::Control { response, .. }
+                | Command::RawControl { response, .. }
+                | Command::SetMcpServers { response, .. }
+                | Command::Initialize { response, .. } => {
+                    let _ = response.send(Err(Error::InitializationFailed(error.clone())));
+                }
+            }
+        }
+        for (_, pending) in self.pending.drain() {
+            pending.response.send_error(Error::InitializationFailed(error.clone()));
+        }
+    }
+
     async fn command(&mut self, command: Command) -> Result<(), Error> {
+        if self.held_by_initialize(&command) {
+            self.held_commands.push_back(command);
+            return Ok(());
+        }
         match command {
             Command::Initialize { first, response } => {
                 let mut request = self.initialize_request.clone();
@@ -1353,11 +1568,13 @@ where
                     return Ok(());
                 }
                 match self.state {
-                    State::Initializing => {
+                    // TypeScript writes a prompt right behind the initialize request; only Python waits for the
+                    // response before it lets one through.
+                    State::Initializing if self.argv_style == crate::ArgvStyle::Python => {
                         let _ = response.send(Err(Error::NotInitialized));
                         return Ok(());
                     }
-                    State::Idle | State::Running => {}
+                    State::Initializing | State::Idle | State::Running => {}
                 }
                 if self
                     .limits
@@ -1375,8 +1592,7 @@ where
                 }
                 self.write(frame).await?;
                 self.state = State::Running;
-                self.run_state.result_received = false;
-                self.run_state.turn_active = true;
+                self.run_end.prompt_written();
                 self.run_state.pending_inputs.push_back(input.uuid.clone());
                 let _ = response.send(Ok(()));
             }
@@ -1396,18 +1612,24 @@ where
                 self.start_control(ControlResponder::Raw { operation, response }, request)
                     .await?;
             }
-            Command::FinishInput { completion, response } => {
+            Command::FinishInput {
+                completion,
+                written,
+                response,
+            } => {
                 self.run_state.input_done = Some(completion);
+                let needs = self.bidirectional_needs();
+                self.run_end
+                    .finish(matches!(completion, Completion::Turn), needs, written);
                 let _ = response.send(Ok(()));
             }
-            Command::Abort => return Err(crate::AbortError::PROCESS.into()),
         }
         Ok(())
     }
 
     /// Applies the initialize checks of `sdk.mjs` `Query.initialize({first})`, in its order. A refusal ends the
     /// session, after a `reinitialize()` too.
-    fn finish_initialize(
+    async fn finish_initialize(
         &mut self,
         first: bool,
         sender: ControlSender,
@@ -1433,6 +1655,9 @@ where
             None
         };
         if let Some(error) = refusal {
+            if self.argv_style == crate::ArgvStyle::TypeScript {
+                self.abandon_initialize(&std::sync::Arc::new(error()));
+            }
             let _ = sender.send(Err(error()));
             return Err(error());
         }
@@ -1443,10 +1668,13 @@ where
                 "[Query.initialize] Claude Code did not apply the plugins sent with pluginDelivery 'initialize'; the process is running with the plugins it was launched with."
             );
         }
-        if first {
+        if first && matches!(self.state, State::Initializing) {
             self.state = State::Idle;
         }
         let _ = sender.send(Ok(response));
+        if first {
+            self.release_held_commands().await?;
+        }
         Ok(())
     }
 
@@ -1510,7 +1738,21 @@ where
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(commands.clone());
                 }
+                // TypeScript `dropUnreadHookProgress`: while `startup()` waits, hook progress is not kept.
+                if self.startup_tap.as_ref().is_some_and(|tap| !tap.is_closed())
+                    && let Message::System(system) = &message
+                    && system.subtype == "hook_progress"
+                {
+                    return Ok(());
+                }
                 self.run_state.observe(&message, queued_limit, task_limit)?;
+                let flushing = matches!(message, Message::Result(_)) && self.session.is_some();
+                if flushing || self.mirror_flush.is_some() || !self.held_observations.is_empty() {
+                    self.held_observations.push_back((message.clone(), flushing));
+                } else {
+                    let needs = self.bidirectional_needs();
+                    self.run_end.observe(&message, needs);
+                }
                 // Both SDKs drop the state changes the CLI sent only because the SDK asked for them.
                 if let Message::System(system) = &message
                     && system.subtype == "session_state_changed"
@@ -1560,7 +1802,7 @@ where
                                 first,
                                 response: sender,
                             } => {
-                                return self.finish_initialize(first, sender, response);
+                                return self.finish_initialize(first, sender, response).await;
                             }
                             ControlResponder::Raw { response: sender, .. } => {
                                 let _ = sender.send(Ok(response));
@@ -1584,10 +1826,27 @@ where
                         let _ = sender.send(Ok(response));
                     }
                     ControlResponse::Error { message, error_code } => {
+                        let first_initialize =
+                            matches!(pending.response, ControlResponder::Initialize { first: true, .. });
                         pending.response.send_error(Error::ControlRejected {
                             operation,
-                            rejection: ControlRejectionError::new(message, error_code, self.argv_style),
+                            rejection: ControlRejectionError::new(message.clone(), error_code.clone(), self.argv_style),
                         });
+                        // The hold turns a failed first initialize into the end of the run, with that error.
+                        if first_initialize && self.initialize_hold {
+                            self.abandon_initialize(&std::sync::Arc::new(Error::ControlRejected {
+                                operation,
+                                rejection: ControlRejectionError::new(
+                                    message.clone(),
+                                    error_code.clone(),
+                                    self.argv_style,
+                                ),
+                            }));
+                            return Err(Error::ControlRejected {
+                                operation,
+                                rejection: ControlRejectionError::new(message, error_code, self.argv_style),
+                            });
+                        }
                     }
                 }
             }
@@ -2004,9 +2263,30 @@ where
         Ok(())
     }
 
+    /// A flush finished: the run-end machine sees the result that started it and the frames after it, up to the
+    /// next result that starts a flush of its own.
+    fn release_observations(&mut self) {
+        let mut released_flush = false;
+        while let Some((_, flushing)) = self.held_observations.front() {
+            if *flushing {
+                if released_flush {
+                    break;
+                }
+                released_flush = true;
+            }
+            let Some((message, _)) = self.held_observations.pop_front() else {
+                break;
+            };
+            let needs = self.bidirectional_needs();
+            self.run_end.observe(&message, needs);
+        }
+    }
+
     async fn finish_mirror(&mut self) -> Result<(), Error> {
         while let Some(flush) = self.mirror_flush.take() {
-            for failure in flush.await? {
+            let failures = flush.await?;
+            self.release_observations();
+            for failure in failures {
                 self.publish(failure.into_message().map_err(ProtocolError::from)?)?;
             }
             self.publish_deferred()?;
@@ -2114,6 +2394,7 @@ where
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
         tokio::select! {
             _ = &mut self.shutdown => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
+            () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
         }
     }

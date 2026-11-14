@@ -113,14 +113,30 @@ pub struct HostAuthTokenRequest {
     pub signal: CancellationToken,
 }
 
-/// The token, or `None` for the `null` upstream sends when the callback returns nothing. Upstream also forwards a
-/// non-string return unchanged, which a typed handler cannot produce.
-pub type HostAuthToken = Option<String>;
+/// What `getHostAuthToken` resolves to. Upstream answers a string or `null` as `{authToken}` and sends any other
+/// value as the whole response.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum HostAuthToken {
+    Token(String),
+    /// `null`, and the `undefined` upstream turns into `null`.
+    #[default]
+    Null,
+    /// Any other value the callback returns. A string or `null` here is answered like `Token` or `Null`.
+    Raw(Value),
+}
 
+/// TypeScript `typeof n === "string" || n === null ? {authToken: n} : n`.
 pub(crate) fn host_auth_wire_json(token: &HostAuthToken) -> Value {
-    let mut wire = Map::new();
-    wire.insert("authToken".to_owned(), token_value(token.as_deref()));
-    Value::Object(wire)
+    let wrapped = |token: Option<&str>| {
+        let mut wire = Map::new();
+        wire.insert("authToken".to_owned(), token_value(token));
+        Value::Object(wire)
+    };
+    match token {
+        HostAuthToken::Token(token) | HostAuthToken::Raw(Value::String(token)) => wrapped(Some(token)),
+        HostAuthToken::Null | HostAuthToken::Raw(Value::Null) => wrapped(None),
+        HostAuthToken::Raw(value) => value.clone(),
+    }
 }
 
 fn token_value(token: Option<&str>) -> Value {

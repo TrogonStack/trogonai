@@ -19,16 +19,19 @@ use std::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
     ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, ContextUsageDetail, ControlOperation, Error, InterruptReceipt,
-    JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, McpServers, MessageId,
-    ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RewindMode, SdkMcpServers, SettingsUpdateSource, TaskId,
-    ToolUseId,
+    JsRuntime, JsonObject, LocalPlugin, MaxThinkingTokensDisplay, McpPermissionModeOverride, McpServerName, McpServers,
+    MessageId, ReadFileEncoding, ReadFileOptions, ReloadPluginsOptions, RemoteControlOptions, RewindMode,
+    SdkMcpServers, SettingsUpdateSource, TaskId, ToolUseId,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
 
+#[path = "support/captured.rs"]
+mod captured;
 #[path = "support/scripted_process.rs"]
 mod scripted_process;
 
+use captured::Captured;
 use scripted_process::{ScriptedProcessHarness, ScriptedProcessSpawner};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -106,11 +109,26 @@ async fn connect(
     ),
     Error,
 > {
+    connect_under(style, JsRuntime::Node, script).await
+}
+
+async fn connect_under(
+    style: ArgvStyle,
+    js_runtime: JsRuntime,
+    script: Script,
+) -> Result<
+    (
+        ClaudeSdkClient,
+        tokio::task::JoinHandle<Result<Vec<String>, std::io::Error>>,
+    ),
+    Error,
+> {
     let (process, harness) = ScriptedProcessSpawner::new();
     let server = tokio::spawn(serve(harness, script));
     let options = ClaudeAgentOptions {
         cli_path: Some("claude".into()),
         argv_style: style,
+        js_runtime,
         ..ClaudeAgentOptions::default()
     };
     let client = ClaudeSdkClient::connect_with_adapters(
@@ -301,17 +319,20 @@ async fn typescript_controls_match_sdk_mjs_bytes_and_returns() -> TestResult {
     let servers = handle.mcp_server_status().await?;
     assert_eq!(servers.as_json(), Some(&json!([{"name":"s","status":"connected"}])));
     assert_eq!(servers.decode()?[0].name, "s");
-    let commands = handle.supported_commands()?;
+    let commands = handle.supported_commands().await?;
     assert_eq!(
         commands.as_json(),
         Some(&json!([{"name":"a","description":"d","argumentHint":""}]))
     );
-    assert_eq!(handle.account_info()?.as_json(), Some(&json!({"email":"x"})));
-    assert_eq!(handle.supported_models()?.as_json(), Some(&json!([])));
-    assert_eq!(handle.supported_agents()?.as_json(), Some(&json!([])));
+    assert_eq!(handle.account_info().await?.as_json(), Some(&json!({"email":"x"})));
+    assert_eq!(handle.supported_models().await?.as_json(), Some(&json!([])));
+    assert_eq!(handle.supported_agents().await?.as_json(), Some(&json!([])));
     let reinitialized = handle.reinitialize().await?;
     assert_eq!(reinitialized.as_json(), Some(&json!({})));
-    assert_eq!(handle.initialization_result()?.as_json(), Some(&first_initialize()));
+    assert_eq!(
+        handle.initialization_result().await?.as_json(),
+        Some(&first_initialize())
+    );
     client.disconnect().await?;
     let lines: Vec<String> = server.await??.iter().map(|line| typescript_line(line)).collect();
     assert_eq!(lines, TYPESCRIPT_REQUESTS);
@@ -403,10 +424,9 @@ async fn an_absent_response_stays_undefined_and_a_null_one_stays_null_like_types
     )
     .await?;
     let handle = client.handle();
-    assert_eq!(client.connection_info().as_json(), None);
-    assert_eq!(handle.initialization_result()?.as_json(), None);
-    assert!(matches!(handle.supported_models(), Err(Error::Protocol(_))));
-    assert!(matches!(handle.supported_commands(), Err(Error::Protocol(_))));
+    assert_eq!(handle.initialization_result().await?.as_json(), None);
+    assert!(matches!(handle.supported_models().await, Err(Error::TypeError(_))));
+    assert!(matches!(handle.supported_commands().await, Err(Error::TypeError(_))));
     assert_eq!(handle.reload_skills().await?.as_json(), None);
     assert_eq!(handle.reload_skills().await?.as_json(), Some(&Value::Null));
     assert_eq!(handle.context_usage(None).await?.as_json(), None);
@@ -474,6 +494,80 @@ async fn mcp_replacement_replies_are_kept_like_each_sdk() -> TestResult {
     Ok(())
 }
 
+/// The getters read the initialization result, which throws the engine's `TypeError` when initialize answered
+/// without a response or with `null`, `supportedCommands()` included once `commands_changed` replaced the list.
+#[tokio::test]
+async fn the_getters_throw_the_engine_type_error_on_a_missing_or_null_initialize_response() -> TestResult {
+    let changed = json!({"type":"system","subtype":"commands_changed","commands":[{"name":"z"}]});
+    let cases: [(JsRuntime, Option<Value>, [&str; 4]); 4] = [
+        (
+            JsRuntime::Node,
+            None,
+            [
+                "Cannot destructure property 'commands' of '(intermediate value)' as it is undefined.",
+                "Cannot read properties of undefined (reading 'models')",
+                "Cannot read properties of undefined (reading 'agents')",
+                "Cannot read properties of undefined (reading 'account')",
+            ],
+        ),
+        (
+            JsRuntime::Node,
+            Some(Value::Null),
+            [
+                "Cannot destructure property 'commands' of '(intermediate value)' as it is null.",
+                "Cannot read properties of null (reading 'models')",
+                "Cannot read properties of null (reading 'agents')",
+                "Cannot read properties of null (reading 'account')",
+            ],
+        ),
+        (
+            JsRuntime::Bun,
+            None,
+            [
+                "Cannot destructure property 'commands' from null or undefined value",
+                "undefined is not an object (evaluating '(await this.initialization).models')",
+                "undefined is not an object (evaluating '(await this.initialization).agents')",
+                "undefined is not an object (evaluating '(await this.initialization).account')",
+            ],
+        ),
+        (
+            JsRuntime::Bun,
+            Some(Value::Null),
+            [
+                "Cannot destructure property 'commands' from null or undefined value",
+                "null is not an object (evaluating '(await this.initialization).models')",
+                "null is not an object (evaluating '(await this.initialization).agents')",
+                "null is not an object (evaluating '(await this.initialization).account')",
+            ],
+        ),
+    ];
+    for (js_runtime, response, expected) in cases {
+        let initialize = match response {
+            Some(response) => Reply::Success(response),
+            None => Reply::Omitted,
+        };
+        let reload = Reply::After(changed.clone(), Box::new(Reply::Success(json!({}))));
+        let (client, server) = connect_under(
+            ArgvStyle::TypeScript,
+            js_runtime,
+            script([("initialize", vec![initialize]), ("reload_skills", vec![reload])]),
+        )
+        .await?;
+        let handle = client.handle();
+        handle.reload_skills().await?;
+        let texts = [
+            handle.supported_commands().await.err().map(|error| error.to_string()),
+            handle.supported_models().await.err().map(|error| error.to_string()),
+            handle.supported_agents().await.err().map(|error| error.to_string()),
+            handle.account_info().await.err().map(|error| error.to_string()),
+        ];
+        assert_eq!(texts, expected.map(|text| Some(text.to_owned())));
+        client.disconnect().await?;
+        server.await??;
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn supported_commands_follow_commands_changed() -> TestResult {
     let changed = json!({"type":"system","subtype":"commands_changed",
@@ -496,9 +590,9 @@ async fn supported_commands_follow_commands_changed() -> TestResult {
     let handle = client.handle();
     handle.reload_skills().await?;
     let expected = json!([{"name":"b","description":"e","argumentHint":"<x>"}]);
-    assert_eq!(handle.supported_commands()?.as_json(), Some(&expected));
+    assert_eq!(handle.supported_commands().await?.as_json(), Some(&expected));
     handle.reload_skills().await?;
-    assert_eq!(handle.supported_commands()?.as_json(), Some(&expected));
+    assert_eq!(handle.supported_commands().await?.as_json(), Some(&expected));
     client.disconnect().await?;
     server.await??;
     Ok(())
@@ -565,6 +659,195 @@ async fn python_controls_match_claude_agent_sdk_bytes_and_returns() -> TestResul
             r#"{"type": "control_request", "request_id": "<id>", "request": {"subtype": "get_context_usage"}}"#,
             r#"{"type": "control_request", "request_id": "<id>", "request": {"subtype": "stop_task", "task_id": "t"}}"#,
         ]
+    );
+    Ok(())
+}
+
+const CAPTURED: &str = include_str!("fixtures/auth_callbacks/remote_control.json");
+
+#[tokio::test]
+async fn enable_remote_control_writes_the_typescript_request_bytes() -> TestResult {
+    let (client, server) = connect(
+        ArgvStyle::TypeScript,
+        script([
+            ("initialize", vec![Reply::Success(first_initialize())]),
+            (
+                "remote_control",
+                vec![
+                    Reply::Success(json!({"bridge_session_id":"nm"})),
+                    Reply::Success(json!({})),
+                    Reply::Success(json!({})),
+                    Reply::Success(json!({})),
+                ],
+            ),
+        ]),
+    )
+    .await?;
+    let handle = client.handle();
+    let options = RemoteControlOptions {
+        work_secret: Some("sec".into()),
+        reattach_session_id: Some("cse_1".into()),
+        keep_session_on_exit: Some(true),
+        ..RemoteControlOptions::default()
+    };
+    let reply = handle.enable_remote_control(true, Some("nm"), Some(options)).await?;
+    assert_eq!(reply, Some(json!({"bridge_session_id":"nm"})));
+    handle.enable_remote_control(false, None, None).await?;
+    handle.enable_remote_control(true, None, None).await?;
+    let keep_off = RemoteControlOptions {
+        keep_session_on_exit: Some(false),
+        ..RemoteControlOptions::default()
+    };
+    handle.enable_remote_control(true, None, Some(keep_off)).await?;
+    client.disconnect().await?;
+    let written = server.await??;
+    let lines: Vec<String> = written
+        .iter()
+        .filter(|line| line.contains(r#""subtype":"remote_control""#))
+        .map(|line| typescript_line(line))
+        .collect();
+    assert_eq!(
+        lines,
+        Captured::parse(CAPTURED)?.strings("remote_request_bytes", "requests")?
+    );
+    Ok(())
+}
+
+/// What the scripted CLI answers a `remote_control` request with in the captured `sdk.mjs` run.
+fn remote_answer(answer: &str) -> Reply {
+    match answer {
+        "absent" => Reply::Omitted,
+        "null" => Reply::Success(Value::Null),
+        _ => Reply::Success(json!({})),
+    }
+}
+
+#[tokio::test]
+async fn an_undefined_remote_control_response_follows_sdk_mjs() -> TestResult {
+    let captured = Captured::parse(CAPTURED)?;
+    for answer in ["absent", "null", "empty"] {
+        for state in ["on", "off"] {
+            let scenario = format!("remote_{answer}_{state}");
+            let (client, server) = connect(
+                ArgvStyle::TypeScript,
+                script([
+                    ("initialize", vec![Reply::Success(first_initialize())]),
+                    ("remote_control", vec![remote_answer(answer)]),
+                ]),
+            )
+            .await?;
+            let result = client
+                .handle()
+                .enable_remote_control(state == "on", Some("n1"), None)
+                .await;
+            client.disconnect().await?;
+            let written = server.await??;
+            let lines: Vec<String> = written
+                .iter()
+                .filter(|line| line.contains(r#""subtype":"remote_control""#))
+                .map(|line| typescript_line(line))
+                .collect();
+            assert_eq!(lines, captured.strings(&scenario, "requests")?, "{scenario}");
+            let seen = captured.field(&scenario, "seen")?;
+            match (seen.get("error"), result) {
+                // `sdk.mjs` throws a `TypeError` reading `bridge_session_id` off the missing response.
+                (Some(error), Err(Error::Protocol(_))) => assert_eq!(error["name"], "TypeError", "{scenario}"),
+                (Some(_), other) => {
+                    return Err(format!("{scenario}: expected a TypeError, got ok={}", other.is_ok()).into());
+                }
+                (None, Ok(reply)) => {
+                    // `sdk.mjs` returns `undefined` for an absent response and the value otherwise, `null` included.
+                    let expected = match &seen["reply"] {
+                        Value::String(text) if text == "__undefined__" => None,
+                        other => Some(other.clone()),
+                    };
+                    assert_eq!(reply, expected, "{scenario}");
+                }
+                (None, Err(error)) => return Err(format!("{scenario}: {error}").into()),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Answers neither request until both the initialize and the `remote_control` request were written, the way the
+/// captured `sdk.mjs` run delays its initialize answer, so a request written only after the initialize response
+/// would never arrive.
+async fn serve_after_both(process: ScriptedProcessHarness) -> Result<Vec<String>, std::io::Error> {
+    let mut lines = BufReader::new(process.stdin).lines();
+    let mut stdout = process.stdout;
+    let stderr = process.stderr;
+    let mut written = Vec::new();
+    let mut ids = Vec::new();
+    while written.len() < 2 {
+        let Some(line) = lines.next_line().await? else {
+            break;
+        };
+        let request: Value = serde_json::from_str(&line)?;
+        ids.push(request["request_id"].clone());
+        written.push(line);
+    }
+    let answers = [first_initialize(), json!({})];
+    for (id, response) in ids.iter().zip(answers) {
+        let mut frame = serde_json::to_vec(&json!({"type":"control_response","response":{
+            "subtype":"success","request_id":id,"response":response}}))?;
+        frame.push(b'\n');
+        stdout.write_all(&frame).await?;
+    }
+    while let Some(line) = lines.next_line().await? {
+        written.push(line);
+    }
+    drop(stdout);
+    drop(stderr);
+    process.observer.complete(0);
+    Ok(written)
+}
+
+#[tokio::test]
+async fn connect_returns_before_initialize_is_answered_like_sdk_mjs() -> TestResult {
+    let captured = Captured::parse(CAPTURED)?;
+    let scenario = "order_remote_control_before_init";
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let server = tokio::spawn(serve_after_both(harness));
+    let options = ClaudeAgentOptions {
+        cli_path: Some("claude".into()),
+        ..ClaudeAgentOptions::default()
+    };
+    // No options: like `query()` in `sdk.mjs`, `connect` returns once the initialize request is queued, so the
+    // server, which answers nothing before both requests were written, is still waiting here.
+    let client = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        ClaudeSdkClient::connect_with_adapters(
+            options,
+            RuntimeAdapters {
+                environment: FixedEnvironment {
+                    directory: PathBuf::from("unused-directory"),
+                    variables: BTreeMap::new(),
+                },
+                process,
+                filesystem: NativeFileSystem,
+            },
+        ),
+    )
+    .await??;
+    let handle = client.handle();
+    let remote = RemoteControlOptions {
+        work_secret: Some("s".into()),
+        reattach_session_id: Some("cse_early".into()),
+        ..RemoteControlOptions::default()
+    };
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        handle.enable_remote_control(true, Some("early"), Some(remote)),
+    )
+    .await??;
+    assert_eq!(reply, Some(json!({})));
+    client.disconnect().await?;
+    let lines: Vec<String> = server.await??.iter().map(|line| typescript_line(line)).collect();
+    assert_eq!(lines, captured.strings(scenario, "requests")?);
+    assert_eq!(
+        captured.strings(scenario, "order")?,
+        ["sdk writes initialize request", "sdk writes remote_control request"]
     );
     Ok(())
 }

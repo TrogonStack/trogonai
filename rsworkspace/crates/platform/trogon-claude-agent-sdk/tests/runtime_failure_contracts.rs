@@ -51,6 +51,16 @@ fn options() -> Result<ClaudeAgentOptions, Box<dyn std::error::Error>> {
     Ok(options)
 }
 
+/// Options with a permission callback, which is a bidirectional need: the run keeps stdin open until it settles
+/// instead of closing it as soon as the input is finished, as both upstream SDKs do.
+fn options_with_needs() -> Result<ClaudeAgentOptions, Box<dyn std::error::Error>> {
+    let mut options = options()?;
+    options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        PermissionDecision::allow()
+    }));
+    Ok(options)
+}
+
 fn adapters<P>(process: P) -> RuntimeAdapters<FixedEnvironment, P> {
     RuntimeAdapters {
         environment: FixedEnvironment {
@@ -293,7 +303,7 @@ async fn s13_empty_hooks_are_ignored_and_hook_callback_count_is_unbounded() -> T
 #[tokio::test]
 /// Both upstream SDKs write input whenever it arrives, so a prompt sent mid-turn reaches the CLI.
 async fn s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recoverable() -> TestResult {
-    let mut configured = options()?;
+    let mut configured = options_with_needs()?;
     configured.limits.input_after_finish = trogon_claude_agent_sdk::InputAfterFinish::Reject;
     let (mut client, mut cli) = connect(configured).await?;
     client.query(Prompt::from("first")).await?;
@@ -353,9 +363,9 @@ async fn query_facades_expose_handles_and_cleanup_after_completion_or_early_clos
             assert!(query.next_message().await?.is_none());
             assert!(query.next_message().await?.is_none());
             assert!(query.handle().is_none());
-            query.close().await?;
+            query.disconnect().await?;
         } else {
-            let closing = tokio::spawn(query.close());
+            let closing = tokio::spawn(query.disconnect());
             assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
             cli.end(0);
             closing.await??;
@@ -1420,7 +1430,7 @@ async fn background_task_ledger_rejects_new_tasks_at_its_limit_but_accepts_dupli
 #[tokio::test]
 async fn task_terminal_states_and_session_idle_complete_a_finished_run() -> TestResult {
     for status in ["completed", "failed", "stopped", "killed"] {
-        let (mut client, mut cli) = connect(options()?).await?;
+        let (mut client, mut cli) = connect(options_with_needs()?).await?;
         client.send_prompt(Prompt::from("run with background task")).await?;
         cli.read().await?;
         client.finish_input().await?;
@@ -1453,7 +1463,7 @@ async fn task_terminal_states_and_session_idle_complete_a_finished_run() -> Test
 
 #[tokio::test]
 async fn error_results_and_queue_retractions_preserve_run_completion() -> TestResult {
-    let (mut client, mut cli) = connect(options()?).await?;
+    let (mut client, mut cli) = connect(options_with_needs()?).await?;
     let mut first = UserInput::from(Prompt::from("first"));
     first.uuid = Some(MessageId::from("queued-first"));
     let mut second = UserInput::from(Prompt::from("second"));
@@ -1461,6 +1471,11 @@ async fn error_results_and_queue_retractions_preserve_run_completion() -> TestRe
     client.stream_input(futures_util::stream::iter([first, second])).await?;
     cli.read().await?;
     cli.read().await?;
+    // A CLI that reports its session state keeps the run open until `idle`, as `sdk.mjs` does; without state
+    // events the result alone would close stdin before the interrupt below.
+    cli.send(json!({"type":"system","subtype":"session_state_changed","state":"running"}))
+        .await?;
+    assert!(matches!(client.next_message().await?, Some(Message::System(_))));
     let mut response = result();
     response["queued_turn_count"] = 1.into();
     response["is_error"] = true.into();
@@ -1818,7 +1833,7 @@ async fn a_turn_keeps_stdin_open_until_an_in_flight_callback_answers() -> TestRe
     assert!(timeout(Duration::from_secs(2), cli.lines.next_line()).await??.is_none());
     cli.end(0);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     Ok(())
 }
 
@@ -1863,7 +1878,7 @@ async fn a_callback_answered_after_the_run_settled_is_dropped_without_stopping_t
     timeout(Duration::from_secs(2), dropped.notified()).await?;
     cli.end(0);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     Ok(())
 }
 
@@ -2064,11 +2079,11 @@ async fn a_stderr_pipe_that_stays_open_is_reported_beside_the_error_that_ended_t
 async fn startup_fails_before_a_healthy_shutdown() -> Result<bool, Box<dyn std::error::Error>> {
     let (process, harness) = ScriptedProcessSpawner::new();
     let mut cli = ScriptedCli::from(harness);
-    let querying = tokio::spawn(query_with_adapters(
-        Prompt::from("prompt"),
-        options()?,
-        adapters(process),
-    ));
+    // Python style: TypeScript hands the query back without waiting for the prompt to be written, so only Python
+    // reports a startup failure from `query`.
+    let mut python = options()?;
+    python.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    let querying = tokio::spawn(query_with_adapters(Prompt::from("prompt"), python, adapters(process)));
     let request = cli.read().await?;
     cli.success(&request, json!({"hooks_applied":true,"hook_on_failure_supported":true}))
         .await?;

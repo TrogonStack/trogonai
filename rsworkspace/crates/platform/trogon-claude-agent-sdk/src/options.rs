@@ -199,6 +199,16 @@ pub enum InputAfterFinish {
     Reject,
 }
 
+/// Output that ends in the middle of a turn: the CLI closed stdout before the result, and exits cleanly.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EndWithoutResult {
+    /// Upstream: the messages end quietly, as TypeScript and Python do when the CLI exits with status 0.
+    #[default]
+    End,
+    /// Opt-in: the messages end with [`crate::Error::UnexpectedEof`].
+    Fail,
+}
+
 /// Waits and bounds on the runtime. The default is TypeScript's: no control or write timeout and no bounded queue.
 /// [`Limits::python`] selects Python's values. Every other bound is opt-in.
 #[derive(Clone, Debug)]
@@ -240,6 +250,7 @@ pub struct Limits {
     pub duplicate_control_requests: DuplicateControlRequests,
     pub request_id_exhaustion: RequestIdExhaustion,
     pub input_after_finish: InputAfterFinish,
+    pub end_without_result: EndWithoutResult,
 }
 
 impl Limits {
@@ -303,6 +314,7 @@ impl Default for Limits {
             duplicate_control_requests: DuplicateControlRequests::Skip,
             request_id_exhaustion: RequestIdExhaustion::Wrap,
             input_after_finish: InputAfterFinish::Write,
+            end_without_result: EndWithoutResult::End,
         }
     }
 }
@@ -381,6 +393,14 @@ pub struct ClaudeAgentOptions {
     pub client_app_derivation: crate::ClientAppDerivation,
     pub trace_context: Option<TraceContext>,
     pub stderr_handler: Option<StderrHandler>,
+    /// TypeScript `abortController`. Cancelling it stops the process and ends the run with
+    /// `AbortError("Claude Code process aborted by user")`; a token already cancelled makes `connect` fail with that
+    /// error. `None` uses a fresh token, which `abort()` cancels. Closing the client does not cancel it.
+    pub abort_controller: Option<crate::CancellationToken>,
+    /// TypeScript `spawnClaudeCodeProcess`: start the CLI with this instead of the SDK's own spawn.
+    pub spawn_claude_code_process: Option<crate::SpawnClaudeCodeProcess>,
+    /// TypeScript `onProcessSpawned`: told the process id when the SDK starts the CLI itself.
+    pub on_process_spawned: Option<crate::OnProcessSpawned>,
     pub extra_args: Vec<ExtraArgument>,
     pub script_runtime: ScriptRuntime,
     /// Python's `user`: the CLI runs as this account (Unix only). The name is looked up in `/etc/passwd`; only the

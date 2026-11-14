@@ -29,6 +29,8 @@ pub enum ControlOperation {
     ReloadSkills,
     ReloadOutputStyles,
     SeedReadState,
+    RemoteControl,
+    ClaimSession,
 }
 
 impl std::fmt::Display for ControlOperation {
@@ -57,6 +59,8 @@ impl std::fmt::Display for ControlOperation {
             Self::ReloadSkills => "reload_skills",
             Self::ReloadOutputStyles => "reload_output_styles",
             Self::SeedReadState => "seed_read_state",
+            Self::RemoteControl => "remote_control",
+            Self::ClaimSession => "claim_session",
         })
     }
 }
@@ -275,14 +279,28 @@ pub enum Error {
     },
     #[error("the SDK driver has stopped; receive remaining messages for its terminal error")]
     DriverStopped,
+    /// TypeScript's rejection of a control request still waiting for its answer when the query is closed.
+    #[error("Query closed before response received")]
+    QueryClosed,
     #[error("the client is not initialized")]
     NotInitialized,
+    /// The first initialize failed. TypeScript rejects `initializationResult()` with the same error that ended
+    /// the run, so the text is the inner error's.
+    #[error(transparent)]
+    InitializationFailed(std::sync::Arc<Error>),
+    /// A `TypeError` the TypeScript SDK leaves to its JavaScript engine, worded as the engine chosen with
+    /// [`crate::JsRuntime`] words it.
+    #[error("{0}")]
+    TypeError(String),
     #[error("control request counter exhausted")]
     RequestIdExhausted,
     #[error("SDK driver task failed")]
     DriverTask(#[source] tokio::task::JoinError),
     #[error("permission callback task failed")]
     CallbackTask(#[source] tokio::task::JoinError),
+    /// TypeScript's `initialize_timeout` error: the CLI did not answer initialize within the startup limit.
+    #[error(transparent)]
+    InitializeTimeout(#[from] InitializeTimeoutError),
     #[doc(hidden)]
     #[error("the subprocess owner requested shutdown")]
     ShutdownRequested,
@@ -332,6 +350,7 @@ impl Error {
     /// `Claude Code process terminated by signal SIG<NAME>`, with the stderr tail appended when it is not blank.
     pub fn typescript_message(&self) -> Option<String> {
         match self {
+            Self::InitializationFailed(inner) => return inner.typescript_message(),
             Self::WriteToTerminatedProcess { .. } => return Some("Cannot write to terminated process".to_owned()),
             Self::BlockingHooksUnsupported => {
                 return Some(
@@ -385,6 +404,65 @@ fn signal_name(signal: i32) -> &'static str {
         14 => "SIGALRM",
         15 => "SIGTERM",
         _ => "unknown",
+    }
+}
+
+/// TypeScript's `errorClass: "initialize_timeout"` error of `startup()` and `prewarm()`.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct InitializeTimeoutError {
+    message: String,
+    hooks_open: usize,
+    startup_mark: Option<String>,
+    startup_mark_age_ms: Option<u64>,
+}
+
+impl InitializeTimeoutError {
+    pub(crate) fn new(message: String, hooks_open: usize) -> Self {
+        Self {
+            message,
+            hooks_open,
+            startup_mark: None,
+            startup_mark_age_ms: None,
+        }
+    }
+
+    /// Records the last startup mark the CLI reported, `none` when it reported no mark.
+    pub(crate) fn with_mark(mut self, mark: Option<(String, u64)>) -> Self {
+        match mark {
+            Some((mark, age)) => {
+                self.startup_mark = Some(mark);
+                self.startup_mark_age_ms = Some(age);
+            }
+            None => self.startup_mark = Some("none".to_owned()),
+        }
+        self
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// TypeScript's `telemetryMessage`: the first sentence of the message, without its period.
+    pub fn telemetry_message(&self) -> &str {
+        self.message
+            .split_once(". ")
+            .map_or(self.message.as_str(), |(head, _)| head)
+    }
+
+    /// TypeScript's `startupHooksOpen`: the SessionStart or Setup hooks still running when the wait ran out.
+    pub fn startup_hooks_open(&self) -> usize {
+        self.hooks_open
+    }
+
+    /// TypeScript's `startupMark`: the last mark the CLI reported, or `none`.
+    pub fn startup_mark(&self) -> Option<&str> {
+        self.startup_mark.as_deref()
+    }
+
+    /// TypeScript's `startupMarkAgeMs`: how long before the timeout that mark arrived.
+    pub fn startup_mark_age_ms(&self) -> Option<u64> {
+        self.startup_mark_age_ms
     }
 }
 
@@ -562,6 +640,15 @@ impl ResultError {
 
     pub fn session_id(&self) -> Option<&str> {
         self.data.get("session_id").and_then(serde_json::Value::as_str)
+    }
+
+    /// TypeScript's `startupFailureReason`: the error result's `startup_failure_reason` when it is a string.
+    pub fn startup_failure_reason(&self) -> Option<crate::upstream::messages::SDKStartupFailureReason> {
+        let reason = self.data.get("startup_failure_reason")?;
+        if !reason.is_string() {
+            return None;
+        }
+        serde_json::from_value(reason.clone()).ok()
     }
 }
 

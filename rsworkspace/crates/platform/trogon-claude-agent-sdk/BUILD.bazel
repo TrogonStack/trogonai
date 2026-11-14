@@ -68,6 +68,19 @@ workspace_crate(
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
+        "client_lifecycle_stream": {
+            "compile_data": glob([
+                "tests/fixtures/client_lifecycle/*.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
+        "client_lifecycle_connect": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "control_request_id": {},
         "control_values": {},
         "core_options_golden": {
@@ -95,12 +108,18 @@ workspace_crate(
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "golden_controls": {
-            "compile_data": glob(["tests/support/*.rs"]),
+            "compile_data": glob([
+                "tests/fixtures/auth_callbacks/*.json",
+                "tests/support/*.rs",
+            ]),
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "golden_inbound_control": {
-            "compile_data": glob(["tests/support/*.rs"]),
+            "compile_data": glob([
+                "tests/fixtures/auth_callbacks/*.json",
+                "tests/support/*.rs",
+            ]),
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
@@ -111,6 +130,48 @@ workspace_crate(
         },
         "core_types_module": {},
         "create_sdk_mcp_server_options": {},
+        "golden_initialize_hold": {
+            "compile_data": glob([
+                "tests/fixtures/auth_callbacks/*.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
+        "golden_initialize_ordering": {
+            "compile_data": glob([
+                "tests/fixtures/auth_callbacks/*.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
+        "golden_prewarm": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
+        "golden_run_end": {
+            "compile_data": glob([
+                "tests/fixtures/auth_callbacks/*.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
+        "golden_startup": {
+            "compile_data": glob(["tests/support/*.rs"]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
+        "golden_stream_input": {
+            "compile_data": glob([
+                "tests/fixtures/auth_callbacks/*.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "in_memory_session_store": {},
         "initialize_options": {
             "compile_data": glob([

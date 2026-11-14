@@ -222,9 +222,12 @@ async fn blocking_hook_is_registered_and_answered_through_the_public_client() ->
 async fn blocking_hook_refuses_a_cli_without_failure_capability() -> TestResult {
     let mut options = options("hook-unsupported")?;
     options.hooks = vec![blocking_hook()];
+    // TypeScript hands the client out before initialize is answered, so the refusal rejects the initialization
+    // result.
+    let client = ClaudeSdkClient::connect(options).await?;
     assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::BlockingHooksUnsupported)
+        client.handle().initialization_result().await,
+        Err(Error::InitializationFailed(inner)) if matches!(*inner, Error::BlockingHooksUnsupported)
     ));
     Ok(())
 }
@@ -461,9 +464,10 @@ async fn cancelled_permission_exposes_its_signal_to_the_host() -> TestResult {
 async fn blocking_hook_refuses_a_session_that_did_not_apply_it() -> TestResult {
     let mut options = options("hook-not-applied")?;
     options.hooks = vec![blocking_hook()];
+    let client = ClaudeSdkClient::connect(options).await?;
     assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::HooksNotApplied)
+        client.handle().initialization_result().await,
+        Err(Error::InitializationFailed(inner)) if matches!(*inner, Error::HooksNotApplied)
     ));
     Ok(())
 }

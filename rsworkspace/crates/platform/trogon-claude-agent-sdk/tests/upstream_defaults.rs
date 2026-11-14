@@ -7,10 +7,10 @@ use std::{
 
 use tokio::time::timeout;
 use trogon_claude_agent_sdk::{
-    ClaudeAgentOptions, ClaudeSdkClient, DuplicateControlRequests, Error, InitializeTimeout, InputAfterFinish, Limits,
-    MessageBuffer, MirrorFailureError, Prompt, QueueCapacity, RequestIdExhaustion, RunEndTimeout, SessionEntry,
-    SessionKey, SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreLimits, SessionStoreOptions, Shutdown,
-    Timeout, TranscriptMirror,
+    ClaudeAgentOptions, ClaudeSdkClient, DuplicateControlRequests, EndWithoutResult, Error, InitializeTimeout,
+    InputAfterFinish, Limits, MessageBuffer, MirrorFailureError, Prompt, QueueCapacity, RequestIdExhaustion,
+    RunEndTimeout, SessionEntry, SessionKey, SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreLimits,
+    SessionStoreOptions, Shutdown, Timeout, TranscriptMirror,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -59,6 +59,7 @@ fn the_default_limits_are_the_typescript_sdk() {
     assert_eq!(limits.duplicate_control_requests, DuplicateControlRequests::Skip);
     assert_eq!(limits.request_id_exhaustion, RequestIdExhaustion::Wrap);
     assert_eq!(limits.input_after_finish, InputAfterFinish::Write);
+    assert_eq!(limits.end_without_result, EndWithoutResult::End);
 }
 
 #[test]

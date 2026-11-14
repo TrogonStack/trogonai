@@ -45,6 +45,8 @@ fn spawn(script: &'static str, argv_style: ArgvStyle) -> Result<ProcessTransport
         config_dir: None,
         derived_debug_file: None,
         secure_storage_config_dir: None,
+        parent_environment: Vec::new(),
+        startup_marks: false,
         closed: Closed::default(),
     })
 }
