@@ -1,10 +1,14 @@
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde_json::{Value, json};
 
+use crate::bridge_gitcmd::GitProbeContext;
 use crate::bridge_js::js_trim;
+use crate::bridge_refs::guess_default_branch;
+use crate::bridge_url::rejected;
 
 static SCP: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^git@([^:/@]+):([^/]+)/([^/]+?)(?:\.git)?/?$").ok());
@@ -76,9 +80,44 @@ pub trait GitContextProbe {
     fn guess_default_branch(&self) -> impl Future<Output = Option<String>> + Send;
 }
 
-/// Parses repository addresses the way the upstream bridge does and never guesses a default branch.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DefaultGitProbe;
+/// Parses repository addresses the way the upstream bridge does and guesses the default branch from the repository
+/// around a directory, as the upstream bridge does from the directory it was started in.
+#[derive(Clone, Debug)]
+pub struct DefaultGitProbe {
+    directory: Option<PathBuf>,
+    context: GitProbeContext,
+}
+
+impl DefaultGitProbe {
+    /// A probe that reads the repository around the current directory, which upstream captures once at startup.
+    pub fn new() -> Self {
+        Self {
+            directory: std::env::current_dir().ok(),
+            context: GitProbeContext::from_process(),
+        }
+    }
+
+    /// A probe that reads the repository around `directory`.
+    pub fn with_directory(directory: impl Into<PathBuf>) -> Self {
+        Self {
+            directory: Some(directory.into()),
+            context: GitProbeContext::from_process(),
+        }
+    }
+
+    /// The same probe with explicit answers for the process-wide state the upstream Git runner consults.
+    #[must_use]
+    pub fn with_context(mut self, context: GitProbeContext) -> Self {
+        self.context = context;
+        self
+    }
+}
+
+impl Default for DefaultGitProbe {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GitContextProbe for DefaultGitProbe {
     fn parse_repository(&self, url: &str) -> Option<GitRepository> {
@@ -86,7 +125,10 @@ impl GitContextProbe for DefaultGitProbe {
     }
 
     async fn guess_default_branch(&self) -> Option<String> {
-        None
+        match self.directory.as_deref() {
+            Some(directory) => Some(guess_default_branch(&self.context, directory).await),
+            None => Some("main".to_owned()),
+        }
     }
 }
 
@@ -121,6 +163,9 @@ fn repository(host: &str, owner: &str, name: &str) -> Option<GitRepository> {
 
 pub(crate) fn parse_repository(input: &str) -> Option<GitRepository> {
     let text = js_trim(input);
+    if rejected(text) {
+        return None;
+    }
     if let Some(captures) = SCP.as_ref().and_then(|scp| scp.captures(text)) {
         let host = &captures[1];
         return valid_host(host)

@@ -110,3 +110,15 @@ fn cleans_reply_text_like_the_upstream_cleaner() {
         "z".repeat(96)
     );
 }
+
+#[test]
+fn cleans_error_details_like_the_upstream_bridge() {
+    let cases: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../tests/fixtures/bridge_create_session/details.json")).unwrap_or_default();
+    assert!(cases.len() > 5000);
+    for case in &cases {
+        let message = case["message"].as_str().unwrap_or_default();
+        let expected = case["detail"].as_str().map(str::to_owned);
+        assert_eq!(plain_detail(message), expected, "{message:?}");
+    }
+}

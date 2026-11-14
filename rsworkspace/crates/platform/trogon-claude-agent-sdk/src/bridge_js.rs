@@ -4,8 +4,9 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
+
+use crate::bridge_unicode::{is_forbidden, is_mark, is_punctuation, is_space};
 
 const DETAIL_LIMIT: usize = 1024;
 
@@ -23,11 +24,7 @@ static DECIMAL: LazyLock<Option<Regex>> =
 
 /// A character the JavaScript `\s` class and `trim` treat as white space.
 pub(crate) fn is_js_space(c: char) -> bool {
-    matches!(
-        c,
-        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
-    )
+    is_space(c)
 }
 
 /// `text.trim()`.
@@ -240,11 +237,7 @@ fn strip_leading_marks(text: &str) -> String {
     let mut previous: Option<char> = None;
     let mut removing = false;
     for c in text.chars() {
-        let is_mark = matches!(
-            get_general_category(c),
-            GeneralCategory::NonspacingMark | GeneralCategory::SpacingMark | GeneralCategory::EnclosingMark
-        );
-        if is_mark && (removing || previous.is_none_or(|before| is_js_space(before) || is_punctuation(before))) {
+        if is_mark(c) && (removing || previous.is_none_or(|before| is_js_space(before) || is_punctuation(before))) {
             removing = true;
         } else {
             removing = false;
@@ -253,57 +246,6 @@ fn strip_leading_marks(text: &str) -> String {
         previous = Some(c);
     }
     out
-}
-
-fn is_punctuation(c: char) -> bool {
-    matches!(
-        get_general_category(c),
-        GeneralCategory::ConnectorPunctuation
-            | GeneralCategory::DashPunctuation
-            | GeneralCategory::OpenPunctuation
-            | GeneralCategory::ClosePunctuation
-            | GeneralCategory::InitialPunctuation
-            | GeneralCategory::FinalPunctuation
-            | GeneralCategory::OtherPunctuation
-    )
-}
-
-fn is_forbidden(c: char) -> bool {
-    (is_js_space(c) && c != ' ')
-        || matches!(
-            get_general_category(c),
-            GeneralCategory::Control
-                | GeneralCategory::Format
-                | GeneralCategory::Surrogate
-                | GeneralCategory::PrivateUse
-                | GeneralCategory::Unassigned
-        )
-        || c == '\u{2800}'
-        || is_default_ignorable(c)
-}
-
-/// The `Default_Ignorable_Code_Point` property.
-fn is_default_ignorable(c: char) -> bool {
-    matches!(
-        c,
-        '\u{ad}'
-            | '\u{34f}'
-            | '\u{61c}'
-            | '\u{115f}'..='\u{1160}'
-            | '\u{17b4}'..='\u{17b5}'
-            | '\u{180b}'..='\u{180f}'
-            | '\u{200b}'..='\u{200f}'
-            | '\u{202a}'..='\u{202e}'
-            | '\u{2060}'..='\u{206f}'
-            | '\u{3164}'
-            | '\u{fe00}'..='\u{fe0f}'
-            | '\u{feff}'
-            | '\u{ffa0}'
-            | '\u{fff0}'..='\u{fff8}'
-            | '\u{1bca0}'..='\u{1bca3}'
-            | '\u{1d173}'..='\u{1d17a}'
-            | '\u{e0000}'..='\u{e0fff}'
-    )
 }
 
 #[cfg(test)]

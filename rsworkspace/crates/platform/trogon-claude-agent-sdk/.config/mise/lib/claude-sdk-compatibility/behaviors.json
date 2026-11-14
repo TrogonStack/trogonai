@@ -3674,6 +3674,36 @@
       ]
     },
     {
+      "id": "b01-bridge-git-child-wrappers",
+      "concept": "Sandbox, cgroup and launcher wrappers around the bridge Git child",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no bridge entry point and never spawns the Git probe."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "async function Iy(e,t){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 900,
+        "sha256": "11265e6c1ada1d82f5fe7d6412c5d1bb90cea423b7328228081794045dda4e24"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "createCodeSession reaches the Git child only through Iy (bridge.mjs offset 603705), which calls tr (572753), then q1 (576140) and y1 (562379) without bwrapProfileFd, inheritFd, gitStartsIn or allowRepoGitHooks, so no sandbox profile is applied and no option, server reply or session field can add one. The memory cgroup is chosen by oy (569821) and Oke (568290), which need vke (567261) to see a Linux or WSL process that is not diskless, with CLAUDE_CODE_TOOL_MEMORY_LIMIT not set to none and either that variable parsing as a size (Gke) or the tengu_tool_memory_cgroup flag on; only the ambient process environment and flags decide it, and it caps memory without changing arguments, output or exit status. The Windows launcher probe (GU 614968, DIe 615116, IIe 615821) needs process.platform win32 and a git.exe under a cmd folder, and Yi answers plain git when the process is diskless."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_git_child::runs_plain_git_with_the_fixed_flags_and_the_sanitised_environment"
+      ],
+      "rust": [
+        "src/bridge_gitcmd.rs"
+      ]
+    },
+    {
       "id": "c19-connector-real-path",
       "concept": "Canonical path of a connector folder link target",
       "python": {

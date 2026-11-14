@@ -12,14 +12,25 @@ mod agent_name;
 mod argv;
 mod auth_token;
 mod bridge_client;
+#[cfg(test)]
+mod bridge_fake_probe;
+mod bridge_flavor;
 mod bridge_git;
+mod bridge_gitcmd;
 mod bridge_js;
+mod bridge_packed;
+mod bridge_paths;
+mod bridge_platform;
+mod bridge_refs;
 mod bridge_session;
 mod bridge_session_core;
 mod bridge_session_handle;
 mod bridge_session_runtime;
 mod bridge_session_stream_events;
 mod bridge_types;
+mod bridge_unicode;
+mod bridge_unicode_tables;
+mod bridge_url;
 mod bridge_worker;
 mod bridge_worker_control;
 mod bridge_worker_control_async;
@@ -240,6 +251,9 @@ pub use auth_token::{
 };
 pub use bridge_client::BridgeClient;
 pub use bridge_git::{BranchDropLogDedup, CodeSessionGitContext, DefaultGitProbe, GitContextProbe, GitRepository};
+pub use bridge_gitcmd::GitProbeContext;
+pub use bridge_paths::PathGuard;
+pub use bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe, ProbeError};
 pub use bridge_session::{
     AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, CloseCallback,
     EnvironmentLookup, InboundMessageCallback, PermissionResponseCallback, attach_bridge_session,

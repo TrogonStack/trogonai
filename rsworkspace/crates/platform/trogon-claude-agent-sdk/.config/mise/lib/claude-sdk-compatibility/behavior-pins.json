@@ -75,6 +75,10 @@
       "package/sdk.mjs": {
         "sha256": "9350483cd0434c18c13745d7ca2630acd4ef29c6c2f0038b5a061f7e8c0fdb78",
         "bytes": 1420658
+      },
+      "package/bridge.mjs": {
+        "sha256": "bb4aa71839b41b0d68f855791b152009e1ed9d65337e362bf9736c8c73ff6827",
+        "bytes": 1201138
       }
     }
   }
