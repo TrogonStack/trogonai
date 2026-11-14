@@ -66,3 +66,30 @@ sh_test(
         "no-sandbox",
     ],
 )
+
+sh_test(
+    name = "rust_tls_policy_test",
+    srcs = ["rust_tls_policy_test.sh"],
+    data = [
+        "//rsworkspace:Cargo.lock",
+        "//rsworkspace:Cargo.toml",
+        "//rsworkspace:deny.toml",
+        "@mise//tools/cargo-deny",
+        "@rules_rust//cargo:current_cargo_toolchain",
+        "@rules_rust//rust/toolchain:current_rustc_files",
+    ],
+    env = {
+        "CARGO": "$(rootpath @rules_rust//cargo:current_cargo_toolchain)",
+        "CARGO_DENY": "$(rootpath @mise//tools/cargo-deny)",
+        "CARGO_MANIFEST": "$(rootpath //rsworkspace:Cargo.toml)",
+        "RUSTC": "$(rootpath @rules_rust//rust/toolchain:current_rustc_files)",
+    },
+    # cargo downloads every dependency's manifest from crates.io, and the
+    # source tree it reads is not among the declared inputs, so the test runs
+    # outside the sandbox and is never served from the cache.
+    tags = [
+        "external",
+        "no-sandbox",
+        "requires-network",
+    ],
+)

@@ -56,14 +56,11 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
         with:
-          install-args: rust python cargo:cargo-dylint cargo:dylint-link cargo:cargo-deny
+          install-args: rust python cargo:cargo-dylint cargo:dylint-link
           dylint-toolchain-dir: rsworkspace/dylints/trogonai_dylint
 
       - name: Enforce crate licenses
         run: mise run --skip-tools github:workflows:ci-rust:enforce-cargo-license
-
-      - name: Enforce TLS policy (ADR#0015)
-        run: mise run --skip-tools github:workflows:ci-rust:tls-policy
 
       - name: Cache dependencies
         id: rust-cache
