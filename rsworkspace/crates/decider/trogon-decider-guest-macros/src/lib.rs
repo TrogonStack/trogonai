@@ -23,9 +23,26 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
     // resolved (and baked into a `&'static str`) when *this* proc-macro crate was compiled.
     // Reading it here, rather than emitting `env!("CARGO_MANIFEST_DIR")` into the generated
     // tokens, keeps `wit_bindgen::generate!`'s `path:` absolute and independent of the
-    // directory depth of whichever crate calls `export_decider!`.
-    let wit_dir = trogon_decider_wit::WIT_DIR;
-    if !std::path::Path::new(wit_dir).is_dir() {
+    // directory depth of whichever crate calls `export_decider!`. Under Bazel the constant is
+    // relative to the execution root, which is the working directory of every compile there, so
+    // it is made absolute here: `wit_bindgen::generate!` would otherwise join it onto the calling
+    // crate's own manifest directory.
+    let wit_dir = match std::path::absolute(trogon_decider_wit::WIT_DIR) {
+        Ok(path) => path.to_string_lossy().into_owned(),
+        Err(error) => {
+            return syn::Error::new(
+                proc_macro2::Span::call_site(),
+                format!(
+                    "export_decider!: cannot resolve the WIT contract directory '{}' \
+                     (from trogon_decider_wit::WIT_DIR): {error}",
+                    trogon_decider_wit::WIT_DIR,
+                ),
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+    if !std::path::Path::new(&wit_dir).is_dir() {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
             format!(

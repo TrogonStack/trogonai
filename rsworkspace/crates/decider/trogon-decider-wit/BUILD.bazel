@@ -15,8 +15,14 @@ workspace_crate(
         "host",
     ],
     data = [":wit"],
-    # WIT_DIR bakes this path into a constant that `export_decider!` reads while
-    # other crates compile. The default points into this action's sandbox, which
-    # no other action sees, so it points at the execution root instead.
-    rustc_env = {"CARGO_MANIFEST_DIR": "$${exec_root}/" + package_name()},
+    # The bindgen macros join this with `wit` and resolve it against the working
+    # directory of the compile, which is the execution root of that action. WIT_DIR
+    # bakes the same relative path into a constant, so each crate whose
+    # `export_decider!` expansion reads it resolves it inside its own action, where
+    # its compile_data provides the WIT files. An absolute path would name one
+    # action's sandbox, which no other action sees.
+    rustc_env = {"CARGO_MANIFEST_DIR": package_name()},
+    # No Cargo crate enables the `guest` feature for the host, so crate_universe
+    # leaves the optional wit-bindgen out of this crate's dependencies.
+    deps = ["@crates//wit-bindgen-0.63.0"],
 )
