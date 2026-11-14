@@ -7830,6 +7830,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-webhooks"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
+ "base64 0.22.1",
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "hmac 0.13.0",
+ "sha2 0.11.1",
+ "subtle",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "trogon-nats",
+ "trogon-std",
+ "trogonai-proto",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-workload-identity"
 version = "0.1.0"
 dependencies = [

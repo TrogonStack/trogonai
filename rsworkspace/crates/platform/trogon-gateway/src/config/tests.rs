@@ -4037,3 +4037,70 @@ signing_secret = "slack-secret"
         vec!["github/primary and slack/primary both use stream_name `EVENTS`"]
     );
 }
+
+#[test]
+fn generic_webhooks_enable_an_independent_source_without_provider_integrations() {
+    let file = write_toml("[webhooks]\n");
+    let config = load(Some(file.path())).expect("generic webhook config must load");
+
+    assert!(config.has_any_source());
+    assert_eq!(
+        config.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(604_800).unwrap())
+    );
+}
+
+#[test]
+fn generic_webhooks_retention_contributes_to_claim_check_lifetime() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 1209600\n");
+    let config = load(Some(file.path())).expect("generic webhook config must load");
+
+    assert_eq!(
+        config.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(1_209_600).unwrap())
+    );
+}
+
+#[test]
+fn generic_webhooks_reject_invalid_infrastructure_configuration() {
+    for setting in [
+        "registry_bucket = 'bad.bucket'",
+        "subject_prefix = 'webhooks.*'",
+        "stream_name = 'WEBHOOKS.*'",
+        "admission_timeout_secs = 0",
+        "duplicate_window_secs = 0",
+        "duplicate_window_secs = 604801",
+        "unknown_setting = 'refuse'",
+    ] {
+        let file = write_toml(&format!("[webhooks]\n{setting}\n"));
+        assert!(load(Some(file.path())).is_err(), "accepted {setting}");
+    }
+}
+
+#[test]
+fn generic_webhooks_refuse_subjects_over_the_credential_stream() {
+    let file = write_toml("[webhooks]\nsubject_prefix = 'gateway.credentials'\n");
+
+    assert!(load(Some(file.path())).is_err());
+}
+
+#[test]
+fn generic_webhooks_refuse_overlapping_provider_subjects() {
+    let file = write_toml(
+        "[webhooks]\nsubject_prefix = 'github'\n\
+         [sources.github.integrations.primary]\nsubject_prefix = 'github.primary'\n\
+         [sources.github.integrations.primary.webhook]\nwebhook_secret = 'test-fixture'\n",
+    );
+
+    assert!(load(Some(file.path())).is_err());
+}
+
+#[test]
+fn generic_webhooks_refuse_duplicate_stream_names() {
+    let file = write_toml(&format!(
+        "[webhooks]\nstream_name = '{}'\n",
+        crate::credential::constants::CREDENTIAL_STREAM
+    ));
+
+    assert!(load(Some(file.path())).is_err());
+}

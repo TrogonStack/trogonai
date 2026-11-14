@@ -1535,6 +1535,16 @@ where
             SecretMaterial::Verifier(_) => Err(RuntimeCredentialError::VerifierOnly { key: key.clone(), kind }),
         }
     }
+
+    pub async fn resolve_plaintext_for_owner(
+        &self,
+        key: &RuntimeIntegrationKey,
+        _kind: CredentialKind,
+        _expected_owner: &CredentialOwnerId,
+        _request: &RuntimeReleaseRequest<'_>,
+    ) -> Result<SecretString, RuntimeCredentialError> {
+        Err(RuntimeCredentialError::IntegrationNotFound { key: key.clone() })
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

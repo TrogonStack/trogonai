@@ -64,6 +64,7 @@ trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
 trogon-egress-proxy = { path = "crates/platform/trogon-egress-proxy" }
 trogon-workload-identity = { path = "crates/platform/trogon-workload-identity" }
+trogon-webhooks = { path = "crates/platform/trogon-webhooks" }
 trogon-policy-eval = { path = "crates/policy/trogon-policy-eval" }
 trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
