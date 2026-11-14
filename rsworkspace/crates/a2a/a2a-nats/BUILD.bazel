@@ -2,6 +2,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     name = "a2a-nats",
+    # The workspace imports spicedb-grpc-tonic under the name authzed.
+    aliases = {"@crates//:spicedb-grpc-tonic": "authzed"},
     crate_features = ["spicedb"],
     # The @crates labels are optional dependencies of the enabled features. No
     # workspace member enables those features, so crate_universe leaves them out.
@@ -13,8 +15,8 @@ workspace_crate(
         "//rsworkspace/crates/platform/trogon-nats",
         "//rsworkspace/crates/platform/trogon-semconv",
         "//rsworkspace/crates/platform/trogon-std",
-        "@crates//:authzed",
         "@crates//:moka",
+        "@crates//:spicedb-grpc-tonic",
         "@crates//:tonic",
     ],
 )

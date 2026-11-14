@@ -2,6 +2,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     name = "a2a-gateway",
+    # The workspace imports spicedb-grpc-tonic under the name authzed.
+    aliases = {"@crates//:spicedb-grpc-tonic": "authzed"},
     binaries = {"a2a-gateway": {}},
     # Cargo CI tests every feature at once; the default-features run is not mirrored.
     crate_features = ["spicedb"],
@@ -51,7 +53,7 @@ workspace_crate(
         "//rsworkspace/crates/platform/trogon-semconv",
         "//rsworkspace/crates/platform/trogon-std",
         "//rsworkspace/crates/platform/trogon-telemetry",
-        "@crates//:authzed",
+        "@crates//:spicedb-grpc-tonic",
         "@crates//:tonic",
     ],
 )
