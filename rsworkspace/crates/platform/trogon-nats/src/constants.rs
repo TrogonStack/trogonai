@@ -59,3 +59,6 @@ pub const SEED_PREFIXES: [&str; 3] = ["SO", "SA", "SU"];
 /// Values of `NATS_TLS_DISABLED` that disable TLS, compared without regard to
 /// letter case. Any other non-empty value is a configuration error.
 pub const TLS_DISABLED_VALUES: [&str; 3] = ["true", "1", "yes"];
+
+pub(crate) const MAX_NATIVE_STORED_HEADER_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_NATIVE_KV_KEY_BYTES: usize = 1024;
