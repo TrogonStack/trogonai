@@ -1774,7 +1774,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "Limits::stderr_tail defaults to TypeScript's 2048 units; Limits::python() sets it to 0. TypeScript's secret redaction of the tail is not ported."
+        "reason": "Limits::stderr_tail defaults to TypeScript's 2048 units; Limits::python() sets it to 0. The tail grows and is cut as TypeScript's does, and its secrets are redacted in the TypeScript dialect only (see r12-stderr-redaction)."
       },
       "contracts": [
         "upstream_defaults::r08_a_process_error_keeps_the_last_2048_stderr_units_trimmed",
@@ -1784,6 +1784,42 @@
       "rust": [
         "src/framing.rs",
         "src/process_transport.rs"
+      ]
+    },
+    {
+      "id": "r12-stderr-redaction",
+      "concept": "Secret redaction of stderr-derived error text",
+      "python": {
+        "status": "absent",
+        "reason": "Python keeps no stderr tail and redacts nothing."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function Em(e){return[...Uet,...Fet].reduce((t,[n,r])=>t.replace(n,r),String(e))}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "5172ee0063201e43c0064c426791fd2c10f0c81f46b50d57f57ec55078af324e"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "TypeScript removes secret-shaped tokens (bearer and basic credentials, vendor API keys, cloud and source host tokens, webhooks, JWTs) from the stderr tail, from the spawn failure message and from the path in the not found and failed to launch message. Python puts none of that text in its errors."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "The TypeScript dialect redacts with the same eighteen patterns in the same order, run on a matcher with JavaScript semantics; ArgvStyle::Python keeps its tail unredacted."
+      },
+      "contracts": [
+        "subprocess::process_failure_message_redacts_secrets_from_the_stderr_tail",
+        "shutdown_errors::t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory"
+      ],
+      "rust": [
+        "src/error.rs",
+        "src/framing.rs",
+        "src/js_regex.rs",
+        "src/process_transport.rs",
+        "src/stderr_redaction.rs"
       ]
     },
     {

@@ -181,10 +181,54 @@
         {
           "path": "tests/shutdown_errors.rs",
           "name": "t14_a_write_after_the_cli_exited_with_an_error_reports_the_upstream_state"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "every_golden_stderr_case_matches_the_bundle_byte_for_byte"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "every_golden_spawn_case_matches_the_bundle_byte_for_byte"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "all_eighteen_patterns_are_compiled"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "another_spawn_error_is_worded_and_redacted_like_the_bundle"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "a_launch_failure_keeps_its_kind_and_text_and_adds_the_path"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "the_errno_values_of_an_unusable_path_are_launch_failures"
+        },
+        {
+          "path": "src/stderr_redaction/tests.rs",
+          "name": "any_other_spawn_error_is_left_as_it_was"
+        },
+        {
+          "path": "src/framing/tests.rs",
+          "name": "a_secret_is_removed_from_the_tail_only_when_redacting"
+        },
+        {
+          "path": "src/framing/tests.rs",
+          "name": "a_secret_is_removed_before_the_tail_is_cut"
+        },
+        {
+          "path": "tests/subprocess.rs",
+          "name": "process_failure_message_redacts_secrets_from_the_stderr_tail"
+        },
+        {
+          "path": "tests/shutdown_errors.rs",
+          "name": "t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory"
         }
       ],
       "status": "supported",
-      "rationale": "Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data."
+      "rationale": "TypeScript error text that comes from stderr or a failed spawn is redacted with the bundle's eighteen secret patterns, run on a matcher with JavaScript semantics because the patterns need lookahead and lookbehind (goldens from the real sdk.mjs 0.3.323 in tests/fixtures/stderr_redaction); Python redacts nothing. Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data."
     },
     {
       "id": "permission-modes",

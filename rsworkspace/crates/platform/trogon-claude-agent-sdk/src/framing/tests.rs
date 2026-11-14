@@ -71,3 +71,77 @@ fn an_incomplete_character_waits_for_the_next_chunk() {
     assert_eq!(super::decode_chunk(&mut pending, &bytes[1..]), "é");
     assert!(pending.is_empty());
 }
+
+fn tail_text(tail: &super::SharedTail) -> String {
+    String::from_utf8_lossy(tail.snapshot().as_bytes()).into_owned()
+}
+
+#[test]
+fn the_tail_keeps_the_last_units_without_surrounding_whitespace() {
+    let tail = super::SharedTail::new(8, false);
+    tail.append(b"  header line\nlast words \n");
+    assert_eq!(tail_text(&tail), "words");
+}
+
+#[test]
+fn the_tail_trims_the_javascript_whitespace_set_only() {
+    let tail = super::SharedTail::new(64, false);
+    tail.append("\u{feff}\u{a0} body \u{85}\u{3000}".as_bytes());
+    assert_eq!(tail_text(&tail), "body \u{85}");
+}
+
+#[test]
+fn a_surrogate_pair_cut_in_half_is_dropped() {
+    let tail = super::SharedTail::new(3, false);
+    tail.append("a\u{1f600}bc".as_bytes());
+    assert_eq!(tail_text(&tail), "bc");
+}
+
+#[test]
+fn the_tail_is_cut_once_it_holds_more_than_twice_the_units() {
+    let tail = super::SharedTail::new(4, false);
+    tail.append(b"12345678");
+    assert_eq!(tail_text(&tail), "5678");
+    tail.append(b"9");
+    assert_eq!(tail_text(&tail), "6789");
+}
+
+#[test]
+fn a_secret_is_removed_from_the_tail_only_when_redacting() {
+    let secret = format!("sk-{}", "a1".repeat(12));
+    let redacting = super::SharedTail::new(2048, true);
+    redacting.append(format!("token {secret} end").as_bytes());
+    assert_eq!(tail_text(&redacting), "token <token> end");
+    let plain = super::SharedTail::new(2048, false);
+    plain.append(format!("token {secret} end").as_bytes());
+    assert_eq!(tail_text(&plain), format!("token {secret} end"));
+}
+
+#[test]
+fn a_secret_is_removed_before_the_tail_is_cut() {
+    let secret = format!("sk-{}", "a1".repeat(12));
+    let tail = super::SharedTail::new(20, true);
+    tail.append(format!("x {secret} yyyyyyyyyyyyyyyyyyyyyyyyy").as_bytes());
+    assert_eq!(tail_text(&tail), "yyyyyyyyyyyyyyyyyyyy");
+}
+
+#[test]
+fn a_stream_that_ends_inside_a_character_leaves_one_replacement_character() {
+    let tail = super::SharedTail::new(64, false);
+    tail.append(&"é".as_bytes()[..1]);
+    assert_eq!(tail_text(&tail), "");
+    tail.finish();
+    assert_eq!(tail_text(&tail), "\u{fffd}");
+    tail.finish();
+    assert_eq!(tail_text(&tail), "\u{fffd}");
+}
+
+#[tokio::test]
+async fn draining_stderr_fills_the_tail_and_flushes_a_cut_character() -> Result<(), std::io::Error> {
+    let tail = super::SharedTail::new(64, false);
+    let mut bytes = b"oops ".to_vec();
+    bytes.push(0xC3);
+    super::drain_stderr_with(&bytes[..], tail.clone(), 100, None).await?;
+    assert_eq!(tail_text(&tail), "oops \u{fffd}");
+    Ok(())
+}

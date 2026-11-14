@@ -337,13 +337,25 @@ impl Error {
                         .to_owned(),
                 );
             }
+            Self::Spawn(source) => {
+                return Some(
+                    match source.get_ref().and_then(|inner| inner.downcast_ref::<SpawnFailure>()) {
+                        Some(failure) => launch_message(&failure.path),
+                        None => format!(
+                            "Failed to spawn Claude Code process: {}",
+                            crate::stderr_redaction::redact(&source.to_string())
+                        ),
+                    },
+                );
+            }
+            Self::CliNotFoundAt(path) => return Some(launch_message(path)),
             _ => {}
         }
         let Self::Process { status, stderr } = self else {
             return None;
         };
         let tail = String::from_utf8_lossy(stderr.as_bytes());
-        let tail = tail.trim();
+        let tail = tail.trim_matches(crate::js_regex::is_whitespace);
         let tail = if tail.is_empty() {
             String::new()
         } else {
@@ -362,6 +374,74 @@ impl Error {
             }
         }
         None
+    }
+}
+
+/// A spawn error that carries the path it tried to start, so TypeScript's launch-failure text can name it.
+#[derive(Debug)]
+pub(crate) struct SpawnFailure {
+    path: std::path::PathBuf,
+    source: io::Error,
+}
+
+impl std::fmt::Display for SpawnFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.source, formatter)
+    }
+}
+
+impl std::error::Error for SpawnFailure {}
+
+/// Whether TypeScript words a spawn failure as a failed launch of the executable: the errors a missing or
+/// unusable path produces.
+fn is_launch_failure(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied) || has_launch_errno(error)
+}
+
+#[cfg(unix)]
+fn has_launch_errno(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::ENOTDIR | libc::ELOOP | libc::ENAMETOOLONG | libc::EROFS)
+    )
+}
+
+#[cfg(not(unix))]
+fn has_launch_errno(_error: &io::Error) -> bool {
+    false
+}
+
+/// Keeps the kind and text of a spawn error and, for a launch failure, the path that was started.
+pub(crate) fn launch_failure(path: &std::path::Path, error: io::Error) -> io::Error {
+    if is_launch_failure(&error) {
+        io::Error::new(
+            error.kind(),
+            SpawnFailure {
+                path: path.to_path_buf(),
+                source: error,
+            },
+        )
+    } else {
+        error
+    }
+}
+
+/// TypeScript's text for a path that could not be started, which depends on whether it names a native binary and
+/// whether it exists.
+fn launch_message(path: &std::path::Path) -> String {
+    let native = !crate::process_transport::is_script(path, crate::ArgvStyle::TypeScript);
+    let shown = crate::stderr_redaction::redact(&path.to_string_lossy());
+    match (native, path.exists()) {
+        (true, true) => format!(
+            "Claude Code native binary at {shown} exists but failed to launch. This usually means the binary does not match this system's libc \u{2014} e.g. spawning a musl-linked binary on a glibc Linux host fails because the musl dynamic loader (/lib/ld-musl-*) is missing. Specify a matching binary with options.pathToClaudeCodeExecutable."
+        ),
+        (false, true) => format!("Claude Code executable at {shown} exists but failed to launch."),
+        (true, false) => format!(
+            "Claude Code native binary not found at {shown}. Please ensure Claude Code is installed via native installer or specify a valid path with options.pathToClaudeCodeExecutable."
+        ),
+        (false, false) => {
+            format!("Claude Code executable not found at {shown}. Is options.pathToClaudeCodeExecutable set?")
+        }
     }
 }
 
