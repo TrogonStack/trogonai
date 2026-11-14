@@ -22,10 +22,15 @@ import { pathToFileURL } from 'node:url';
 const realNow = Date.now.bind(Date);
 const realPerformanceNow = performance.now.bind(performance);
 const realSetTimeout = globalThis.setTimeout;
-const clock = { wall: 0, mono: 0, jump: null };
+const clock = { wall: 0, mono: 0, jump: null, deadlines: [] };
 Date.now = () => realNow() + clock.wall;
 performance.now = () => realPerformanceNow() + clock.mono;
 globalThis.setTimeout = (callback, delay, ...args) => {
+  // The side question deadline (660000 ms) is shortened to 300 ms, and the delay the bundle asked for is kept.
+  if (delay === 660000) {
+    clock.deadlines.push(delay);
+    return realSetTimeout(callback, 300, ...args);
+  }
   if (clock.jump !== null && delay === 45000) {
     const jump = clock.jump;
     clock.jump = null;
@@ -681,6 +686,123 @@ controlCase('side_question_history_must_be_pairs', request('side_question', { qu
 controlCase('side_question_history_must_be_an_array', request('side_question', { question: 'q', history: 'x' }), { callbacks: { onSideQuestion: {} } });
 controlCase('side_question_without_a_callback_is_unsupported', request('side_question', { question: 'q' }));
 controlCase('side_question_with_an_invalid_fallback_notice_is_refused', request('side_question', { question: 'q', history: [{ question: 'a', response: 'b', fallback_notice: 3 }] }));
+
+// Replies that wait for a host promise. `resolves`, `rejects`, `rejectsAbort` (an AbortError), `never` and
+// `rejectsOnAbort` say what the promise does; `progress` lists what the callback reports before it settles.
+const slow = { settleMs: 900 };
+const stopTask = (name, behaviour, extra = {}) => controlCase(`stop_task_${name}`, request('stop_task', { task_id: 't1' }), { callbacks: { onStopTask: behaviour }, ...extra });
+stopTask('replies_with_what_the_host_resolves', { resolves: { stopped: true } });
+stopTask('replies_with_an_empty_object_for_nothing', { resolvesNothing: true });
+stopTask('replies_with_an_empty_object_for_null', { resolves: null });
+stopTask('that_rejects_says_it_failed', { rejects: 'boom' });
+stopTask('that_is_aborted_reports_the_cleaned_message', { rejectsAbort: 'stop\tded​ early' });
+const backgroundTasks = (name, extra, behaviour, spec = {}) => controlCase(`background_tasks_${name}`, request('background_tasks', extra), { callbacks: { onBackgroundTasks: behaviour }, ...spec });
+backgroundTasks('without_a_tool_use_id_replies_with_an_empty_object', {}, { resolves: true });
+backgroundTasks('with_a_null_tool_use_id_replies_with_an_empty_object', { tool_use_id: null }, { resolves: true });
+backgroundTasks('with_an_empty_tool_use_id_replies_with_an_empty_object', { tool_use_id: '' }, { resolves: true });
+backgroundTasks('with_a_tool_use_id_reports_what_was_backgrounded', { tool_use_id: 'tu1' }, { resolves: true });
+backgroundTasks('with_a_tool_use_id_reports_a_structured_answer', { tool_use_id: 'tu1' }, { resolves: { ids: ['a'] } });
+backgroundTasks('with_a_tool_use_id_and_no_answer_replies_with_an_empty_object', { tool_use_id: 'tu1' }, { resolvesNothing: true });
+backgroundTasks('that_rejects_says_it_failed', { tool_use_id: 'tu1' }, { rejects: 'boom' });
+backgroundTasks('that_is_aborted_reports_the_cleaned_message', {}, { rejectsAbort: 'cut\u0007 short' });
+backgroundTasks('are_refused_when_disabled_by_the_environment', { tool_use_id: 'tu1' }, { resolves: true }, { env: { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1' } });
+backgroundTasks('are_refused_in_simple_mode', {}, { resolves: true }, { env: { CLAUDE_CODE_SIMPLE: '1' } });
+backgroundTasks('ignore_a_falsy_disable_flag', {}, { resolves: true }, { env: { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '0' } });
+backgroundTasks('read_a_true_word_as_disabled', {}, { resolves: true }, { env: { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: ' True ' } });
+backgroundTasks('with_a_bad_id_are_refused_before_the_environment', { tool_use_id: 5 }, { resolves: true }, { env: { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1' } });
+const sideQuestion = (name, behaviour, extra = {}, spec = {}) => controlCase(`side_question_${name}`, request('side_question', { question: 'q', ...extra }), { callbacks: { onSideQuestion: behaviour }, ...slow, ...spec });
+sideQuestion('passes_a_real_answer_through', { resolves: { response: 'a', synthetic: false } });
+sideQuestion('replaces_an_answer_that_is_not_marked_real', { resolves: { response: 'a' } });
+sideQuestion('replaces_a_synthetic_answer', { resolves: { response: 'a', synthetic: true, note: 1 } });
+sideQuestion('keeps_a_null_answer', { resolves: { response: null } });
+sideQuestion('keeps_a_null_answer_that_is_synthetic', { resolves: { response: null, synthetic: true } });
+sideQuestion('without_a_response_key_is_replaced', { resolves: { extra: 1 } });
+sideQuestion('without_an_answer_fails', { resolvesNothing: true });
+sideQuestion('that_rejects_says_it_failed', { rejects: 'boom' });
+sideQuestion('that_is_aborted_reports_the_cleaned_message', { rejectsAbort: 'gave\tup' });
+sideQuestion('hands_over_the_question_and_history', { resolves: { response: 'a', synthetic: false } }, { history: [{ question: 'a', response: 'b', fallback_notice: 'n', extra: 1 }, { question: 'c', response: 'd' }], extra: 2 });
+sideQuestion('reports_progress_before_the_answer', { progress: [{ message: 'one' }, { message: 'two', percent: 5 }], resolves: { response: 'a', synthetic: false } });
+sideQuestion('progress_may_name_the_envelope_keys', { progress: [{ type: 'x', subtype: 'y', request_id: 'z', uuid: 'u', session_id: 's', more: true }], resolves: { response: 'a', synthetic: false } });
+sideQuestion('times_out_and_aborts_the_host', { never: true });
+const twoEvents = (name, second, behaviour, spec = {}) => add('control', name, { epoch: 6, stream: [connection([clientEvent(1, 'e1', request('side_question', { question: 'q' })), clientEvent(2, 'e2', second)], 'hold', { gapMs: 200 })], callbacks: { onSideQuestion: behaviour }, waitFor: [['=/worker/events', 1]], settleMs: 900, ...spec });
+twoEvents('side_question_cancelled_by_the_client_aborts_the_host', { type: 'control_cancel_request', request_id: 'r1' }, { rejectsOnAbort: true });
+twoEvents('side_question_cancelled_after_the_host_answered_changes_nothing', { type: 'control_cancel_request', request_id: 'r1' }, { resolves: { response: 'a', synthetic: false } });
+const lateAnswer = { resolvesAfterMs: 260, resolves: { response: 'a', synthetic: false } };
+twoEvents('side_question_cancelled_by_the_client_is_still_answered_when_the_host_ignores_it', { type: 'control_cancel_request', request_id: 'r1' }, lateAnswer);
+twoEvents('side_question_delivered_twice_is_answered_once', request('side_question', { question: 'q' }), { never: true });
+twoEvents('side_question_cancel_for_another_request_leaves_it_running', { type: 'control_cancel_request', request_id: 'other' }, lateAnswer);
+
+const setModel = (name, behaviour, extra = { model: 'm1' }, spec = {}) => controlCase(`set_model_${name}`, request('set_model', extra), { callbacks: { onSetModel: behaviour }, ...slow, ...spec });
+setModel('verdict_that_succeeds', { resolves: { ok: true } });
+setModel('verdict_that_names_the_model', { resolves: { ok: true, model: 'm​2\n' } });
+setModel('verdict_that_carries_notices', { resolves: { ok: true, notices: ['one\t1', 5, 'two', null] } });
+setModel('verdict_with_notices_that_is_not_a_list', { resolves: { ok: true, notices: 'x' } });
+setModel('verdict_with_no_answer_succeeds', { resolvesNothing: true });
+setModel('verdict_that_fails_reports_each_cleaned_line', { resolves: { ok: false, error: 'bad​ one\nsecond\tline' } });
+setModel('verdict_that_fails_with_a_known_code', { resolves: { ok: false, error: 'slow down', code: 'rate_limit' } });
+setModel('verdict_that_fails_with_every_known_code_kind', { resolves: { ok: false, error: 'e', code: 'verdict_pending', model: 'keep\tme' } });
+setModel('verdict_that_fails_with_an_unknown_code_drops_it', { resolves: { ok: false, error: 'e', code: 'mystery' } });
+setModel('verdict_that_fails_without_text_has_an_empty_error', { resolves: { ok: false } });
+setModel('verdict_that_fails_with_a_non_text_error_has_an_empty_error', { resolves: { ok: false, error: 7 } });
+setModel('verdict_that_rejects_is_an_internal_error', { rejects: 'boom' });
+setModel('verdict_that_is_aborted_is_an_internal_error', { rejectsAbort: 'stopped' });
+const thinking2 = (name, behaviour, extra = { max_thinking_tokens: 5 }) => controlCase(`set_max_thinking_tokens_${name}`, thinkingRequest(extra), { callbacks: { onSetMaxThinkingTokens: behaviour }, ...slow });
+thinking2('verdict_that_succeeds', { resolves: { ok: true } });
+thinking2('verdict_with_no_answer_succeeds', { resolvesNothing: true });
+thinking2('verdict_that_fails_reports_the_cleaned_error', { resolves: { ok: false, error: 'no​pe\t!' } });
+thinking2('verdict_that_fails_without_text_has_an_empty_error', { resolves: { ok: false } });
+thinking2('verdict_that_rejects_says_it_failed', { rejects: 'boom' });
+thinking2('verdict_that_is_aborted_reports_the_cleaned_message', { rejectsAbort: 'cut\tshort' });
+thinking2('verdict_gets_the_display', { resolves: { ok: true } }, { max_thinking_tokens: null, thinking_display: 'omitted' });
+// `apply_flag_settings`: the settings are checked on the spot and the attach path registers no handler for them.
+const flagSettings = (name, settings) => controlCase(`apply_flag_settings_${name}`, request('apply_flag_settings', settings === undefined ? {} : { settings }));
+flagSettings('without_settings_must_be_an_object', undefined);
+flagSettings('with_null_settings_must_be_an_object', null);
+flagSettings('with_text_settings_must_be_an_object', 'x');
+flagSettings('with_list_settings_must_be_an_object', []);
+flagSettings('with_number_settings_must_be_an_object', 5);
+flagSettings('with_no_keys_has_nothing_to_apply', {});
+flagSettings('with_an_effort_level_reaches_the_missing_handler', { effortLevel: 'low' });
+flagSettings('with_a_null_effort_level_reaches_the_missing_handler', { effortLevel: null });
+flagSettings('with_ultracode_reaches_the_missing_handler', { ultracode: false });
+flagSettings('with_both_known_keys_reaches_the_missing_handler', { ultracode: true, effortLevel: 'high' });
+flagSettings('with_a_numeric_effort_level_is_refused', { effortLevel: 5 });
+flagSettings('with_a_text_ultracode_is_refused', { ultracode: 'yes' });
+flagSettings('with_a_bad_effort_level_and_a_bad_ultracode_names_the_effort_level', { ultracode: 1, effortLevel: 5 });
+flagSettings('with_a_good_effort_level_and_a_bad_ultracode_names_ultracode', { ultracode: 1, effortLevel: 'x' });
+flagSettings('with_an_unknown_key_names_it', { foo: 1 });
+flagSettings('with_an_unknown_key_before_a_bad_type_names_the_key', { effortLevel: 5, foo: 1 });
+flagSettings('with_several_unknown_keys_names_five_and_counts_the_rest', { a: 1, b: 1, c: 1, d: 1, e: 1, f: 1, g: 1, h: 1 });
+flagSettings('with_exactly_five_unknown_keys_names_them_all', { a: 1, b: 1, c: 1, d: 1, e: 1 });
+flagSettings('with_index_like_keys_lists_them_first_in_order', { b: 1, 2: 1, 1: 1, a: 1, '01': 1, 10: 1 });
+flagSettings('with_an_unknown_key_that_has_escape_codes', { 'a\u001b[31mred\u001b[0mb': 1 });
+flagSettings('with_an_unknown_key_that_rebuilds_an_escape_code_when_stripped', { 'a\u001b\u001b[31m[31mb': 1 });
+flagSettings('with_an_unknown_key_nested_deeper_than_the_strip_passes', { 'x\u001b\u001b\u001b\u001b\u001b[31m[31m[31m[31m[31mmmmmmy': 1 });
+flagSettings('with_an_unknown_key_that_has_control_and_format_characters', { 'tab\tkey​z\u0000q r': 1 });
+flagSettings('with_an_unknown_key_that_has_runs_of_spaces', { '  two   words  ': 1 });
+flagSettings('with_an_unknown_key_that_has_backticks', { 'a`b｀cˋd`e‵f': 1 });
+flagSettings('with_an_unknown_key_that_starts_with_a_combining_mark', { '́x ́y -́z q́': 1 });
+flagSettings('with_an_unknown_key_that_needs_composing', { 'é': 1 });
+flagSettings('with_an_unknown_key_that_cleans_to_nothing', { '​': 1 });
+flagSettings('with_an_unknown_key_of_exactly_the_limit', { ['k'.repeat(40)]: 1 });
+flagSettings('with_an_unknown_key_over_the_limit', { ['k'.repeat(41)]: 1 });
+flagSettings('with_an_unknown_key_cut_inside_a_surrogate_pair', { ['k'.repeat(39) + '\u{1f600}tail']: 1 });
+flagSettings('with_an_unknown_key_cut_after_a_surrogate_pair', { ['k'.repeat(38) + '\u{1f600}tail']: 1 });
+// A key longer than 320 units is cut there first, and an escape code the cut splits is dropped whole when the full text
+// finishes it, so the pad of short escape codes pushes the text that shows past the cut.
+const pad = '\u001b[0m'.repeat(77) + 'abcdefghi';
+flagSettings('with_an_unknown_key_cut_at_a_pair_before_the_eight_fold_limit', { ['k'.repeat(319) + '\u{1f600}tail']: 1 });
+flagSettings('with_an_unknown_key_that_cuts_a_whole_escape_code', { [pad + '\u001b[31mtail']: 1 });
+flagSettings('with_an_unknown_key_that_cuts_an_escape_code_missing_its_end', { [pad + '\u001b[31\u0001tail']: 1 });
+flagSettings('with_an_unknown_key_that_cuts_a_whole_string_escape', { [pad + '\u001b]0;title\u0007tail']: 1 });
+flagSettings('with_an_unknown_key_that_cuts_a_string_escape_missing_its_end', { [pad + '\u001b]0;title and more text without an end']: 1 });
+flagSettings('with_an_unknown_key_that_cuts_a_string_escape_before_its_closer', { [pad + '\u001b]\u001b\\tail']: 1 });
+flagSettings('with_an_unknown_key_that_cuts_a_device_control_escape', { [pad + '\u001bPdata\u001b\\tail']: 1 });
+flagSettings('with_an_unknown_key_that_starts_a_string_escape_early_and_ends_it_late', { ['abc\u001b]0;' + 'x'.repeat(400) + '\u0007tail']: 1 });
+flagSettings('with_an_unknown_key_where_the_cut_ends_a_whole_escape_code', { [pad + '\u001b[mtail']: 1 });
+flagSettings('with_an_unknown_key_where_the_cut_leaves_a_lone_introducer', { [pad + 'ab\u001b[31mtail']: 1 });
+flagSettings('with_a_short_unknown_key_that_ends_in_a_partial_escape_code', { 'a\u001b[3': 1 });
+flagSettings('with_an_unknown_key_that_is_long_and_plain', { ['k'.repeat(400)]: 1 });
 controlCase('initialize_lists_the_defaults', request('initialize'));
 controlCase('initialize_names_the_client_version', request('initialize'), { version: '9.9.9' });
 controlCase('initialize_ignores_dialog_kinds_it_cannot_use', request('initialize', { supportedDialogKinds: ['a', 5] }));
@@ -785,12 +907,27 @@ async function run(spec) {
   // Host callbacks the control dispatch is handed (`spec.callbacks`): each records its arguments and returns what the
   // case says (`returns`), or nothing when the case names none. `undefined` arguments are written as "<undefined>".
   const calls = [];
+  const signals = [];
+  const copy = (value) => JSON.parse(JSON.stringify(value));
   const callback = (name, behaviour) => (...args) => {
-    calls.push([name, ...args.map((arg) => (arg === undefined ? '<undefined>' : arg))]);
-    return 'returns' in behaviour ? JSON.parse(JSON.stringify(behaviour.returns)) : undefined;
+    const options = args.find((arg) => arg !== null && typeof arg === 'object' && 'signal' in arg);
+    if (options !== undefined) signals.push(options.signal);
+    calls.push([name, ...args.map((arg) => (arg === undefined ? '<undefined>' : arg === options ? '<options>' : arg))]);
+    if ('returns' in behaviour) return copy(behaviour.returns);
+    for (const progress of behaviour.progress ?? []) options.onProgress(copy(progress));
+    const abort = (message) => Object.assign(new Error(message), { name: 'AbortError' });
+    if ('resolvesAfterMs' in behaviour) return new Promise((resolve) => setTimeout(() => resolve(copy(behaviour.resolves)), behaviour.resolvesAfterMs));
+    if ('resolves' in behaviour) return Promise.resolve(copy(behaviour.resolves));
+    if (behaviour.resolvesNothing) return Promise.resolve(undefined);
+    if ('rejects' in behaviour) return Promise.reject(new Error(behaviour.rejects));
+    if ('rejectsAbort' in behaviour) return Promise.reject(abort(behaviour.rejectsAbort));
+    if (behaviour.never) return new Promise(() => {});
+    if (behaviour.rejectsOnAbort) return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(abort('the host stopped'))));
+    return undefined;
   };
   for (const [key, behaviour] of Object.entries(spec.callbacks ?? {})) options[key] = callback(key, behaviour);
   if (spec.version !== undefined) options.claudeCodeVersion = spec.version;
+  for (const [key, value] of Object.entries(spec.env ?? {})) process.env[key] = value;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
   const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), ...(spec.stream !== undefined && { stream: spec.stream }), ...(spec.clock !== undefined && { clock: spec.clock }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
@@ -875,10 +1012,12 @@ async function run(spec) {
     }
     if (spec.handleKeys) result.handle_keys = Object.keys(handle).sort();
     if (spec.stream !== undefined) { result.inbound = inbound; result.permission_responses = permissions; result.last_sequence = handle.getSequenceNum(); }
-    if (spec.callbacks !== undefined) result.calls = calls;
+    if (spec.callbacks !== undefined) result.calls = signals.length === 0 ? calls : [...calls, ['<signals aborted>', signals.map((signal) => signal.aborted)]];
+    if (spec.callbacks !== undefined) result.deadlines = clock.deadlines.splice(0);
     result.connected = handle.isConnected();
     result.epoch = handle.getEpoch();
   }
+  for (const key of Object.keys(spec.env ?? {})) delete process.env[key];
   await sleep(120);
   // The bundle's debug log writer is buffered, so the line that names the mismatch reason lands some time after the
   // close. A session that closed always ended on a mismatch or on a refusal that names none, so wait for the line
@@ -1032,11 +1171,12 @@ for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue'
 for (const spec of cases.control) {
   const result = await run(spec);
   const frames = result.requests.filter((r) => r.method === 'POST' && r.path === '/worker/events')
-    .flatMap((r) => JSON.parse(r.body).events.map((event) => event.payload)).filter((payload) => payload.type === 'control_response');
+    .flatMap((r) => JSON.parse(r.body).events.map((event) => event.payload)).filter((payload) => payload.type === 'control_response' || payload.type === 'system');
   for (const frame of frames) if (typeof frame.response?.response?.pid === 'number') frame.response.response.pid = 0;
   const first = spec.stream[0].chunks.length > 0 ? JSON.parse(spec.stream[0].chunks[0].split('data: ')[1]).payload : null;
+  const later = spec.stream[0].chunks.slice(1).map((chunk) => JSON.parse(chunk.split('data: ')[1]).payload);
   const prompts = (spec.steps ?? []).flatMap((step) => step.writes ?? []).map((write) => write.payload);
-  goldens.control.push({ name: spec.name, request: first, version: spec.version ?? null, callbacks: spec.callbacks ?? {}, prompts, calls: result.calls ?? [], frames });
+  goldens.control.push({ name: spec.name, request: first, later, version: spec.version ?? null, callbacks: spec.callbacks ?? {}, prompts, env: spec.env ?? {}, deadlines: result.deadlines ?? [], calls: result.calls ?? [], frames });
 }
 for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));
 for (const mode of ['destroy', 'truncated', 'hang']) goldens.fetch_failures.push(await fetchFailureCase(mode));

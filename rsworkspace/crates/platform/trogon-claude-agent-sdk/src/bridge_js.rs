@@ -9,6 +9,15 @@ use unicode_normalization::UnicodeNormalization;
 
 const DETAIL_LIMIT: usize = 1024;
 
+static ESCAPE_CODES: LazyLock<Option<Regex>> = LazyLock::new(|| {
+    Regex::new(r"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[\]PX^_][^\x1b\x07]*(?:\x07|\x1b\\)").ok()
+});
+static PARTIAL_ESCAPE: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"\x1b(?:[\]PX^_][^\x1b\x07]*\x1b?|\[[\x30-\x3f]*[\x20-\x2f]*)$").ok());
+static WHOLE_CSI: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"^\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]").ok());
+static WHOLE_STRING_ESCAPE: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"^\x1b[\]PX^_][^\x1b\x07]*(?:\x07|\x1b\\)").ok());
 static DECIMAL: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$").ok());
 
@@ -88,15 +97,96 @@ pub(crate) fn plain_detail(message: &str) -> Option<String> {
     if message.encode_utf16().count() > DETAIL_LIMIT || message.chars().any(is_forbidden) {
         return None;
     }
-    let mapped: String = collapse_spaces(message)
+    let cleaned = compose(&collapse_spaces(message));
+    (cleaned.encode_utf16().count() <= DETAIL_LIMIT && cleaned == message.replace('`', "'")).then(|| message.to_owned())
+}
+
+/// The tail of the label cleaner: composed (NFC), backticks as apostrophes, no combining marks after the start, white
+/// space or punctuation.
+fn compose(text: &str) -> String {
+    let mapped: String = text
         .nfc()
         .map(|c| match c {
             '`' | '\u{ff40}' | '\u{2cb}' | '\u{1fef}' | '\u{2035}' => '\'',
             other => other,
         })
         .collect();
-    let cleaned = strip_leading_marks(&mapped);
-    (cleaned.encode_utf16().count() <= DETAIL_LIMIT && cleaned == message.replace('`', "'")).then(|| message.to_owned())
+    strip_leading_marks(&mapped)
+}
+
+/// `rc(text, limit)`: a name as the upstream label cleaner shows it. Cut to `limit * 8` UTF-16 units (an escape code
+/// the cut splits goes whole when the full text finishes it), stripped of escape codes (at most four passes, so a
+/// code the stripping rebuilds can survive), each run of control, format, line and paragraph separator characters a
+/// single space, runs of spaces one space, trimmed, composed, and finally cut to `limit` units with an ellipsis.
+pub(crate) fn clean_label(text: &str, limit: usize) -> String {
+    let cut = cut_before_partial_escape(text, limit * 8);
+    let spaced = collapse_spaces(&mask_controls(&strip_escape_codes(cut)));
+    let composed = compose(&spaced);
+    if composed.encode_utf16().count() > limit {
+        format!("{}\u{2026}", prefix_within_units(&composed, limit))
+    } else {
+        composed
+    }
+}
+
+/// `LX`: `text` cut to `limit` units, less an escape code that the cut leaves unfinished and the text finishes.
+fn cut_before_partial_escape(text: &str, limit: usize) -> &str {
+    let cut = prefix_within_units(text, limit);
+    if cut.len() == text.len() {
+        return cut;
+    }
+    let finishes = |tail: &str| {
+        let pattern = if tail.chars().nth(1) == Some('[') {
+            &WHOLE_CSI
+        } else {
+            &WHOLE_STRING_ESCAPE
+        };
+        pattern.as_ref().is_some_and(|pattern| pattern.is_match(tail))
+    };
+    PARTIAL_ESCAPE
+        .as_ref()
+        .and_then(|partial| partial.find(cut))
+        .map(|found| found.start())
+        .filter(|start| text.get(*start..).is_some_and(finishes))
+        .map_or(cut, |start| cut.get(..start).unwrap_or(cut))
+}
+
+/// `kX`: up to four passes that remove the escape codes.
+fn strip_escape_codes(text: &str) -> String {
+    let mut current = text.to_owned();
+    for _ in 0..4 {
+        let next = ESCAPE_CODES.as_ref().map_or_else(
+            || current.clone(),
+            |pattern| pattern.replace_all(&current, "").into_owned(),
+        );
+        if next == current {
+            break;
+        }
+        current = next;
+    }
+    current
+}
+
+/// `wk`: each run of control, format, line and paragraph separator characters becomes one space.
+fn mask_controls(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut masking = false;
+    for c in text.chars() {
+        let masked = matches!(
+            get_general_category(c),
+            GeneralCategory::Control
+                | GeneralCategory::Format
+                | GeneralCategory::LineSeparator
+                | GeneralCategory::ParagraphSeparator
+        );
+        if !masked {
+            out.push(c);
+        } else if !masking {
+            out.push(' ');
+        }
+        masking = masked;
+    }
+    out
 }
 
 /// `Kt(text)`: the text of a control reply error as the upstream cleaner leaves it: cut to 4,096 UTF-16 units (a pair

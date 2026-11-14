@@ -13,6 +13,17 @@ use trogon_claude_agent_sdk::{
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 type Calls = Arc<Mutex<Vec<Value>>>;
 
+/// The host behaviours that settle a promise; those cases are replayed by `bridge_worker_control_async`.
+const PROMISE_KEYS: [&str; 7] = [
+    "resolves",
+    "resolvesNothing",
+    "rejects",
+    "rejectsAbort",
+    "never",
+    "rejectsOnAbort",
+    "progress",
+];
+
 const GOLDENS: &str = include_str!("fixtures/bridge_worker/goldens.json");
 
 fn goldens() -> Result<Value, serde_json::Error> {
@@ -122,8 +133,17 @@ fn the_error_text_cleaner_is_the_recorded_one() -> TestResult {
 fn control_requests_are_answered_as_the_recorded_session_answered() -> TestResult {
     let goldens = goldens()?;
     let cases = list(&goldens, "control")?;
-    assert!(cases.len() > 90);
+    let mut replayed = 0;
     for case in cases {
+        let waits_for_a_promise = case["callbacks"].as_object().is_some_and(|callbacks| {
+            callbacks
+                .values()
+                .any(|behaviour| PROMISE_KEYS.iter().any(|key| behaviour.get(key).is_some()))
+        });
+        if waits_for_a_promise {
+            continue;
+        }
+        replayed += 1;
         let name = text(case, "name")?;
         let calls = Calls::default();
         let mut callbacks = callbacks_from(&case["callbacks"], &calls);
@@ -158,6 +178,7 @@ fn control_requests_are_answered_as_the_recorded_session_answered() -> TestResul
         let seen = calls.lock().map_err(|error| error.to_string())?.clone();
         assert_eq!(Value::Array(seen), case["calls"], "{name}");
     }
+    assert!(replayed > 90, "{replayed}");
     Ok(())
 }
 
@@ -178,7 +199,7 @@ fn deferred(request: &Value, callbacks: &mut ControlCallbacks) -> Option<Deferre
     };
     match answer_control_request(request, &session, callbacks) {
         ControlReply::Deferred(work) => Some(work),
-        ControlReply::Frame(_) => None,
+        ControlReply::Frame(_) | ControlReply::Pending(_) => None,
     }
 }
 
@@ -219,13 +240,6 @@ fn requests_that_wait_for_a_host_call_are_handed_back_with_their_arguments() {
         deferred(&question, &mut callbacks),
         Some(DeferredControl::SideQuestion {
             request: question["request"].clone()
-        })
-    );
-    let flags = request("apply_flag_settings", json!({ "settings": { "effortLevel": "low" } }));
-    assert_eq!(
-        deferred(&flags, &mut callbacks),
-        Some(DeferredControl::ApplyFlagSettings {
-            settings: Some(json!({ "effortLevel": "low" }))
         })
     );
 }

@@ -4,9 +4,10 @@
 //! The attach path wires `onInterrupt`, `onSetModel`, `onSetMaxThinkingTokens`, `onSetPermissionMode`,
 //! `onRenameSession`, `onStopTask`, `onBackgroundTasks`, `onSideQuestion` and the version string into the dispatcher,
 //! and nothing else, so those are the only callbacks [`ControlCallbacks`] carries. A request that the upstream answers
-//! after an asynchronous host call (`stop_task`, `background_tasks`, `side_question` with a registered callback, and
-//! `apply_flag_settings`) comes back as [`ControlReply::Deferred`] with what the responder needs; a callback that
-//! returns a promise is not representable yet.
+//! after an asynchronous host call (`stop_task`, `background_tasks` and `side_question` with a registered callback)
+//! comes back as [`ControlReply::Deferred`] with what the responder needs, and a `set_model` or
+//! `set_max_thinking_tokens` callback that returns a promise comes back as [`ControlReply::Pending`] with that future;
+//! `bridge_worker_control_async` finishes both.
 //!
 //! Branches the attach path never reaches (each is a draft row in the unreachable notes):
 //! - the outbound-only rejection: an outbound-only session opens no read stream, so no request ever arrives;
@@ -17,12 +18,20 @@
 //!   `onGetWorkspaceDiff`, `onGetContextUsage`, `onMcp*`, `onForkConversation`, `hasPendingPrompts`): each is absent, so
 //!   the request is answered as not supported and the registered branch cannot run.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use serde_json::{Map, Value, json};
 
-use crate::bridge_js::clean_reply_text;
+use crate::bridge_js::{clean_label, clean_reply_text};
 
 const ERROR_CODE_UNSUPPORTED: &str = "unsupported_request";
 const PERMISSION_MODES: [&str; 6] = ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"];
+/// `NPe`: the settings a Remote Control client may change, `MPe` how many unknown names an error lists, and `UPe` how
+/// long each is.
+const FLAG_SETTINGS: [&str; 2] = ["effortLevel", "ultracode"];
+const FLAG_KEYS_SHOWN: usize = 5;
+const FLAG_KEY_LIMIT: usize = 40;
 const THINKING_DISPLAYS: [&str; 3] = ["summarized", "omitted", "highlights"];
 
 /// What a host callback that reports success or failure returned. A callback that returns nothing is `None` where
@@ -36,6 +45,43 @@ pub enum CallbackResult {
     },
 }
 
+/// What a host promise rejected with: an abort (its message is shown to the client) or any other failure (only the
+/// subtype is).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostError {
+    Aborted(String),
+    Failed(String),
+}
+
+impl HostError {
+    /// The text the host rejected with.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Aborted(message) | Self::Failed(message) => message,
+        }
+    }
+}
+
+pub type HostFuture<T> = Pin<Box<dyn Future<Output = Result<T, HostError>> + Send>>;
+
+/// What a `set_model` promise resolved with. A promise that resolves with nothing is `None` where the callback type
+/// says `Option<ModelVerdict>`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModelVerdict {
+    pub ok: bool,
+    pub model: Option<String>,
+    /// The notices of the verdict that are text, in order, when `notices` was a list.
+    pub notices: Option<Vec<String>>,
+    /// The error text, when the error was text (anything else reads as an empty error).
+    pub error: Option<String>,
+    pub code: Option<String>,
+}
+
+pub type PendingModelCallback = Box<dyn FnMut(Option<&str>) -> HostFuture<Option<ModelVerdict>> + Send>;
+pub type PendingThinkingTokensCallback =
+    Box<dyn FnMut(Option<&Value>, Option<&Value>) -> HostFuture<Option<CallbackResult>> + Send>;
+
 pub type ModelCallback = Box<dyn FnMut(Option<&str>) -> Option<CallbackResult> + Send>;
 pub type ThinkingTokensCallback = Box<dyn FnMut(Option<&Value>, Option<&Value>) -> Option<CallbackResult> + Send>;
 pub type TextCallback = Box<dyn FnMut(&str) -> Option<CallbackResult> + Send>;
@@ -47,6 +93,10 @@ pub struct ControlCallbacks {
     pub on_interrupt: Option<Box<dyn FnMut() + Send>>,
     pub on_set_model: Option<ModelCallback>,
     pub on_set_max_thinking_tokens: Option<ThinkingTokensCallback>,
+    /// A `set_model` callback that returns a promise; it replaces `on_set_model` when both are set.
+    pub on_set_model_pending: Option<PendingModelCallback>,
+    /// A `set_max_thinking_tokens` callback that returns a promise; it replaces `on_set_max_thinking_tokens`.
+    pub on_set_max_thinking_tokens_pending: Option<PendingThinkingTokensCallback>,
     pub on_set_permission_mode: Option<TextCallback>,
     pub on_rename_session: Option<TextCallback>,
     pub has_stop_task: bool,
@@ -70,14 +120,29 @@ pub enum DeferredControl {
     StopTask { task_id: String },
     BackgroundTasks { tool_use_id: Option<String> },
     SideQuestion { request: Value },
-    ApplyFlagSettings { settings: Option<Value> },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// A host promise the dispatcher already started; `bridge_worker_control_async::finish_pending` answers it.
+pub enum PendingControl {
+    SetModel(HostFuture<Option<ModelVerdict>>),
+    SetMaxThinkingTokens(HostFuture<Option<CallbackResult>>),
+}
+
+impl std::fmt::Debug for PendingControl {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::SetModel(_) => "PendingControl::SetModel",
+            Self::SetMaxThinkingTokens(_) => "PendingControl::SetMaxThinkingTokens",
+        })
+    }
+}
+
+#[derive(Debug)]
 pub enum ControlReply {
     /// The `control_response` frame to write, with the session id already on it.
     Frame(Value),
     Deferred(DeferredControl),
+    Pending(PendingControl),
 }
 
 /// Whether a request the host sent to the server is kept as pending until a response settles it: only the permission
@@ -118,13 +183,18 @@ fn js_string(value: Option<&Value>) -> String {
     }
 }
 
-struct Replier<'a> {
-    session_id: &'a str,
-    id: Option<&'a Value>,
+pub(crate) struct Replier<'a> {
+    pub(crate) session_id: &'a str,
+    pub(crate) id: Option<&'a Value>,
 }
 
 impl Replier<'_> {
     fn frame(&self, subtype: &str, tail: Vec<(&str, Value)>) -> ControlReply {
+        ControlReply::Frame(self.frame_value(subtype, tail))
+    }
+
+    /// The `control_response` frame with the request id after the subtype and `tail` after it.
+    pub(crate) fn frame_value(&self, subtype: &str, tail: Vec<(&str, Value)>) -> Value {
         let mut response = Map::new();
         response.insert("subtype".to_owned(), json!(subtype));
         if let Some(id) = self.id {
@@ -137,7 +207,7 @@ impl Replier<'_> {
         frame.insert("type".to_owned(), json!("control_response"));
         frame.insert("response".to_owned(), Value::Object(response));
         frame.insert("session_id".to_owned(), json!(self.session_id));
-        ControlReply::Frame(Value::Object(frame))
+        Value::Object(frame)
     }
 
     fn success(&self) -> ControlReply {
@@ -237,9 +307,7 @@ pub fn answer_control_request(
             }
             replier.success()
         }
-        Some("apply_flag_settings") => ControlReply::Deferred(DeferredControl::ApplyFlagSettings {
-            settings: field("settings").cloned(),
-        }),
+        Some("apply_flag_settings") => apply_flag_settings(&replier, field("settings")),
         Some("mcp_set_servers") => mcp_set_servers(&replier, body),
         Some("stop_task") => {
             let Some(task_id) = field("task_id").and_then(Value::as_str) else {
@@ -343,6 +411,9 @@ fn set_model(replier: &Replier<'_>, body: Option<&Value>, callbacks: &mut Contro
             "set_model: Remote Control does not implement only_if_model_is_current. The request changed nothing.",
         );
     }
+    if let Some(callback) = callbacks.on_set_model_pending.as_mut() {
+        return ControlReply::Pending(PendingControl::SetModel(callback(model.and_then(Value::as_str))));
+    }
     let result = callbacks
         .on_set_model
         .as_mut()
@@ -371,6 +442,9 @@ fn set_max_thinking_tokens(
         return replier.error(
             "set_max_thinking_tokens: max_thinking_tokens must be an integer or null and thinking_display must be \"summarized\", \"omitted\", \"highlights\", or null",
         );
+    }
+    if let Some(callback) = callbacks.on_set_max_thinking_tokens_pending.as_mut() {
+        return ControlReply::Pending(PendingControl::SetMaxThinkingTokens(callback(tokens, display)));
     }
     let result = callbacks
         .on_set_max_thinking_tokens
@@ -410,6 +484,73 @@ fn set_permission_mode(replier: &Replier<'_>, mode: Option<&Value>, callbacks: &
         CallbackResult::Ok => replier.success(),
         CallbackResult::Failed { error, code } => replier.cleaned_error(error.as_deref(), code.as_deref()),
     }
+}
+
+/// `qPe` followed by the missing handler: the settings are checked on the spot and the attach path registers no
+/// `onApplyFlagSettings`, so a valid object is answered as not supported.
+fn apply_flag_settings(replier: &Replier<'_>, settings: Option<&Value>) -> ControlReply {
+    match check_flag_settings(settings) {
+        Err(text) => replier.error(&text),
+        Ok(()) => replier.unsupported(
+            "apply_flag_settings is not supported in this context (onApplyFlagSettings callback not registered)",
+        ),
+    }
+}
+
+/// `Object.keys` order: array-index names ascending, then the rest as they were written.
+fn js_key_order(map: &Map<String, Value>) -> Vec<&String> {
+    let index = |key: &str| {
+        key.parse::<u32>()
+            .ok()
+            .filter(|index| *index < u32::MAX && index.to_string() == key)
+    };
+    let mut indexed: Vec<(u32, &String)> = map
+        .keys()
+        .filter_map(|key| index(key).map(|index| (index, key)))
+        .collect();
+    indexed.sort_by_key(|(index, _)| *index);
+    let named = map.keys().filter(|key| index(key).is_none());
+    indexed.into_iter().map(|(_, key)| key).chain(named).collect()
+}
+
+fn check_flag_settings(settings: Option<&Value>) -> Result<(), String> {
+    let Some(settings) = settings.and_then(Value::as_object) else {
+        return Err("apply_flag_settings: settings must be an object".to_owned());
+    };
+    let unknown: Vec<&String> = js_key_order(settings)
+        .into_iter()
+        .filter(|key| !FLAG_SETTINGS.contains(&key.as_str()))
+        .collect();
+    if !unknown.is_empty() {
+        let shown: Vec<String> = unknown
+            .iter()
+            .take(FLAG_KEYS_SHOWN)
+            .map(|key| clean_label(key, FLAG_KEY_LIMIT))
+            .collect();
+        let rest = unknown.len() - shown.len();
+        let more = if rest > 0 {
+            format!(" (+{rest} more)")
+        } else {
+            String::new()
+        };
+        return Err(format!(
+            "apply_flag_settings: {}{more} cannot be changed over Remote Control (only effortLevel and ultracode can)",
+            shown.join(", ")
+        ));
+    }
+    if settings
+        .get("effortLevel")
+        .is_some_and(|level| !level.is_null() && !level.is_string())
+    {
+        return Err("apply_flag_settings: effortLevel must be a string or null".to_owned());
+    }
+    if settings.get("ultracode").is_some_and(|flag| !flag.is_boolean()) {
+        return Err("apply_flag_settings: ultracode must be a boolean".to_owned());
+    }
+    if settings.is_empty() {
+        return Err("apply_flag_settings: nothing to apply \u{2014} only effortLevel and ultracode can be changed over Remote Control".to_owned());
+    }
+    Ok(())
 }
 
 fn mcp_set_servers(replier: &Replier<'_>, body: Option<&Value>) -> ControlReply {

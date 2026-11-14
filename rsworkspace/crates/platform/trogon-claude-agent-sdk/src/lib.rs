@@ -17,6 +17,7 @@ mod bridge_js;
 mod bridge_types;
 mod bridge_worker;
 mod bridge_worker_control;
+mod bridge_worker_control_async;
 mod bridge_worker_delivery;
 mod bridge_worker_events;
 mod bridge_worker_inbound;
@@ -200,8 +201,14 @@ pub use bridge_worker::{
     retry_after_ms, session_url, token_expiry,
 };
 pub use bridge_worker_control::{
-    CallbackResult, ControlCallbacks, ControlReply, ControlSession, DeferredControl, ModelCallback, TextCallback,
+    CallbackResult, ControlCallbacks, ControlReply, ControlSession, DeferredControl, HostError, HostFuture,
+    ModelCallback, ModelVerdict, PendingControl, PendingModelCallback, PendingThinkingTokensCallback, TextCallback,
     ThinkingTokensCallback, answer_control_request, clean_control_text, is_pending_prompt,
+};
+pub use bridge_worker_control_async::{
+    AsyncControl, AsyncControlCallbacks, BackgroundTasksCallback, BackgroundTasksSwitch, ControlTask, FrameWriter,
+    SIDE_QUESTION_DEADLINE, SideQuestionCallback, SideQuestionContext, StopTaskCallback, UuidSource,
+    background_tasks_disabled,
 };
 pub use bridge_worker_delivery::{
     DeliveryAck, DeliveryNext, DeliveryQueue, DeliveryStatus, MAX_BATCH_ACKS, MAX_QUEUE_ACKS, delivery_body,
