@@ -1196,3 +1196,22 @@ pub(crate) const WEBSOCKET_NO_STATUS_CODE: u16 = 1005;
 
 /// The code a browser reports when the connection drops without a close frame.
 pub(crate) const WEBSOCKET_ABNORMAL_CODE: u16 = 1006;
+
+/// The pydantic model union a JSON-RPC message is validated against, as pydantic titles its `ValidationError`.
+pub(crate) const PYDANTIC_JSONRPC_MESSAGE_TITLE: &str =
+    "union[JSONRPCRequest,JSONRPCNotification,JSONRPCResponse,JSONRPCError]";
+
+/// pydantic refuses to convert a string of more than this many significant digits to an integer.
+pub(crate) const PYDANTIC_MAX_INT_DIGITS: usize = 4300;
+
+/// The pydantic minor version that documents each error type.
+pub(crate) const PYDANTIC_DOCUMENTATION_VERSION: &str = "2.14";
+
+/// pydantic-core shows at most this many bytes of an input's `repr`.
+pub(crate) const PYDANTIC_MAX_REPR_BYTES: usize = 50;
+
+/// The bytes pydantic-core keeps from the start of a `repr` it truncates.
+pub(crate) const PYDANTIC_REPR_HEAD_BYTES: usize = 25;
+
+/// The bytes pydantic-core keeps from the end of a `repr` it truncates.
+pub(crate) const PYDANTIC_REPR_TAIL_BYTES: usize = 24;

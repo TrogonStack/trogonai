@@ -1925,6 +1925,54 @@
           "name": "python_dialect_reports_messages_it_cannot_read_and_typescript_drops_them"
         },
         {
+          "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "python_dialect_reads_every_jsonrpc_shape_like_the_mcp_package"
+        },
+        {
+          "path": "src/jsonrpc_message_tests.rs",
+          "name": "reads_each_shape_as_the_union_does"
+        },
+        {
+          "path": "src/jsonrpc_message_tests.rs",
+          "name": "an_empty_message_fails_every_model"
+        },
+        {
+          "path": "src/jsonrpc_message_tests.rs",
+          "name": "params_that_are_not_a_dictionary_are_named_per_model"
+        },
+        {
+          "path": "src/pydantic_int_string_tests.rs",
+          "name": "accepts_what_pydantic_reads_as_an_integer"
+        },
+        {
+          "path": "src/pydantic_int_string_tests.rs",
+          "name": "rejects_what_pydantic_cannot_read"
+        },
+        {
+          "path": "src/pydantic_int_string_tests.rs",
+          "name": "separates_too_many_digits_from_a_bad_number"
+        },
+        {
+          "path": "src/pydantic_validation_error_tests.rs",
+          "name": "renders_the_header_block_and_link"
+        },
+        {
+          "path": "src/pydantic_validation_error_tests.rs",
+          "name": "cuts_a_long_input_around_an_ellipsis_on_character_boundaries"
+        },
+        {
+          "path": "src/pydantic_validation_error_tests.rs",
+          "name": "shows_the_failing_value_when_the_error_has_its_own_input"
+        },
+        {
+          "path": "src/python_value_repr_tests.rs",
+          "name": "repr_spells_values_as_python_does"
+        },
+        {
+          "path": "src/python_value_repr_tests.rs",
+          "name": "type_name_is_the_python_class_name"
+        },
+        {
           "path": "tests/sdk_tools.rs",
           "name": "python_collections_keep_repeated_names"
         },

@@ -248,6 +248,13 @@ request when the server name or message is missing, and answers an unknown
 server or an undeliverable message with a JSON-RPC error under the message's
 id.
 
+The Python dialect reads every message with the `mcp` package's JSON-RPC union
+(request, notification, response, error response), including pydantic's lax
+reading of an error code and its smart-union choice between models. A message
+no model accepts is reported with the text of the `ValidationError` pydantic
+raises: the same header, locations, messages, truncated `input_value` repr and
+documentation link.
+
 `set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
 servers before the request is sent and keeps the session of a server that stays
 registered. Remove a server and re-add it to replace its registry instance. Its
