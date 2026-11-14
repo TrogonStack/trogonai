@@ -813,7 +813,7 @@ fn file_urls_refuse_remote_hosts_and_unreadable_paths() -> TestResult {
 
 #[test]
 fn redirects_raise_what_http_error_302_raises() -> TestResult {
-    let (listener, port) = RawServer::listen()?;
+    let (listener, _) = RawServer::listen()?;
     let routes = Routes::from([
         (
             "/bad-ipv6".to_owned(),

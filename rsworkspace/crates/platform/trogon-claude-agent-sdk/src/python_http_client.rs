@@ -23,7 +23,7 @@ use crate::python_urlopen_tls::{Duplex, UrlopenTls};
 use crate::remote_schema_error::{failure, python_concat, url_error};
 #[cfg(unix)]
 use std::ffi::CString;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Read};
 #[cfg(not(unix))]
 use std::net::ToSocketAddrs;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};

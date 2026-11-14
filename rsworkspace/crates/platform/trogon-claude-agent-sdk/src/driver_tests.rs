@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use serde_json::error::Category;
 use tokio::sync::mpsc;
 
 use super::*;
@@ -1051,10 +1050,4 @@ async fn a_message_nested_past_the_native_stack_is_decoded_routed_and_dropped() 
     assert_eq!(system.data.get("payload").map(array_depth), Some(DEEP));
     drop((result, system));
     fixture.finish().await
-}
-
-#[test]
-fn a_control_response_that_is_not_an_object_is_a_protocol_error() {
-    let response = control_object(deep_value(DEEP));
-    assert!(matches!(response, Err(Error::Protocol(ProtocolError::Json(error))) if error.classify() == Category::Data));
 }

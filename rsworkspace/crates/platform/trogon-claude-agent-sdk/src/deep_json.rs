@@ -135,6 +135,7 @@ fn read_nested(bytes: &[u8], open: &mut Vec<Reading>) -> Result<JsonObject, usiz
             }
         };
         loop {
+            let failed = open.len();
             let Some(innermost) = open.last_mut() else {
                 return match value {
                     Value::Object(object) if skip_whitespace(bytes, at) == bytes.len() => Ok(object),
@@ -144,7 +145,6 @@ fn read_nested(bytes: &[u8], open: &mut Vec<Reading>) -> Result<JsonObject, usiz
                     }
                 };
             };
-            let failed = open.len();
             at = skip_whitespace(bytes, at);
             let separator = bytes.get(at).copied();
             match innermost {

@@ -140,7 +140,7 @@ fn parse150(response: &str) -> Result<(), FtpError> {
         return Ok(());
     };
     let line = rest.split('\n').next().unwrap_or_default();
-    let size = line.match_indices(" (").rev().find_map(|(at, _)| {
+    let size = line.rmatch_indices(" (").find_map(|(at, _)| {
         let tail = line.get(at + 2..)?;
         let end = tail.find(|c: char| !c.is_ascii_digit()).unwrap_or(tail.len());
         let closed = tail

@@ -4,10 +4,13 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
 fn every_number_up_to_unicode_is_a_code_point() -> TestResult {
-    assert_eq!(PythonCodePoint::try_from(0x10_FFFF)?.as_u32(), 0x10_FFFF);
-    assert_eq!(PythonCodePoint::try_from(0xD800)?, PythonCodePoint::from(0xD800_u16));
+    assert_eq!(PythonCodePoint::try_from(0x10_FFFF_u32)?.as_u32(), 0x10_FFFF);
     assert_eq!(
-        PythonCodePoint::try_from(0x11_0000),
+        PythonCodePoint::try_from(0xD800_u32)?,
+        PythonCodePoint::from(0xD800_u16)
+    );
+    assert_eq!(
+        PythonCodePoint::try_from(0x11_0000_u32),
         Err(PythonCodePointError::OutOfRange(0x11_0000))
     );
     Ok(())

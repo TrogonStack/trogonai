@@ -343,7 +343,7 @@ async fn python_dialect_retrieves_remote_references_and_warns_like_the_python_pa
     for case in cases {
         let name = text(case, "name")?;
         let schema = field(case, "schema")?;
-        let server = server(schema)?.with_remote_schema_retriever(Arc::clone(&retriever));
+        let server = server(schema)?.with_remote_schema_retriever(Arc::<ScriptedRetriever>::clone(&retriever));
         let session = initialized(&server).await?;
         for recorded in list(case, "calls")? {
             let arguments = field(recorded, "arguments")?;
@@ -406,9 +406,9 @@ async fn sessions_keep_the_retriever_their_server_had_when_they_opened() -> Test
     let first = Arc::new(ScriptedRetriever::recorded(&documents)?);
     let second = Arc::new(ScriptedRetriever::recorded(&documents)?);
     let schema = json!({"type": "object", "properties": {"a": {"$ref": uri}}});
-    let server = server(&schema)?.with_remote_schema_retriever(Arc::clone(&first));
+    let server = server(&schema)?.with_remote_schema_retriever(Arc::<ScriptedRetriever>::clone(&first));
     let early = initialized(&server).await?;
-    let server = server.with_remote_schema_retriever(Arc::clone(&second));
+    let server = server.with_remote_schema_retriever(Arc::<ScriptedRetriever>::clone(&second));
     let late = initialized(&server).await?;
     let expected = "ERR Input validation error: 'x' is not of type 'integer'";
     assert_eq!(call(&early, &json!({"a": "x"})).await?, expected);
