@@ -1,5 +1,6 @@
 use std::{
     error::Error,
+    ffi::OsStr,
     io::{self, BufRead, Write},
     sync::{
         Arc,
@@ -9,6 +10,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
+use trogon_claude_agent_sdk::adapters::{EnvironmentVariable, SystemEnvironment};
 
 fn emit(value: Value) -> io::Result<()> {
     let stdout = io::stdout();
@@ -134,7 +136,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         json!({"type":"control_response","response":{"subtype":"success","request_id":initialize_id,"response":initialization}}),
     )?;
     emit(
-        json!({"type":"system","subtype":"init","session_id":"fixture-session","arguments":args,"cwd":std::env::current_dir()?,"initialize_request":initialize["request"],"config_dir":std::env::var_os("CLAUDE_CONFIG_DIR")}),
+        json!({"type":"system","subtype":"init","session_id":"fixture-session","arguments":args,"cwd":std::env::current_dir()?,"initialize_request":initialize["request"],"config_dir":SystemEnvironment.var_os(OsStr::new("CLAUDE_CONFIG_DIR"))}),
     )?;
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -307,7 +309,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         emit(result(field(&response["result"]["content"][0], "text")?))?;
                     }
                     "mirror" | "mirror-two" | "mirror-close" => {
-                        let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+                        let config = SystemEnvironment
+                            .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
                             .ok_or_else(|| io::Error::other("missing config root"))?;
                         let path =
                             std::path::PathBuf::from(config).join("projects/fixture-project/fixture-session.jsonl");

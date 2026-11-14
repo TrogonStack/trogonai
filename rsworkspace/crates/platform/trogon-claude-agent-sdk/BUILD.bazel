@@ -9,7 +9,7 @@ rust_binary(
     edition = "2024",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     rustc_flags = ["-Dwarnings"],
-    deps = all_crate_deps(normal = True),
+    deps = [":trogon-claude-agent-sdk"] + all_crate_deps(normal = True),
 )
 
 rust_binary(

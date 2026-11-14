@@ -1,13 +1,15 @@
 #![cfg(feature = "test-support")]
 
-use std::{error::Error as StdError, sync::Arc, time::Duration};
+use std::{error::Error as StdError, ffi::OsStr, sync::Arc, time::Duration};
 
 use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
     BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, EndWithoutResult, Error,
     FeatureSupport, FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages,
     PermissionDecision, Prompt, QueueCapacity, RunEndTimeout, SessionId, SessionStore, SessionStoreOptions,
-    SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet, adapters::SystemClock, query,
+    SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet,
+    adapters::{EnvironmentVariable, SystemClock, SystemEnvironment},
+    query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -995,15 +997,12 @@ async fn a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query()
     );
     assert_eq!(spawn.cwd.as_deref(), Some(directory.path()));
     assert_eq!(
-        spawn
-            .env
-            .get(std::ffi::OsStr::new("SPAWN_MARKER"))
-            .map(|value| value.as_os_str()),
-        Some(std::ffi::OsStr::new("custom"))
+        spawn.env.get(OsStr::new("SPAWN_MARKER")).map(|value| value.as_os_str()),
+        Some(OsStr::new("custom"))
     );
     // The spawner gets the whole environment, the caller's included, not only the SDK's changes.
-    if let Some(path) = std::env::var_os("PATH") {
-        assert_eq!(spawn.env.get(std::ffi::OsStr::new("PATH")), Some(&path));
+    if let Some(path) = SystemEnvironment.var_os(OsStr::new("PATH")) {
+        assert_eq!(spawn.env.get(OsStr::new("PATH")), Some(&path));
     }
     assert_eq!(spawn.uid, None);
     // Closing without an abort leaves the forwarded signal alone, and TypeScript reports no spawn it did not make.
