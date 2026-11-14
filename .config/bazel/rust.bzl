@@ -1,16 +1,21 @@
 """Bazel targets for a Cargo workspace crate."""
 
 load("@crates//:defs.bzl", "all_crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library", "rust_proc_macro", "rust_test")
 
 _RUSTC_FLAGS = ["-Dwarnings"]
 
 def workspace_crate(
         name,
         version = "0.1.0",
+        edition = "2024",
+        library = True,
+        proc_macro = False,
+        binaries = {},
         crate_features = [],
         compile_data = [],
         data = [],
+        rustc_env = {},
         unit_test_args = [],
         deps = [],
         dev_deps = [],
@@ -24,9 +29,19 @@ def workspace_crate(
     Args:
         name: Cargo package name; the crate name replaces dashes with underscores.
         version: Cargo package version.
+        edition: Cargo package edition.
+        library: Whether the package has a library target at `src/lib.rs`.
+        proc_macro: Whether the library is a procedural macro crate.
+        binaries: Maps each Cargo binary name to extra `rust_binary` attributes;
+            `crate_root` defaults to `src/main.rs`. The target is the binary name,
+            with a `_bin` suffix when it matches the package name of a crate that
+            also has a library. Each binary also gets a unit test target, as
+            `cargo test` runs the tests inside binaries too.
         crate_features: Cargo features enabled for the library and its tests.
         compile_data: Files read at compile time, such as `include_str!` inputs.
         data: Files read at test runtime.
+        rustc_env: Environment for compiling the library, which its unit tests
+            inherit.
         deps: Workspace crate labels the library depends on.
         dev_deps: Workspace crate labels only the tests and examples depend on.
         examples: Maps each `examples/<name>.rs` to extra `rust_binary` attributes.
@@ -35,24 +50,63 @@ def workspace_crate(
         unit_test_tags: Tags for the unit test target.
     """
     crate_name = name.replace("-", "_")
+    lib_deps = [":" + name] if library else []
+    library_rule = rust_proc_macro if proc_macro else rust_library
 
-    rust_library(
+    test_deps = all_crate_deps(normal_dev = True) + dev_deps
+    test_proc_macro_deps = all_crate_deps(proc_macro_dev = True)
+
+    for binary, attrs in binaries.items():
+        binary_attrs = dict({"crate_root": "src/main.rs"}, **attrs)
+
+        # A binary named after its package would clash with the library target.
+        target = binary + "_bin" if library and binary == name else binary
+        rust_binary(
+            name = target,
+            srcs = native.glob(["src/**/*.rs"]),
+            compile_data = compile_data,
+            crate_features = crate_features,
+            crate_name = binary.replace("-", "_"),
+            edition = edition,
+            proc_macro_deps = all_crate_deps(proc_macro = True),
+            rustc_flags = _RUSTC_FLAGS,
+            version = version,
+            visibility = ["//visibility:public"],
+            deps = lib_deps + all_crate_deps(normal = True) + deps,
+            **binary_attrs
+        )
+        rust_test(
+            name = target + "_unit_test",
+            crate = ":" + target,
+            compile_data = compile_data,
+            crate_features = crate_features,
+            data = data,
+            proc_macro_deps = test_proc_macro_deps,
+            rustc_flags = _RUSTC_FLAGS,
+            tags = unit_test_tags,
+            deps = test_deps,
+        )
+
+    if not library:
+        if integration_tests or examples:
+            fail("integration tests and examples need a library target")
+        return
+
+    library_rule(
         name = name,
         srcs = native.glob(["src/**/*.rs"]),
         compile_data = compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = "src/lib.rs",
-        edition = "2024",
+        edition = edition,
         proc_macro_deps = all_crate_deps(proc_macro = True),
+        rustc_env = rustc_env,
         rustc_flags = _RUSTC_FLAGS,
         version = version,
         visibility = ["//visibility:public"],
         deps = all_crate_deps(normal = True) + deps,
     )
-
-    test_deps = all_crate_deps(normal_dev = True) + dev_deps
-    test_proc_macro_deps = all_crate_deps(proc_macro_dev = True)
 
     rust_test(
         name = name + "_test",
@@ -74,7 +128,7 @@ def workspace_crate(
             srcs = native.glob(["tests/" + test + ".rs", "tests/" + test + "/**/*.rs"], allow_empty = True),
             crate_features = crate_features,
             crate_root = "tests/" + test + ".rs",
-            edition = "2024",
+            edition = edition,
             proc_macro_deps = all_crate_deps(proc_macro = True) + test_proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
             deps = [":" + name] + all_crate_deps(normal = True) + deps + test_deps,
@@ -95,7 +149,7 @@ def workspace_crate(
             srcs = native.glob(["examples/" + example + ".rs", "examples/" + example + "/**/*.rs"], allow_empty = True),
             crate_features = crate_features,
             crate_root = "examples/" + example + ".rs",
-            edition = "2024",
+            edition = edition,
             proc_macro_deps = all_crate_deps(proc_macro = True) + test_proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
             # Examples link dev-dependencies, which only test code may use.

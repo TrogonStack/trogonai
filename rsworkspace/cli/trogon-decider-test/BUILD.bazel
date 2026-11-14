@@ -1,0 +1,65 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-decider-test",
+    # These tests load target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
+    # built by cargo component outside Bazel.
+    unit_test_args = [
+        "--skip",
+        "conformance::tests::an_authored_error_code_is_checked_against_the_guest_outcome",
+        "--skip",
+        "conformance::tests::an_explicit_normal_budget_still_executes_the_scenario",
+        "--skip",
+        "conformance::tests::an_instantiation_trap_cannot_stand_in_for_multiple_steps",
+        "--skip",
+        "conformance::tests::an_instantiation_trap_does_not_satisfy_an_accepted_expectation",
+        "--skip",
+        "conformance::tests::failed_scenarios_accumulate_in_human_and_tap_runs",
+        "--skip",
+        "conformance::tests::a_suite_whose_name_does_not_match_the_component_is_refused",
+        "--skip",
+        "conformance::tests::strictness_controls_whether_a_suite_with_no_coverage_can_pass",
+        "--skip",
+        "conformance::tests::the_checked_in_schedules_suite_passes",
+    ],
+    deps = [
+        "//rsworkspace/crates/decider/trogon-decider-sim",
+        "//rsworkspace/crates/platform/trogonai-proto",
+    ],
+)
+
+# Declared by hand rather than through workspace_crate(binaries = ...) so its unit
+# tests can skip the ones that need the wasm component built outside Bazel.
+rust_binary(
+    name = "decider-test",
+    srcs = [
+        "src/main.rs",
+        "src/tests.rs",
+    ],
+    crate_root = "src/main.rs",
+    edition = "2024",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_flags = ["-Dwarnings"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":trogon-decider-test",
+        "//rsworkspace/crates/decider/trogon-decider-sim",
+        "//rsworkspace/crates/platform/trogonai-proto",
+    ] + all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "decider-test_unit_test",
+    # These tests load the wasm component built by cargo component outside Bazel.
+    args = [
+        "--skip",
+        "tests::run_passes_the_checked_in_schedules_suite",
+        "--skip",
+        "tests::no_strict_allows_an_incomplete_suite_to_run",
+    ],
+    crate = ":decider-test",
+    rustc_flags = ["-Dwarnings"],
+    deps = all_crate_deps(normal_dev = True),
+)

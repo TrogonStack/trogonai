@@ -1,0 +1,31 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-decider-sim",
+    crate_features = ["test-support"],
+    dev_deps = [
+        "//rsworkspace/cli/trogon-decider-test",
+        "//rsworkspace/crates/scheduler/trogon-scheduler-domain",
+    ],
+    integration_tests = {
+        "parity_schedules": {
+            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm and
+            # cli/trogon-decider-test/schedules.yaml through CARGO_MANIFEST_DIR; the wasm
+            # component is built by cargo component outside Bazel.
+            "tags": ["manual"],
+        },
+        "schedules": {
+            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
+            # built by cargo component outside Bazel.
+            "tags": ["manual"],
+        },
+    },
+    deps = [
+        "//rsworkspace/crates/decider/trogon-decider",
+        "//rsworkspace/crates/decider/trogon-decider-guest-sdk",
+        "//rsworkspace/crates/decider/trogon-decider-wasm-runtime",
+        "//rsworkspace/crates/decider/trogon-decider-wit",
+        "//rsworkspace/crates/platform/trogon-std",
+        "//rsworkspace/crates/platform/trogonai-proto",
+    ],
+)

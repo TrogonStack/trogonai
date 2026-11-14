@@ -1,0 +1,18 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = "trogon-decider-guest-sdk",
+    crate_features = ["test-support"],
+    dev_deps = ["//rsworkspace/crates/platform/trogonai-proto"],
+    integration_tests = {
+        "descriptor": {
+            # export_decider! reads trogon_decider_wit::WIT_DIR, an absolute path baked
+            # in from another build action's sandbox, so wit_bindgen cannot find the WIT.
+            "tags": ["manual"],
+        },
+    },
+    deps = [
+        "//rsworkspace/crates/decider/trogon-decider",
+        "//rsworkspace/crates/decider/trogon-decider-guest-macros",
+    ],
+)
