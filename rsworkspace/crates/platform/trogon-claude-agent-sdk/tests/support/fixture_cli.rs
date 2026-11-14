@@ -27,6 +27,21 @@ fn field<'a>(value: &'a Value, key: &str) -> io::Result<&'a str> {
         .ok_or_else(|| io::Error::other("fixture expected string field"))
 }
 
+/// The CLI takes a prompt as a string, which Python and the client write, or as content blocks, which `sdk.mjs`
+/// writes for a string given to `query()`.
+fn prompt_text(content: &Value) -> io::Result<&str> {
+    match content {
+        Value::Array(blocks) => blocks
+            .first()
+            .map_or(Err(io::Error::other("fixture expected a text block")), |block| {
+                field(block, "text")
+            }),
+        other => other
+            .as_str()
+            .ok_or_else(|| io::Error::other("fixture expected string field")),
+    }
+}
+
 fn result(text: &str) -> Value {
     json!({"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session","result":text,"total_cost_usd":0.0})
 }
@@ -165,7 +180,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     continue;
                 }
-                let prompt = field(&value["message"], "content")?;
+                let prompt = prompt_text(&value["message"]["content"])?;
                 match mode {
                     "normal" | "argv" | "connection-info" => {
                         emit(assistant(prompt))?;
