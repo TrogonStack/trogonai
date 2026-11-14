@@ -92,8 +92,14 @@ impl RequiresActionDetails {
 pub enum RegisterFailure {
     Status(u16),
     TimedOut,
-    Unreachable,
-    InvalidEpoch { detail: Option<String> },
+    /// The request never got an answer; the text and code are the ones the transport error carries.
+    Network {
+        message: String,
+        code: Option<String>,
+    },
+    InvalidEpoch {
+        detail: Option<String>,
+    },
 }
 
 impl RegisterFailure {
@@ -102,7 +108,7 @@ impl RegisterFailure {
         match self {
             Self::Status(status) => format!("Request failed with status code {status}"),
             Self::TimedOut => "timeout of 10000ms exceeded".to_owned(),
-            Self::Unreachable => "Network Error".to_owned(),
+            Self::Network { message, .. } => message.clone(),
             Self::InvalidEpoch { detail: Some(detail) } => {
                 format!("registerWorker: invalid worker_epoch in response: {detail}")
             }
@@ -113,12 +119,12 @@ impl RegisterFailure {
     }
 
     /// The axios error code the upstream error carries, when it has one.
-    pub fn code(&self) -> Option<&'static str> {
+    pub fn code(&self) -> Option<&str> {
         match self {
             Self::Status(status) if status / 100 == 4 => Some("ERR_BAD_REQUEST"),
             Self::Status(_) => Some("ERR_BAD_RESPONSE"),
             Self::TimedOut => Some("ECONNABORTED"),
-            Self::Unreachable => Some("ERR_NETWORK"),
+            Self::Network { code, .. } => code.as_deref(),
             Self::InvalidEpoch { .. } => None,
         }
     }
@@ -162,6 +168,8 @@ pub struct RequestFailure {
     pub reason: String,
     pub retry_after_ms: Option<f64>,
     pub fetch_failed: bool,
+    /// A `403` that the service did not send itself (a proxy or an edge network refused it).
+    pub non_origin_refusal: bool,
 }
 
 /// What one request to the worker service came to.

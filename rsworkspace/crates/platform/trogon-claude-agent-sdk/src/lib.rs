@@ -189,8 +189,9 @@ pub use bridge_types::{
 pub use bridge_worker::{
     AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
     HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
-    InvalidSessionId, NOT_FOUND_BEFORE_EXIT, StatusClass, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing,
-    classify_status, external_metadata_patch, heartbeat_timeout, retry_after_ms, session_url,
+    InvalidSessionId, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
+    WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, refusal_source,
+    retry_after_ms, session_url, token_expiry,
 };
 pub use bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
