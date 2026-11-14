@@ -271,7 +271,7 @@ pub use bridge_types::{
 pub use bridge_worker::{
     AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
     HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
-    InvalidSessionId, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
+    InvalidSessionIdError, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
     WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, refusal_source,
     retry_after_ms, session_url, token_expiry,
 };
@@ -305,12 +305,13 @@ pub use bridge_worker_stream::{
     liveness_timeout, reconnect_delay,
 };
 pub use bridge_worker_stream_driver::{
-    CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector, StreamFailure,
-    StreamResponse, run_stream,
+    CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector,
+    StreamFailureError, StreamResponse, run_stream,
 };
 pub use bridge_worker_stream_http::{HttpStreamBody, HttpStreamConnector};
 pub use bridge_worker_types::{
-    InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
+    InitError, InitFailureError, MismatchReason, RegisterFailureError, RequestFailure, RequestOutcome,
+    RequiresActionDetails,
 };
 pub use browser_query::{
     BrowserPrompt, BrowserQueryOptions, BrowserTransport, browser_query, get_ccr_event, get_sse_drop_counts,
@@ -476,7 +477,7 @@ pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
-pub use settings_sandbox_schema::{SandboxConfigRejected, SandboxConfigSchema};
+pub use settings_sandbox_schema::{SandboxConfigRejectedError, SandboxConfigSchema};
 pub use sse_ccr_event::SseCcrEvent;
 pub use sse_delivery_update::SseDeliveryUpdate;
 pub use sse_drop_category::SseDropCategory;

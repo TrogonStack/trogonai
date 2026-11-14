@@ -11,11 +11,11 @@ use tokio::net::{TcpListener, TcpStream};
 use trogon_claude_agent_sdk::{
     AUTH_FAILURES_BEFORE_EXIT, ClientEvent, DEFAULT_HEARTBEAT_INTERVAL_MS, DeliveryStatus,
     HEARTBEAT_INTERVAL_CEILING_MS, HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS,
-    HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS, InitError, InitFailure, InvalidSessionId, MismatchReason,
-    NOT_FOUND_BEFORE_EXIT, NonOrigin403, POST_TIMEOUT_FLOOR_MS, RegisterFailure, RequestFailure, RequestOutcome,
-    RequiresActionDetails, SHRINK_FROM_BYTES, SensitiveString, SessionState, StatusClass, TokioPacing, WorkerClient,
-    WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, lane_for_path,
-    refusal_source, retry_after_ms, session_url, token_expiry, upload_timeout,
+    HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS, InitError, InitFailureError, InvalidSessionIdError,
+    MismatchReason, NOT_FOUND_BEFORE_EXIT, NonOrigin403, POST_TIMEOUT_FLOOR_MS, RegisterFailureError, RequestFailure,
+    RequestOutcome, RequiresActionDetails, SHRINK_FROM_BYTES, SensitiveString, SessionState, StatusClass, TokioPacing,
+    WorkerClient, WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout,
+    lane_for_path, refusal_source, retry_after_ms, session_url, token_expiry, upload_timeout,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -1072,7 +1072,7 @@ fn invalid_session_ids_are_refused() {
             ..config("http://h", "tok")
         },
     );
-    assert_eq!(refused.err(), Some(InvalidSessionId));
+    assert_eq!(refused.err(), Some(InvalidSessionIdError));
 }
 
 #[test]
@@ -1099,7 +1099,7 @@ async fn init_backs_off_between_attempts_and_then_gives_up() -> TestResult {
     let (base, log) = serve(None, vec![json!({"status": 500, "headers": [], "body": ""})], vec![]).await?;
     let pacing = Recorded::new(0.0);
     let worker = client(&base, pacing.clone())?;
-    let failure = InitFailure {
+    let failure = InitFailureError {
         reason: "worker_register_failed",
         http_status: Some(500),
         no_answer: false,
@@ -1137,7 +1137,7 @@ async fn init_reports_that_nobody_answered() -> TestResult {
     let worker = client(&closed_port().await?, Recorded::new(0.0))?;
     assert_eq!(
         worker.initialize(1).await,
-        Err(InitError::Failed(InitFailure {
+        Err(InitError::Failed(InitFailureError {
             reason: "worker_register_failed",
             http_status: None,
             no_answer: true,
@@ -1242,7 +1242,7 @@ async fn a_silent_service_times_the_request_out() -> TestResult {
     let (base, _) = serve(Some(json!("hang")), vec![], vec![json!("hang")]).await?;
     let worker = client(&base, Recorded::new(0.0))?;
     let failure = worker.register_worker().await.err().ok_or("expected a failure")?;
-    assert_eq!(failure, RegisterFailure::TimedOut);
+    assert_eq!(failure, RegisterFailureError::TimedOut);
     assert_eq!(failure.to_string(), "timeout of 10000ms exceeded");
     assert_eq!(failure.code(), Some("ECONNABORTED"));
     let outcome = worker.heartbeat().await;

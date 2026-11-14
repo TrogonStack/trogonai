@@ -23,7 +23,7 @@ fn missing_home(error: &HomeDirectoryError) {
 
 fn mutation_outcome(result: Result<(), SessionMutationError>) {
     match result {
-        Err(SessionMutationError::InvalidSessionId(id)) => assert_eq!(id, UNKNOWN),
+        Err(SessionMutationError::InvalidSessionIdError(id)) => assert_eq!(id, UNKNOWN),
         Err(SessionMutationError::HomeDirectory(error)) => missing_home(&error),
         other => panic!("unexpected outcome {other:?}"),
     }

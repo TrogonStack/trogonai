@@ -69,7 +69,7 @@ where
     pub async fn fetch_remote_credentials(&self, options: &FetchRemoteCredentialsOptions) -> RemoteCredentialsOutcome {
         let id = &options.session_id;
         if id.is_empty() || !id.chars().all(valid_id_char) {
-            return RemoteCredentialsOutcome::Failure(CredentialsFailure::InvalidSessionId);
+            return RemoteCredentialsOutcome::Failure(CredentialsFailure::InvalidSessionIdError);
         }
         let url = format!("{}/v1/code/sessions/{id}/bridge", options.base_url);
         let Some(reply) = self

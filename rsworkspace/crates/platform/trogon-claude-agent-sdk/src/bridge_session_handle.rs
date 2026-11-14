@@ -12,7 +12,9 @@ use crate::adapters::HttpExecute;
 use crate::bridge_session::{BridgeSession, request_key};
 use crate::bridge_session_runtime::wind_down;
 use crate::bridge_types::SessionState;
-use crate::bridge_worker::{InvalidSessionId, NonOrigin403, WorkerClient, WorkerConfig, WorkerPacing, session_url};
+use crate::bridge_worker::{
+    InvalidSessionIdError, NonOrigin403, WorkerClient, WorkerConfig, WorkerPacing, session_url,
+};
 use crate::bridge_worker_delivery::DeliveryStatus;
 use crate::bridge_worker_events::ClientEvent;
 use crate::bridge_worker_stream::StreamSession;
@@ -33,7 +35,7 @@ pub struct ReconnectOptions {
 #[derive(Debug, thiserror::Error)]
 pub enum ReconnectError {
     #[error(transparent)]
-    InvalidSessionId(#[from] InvalidSessionId),
+    InvalidSessionIdError(#[from] InvalidSessionIdError),
     /// `new URL` threw on the session URL built from the given base. The old worker's undelivered events are
     /// dropped and the session is closed without telling the host.
     #[error("Invalid URL")]

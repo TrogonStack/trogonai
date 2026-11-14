@@ -45,7 +45,8 @@ use crate::bridge_worker_events::{ClientEvent, EventNext, EventQueue, refused_fo
 use crate::bridge_worker_queue::{Next, Patch, PatchQueue, requeue_after_refusal, without_status};
 use crate::bridge_worker_stream::StreamRequest;
 use crate::bridge_worker_types::{
-    InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
+    InitError, InitFailureError, MismatchReason, RegisterFailureError, RequestFailure, RequestOutcome,
+    RequiresActionDetails,
 };
 use crate::settings_json::js_stringify;
 use crate::settings_parse::parse_json;
@@ -89,17 +90,17 @@ impl WorkerPacing for TokioPacing {
 /// A session id the service would not accept in a URL.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("Invalid sessionId: contains unsafe characters")]
-pub struct InvalidSessionId;
+pub struct InvalidSessionIdError;
 
 /// `${apiBaseUrl without trailing slashes}/v1/code/sessions/${sessionId}`, for a session id of letters, digits,
 /// `_` and `-`.
-pub fn session_url(api_base_url: &str, session_id: &str) -> Result<String, InvalidSessionId> {
+pub fn session_url(api_base_url: &str, session_id: &str) -> Result<String, InvalidSessionIdError> {
     let safe = !session_id.is_empty()
         && session_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
     if !safe {
-        return Err(InvalidSessionId);
+        return Err(InvalidSessionIdError);
     }
     Ok(format!(
         "{}/v1/code/sessions/{session_id}",
@@ -298,13 +299,13 @@ fn header_value(text: &str, for_fetch: bool) -> Option<HeaderValue> {
 }
 
 /// What axios throws for a request that never got an answer, read from the transport error.
-fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailure {
+fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailureError {
     let host = url
         .host_str()
         .unwrap_or_default()
         .trim_matches(|c| c == '[' || c == ']');
     let port = url.port_or_known_default().unwrap_or_default();
-    let named = |message: String, code: &str| RegisterFailure::Network {
+    let named = |message: String, code: &str| RegisterFailureError::Network {
         message,
         code: Some(code.to_owned()),
     };
@@ -399,7 +400,7 @@ fn decode(bytes: &[u8]) -> Value {
     parse_json(&text).unwrap_or(Value::String(text))
 }
 
-fn worker_epoch(data: &Value) -> Result<i64, RegisterFailure> {
+fn worker_epoch(data: &Value) -> Result<i64, RegisterFailureError> {
     let number = match data.get("worker_epoch") {
         Some(Value::Number(number)) => number.as_f64(),
         Some(Value::String(text)) => Some(js_number(text)),
@@ -407,7 +408,7 @@ fn worker_epoch(data: &Value) -> Result<i64, RegisterFailure> {
     };
     number
         .and_then(safe_integer)
-        .ok_or_else(|| RegisterFailure::InvalidEpoch {
+        .ok_or_else(|| RegisterFailureError::InvalidEpoch {
             detail: plain_detail(&js_stringify(data)),
         })
 }
@@ -534,7 +535,7 @@ pub struct WorkerClient<H, P = TokioPacing> {
 }
 
 impl<H, P> WorkerClient<H, P> {
-    pub fn new(http: H, pacing: P, config: WorkerConfig) -> Result<Self, InvalidSessionId> {
+    pub fn new(http: H, pacing: P, config: WorkerConfig) -> Result<Self, InvalidSessionIdError> {
         let session_url = session_url(&config.api_base_url, &config.session_id)?;
         let interval = config.heartbeat_interval_ms.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL_MS);
         Ok(Self {
@@ -659,8 +660,8 @@ impl<H, P> WorkerClient<H, P> {
 
 impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
     /// `registerWorker`: asks the service for the epoch this worker will run under.
-    pub async fn register_worker(&self) -> Result<i64, RegisterFailure> {
-        let named = |message: String, code: &str| RegisterFailure::Network {
+    pub async fn register_worker(&self) -> Result<i64, RegisterFailureError> {
+        let named = |message: String, code: &str| RegisterFailureError::Network {
             message,
             code: Some(code.to_owned()),
         };
@@ -690,14 +691,14 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         let reply = exchange(&*self.http, request, REGISTER_TIMEOUT)
             .await
             .map_err(|fault| match fault {
-                Fault::TimedOut => RegisterFailure::TimedOut,
+                Fault::TimedOut => RegisterFailureError::TimedOut,
                 Fault::Unreachable(error) => network_failure(&target, &error),
             })?;
         let Some(body) = &reply.body else {
             return Err(named("stream has been aborted".to_owned(), "ERR_BAD_RESPONSE"));
         };
         if !(200..300).contains(&reply.status) {
-            return Err(RegisterFailure::Status(reply.status));
+            return Err(RegisterFailureError::Status(reply.status));
         }
         worker_epoch(&decode(body))
     }
@@ -771,7 +772,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             let delay = Duration::from_millis(backoff) + Duration::from_secs_f64(self.pacing.jitter() * 0.5);
             self.pacing.pause(delay).await;
         };
-        Err(InitError::Failed(InitFailure {
+        Err(InitError::Failed(InitFailureError {
             reason: "worker_register_failed",
             http_status: failure.status,
             no_answer: failure.fetch_failed,

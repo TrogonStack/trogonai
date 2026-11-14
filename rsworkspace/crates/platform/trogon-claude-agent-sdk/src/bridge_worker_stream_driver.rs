@@ -24,7 +24,7 @@ pub use constants::{CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE};
 /// A request or a body that failed. The cause is only for the log: every failure is retried the same way.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("the stream failed: {0}")]
-pub struct StreamFailure(pub String);
+pub struct StreamFailureError(pub String);
 
 /// The answer to a request for the stream.
 pub struct StreamResponse<B> {
@@ -35,7 +35,7 @@ pub struct StreamResponse<B> {
 /// The body of an answer, read a chunk at a time.
 pub trait StreamBody: Send {
     /// The next chunk: `None` when the body ended, an error when it broke.
-    fn next_chunk(&mut self) -> impl Future<Output = Option<Result<Vec<u8>, StreamFailure>>> + Send;
+    fn next_chunk(&mut self) -> impl Future<Output = Option<Result<Vec<u8>, StreamFailureError>>> + Send;
 }
 
 /// Sends the request for the stream.
@@ -46,7 +46,7 @@ pub trait StreamConnector: Send + Sync {
     fn open(
         &self,
         request: &StreamRequest,
-    ) -> impl Future<Output = Result<StreamResponse<Self::Body>, StreamFailure>> + Send;
+    ) -> impl Future<Output = Result<StreamResponse<Self::Body>, StreamFailureError>> + Send;
 }
 
 /// The two clocks the liveness check compares: `Date.now` and `performance.now`, each as a time since a fixed

@@ -23,7 +23,7 @@ use crate::SensitiveString;
 use crate::adapters::HttpExecute;
 use crate::bridge_session_core::{Core, Runtime};
 use crate::bridge_session_runtime::{Lifecycle, Uploads, spawn_uploads, wind_down};
-use crate::bridge_worker::{InvalidSessionId, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing};
+use crate::bridge_worker::{InvalidSessionIdError, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing};
 use crate::bridge_worker_control::ControlCallbacks;
 use crate::bridge_worker_control_async::{AsyncControl, AsyncControlCallbacks, background_tasks_disabled};
 use crate::bridge_worker_events::ClientEvent;
@@ -32,7 +32,7 @@ use crate::bridge_worker_inbound::InboundRouter;
 use crate::bridge_worker_stream::{Reopen, StreamOpen, StreamRequest, StreamSession};
 use crate::bridge_worker_stream_driver::{StreamClocks, run_stream};
 use crate::bridge_worker_stream_http::HttpStreamConnector;
-use crate::bridge_worker_types::{InitError, MismatchReason, RegisterFailure};
+use crate::bridge_worker_types::{InitError, MismatchReason, RegisterFailureError};
 
 mod constants;
 
@@ -125,9 +125,9 @@ impl AttachBridgeSessionOptions {
 #[derive(Debug, thiserror::Error)]
 pub enum AttachError {
     #[error(transparent)]
-    InvalidSessionId(#[from] InvalidSessionId),
+    InvalidSessionIdError(#[from] InvalidSessionIdError),
     #[error("{}", .0.message())]
-    Register(RegisterFailure),
+    Register(RegisterFailureError),
     #[error("Invalid URL")]
     InvalidUrl,
 }

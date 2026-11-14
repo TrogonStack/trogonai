@@ -34,7 +34,7 @@ use crate::{
 #[derive(Debug, thiserror::Error)]
 pub enum SessionMutationError {
     #[error("invalid session id: {0}")]
-    InvalidSessionId(String),
+    InvalidSessionIdError(String),
     #[error("invalid message id: {0}")]
     InvalidMessageId(String),
     #[error("title must be non-empty")]
@@ -409,7 +409,7 @@ impl SessionFiles {
 }
 
 fn checked_session_id(session_id: &str) -> Result<&str, SessionMutationError> {
-    valid_uuid(session_id).ok_or_else(|| SessionMutationError::InvalidSessionId(session_id.to_owned()))
+    valid_uuid(session_id).ok_or_else(|| SessionMutationError::InvalidSessionIdError(session_id.to_owned()))
 }
 
 fn not_found(session_id: &str, directory: Option<&Path>) -> SessionMutationError {

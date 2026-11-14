@@ -369,7 +369,10 @@ impl Error {
             }
             Self::Spawn(source) => {
                 return Some(
-                    match source.get_ref().and_then(|inner| inner.downcast_ref::<SpawnFailure>()) {
+                    match source
+                        .get_ref()
+                        .and_then(|inner| inner.downcast_ref::<SpawnFailureError>())
+                    {
                         Some(failure) => launch_message(&failure.path),
                         None => format!(
                             "Failed to spawn Claude Code process: {}",
@@ -408,19 +411,12 @@ impl Error {
 }
 
 /// A spawn error that carries the path it tried to start, so TypeScript's launch-failure text can name it.
-#[derive(Debug)]
-pub(crate) struct SpawnFailure {
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub(crate) struct SpawnFailureError {
     path: std::path::PathBuf,
-    source: io::Error,
+    error: io::Error,
 }
-
-impl std::fmt::Display for SpawnFailure {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.source, formatter)
-    }
-}
-
-impl std::error::Error for SpawnFailure {}
 
 /// Whether TypeScript words a spawn failure as a failed launch of the executable: the errors a missing or
 /// unusable path produces.
@@ -446,9 +442,9 @@ pub(crate) fn launch_failure(path: &std::path::Path, error: io::Error) -> io::Er
     if is_launch_failure(&error) {
         io::Error::new(
             error.kind(),
-            SpawnFailure {
+            SpawnFailureError {
                 path: path.to_path_buf(),
-                source: error,
+                error,
             },
         )
     } else {
