@@ -1126,9 +1126,14 @@ where
     }
 
     fn controls_full(&self) -> bool {
-        self.limits
-            .max_pending_controls
-            .is_some_and(|limit| self.pending.len() >= limit.get())
+        // The initialize handshake is not an application control, so it does not use up the limit.
+        self.limits.max_pending_controls.is_some_and(|limit| {
+            self.pending
+                .values()
+                .filter(|pending| !matches!(pending.response, ControlResponder::Initialize { .. }))
+                .count()
+                >= limit.get()
+        })
     }
 
     #[cfg(test)]
