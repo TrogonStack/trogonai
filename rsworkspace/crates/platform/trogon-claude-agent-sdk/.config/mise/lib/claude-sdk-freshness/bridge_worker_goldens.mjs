@@ -148,7 +148,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], served: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -288,6 +288,26 @@ add('events', 'an_ephemeral_batch_that_is_refused_is_dropped', { epoch: 6, event
 add('events', 'a_refused_resend_of_a_mixed_batch_is_dropped', { epoch: 6, events: [raw(500, ''), raw(400, ''), raw(400, ''), json(200, {})], steps: [post(3, [note('a', 'u1'), thinking('t1')]), post(1, [note('c', 'u3')])] });
 add('events', 'a_dropped_batch_does_not_stall_the_next', { epoch: 6, events: [raw(400, ''), json(200, {}), json(200, {})], steps: [post(1, [note('a', 'u1')]), post(1, [note('b', 'u2')])] });
 
+// ---- delivery acknowledgements (handle.reportDelivery, POST /worker/events/delivery) ----
+const report = (expect, reports, extra = {}) => ({ op: 'delivery', expect, reports, ...extra });
+add('delivery', 'a_received_ack_is_posted_with_the_epoch', { epoch: 6, steps: [report(1, [['u1', 'received']])] });
+add('delivery', 'a_processed_ack_is_posted', { epoch: 6, steps: [report(1, [['u1', 'processed']])] });
+add('delivery', 'a_processing_ack_is_posted', { epoch: 6, steps: [report(1, [['u1', 'processing']])] });
+add('delivery', 'a_burst_after_the_first_is_one_batch', { epoch: 6, steps: [report(2, [['u1', 'received'], ['u2', 'received'], ['u3', 'received'], ['u1', 'processed']])] });
+add('delivery', 'processing_acks_of_a_burst_are_one_post', { epoch: 6, steps: [report(1, [['u1', 'processing'], ['u2', 'processing'], ['u3', 'processing']])] });
+add('delivery', 'a_mixed_burst_sends_received_then_processing_then_processed', { epoch: 6, steps: [report(3, [['u2', 'received'], ['u2', 'processed'], ['u9', 'processing']])] });
+add('delivery', 'a_failed_batch_is_resent_with_what_arrived_meanwhile', { epoch: 6, deliveries: [raw(500, ''), json(200, {})], deliveryGaps: [500], steps: [report(2, [['u1', 'received'], ['u2', 'received']])] });
+add('delivery', 'retry_after_sets_the_wait', { epoch: 6, deliveries: [raw(429, '', [['retry-after', '2']]), json(200, {})], deliveryGaps: [2000], steps: [report(2, [['u1', 'received']])] });
+add('delivery', 'the_wait_doubles_while_it_keeps_failing', { epoch: 6, deliveries: [raw(500, ''), raw(503, ''), raw(500, ''), json(200, {})], deliveryGaps: [500, 1000, 2000], steps: [report(4, [['u1', 'received']])] });
+add('delivery', 'a_refused_batch_is_dropped', { epoch: 6, deliveries: [raw(400, ''), json(200, {})], steps: [report(1, [['u1', 'received']]), report(1, [['u2', 'received']])] });
+add('delivery', 'a_too_large_batch_is_dropped', { epoch: 6, deliveries: [raw(413, ''), json(200, {})], steps: [report(1, [['u1', 'received']]), report(1, [['u2', 'processed']])] });
+add('delivery', 'an_unprocessable_batch_is_dropped', { epoch: 6, deliveries: [raw(422, ''), json(200, {})], steps: [report(1, [['u1', 'received']]), report(1, [['u2', 'received']])] });
+add('delivery', 'a_failed_processing_ack_is_not_resent', { epoch: 6, deliveries: [raw(500, ''), json(200, {})], steps: [report(1, [['u1', 'processing']], { settleMs: 1400 }), report(1, [['u2', 'received']])] });
+add('delivery', 'a_refused_processing_ack_is_not_resent', { epoch: 6, deliveries: [raw(400, ''), json(200, {})], steps: [report(1, [['u1', 'processing']], { settleMs: 1400 }), report(1, [['u2', 'received']])] });
+add('delivery', 'processing_goes_out_while_a_failed_batch_waits', { epoch: 6, deliveries: [raw(500, ''), json(200, {}), json(200, {})], steps: [report(3, [['u1', 'received'], ['u2', 'processing']])] });
+add('delivery', 'closing_drops_the_acks_still_queued', { epoch: 6, deliveries: [raw(500, '')], steps: [report(1, [['u1', 'received'], ['u2', 'received'], ['u3', 'processed']], { close: true, settleMs: 1400 })] });
+add('delivery', 'a_closed_client_sends_no_processing_ack', { epoch: 6, steps: [report(1, [['u1', 'received']], { close: true }), report(0, [['u2', 'processing'], ['u3', 'received']])] });
+
 // ---- what the service can serve to hold uploads: the heartbeat policy and the has_subscribers answer ----
 // `attachBridgeSession` never sets followsServedPolicy, uploadHoldMarker or noSubscriberUploadHoldMs, so none of these
 // answers may hold a post. Every run here uses the default options, serves hold-shaped answers, and requires each post
@@ -345,7 +365,7 @@ const until = async (predicate, ms) => {
 async function run(spec) {
   const requests = [];
   const gate = { on: spec.gated === true || (spec.steps ?? []).some((step) => step.op === 'beat'), pending: false, answer: null, current: null };
-  const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], events: [...(spec.events ?? [])], landing: [...(spec.landing ?? [])] };
+  const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], events: [...(spec.events ?? [])], deliveries: [...(spec.deliveries ?? [])], landing: [...(spec.landing ?? [])] };
   const pick = (key) => {
     const queue = queues[key];
     if (queue.length === 0) return json(200, {});
@@ -373,6 +393,7 @@ async function run(spec) {
         gate.pending = false;
       } else if (route === '/worker/heartbeat') response = pick('beat');
       else if (route === '/worker/events') response = pick('events');
+      else if (route === '/worker/events/delivery') response = pick('deliveries');
       res.statusCode = response.status;
       for (const [name, value] of response.headers) res.setHeader(name, value.replace('{base}', `http://127.0.0.1:${server.address().port}`));
       if (isRead && spec.recordDelayMs) setTimeout(() => res.end(response.body), spec.recordDelayMs);
@@ -386,7 +407,7 @@ async function run(spec) {
   const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: true, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code) };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
-  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
+  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), ...(spec.deliveries !== undefined && { deliveries: spec.deliveries }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
   if (spec.sessionToken !== undefined) process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = spec.sessionToken;
   try {
@@ -411,6 +432,16 @@ async function run(spec) {
         if (spec.prompt && Date.now() - wroteAt > 600) throw new Error(`${spec.name}: a post was held for ${Date.now() - wroteAt} ms`);
         if (seen() < start + step.expect) throw new Error(`${spec.name}: expected ${step.expect} event posts`);
         await sleep(250);
+        continue;
+      }
+      if (step.op === 'delivery') {
+        const seen = () => requests.filter((r) => r.path.endsWith('/worker/events/delivery')).length;
+        const start = seen();
+        for (const [id, status] of step.reports) handle.reportDelivery(id, status);
+        if (step.close) handle.close();
+        await until(() => seen() >= start + step.expect, 12000);
+        if (seen() < start + step.expect) throw new Error(`${spec.name}: expected ${step.expect} delivery posts`);
+        await sleep(step.settleMs ?? 250);
         continue;
       }
       if (step.op === 'beat') {
@@ -473,6 +504,13 @@ async function run(spec) {
     const ok = gaps.length === spec.retryBases.length && gaps.every((gap, i) => gap >= spec.retryBases[i] - 5 && gap < spec.retryBases[i] + 500 + 400);
     if (!ok) throw new Error(`${spec.name}: retry gaps ${gaps} outside ${spec.retryBases}`);
     result.retry_base_ms = spec.retryBases;
+  }
+  if (spec.deliveryGaps !== undefined) {
+    const posts = requests.filter((r) => r.path.endsWith('/worker/events/delivery'));
+    const gaps = posts.slice(1).map((r, i) => r.at - posts[i].at);
+    const ok = gaps.length === spec.deliveryGaps.length && gaps.every((gap, i) => spec.deliveryGaps[i] === null || (gap >= spec.deliveryGaps[i] - 5 && gap < spec.deliveryGaps[i] + 500 + 400));
+    if (!ok) throw new Error(`${spec.name}: delivery gaps ${gaps} outside ${spec.deliveryGaps}`);
+    result.delivery_gaps_ms = spec.deliveryGaps;
   }
   if (spec.eventGaps !== undefined) {
     const posts = requests.filter((r) => r.path.endsWith('/worker/events'));
@@ -580,8 +618,8 @@ if (only !== undefined) {
   process.exit(0);
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], served: [], network: [], fetch_failures: [] };
-for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'served']) {
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], delivery: [], served: [], network: [], fetch_failures: [] };
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events', 'delivery', 'served']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
 for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));

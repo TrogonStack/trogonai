@@ -9,13 +9,13 @@ use serde_json::{Map, Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use trogon_claude_agent_sdk::{
-    AUTH_FAILURES_BEFORE_EXIT, ClientEvent, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
-    HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
-    InitError, InitFailure, InvalidSessionId, MismatchReason, NOT_FOUND_BEFORE_EXIT, NonOrigin403,
-    POST_TIMEOUT_FLOOR_MS, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails, SHRINK_FROM_BYTES,
-    SensitiveString, SessionState, StatusClass, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing, classify_status,
-    external_metadata_patch, heartbeat_timeout, lane_for_path, refusal_source, retry_after_ms, session_url,
-    token_expiry, upload_timeout,
+    AUTH_FAILURES_BEFORE_EXIT, ClientEvent, DEFAULT_HEARTBEAT_INTERVAL_MS, DeliveryStatus,
+    HEARTBEAT_INTERVAL_CEILING_MS, HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS,
+    HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS, InitError, InitFailure, InvalidSessionId, MismatchReason,
+    NOT_FOUND_BEFORE_EXIT, NonOrigin403, POST_TIMEOUT_FLOOR_MS, RegisterFailure, RequestFailure, RequestOutcome,
+    RequiresActionDetails, SHRINK_FROM_BYTES, SensitiveString, SessionState, StatusClass, TokioPacing, WorkerClient,
+    WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, lane_for_path,
+    refusal_source, retry_after_ms, session_url, token_expiry, upload_timeout,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -185,9 +185,16 @@ async fn serve_all(
         landings,
         json!({"status": 200, "headers": [], "body": "{}"}),
         Duration::ZERO,
-        vec![],
+        Uploads::default(),
     )
     .await
+}
+
+/// The answers of the two upload routes.
+#[derive(Default)]
+struct Uploads {
+    events: Vec<Value>,
+    deliveries: Vec<Value>,
 }
 
 /// `serve_all`, plus the answer `GET /worker` gives. That read is left out of the request log.
@@ -198,7 +205,7 @@ async fn serve_record(
     landings: Vec<Value>,
     record: Value,
     record_delay: Duration,
-    events: Vec<Value>,
+    uploads: Uploads,
 ) -> Result<(String, Log), std::io::Error> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
@@ -206,7 +213,7 @@ async fn serve_record(
     let log: Log = Arc::default();
     let shared = log.clone();
     tokio::spawn(async move {
-        let (mut put_count, mut beat_count, mut landing_count, mut event_count) = (0, 0, 0, 0);
+        let (mut put_count, mut beat_count, mut landing_count, mut event_count, mut delivery_count) = (0, 0, 0, 0, 0);
         let mut held = Vec::new();
         while let Ok((mut stream, _)) = listener.accept().await {
             let Some(mut request) = read_request(&mut stream).await else {
@@ -234,7 +241,8 @@ async fn serve_record(
                 "PUT /worker" => next_response(&puts, &mut put_count),
                 "PUT /worker/landing" => next_response(&landings, &mut landing_count),
                 "POST /worker/heartbeat" => next_response(&beats, &mut beat_count),
-                "POST /worker/events" => next_response(&events, &mut event_count),
+                "POST /worker/events" => next_response(&uploads.events, &mut event_count),
+                "POST /worker/events/delivery" => next_response(&uploads.deliveries, &mut delivery_count),
                 _ => json!({"status": 404, "headers": [], "body": ""}),
             };
             if let Ok(mut captured) = shared.lock() {
@@ -376,7 +384,10 @@ async fn run_case(case: &Value) -> TestResult {
         queue(case, "landing"),
         record,
         record_delay,
-        queue(case, "events"),
+        Uploads {
+            events: queue(case, "events"),
+            deliveries: queue(case, "deliveries"),
+        },
     )
     .await?;
     let pacing = Recorded::new(0.0);
@@ -447,6 +458,15 @@ async fn run_case(case: &Value) -> TestResult {
                     }
                 }
             }
+            if field(step, "op").as_str() == Some("delivery") {
+                match report_deliveries(&mut worker, step).await? {
+                    Ok(()) => continue,
+                    Err(reason) => {
+                        ending = Ending::mismatch(reason);
+                        break;
+                    }
+                }
+            }
             if field(step, "op").as_str() == Some("burst") {
                 match burst(&mut worker, step).await? {
                     Ok(()) => continue,
@@ -498,6 +518,7 @@ async fn run_case(case: &Value) -> TestResult {
     if let Some(bases) = field(case, "retry_base_ms")
         .as_array()
         .or_else(|| field(case, "event_gaps_ms").as_array())
+        .or_else(|| field(case, "delivery_gaps_ms").as_array())
     {
         let waited: Vec<u128> = pacing.delays().iter().map(Duration::as_millis).collect();
         let want: Vec<u128> = bases.iter().filter_map(Value::as_u64).map(u128::from).collect();
@@ -610,6 +631,34 @@ async fn post_events(
     Ok(worker.flush_events().await.map(|_| ()))
 }
 
+/// Reports the deliveries of one step as the handle does: the first goes out alone and the rest arrive while it is in
+/// flight. A step that closes lets the first request go out, then closes the client.
+async fn report_deliveries(
+    worker: &mut WorkerClient<reqwest::Client, Recorded>,
+    step: &Value,
+) -> Result<Result<(), MismatchReason>, Box<dyn std::error::Error>> {
+    for report in queue(step, "reports") {
+        let id = report.get(0).and_then(Value::as_str).ok_or("event id")?;
+        let status = match report.get(1).and_then(Value::as_str) {
+            Some("received") => DeliveryStatus::Received,
+            Some("processing") => DeliveryStatus::Processing,
+            Some("processed") => DeliveryStatus::Processed,
+            other => return Err(format!("unknown delivery status {other:?}").into()),
+        };
+        if let Err(reason) = worker.report_delivery(id, status).await {
+            return Ok(Err(reason));
+        }
+    }
+    if field(step, "close").as_bool() == Some(true) {
+        if let Err(reason) = worker.pump_deliveries(Some(1)).await {
+            return Ok(Err(reason));
+        }
+        worker.close_queue();
+        worker.close_deliveries();
+    }
+    Ok(worker.pump_deliveries(None).await.map(|_| ()))
+}
+
 async fn replay(section: &str, minimum: usize) -> TestResult {
     let goldens: Value = serde_json::from_str(GOLDENS)?;
     let cases = goldens[section].as_array().ok_or("missing section")?;
@@ -657,6 +706,11 @@ async fn queued_reports_match_the_upstream_client() -> TestResult {
 #[tokio::test]
 async fn client_events_match_the_upstream_client() -> TestResult {
     replay("events", 12).await
+}
+
+#[tokio::test]
+async fn delivery_acknowledgements_match_the_upstream_client() -> TestResult {
+    replay("delivery", 17).await
 }
 
 /// `attachBridgeSession` never sets `followsServedPolicy`, `uploadHoldMarker` or `noSubscriberUploadHoldMs`, so the

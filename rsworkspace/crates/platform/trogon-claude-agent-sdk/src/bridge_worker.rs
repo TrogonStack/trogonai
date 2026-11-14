@@ -1,10 +1,13 @@
 //! The worker half of the bridge: registering a worker for a remote session and keeping the service told about it
 //! (`PUT /worker` state and metadata, `POST /worker/heartbeat`), with the request path rules the upstream bridge
-//! entrypoint applies to every answer, and the client event upload (`POST /worker/events`, [`crate::EventQueue`]).
+//! entrypoint applies to every answer, the client event upload (`POST /worker/events`, [`crate::EventQueue`]) and
+//! the delivery acknowledgements (`POST /worker/events/delivery`, [`crate::DeliveryQueue`]).
 //!
-//! Not ported yet, and reachable: the events a flush policy holds or merges, stream-event buffering, the control
-//! request urgent lane, rider and receipt uploads (`/worker/event-batch`), delivery acknowledgements and the internal
-//! event uploader. The event queue takes durable rows and `thinking_tokens` rows only until those land.
+//! Not ported yet: the events a flush policy holds or merges, stream-event buffering, the control request urgent
+//! lane, rider and receipt uploads (`/worker/event-batch`) and the internal event uploader. `attachBridgeSession`
+//! never sets the options that turn the holds on (`followsServedPolicy`, `uploadHoldMarker`,
+//! `noSubscriberUploadHoldMs`) and never calls the internal event writer, so the recorded `served` runs show a hold
+//! never fires, whatever the service answers. The event queue takes durable rows and `thinking_tokens` rows only.
 //!
 //! Draft, pending upstream call-graph evidence for each entry below. The port covers what a caller reaches through
 //! `attachBridgeSession` and the handle it returns, and what a service answer can trigger. These branches of the
@@ -36,6 +39,7 @@ use crate::adapters::HttpExecute;
 use crate::bridge_client::{USER_AGENT, client_platform, header_text};
 use crate::bridge_js::{js_number, js_parse_int, plain_detail, safe_integer};
 use crate::bridge_types::SessionState;
+use crate::bridge_worker_delivery::{DeliveryAck, DeliveryNext, DeliveryQueue, DeliveryStatus, delivery_body};
 use crate::bridge_worker_events::{ClientEvent, EventNext, EventQueue, refused_for_good, upload_body, upload_timeout};
 use crate::bridge_worker_queue::{Next, Patch, PatchQueue, requeue_after_refusal, without_status};
 use crate::bridge_worker_types::{
@@ -532,6 +536,8 @@ pub struct WorkerClient<H, P = TokioPacing> {
     non_origin_403: NonOrigin403,
     queue: PatchQueue,
     events: EventQueue,
+    deliveries: DeliveryQueue,
+    pending_processing: Vec<String>,
     dropped_durable_event_batches: u32,
     record_at_start: Option<Map<String, Value>>,
     reported_keys: Vec<String>,
@@ -563,6 +569,8 @@ impl<H, P> WorkerClient<H, P> {
             non_origin_403: config.non_origin_403,
             queue: PatchQueue::new(),
             events: EventQueue::default(),
+            deliveries: DeliveryQueue::default(),
+            pending_processing: Vec::new(),
             dropped_durable_event_batches: 0,
             record_at_start: None,
             reported_keys: Vec::new(),
@@ -1055,6 +1063,104 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         let jitter = self.pacing.jitter();
         self.events.failed(jitter, failure.retry_after_ms, failure.fetch_failed);
         Ok(())
+    }
+
+    /// Reports the delivery of an inbound event (`reportDelivery`, offset 1135295, as the attached handle calls it
+    /// with no message uuid and no options). `received` and `processed` wait in the delivery queue; `processing`
+    /// waits for the next [`WorkerClient::pump_deliveries`] and goes out in one request of its own. A closed client
+    /// ignores `processing`, and a closed queue drops the others.
+    pub async fn report_delivery(&mut self, event_id: &str, status: DeliveryStatus) -> Result<(), MismatchReason> {
+        if status == DeliveryStatus::Processing {
+            if !self.closed {
+                self.pending_processing.push(event_id.to_owned());
+            }
+            return Ok(());
+        }
+        while !self.deliveries.has_room_for(1) && !self.deliveries.is_closed() {
+            self.pump_deliveries(Some(1)).await?;
+        }
+        self.deliveries.enqueue(vec![DeliveryAck {
+            event_id: event_id.to_owned(),
+            status,
+        }]);
+        Ok(())
+    }
+
+    /// Sends the queued acknowledgements until the service has taken or refused every batch, retrying a failed one
+    /// with the upstream backoff. The `processing` acknowledgements leave right after the first request, the way
+    /// the upstream microtask sends them while that request is in flight, or before a retry wait, or when nothing
+    /// else is waiting. Returns whether the queue drained; a mismatch ends the call.
+    pub async fn pump_deliveries(&mut self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
+        let mut made = 0_u32;
+        loop {
+            if attempts.is_some_and(|cap| made >= cap) {
+                return Ok(self.deliveries.is_idle());
+            }
+            match self.deliveries.poll() {
+                DeliveryNext::Idle => {
+                    self.send_processing_acks().await?;
+                    return Ok(true);
+                }
+                DeliveryNext::Pause(delay) => {
+                    self.send_processing_acks().await?;
+                    self.pacing.pause(delay).await;
+                }
+                DeliveryNext::Send(batch) => {
+                    made += 1;
+                    let body = delivery_body(self.epoch, &batch);
+                    let outcome = self
+                        .request(Method::POST, "/worker/events/delivery", &body, REQUEST_TIMEOUT, false)
+                        .await?;
+                    match outcome {
+                        RequestOutcome::Accepted(_) => self.deliveries.done(),
+                        RequestOutcome::Failed(failure) if failure.status.is_some_and(refused_for_good) => {
+                            self.deliveries.dropped();
+                        }
+                        RequestOutcome::Failed(failure) => {
+                            let jitter = self.pacing.jitter();
+                            self.deliveries.failed(jitter, failure.retry_after_ms);
+                        }
+                    }
+                    self.send_processing_acks().await?;
+                }
+            }
+        }
+    }
+
+    /// One request for every `processing` acknowledgement waiting (`sendProcessingAcks`). It is not retried: the
+    /// upstream failure path only queues the receipts that rode along, and there are none.
+    async fn send_processing_acks(&mut self) -> Result<(), MismatchReason> {
+        let ids = std::mem::take(&mut self.pending_processing);
+        if self.closed || ids.is_empty() {
+            return Ok(());
+        }
+        let acks: Vec<DeliveryAck> = ids
+            .into_iter()
+            .map(|event_id| DeliveryAck {
+                event_id,
+                status: DeliveryStatus::Processing,
+            })
+            .collect();
+        let body = delivery_body(self.epoch, &acks);
+        self.request(Method::POST, "/worker/events/delivery", &body, REQUEST_TIMEOUT, false)
+            .await?;
+        Ok(())
+    }
+
+    /// Drops the acknowledgements still queued and stops the queue (`close`, offset 1143123).
+    pub fn close_deliveries(&mut self) {
+        self.pending_processing.clear();
+        self.deliveries.close();
+    }
+
+    /// How many delivery batches the service refused for good (`droppedDeliveryAckBatches`).
+    pub fn dropped_delivery_ack_batches(&self) -> u32 {
+        self.deliveries.dropped_batches()
+    }
+
+    /// The delivery acknowledgement queue.
+    pub fn delivery_queue(&self) -> &DeliveryQueue {
+        &self.deliveries
     }
 
     /// One heartbeat. An accepted answer that advises a beat interval changes the interval the worker keeps.
