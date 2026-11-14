@@ -20,6 +20,7 @@ use tokio::{
 };
 
 use super::*;
+use crate::SseDeliveryUpdate;
 
 type TestResult = Result<(), Box<dyn StdError>>;
 

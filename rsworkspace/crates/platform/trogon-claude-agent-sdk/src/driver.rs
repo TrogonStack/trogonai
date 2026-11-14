@@ -181,7 +181,9 @@ impl ControlResponder {
     /// timeout. Without a deadline it waits until the caller stops waiting.
     fn time_out_at(self, deadline: Option<Instant>) {
         let operation = self.operation();
-        let (Self::Initialize { mut response, .. } | Self::Control { mut response, .. }) = self;
+        let (Self::Initialize { mut response, .. }
+        | Self::Control { mut response, .. }
+        | Self::Raw { mut response, .. }) = self;
         tokio::spawn(async move {
             let expired = match deadline {
                 Some(deadline) => tokio::select! {

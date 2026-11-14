@@ -16,11 +16,7 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    adapters::{
-        ChangeMode, CreateDirectory, EmitWarning, EnvironmentVariable, ExtractHost, FileIdentity, HostIdentity,
-        NativeExtractHost, OpenFile, OperatingSystem, ProcessId, RandomBytes, ReadFile, RealUserId, RemoveFile,
-        RenamePath, StatLink, TemporaryDirectory,
-    },
+    adapters::{ExtractHost, NativeExtractHost, OperatingSystem},
     node_path_join::{PathStyle, join},
 };
 
