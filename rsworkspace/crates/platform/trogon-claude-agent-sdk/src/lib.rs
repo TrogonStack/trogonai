@@ -82,6 +82,7 @@ mod queue_capacity;
 mod raw_json_id;
 #[cfg(unix)]
 mod run_as;
+mod run_end_ceiling;
 mod runtime_options;
 mod sdk_mcp_server;
 mod sdk_tool;
@@ -237,8 +238,8 @@ pub use option_error::OptionError;
 pub use options::{
     ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, FileCheckpointing,
     InitializeTimeout, InputAfterFinish, Limits, McpDiscovery, McpServers, MessageBuffer, PartialMessages,
-    RequestIdExhaustion, SdkMcpServers, SessionFork, SessionPersistence, Shutdown, SystemPrompt, ToolSet,
-    VerbatimPrompts,
+    RequestIdExhaustion, RunEndTimeout, SdkMcpServers, SessionFork, SessionPersistence, Shutdown, SystemPrompt,
+    ToolSet, VerbatimPrompts,
 };
 pub use output_schema::{OutputSchema, OutputSchemaError};
 pub use permission::{

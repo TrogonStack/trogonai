@@ -4078,10 +4078,42 @@
         {
           "path": "src/run_as/tests.rs",
           "name": "setting_the_uid_to_the_current_one_needs_no_privilege"
+        },
+        {
+          "path": "tests/run_end_ceiling_golden.rs",
+          "name": "typescript_matches_the_real_sdk_on_the_table"
+        },
+        {
+          "path": "tests/run_end_ceiling_golden.rs",
+          "name": "python_matches_the_real_package_on_the_table"
+        },
+        {
+          "path": "tests/run_end_ceiling_golden.rs",
+          "name": "typescript_matches_the_real_sdk_on_every_code_point"
+        },
+        {
+          "path": "tests/run_end_ceiling_golden.rs",
+          "name": "python_matches_the_real_package_on_every_code_point"
+        },
+        {
+          "path": "tests/run_end_ceiling.rs",
+          "name": "typescript_ends_the_run_at_the_ceiling_in_options_env"
+        },
+        {
+          "path": "tests/run_end_ceiling.rs",
+          "name": "python_ends_the_run_at_the_ceiling_in_options_env"
+        },
+        {
+          "path": "tests/run_end_ceiling.rs",
+          "name": "zero_arms_no_ceiling"
+        },
+        {
+          "path": "src/run_end_ceiling_tests.rs",
+          "name": "an_explicit_environment_mode_picks_where_typescript_reads"
         }
       ],
       "status": "supported",
-      "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI. user resolves the name with getpwnam and switches only the real and effective uid with setreuid in a pre_exec hook, as CPython does; debug_stderr is an accepted no-op."
+      "rationale": "Argv tokens and order, the dash rule, extraArgs dictionary semantics (duplicate keys collapse, TypeScript lists integer keys first), the tools preset, empty agent and resume, stderr delivery (raw decoder chunks for TypeScript, trimmed lines for Python), max_buffer_size including zero, client_app precedence and the sessionStore with persistSession false refusal are pinned against goldens captured from the real sdk.mjs 0.3.323 and claude-agent-sdk 0.2.181 driving a recording stand-in for the CLI. CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS is read from the environment by default as TypeScript does (the child environment it builds), with Limits::python() selecting Python's lookup order (options.env, then the process) and int() parse, and RunEndTimeout::Fixed as the opt-in override; both parses are pinned to a table and a full code point sweep captured from the real packages. user resolves the name with getpwnam and switches only the real and effective uid with setreuid in a pre_exec hook, as CPython does; debug_stderr is an accepted no-op."
     },
     {
       "id": "python-thinking-config",

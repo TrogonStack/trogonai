@@ -148,7 +148,19 @@ follow-up turns can still belong to the run. The driver tracks reported session
 state, queued input and delegated work before closing stdin for full-run
 completion. Older CLIs without session-state reporting provide weaker evidence;
 the bounded between-turn wait is not a universal model execution timeout. When
-it expires the driver logs a warning and ends the run without an error. Non-JSON
+it expires the driver logs a warning and ends the run without an error. The
+wait is `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, 600 seconds when unset or not a
+number, and zero means no limit; values past 2^31 - 1 milliseconds are clamped.
+`limits.run_end_timeout` picks how it is read. `RunEndTimeout::TypeScript`, the
+default, reads the child environment the SDK builds, so `options.env` when it
+replaces the inherited environment and the process environment otherwise, and
+accepts what the TypeScript parser does: whole numbers in exponent form such as
+`1e3`, `1,000` or `1_000`, and the leading digits of `12abc`.
+`RunEndTimeout::Python`, which `Limits::python()` selects, reads `options.env`
+and then the process environment and accepts what Python's `int()` does:
+surrounding white space, Unicode decimal digits and single underscores between
+digits, while `1e3` and `1,000` are the default. `RunEndTimeout::Fixed` is an
+opt-in wait that ignores the variable. Non-JSON
 stdout lines are skipped with a debug log, a control response for an unknown
 request is ignored, and an unknown session state is kept as unknown.
 

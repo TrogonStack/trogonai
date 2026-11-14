@@ -6,8 +6,8 @@ use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
     BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, Error, FeatureSupport,
     FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages, PermissionDecision, Prompt,
-    QueueCapacity, SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest,
-    ToolRule, ToolSet, adapters::SystemClock, query,
+    QueueCapacity, RunEndTimeout, SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout,
+    ToolPermissionRequest, ToolRule, ToolSet, adapters::SystemClock, query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -100,7 +100,7 @@ async fn s02_non_json_stdout_lines_are_skipped() -> TestResult {
 #[tokio::test]
 async fn s05_a_missing_idle_state_ends_the_run_quietly_at_the_ceiling() -> TestResult {
     let mut options = options("stuck-running")?;
-    options.limits.run_end_timeout = Timeout::new(Duration::from_millis(300));
+    options.limits.run_end_timeout = RunEndTimeout::Fixed(Timeout::new(Duration::from_millis(300)));
     let mut response = query(Prompt::from("stuck"), options).await?;
     let results = timeout(Duration::from_secs(5), async {
         let mut results = Vec::new();
