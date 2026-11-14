@@ -2,9 +2,8 @@
 //! control replies the session itself produced and go out with [`BridgeSession::pump`]; the upstream calls return
 //! at once and upload in the background, which is the same thing seen from the caller.
 //!
-//! Draft, pending upstream call-graph evidence: the failure of `reconnectTransport` while rebuilding the transport
-//! cannot happen because the session id was checked when the session attached and the epoch is always known, and
-//! the host closing the handle while the rebuild is awaited has no equivalent in a call that cannot be interleaved.
+
+use std::sync::atomic::Ordering;
 
 use serde_json::{Map, Value, json};
 
@@ -12,7 +11,7 @@ use crate::SensitiveString;
 use crate::adapters::HttpExecute;
 use crate::bridge_session::{BridgeSession, request_key};
 use crate::bridge_types::SessionState;
-use crate::bridge_worker::{InvalidSessionId, NonOrigin403, WorkerClient, WorkerConfig, WorkerPacing};
+use crate::bridge_worker::{InvalidSessionId, NonOrigin403, WorkerClient, WorkerConfig, WorkerPacing, session_url};
 use crate::bridge_worker_delivery::DeliveryStatus;
 use crate::bridge_worker_events::ClientEvent;
 use crate::bridge_worker_stream::StreamSession;
@@ -23,6 +22,17 @@ pub struct ReconnectOptions {
     pub ingress_token: SensitiveString,
     /// The epoch to run under; the one the session had when absent.
     pub epoch: Option<i64>,
+}
+
+/// Why `reconnectTransport` rejected.
+#[derive(Debug, thiserror::Error)]
+pub enum ReconnectError {
+    #[error(transparent)]
+    InvalidSessionId(#[from] InvalidSessionId),
+    /// `new URL` threw on the session URL built from the given base. The old worker's undelivered events are
+    /// dropped and the session is closed without telling the host.
+    #[error("Invalid URL")]
+    InvalidUrl,
 }
 
 /// The frame types a rebuilt transport does not take back as its own writes.
@@ -189,19 +199,43 @@ where
     ///
     /// # Errors
     ///
-    /// Never in practice: the session id was validated when the session attached.
-    pub async fn reconnect_transport(&mut self, options: ReconnectOptions) -> Result<(), InvalidSessionId> {
+    /// [`ReconnectError::InvalidUrl`] when the session URL cannot be parsed: what the old worker had not delivered
+    /// is dropped and the session is closed, without a close code for the host.
+    pub async fn reconnect_transport(&mut self, options: ReconnectOptions) -> Result<(), ReconnectError> {
+        self.rebuild(options, false).await
+    }
+
+    /// `reconnectTransport` with `close` called while the rebuild is awaited: the transport is built, found closed
+    /// and closed again, without registering and without carrying anything over.
+    ///
+    /// # Errors
+    ///
+    /// As [`BridgeSession::reconnect_transport`].
+    pub async fn reconnect_transport_closed_meanwhile(
+        &mut self,
+        options: ReconnectOptions,
+    ) -> Result<(), ReconnectError> {
+        self.rebuild(options, true).await
+    }
+
+    async fn rebuild(&mut self, options: ReconnectOptions, closed_meanwhile: bool) -> Result<(), ReconnectError> {
         if self.is_closed() {
             return Ok(());
         }
         self.drain_outbox().await;
         self.token = options.ingress_token.clone();
-        self.api_base_url = options.api_base_url;
         let sequence = self.stream.last_sequence();
         let epoch = options.epoch.unwrap_or_else(|| self.worker.epoch());
         self.worker.close_queue();
         self.worker.close_events(true);
         self.worker.close_deliveries();
+        let url = session_url(&options.api_base_url, &self.session_id)?;
+        if url::Url::parse(&url).is_err() {
+            let _dropped = self.worker.take_undelivered_events();
+            self.closed.store(true, Ordering::SeqCst);
+            return Err(ReconnectError::InvalidUrl);
+        }
+        self.api_base_url = options.api_base_url;
         let rebuilt = WorkerClient::new(
             self.http.clone(),
             self.pacing.clone(),
@@ -216,6 +250,14 @@ where
             },
         )?;
         let mut previous = std::mem::replace(&mut self.worker, rebuilt);
+        if closed_meanwhile {
+            self.mark_closed();
+            self.worker.close_queue();
+            self.worker.close_events(false);
+            self.worker.close_deliveries();
+            self.connected = false;
+            return Ok(());
+        }
         self.stream = StreamSession::seeded(Some(sequence));
         self.ended = false;
         self.connected = false;

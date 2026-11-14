@@ -481,12 +481,20 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
         self.settle(deliveries);
     }
 
-    /// `close`: the host leaves. Open requests are aborted, the worker says goodbye and what was queued is dropped.
-    pub async fn close(&mut self) {
+    /// Marks the session closed and aborts the host calls in flight; false when it already was.
+    pub(crate) fn mark_closed(&mut self) -> bool {
         if self.closed.swap(true, Ordering::SeqCst) {
-            return;
+            return false;
         }
         self.async_control.cancel_all();
+        true
+    }
+
+    /// `close`: the host leaves. Open requests are aborted, the worker says goodbye and what was queued is dropped.
+    pub async fn close(&mut self) {
+        if !self.mark_closed() {
+            return;
+        }
         if !self.ended {
             self.worker.goodbye().await;
         }

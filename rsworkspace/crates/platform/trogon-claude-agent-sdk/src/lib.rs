@@ -194,7 +194,7 @@ pub use bridge_session::{
     AttachBridgeSessionOptions, AttachCallbacks, AttachError, BridgeSession, CLOSE_INIT_FAILED, CloseCallback,
     EnvironmentLookup, InboundMessageCallback, PermissionResponseCallback, attach_bridge_session,
 };
-pub use bridge_session_handle::ReconnectOptions;
+pub use bridge_session_handle::{ReconnectError, ReconnectOptions};
 pub use bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
     DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,

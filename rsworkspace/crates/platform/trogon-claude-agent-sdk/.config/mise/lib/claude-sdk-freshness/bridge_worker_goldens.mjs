@@ -976,9 +976,20 @@ async function run(spec) {
       if (step.op === 'reconnect') {
         for (const item of step.writes ?? []) emit(item);
         if (step.afterMs) await sleep(step.afterMs);
-        const options = { apiBaseUrl: base, ingressToken: step.token ?? 'tok2' };
+        const options = { apiBaseUrl: step.badBase ?? base, ingressToken: step.token ?? 'tok2' };
         if (step.epoch !== undefined) options.epoch = step.epoch;
-        await handle.reconnectTransport(options);
+        if (step.thenClose) {
+          // The close is issued while the rebuild is awaited, so the call is not awaited before it.
+          const pending = handle.reconnectTransport(options);
+          handle.close();
+          await pending;
+        } else {
+          try {
+            await handle.reconnectTransport(options);
+          } catch (error) {
+            result.rejected = String(error?.message ?? error).split('\n')[0];
+          }
+        }
         await sleep(step.settleMs ?? 400);
         continue;
       }
@@ -1221,6 +1232,9 @@ handled('reconnecting_without_an_epoch_keeps_the_epoch', { steps: [{ op: 'reconn
 handled('reconnecting_after_closing_does_nothing', { steps: [{ op: 'close', sends: true }, { op: 'reconnect', epoch: 7 }] });
 handled('what_the_old_worker_did_not_deliver_moves_to_the_new_one', { events: [raw(500, ''), json(200, {})], steps: [{ op: 'reconnect', epoch: 7, writes: [note('a', 'u1'), via('sendControlRequest', prompt('r1', 'can_use_tool', { tool_name: 'Bash', input: {}, tool_use_id: 't1' }))], afterMs: 200 }], waitFor: [['=/worker/events', 2]] });
 handled('a_carried_write_is_not_delivered_back_by_the_new_stream', { stream: [connection([]), connection([clientEvent(1, 'e1', plainUser('u1')), clientEvent(2, 'e2', plainUser('u2'))])], events: [raw(500, ''), json(200, {})], steps: [{ op: 'reconnect', epoch: 7, writes: [note('a', 'u1')], afterMs: 200 }], waitFor: [['=/worker/events', 2], delivered(4)] });
+
+handled('a_rebuild_that_fails_closes_nothing_and_drops_the_old_worker', { events: [raw(500, ''), json(200, {})], steps: [{ op: 'reconnect', epoch: 7, badBase: 'not a url', writes: [note('a', 'u1')], afterMs: 200 }, post(0, [note('b', 'u2')])] });
+handled('closing_while_the_rebuild_is_awaited', { steps: [post(1, [note('a', 'u1')]), { op: 'reconnect', epoch: 7, thenClose: true }, post(0, [note('b', 'u2')])] });
 
 // `--only=<case name>` records just that case, as many times as `--times=<n>` says, and prints the results.
 const only = flags.find((flag) => flag.startsWith('--only='))?.slice('--only='.length);

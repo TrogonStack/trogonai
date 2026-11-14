@@ -164,11 +164,26 @@ async fn replay(case: &Value) -> Result<Replayed, Box<dyn std::error::Error>> {
             "reconnect" => {
                 emit_all(&mut session, &items).await?;
                 let options = ReconnectOptions {
-                    api_base_url: base.clone(),
+                    api_base_url: field(step, "badBase")
+                        .as_str()
+                        .map_or_else(|| base.clone(), str::to_owned),
                     ingress_token: "tok2".into(),
                     epoch: field(step, "epoch").as_i64(),
                 };
-                session.reconnect_transport(options).await?;
+                if field(step, "thenClose").as_bool() == Some(true) {
+                    session.reconnect_transport_closed_meanwhile(options).await?;
+                    continue;
+                }
+                match session.reconnect_transport(options).await {
+                    Ok(()) => assert!(field(case, "rejected").is_null(), "the recorded rebuild was rejected"),
+                    Err(error) => {
+                        assert_eq!(
+                            Some(error.to_string()),
+                            field(case, "rejected").as_str().map(str::to_owned)
+                        );
+                        continue;
+                    }
+                }
                 read_connection(case, &mut session, &mut next, &mut gets).await?;
                 session.pump().await;
             }
@@ -232,7 +247,8 @@ fn only<'a>(requests: &'a [&Value], puts: bool) -> Vec<&'a Value> {
 }
 
 /// The service sees the requests of one worker in the order it made them, but a rebuilt transport registers while the
-/// events it took over are already on their way, so the two kinds are compared apart.
+/// events it took over are already on their way, so the two kinds are compared apart. Upstream races there itself:
+/// the new worker's PUT and the posting of the adopted events are started together, so no order is recorded.
 async fn check(case: &Value) -> TestResult {
     let name = text(case, "name")?;
     assert!(field(case, "rejection").is_null(), "{name} was rejected");
