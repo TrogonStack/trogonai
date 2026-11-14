@@ -953,7 +953,8 @@ where
 
     async fn event_loop(&mut self) -> Result<(), Error> {
         loop {
-            if self.shutdown.try_recv().is_ok() {
+            // A taken or dropped signal leaves the receiver spent, and polling it again panics.
+            if self.shutdown_seen || !matches!(self.shutdown.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
                 self.shutdown_seen = true;
                 return Ok(());
             }
@@ -973,7 +974,7 @@ where
             // until the caller takes a message.
             let reading = self.overflow.is_empty() && !self.deferred_full();
             tokio::select! {
-                _ = &mut self.shutdown => { self.shutdown_seen = true; return Ok(()); }
+                _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; return Ok(()); }
                 () = self.abort.cancelled() => return Err(crate::AbortError::PROCESS.into()),
                 ready = self.messages.ready(), if !self.overflow.is_empty() => {
                     if !ready { return Err(Error::DriverStopped); }
@@ -2042,7 +2043,7 @@ where
                 return;
             }
             let delivered = tokio::select! {
-                _ = &mut self.shutdown => { self.shutdown_seen = true; false }
+                _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; false }
                 sent = self.messages.send(message) => sent.is_ok(),
             };
             if !delivered {
@@ -2210,7 +2211,7 @@ where
                     settled = false;
                     break;
                 }
-                _ = &mut self.shutdown => {
+                _ = &mut self.shutdown, if !self.shutdown_seen => {
                     self.shutdown_seen = true;
                     return Err(Error::ShutdownRequested);
                 }
@@ -2503,7 +2504,7 @@ where
         }
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
         tokio::select! {
-            _ = &mut self.shutdown => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
+            _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
             () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
         }
