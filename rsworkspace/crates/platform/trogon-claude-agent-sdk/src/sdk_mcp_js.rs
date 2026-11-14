@@ -64,14 +64,6 @@ pub(crate) fn ordered(object: JsonObject) -> JsonObject {
         .collect()
 }
 
-/// `String(value)` of a finite number.
-pub(crate) fn number_text(value: f64) -> String {
-    if value == 0.0 {
-        return "0".to_owned();
-    }
-    js_string(&Value::from(value))
-}
-
 /// The `Number(value)` conversion of a JSON value, as the relational operators apply it.
 pub(crate) fn to_number(value: &Value) -> f64 {
     match value {
