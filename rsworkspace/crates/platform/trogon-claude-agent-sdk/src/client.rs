@@ -558,6 +558,7 @@ impl ClaudeSdkClient {
         };
         let latest_commands = handle.latest_commands.clone();
         let host = handle.host.clone();
+        let materialized = session.as_ref().is_some_and(|session| session.materialized.is_some());
         let (first_initialize, receiver) = oneshot::channel();
         let driver = driver::spawn(driver::SpawnOptions {
             options,
@@ -597,7 +598,7 @@ impl ClaudeSdkClient {
                     runtime.handle.initialization.send_replace(Some(Ok(response)));
                     Ok(Self { runtime })
                 }
-                Err(error) => Err(Self::failed_start(runtime, error).await),
+                Err(error) => Err(Self::failed_startup(runtime, error, materialized).await),
             };
         }
         match runtime.handle.style {
@@ -630,6 +631,20 @@ impl ClaudeSdkClient {
                 }
             }
         }
+    }
+
+    /// `startup()` rejecting. TypeScript `O7` calls `close()` without waiting and rethrows, and waits for the exit
+    /// first only when a resumed session's configuration directory has to be removed, throwing the same error either
+    /// way. An initialize the process ended by exiting still reads the run's outcome, which names why it ended.
+    async fn failed_startup(mut runtime: ClientRuntime, error: Error, materialized: bool) -> Error {
+        if runtime.handle.abort.is_cancelled() || matches!(error, Error::DriverStopped) {
+            return Self::failed_start(runtime, error).await;
+        }
+        runtime.handle.close();
+        if materialized && let Err(cleanup) = runtime.finish().await {
+            tracing::debug!(error = %cleanup, "Claude Code cleanup after a failed startup");
+        }
+        error
     }
 
     async fn failed_start(mut runtime: ClientRuntime, error: Error) -> Error {
