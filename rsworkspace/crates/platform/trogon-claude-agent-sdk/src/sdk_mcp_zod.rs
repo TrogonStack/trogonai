@@ -119,7 +119,7 @@ pub(crate) struct ArrayNode {
 pub(crate) enum ObjectMode {
     Strip,
     Strict,
-    Catchall(Node),
+    Catchall(Box<Node>),
 }
 
 pub(crate) struct ObjectNode {
@@ -539,8 +539,8 @@ fn object(schema: &JsonObject, callbacks: Callbacks<'_>) -> Node {
     };
     let mode = match additional {
         Some(Value::Bool(false)) => ObjectMode::Strict,
-        Some(Value::Object(catchall)) if catchall.is_empty() => ObjectMode::Catchall(Node::Any),
-        Some(catchall @ Value::Object(_)) => ObjectMode::Catchall(build(catchall, true, callbacks)),
+        Some(Value::Object(catchall)) if catchall.is_empty() => ObjectMode::Catchall(Box::new(Node::Any)),
+        Some(catchall @ Value::Object(_)) => ObjectMode::Catchall(Box::new(build(catchall, true, callbacks))),
         _ => ObjectMode::Strip,
     };
     Node::Object(ObjectNode { properties, mode })

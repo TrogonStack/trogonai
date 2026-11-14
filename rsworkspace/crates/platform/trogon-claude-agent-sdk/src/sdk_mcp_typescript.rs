@@ -5,6 +5,7 @@ use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error}
 use crate::{
     CallbackError, CancellationToken, JsonObject, McpToolRequest, SdkTool, SdkTools,
     constants::{self, SUPPORTED_PROTOCOL_VERSIONS},
+    sdk_mcp_js::stringify_primitive,
     sdk_mcp_zod::{self, Input},
     settings_json::js_stringify_pretty,
 };
@@ -567,6 +568,22 @@ fn invalid_type(expected: &str, at: Vec<Value>, value: Option<&Value>) -> JsonOb
             "message".into(),
             format!("Invalid input: expected {expected}, received {}", received(value)).into(),
         ),
+    ])
+}
+
+fn invalid_value(values: Vec<Value>, at: Vec<Value>) -> JsonObject {
+    let message = match values.as_slice() {
+        [only] => format!("Invalid input: expected {}", stringify_primitive(only)),
+        _ => format!(
+            "Invalid option: expected one of {}",
+            values.iter().map(stringify_primitive).collect::<Vec<_>>().join("|")
+        ),
+    };
+    JsonObject::from_iter([
+        ("code".into(), "invalid_value".into()),
+        ("values".into(), Value::Array(values)),
+        ("path".into(), Value::Array(at)),
+        ("message".into(), message.into()),
     ])
 }
 

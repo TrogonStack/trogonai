@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::bridge_js::js_parse_int;
+use crate::{bridge_js::js_parse_int, sse_frame::SseFrame};
 
 /// The reconnect delay of the first failure (`W4e`).
 pub const RECONNECT_BASE_MS: u64 = 1_000;
@@ -54,14 +54,6 @@ pub fn reconnect_delay(attempt: u32, random: f64) -> Duration {
 /// grace.
 pub fn liveness_timeout() -> Duration {
     Duration::from_millis(KEEPALIVE_SECONDS * 1_000 + LIVENESS_GRACE_MS)
-}
-
-/// One frame of the stream, as `dC` parses it. A field a frame lacks (or leaves empty, for `data`) is `None`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SseFrame {
-    pub id: Option<String>,
-    pub event: Option<String>,
-    pub data: Option<String>,
 }
 
 /// The line terminator at `at`: its length, `Some(0)` for none, `None` when a lone `\r` ends the text and the next

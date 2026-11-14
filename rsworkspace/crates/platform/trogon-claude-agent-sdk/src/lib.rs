@@ -276,7 +276,7 @@ pub use bridge_worker::{
     retry_after_ms, session_url, token_expiry,
 };
 pub use bridge_worker_control::{
-    CallbackResult, ControlCallbacks, ControlReply, ControlSession, DeferredControl, HostError, HostFuture,
+    BridgeControlReply, CallbackResult, ControlCallbacks, ControlSession, DeferredControl, HostError, HostFuture,
     ModelCallback, ModelVerdict, PendingControl, PendingModelCallback, PendingThinkingTokensCallback, TextCallback,
     ThinkingTokensCallback, answer_control_request, clean_control_text, is_pending_prompt,
 };
@@ -301,8 +301,8 @@ pub use bridge_worker_queue::{
 };
 pub use bridge_worker_stream::{
     FrameParser, KEEPALIVE_SECONDS, LIVENESS_GRACE_MS, PERMANENT_STREAM_STATUSES, RECONNECT_BASE_MS, RECONNECT_CAP_MS,
-    RECONNECT_JITTER_RATIO, Reopen, SLEEP_LATENESS_MS, SseFrame, StreamEffect, StreamOpen, StreamRequest,
-    StreamSession, liveness_timeout, reconnect_delay,
+    RECONNECT_JITTER_RATIO, Reopen, SLEEP_LATENESS_MS, StreamEffect, StreamOpen, StreamRequest, StreamSession,
+    liveness_timeout, reconnect_delay,
 };
 pub use bridge_worker_stream_driver::{
     CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE, StreamBody, StreamClocks, StreamConnector, StreamFailure,

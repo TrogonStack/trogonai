@@ -357,7 +357,7 @@ impl ClaudeSdkClient {
 
     /// [`ClaudeSdkClient::connect_with_transport`] with caller-supplied adapters for the session store mirror.
     pub async fn connect_with_transport_and_adapters<T, E, P, F>(
-        mut options: ClaudeAgentOptions,
+        options: ClaudeAgentOptions,
         transport: T,
         adapters: crate::adapters::RuntimeAdapters<E, P, F>,
     ) -> Result<Self, Error>

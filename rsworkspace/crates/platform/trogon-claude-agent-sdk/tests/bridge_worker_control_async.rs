@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 use tokio::task::JoinHandle;
 use trogon_claude_agent_sdk::{
-    AsyncControl, AsyncControlCallbacks, CallbackResult, CancellationToken, ControlCallbacks, ControlReply,
+    AsyncControl, AsyncControlCallbacks, BridgeControlReply, CallbackResult, CancellationToken, ControlCallbacks,
     ControlSession, HostError, HostFuture, ModelVerdict, PendingControl, SIDE_QUESTION_DEADLINE, SideQuestionContext,
     answer_control_request, background_tasks_disabled,
 };
@@ -211,9 +211,9 @@ impl Session {
             pending_prompts: &[],
         };
         let task = match answer_control_request(frame, &session, &mut self.callbacks) {
-            ControlReply::Frame(_) => None,
-            ControlReply::Deferred(work) => self.control.start(frame, work),
-            ControlReply::Pending(pending) => Some(self.control.finish_pending(frame, pending)),
+            BridgeControlReply::Frame(_) => None,
+            BridgeControlReply::Deferred(work) => self.control.start(frame, work),
+            BridgeControlReply::Pending(pending) => Some(self.control.finish_pending(frame, pending)),
         };
         self.tasks.extend(task.map(tokio::spawn));
     }

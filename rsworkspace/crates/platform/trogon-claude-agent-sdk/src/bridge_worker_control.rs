@@ -5,8 +5,8 @@
 //! `onRenameSession`, `onStopTask`, `onBackgroundTasks`, `onSideQuestion` and the version string into the dispatcher,
 //! and nothing else, so those are the only callbacks [`ControlCallbacks`] carries. A request that the upstream answers
 //! after an asynchronous host call (`stop_task`, `background_tasks` and `side_question` with a registered callback)
-//! comes back as [`ControlReply::Deferred`] with what the responder needs, and a `set_model` or
-//! `set_max_thinking_tokens` callback that returns a promise comes back as [`ControlReply::Pending`] with that future;
+//! comes back as [`BridgeControlReply::Deferred`] with what the responder needs, and a `set_model` or
+//! `set_max_thinking_tokens` callback that returns a promise comes back as [`BridgeControlReply::Pending`] with that future;
 //! `bridge_worker_control_async` finishes both.
 //!
 //! Branches the attach path never reaches (each is a draft row in the unreachable notes):
@@ -138,7 +138,7 @@ impl std::fmt::Debug for PendingControl {
 }
 
 #[derive(Debug)]
-pub enum ControlReply {
+pub enum BridgeControlReply {
     /// The `control_response` frame to write, with the session id already on it.
     Frame(Value),
     Deferred(DeferredControl),
@@ -189,8 +189,8 @@ pub(crate) struct Replier<'a> {
 }
 
 impl Replier<'_> {
-    fn frame(&self, subtype: &str, tail: Vec<(&str, Value)>) -> ControlReply {
-        ControlReply::Frame(self.frame_value(subtype, tail))
+    fn frame(&self, subtype: &str, tail: Vec<(&str, Value)>) -> BridgeControlReply {
+        BridgeControlReply::Frame(self.frame_value(subtype, tail))
     }
 
     /// The `control_response` frame with the request id after the subtype and `tail` after it.
@@ -210,19 +210,19 @@ impl Replier<'_> {
         Value::Object(frame)
     }
 
-    fn success(&self) -> ControlReply {
+    fn success(&self) -> BridgeControlReply {
         self.frame("success", Vec::new())
     }
 
-    fn success_with(&self, response: Value) -> ControlReply {
+    fn success_with(&self, response: Value) -> BridgeControlReply {
         self.frame("success", vec![("response", response)])
     }
 
-    fn error(&self, text: &str) -> ControlReply {
+    fn error(&self, text: &str) -> BridgeControlReply {
         self.frame("error", vec![("error", json!(text))])
     }
 
-    fn cleaned_error(&self, text: Option<&str>, code: Option<&str>) -> ControlReply {
+    fn cleaned_error(&self, text: Option<&str>, code: Option<&str>) -> BridgeControlReply {
         let mut tail = vec![("error", json!(clean_control_text(text.unwrap_or_default())))];
         if let Some(code) = code {
             tail.push(("error_code", json!(code)));
@@ -230,14 +230,14 @@ impl Replier<'_> {
         self.frame("error", tail)
     }
 
-    fn unsupported(&self, text: &str) -> ControlReply {
+    fn unsupported(&self, text: &str) -> BridgeControlReply {
         self.frame(
             "error",
             vec![("error", json!(text)), ("error_code", json!(ERROR_CODE_UNSUPPORTED))],
         )
     }
 
-    fn verdict(&self, result: Option<&CallbackResult>) -> ControlReply {
+    fn verdict(&self, result: Option<&CallbackResult>) -> BridgeControlReply {
         match result {
             Some(CallbackResult::Failed { error, .. }) => self.cleaned_error(error.as_deref(), None),
             _ => self.success(),
@@ -250,7 +250,7 @@ pub fn answer_control_request(
     request: &Value,
     session: &ControlSession<'_>,
     callbacks: &mut ControlCallbacks,
-) -> ControlReply {
+) -> BridgeControlReply {
     let replier = Replier {
         session_id: session.session_id,
         id: request.get("request_id"),
@@ -316,7 +316,7 @@ pub fn answer_control_request(
             if !callbacks.has_stop_task {
                 return missing("stop_task");
             }
-            ControlReply::Deferred(DeferredControl::StopTask {
+            BridgeControlReply::Deferred(DeferredControl::StopTask {
                 task_id: task_id.to_owned(),
             })
         }
@@ -330,7 +330,7 @@ pub fn answer_control_request(
             if !callbacks.has_background_tasks {
                 return missing("background_tasks");
             }
-            ControlReply::Deferred(DeferredControl::BackgroundTasks { tool_use_id })
+            BridgeControlReply::Deferred(DeferredControl::BackgroundTasks { tool_use_id })
         }
         Some("cancel_async_message") => {
             if field("message_uuid").and_then(Value::as_str).is_none() {
@@ -349,7 +349,7 @@ pub fn answer_control_request(
                     "side_question is not supported in this context (onSideQuestion callback not registered)",
                 );
             }
-            ControlReply::Deferred(DeferredControl::SideQuestion {
+            BridgeControlReply::Deferred(DeferredControl::SideQuestion {
                 request: body.cloned().unwrap_or(Value::Null),
             })
         }
@@ -365,7 +365,7 @@ pub fn answer_control_request(
     }
 }
 
-fn initialize(replier: &Replier<'_>, session: &ControlSession<'_>) -> ControlReply {
+fn initialize(replier: &Replier<'_>, session: &ControlSession<'_>) -> BridgeControlReply {
     let by_subtype = |wanted: &str| -> Vec<Value> {
         session
             .pending_prompts
@@ -398,7 +398,7 @@ fn initialize(replier: &Replier<'_>, session: &ControlSession<'_>) -> ControlRep
     )
 }
 
-fn set_model(replier: &Replier<'_>, body: Option<&Value>, callbacks: &mut ControlCallbacks) -> ControlReply {
+fn set_model(replier: &Replier<'_>, body: Option<&Value>, callbacks: &mut ControlCallbacks) -> BridgeControlReply {
     let model = body.and_then(|body| body.get("model"));
     if model.is_some_and(|model| !model.is_null() && !model.is_string()) {
         return replier.error("set_model: model must be a string");
@@ -412,7 +412,7 @@ fn set_model(replier: &Replier<'_>, body: Option<&Value>, callbacks: &mut Contro
         );
     }
     if let Some(callback) = callbacks.on_set_model_pending.as_mut() {
-        return ControlReply::Pending(PendingControl::SetModel(callback(model.and_then(Value::as_str))));
+        return BridgeControlReply::Pending(PendingControl::SetModel(callback(model.and_then(Value::as_str))));
     }
     let result = callbacks
         .on_set_model
@@ -431,7 +431,7 @@ fn set_max_thinking_tokens(
     replier: &Replier<'_>,
     body: Option<&Value>,
     callbacks: &mut ControlCallbacks,
-) -> ControlReply {
+) -> BridgeControlReply {
     let tokens = body.and_then(|body| body.get("max_thinking_tokens"));
     let display = body.and_then(|body| body.get("thinking_display"));
     let tokens_ok = tokens.is_none_or(|tokens| tokens.is_null() || (tokens.is_number() && is_integer(tokens)));
@@ -444,7 +444,7 @@ fn set_max_thinking_tokens(
         );
     }
     if let Some(callback) = callbacks.on_set_max_thinking_tokens_pending.as_mut() {
-        return ControlReply::Pending(PendingControl::SetMaxThinkingTokens(callback(tokens, display)));
+        return BridgeControlReply::Pending(PendingControl::SetMaxThinkingTokens(callback(tokens, display)));
     }
     let result = callbacks
         .on_set_max_thinking_tokens
@@ -453,7 +453,11 @@ fn set_max_thinking_tokens(
     replier.verdict(result.as_ref())
 }
 
-fn set_permission_mode(replier: &Replier<'_>, mode: Option<&Value>, callbacks: &mut ControlCallbacks) -> ControlReply {
+fn set_permission_mode(
+    replier: &Replier<'_>,
+    mode: Option<&Value>,
+    callbacks: &mut ControlCallbacks,
+) -> BridgeControlReply {
     let named = mode
         .and_then(Value::as_str)
         .map(|text| if text == "manual" { "default" } else { text })
@@ -488,7 +492,7 @@ fn set_permission_mode(replier: &Replier<'_>, mode: Option<&Value>, callbacks: &
 
 /// `qPe` followed by the missing handler: the settings are checked on the spot and the attach path registers no
 /// `onApplyFlagSettings`, so a valid object is answered as not supported.
-fn apply_flag_settings(replier: &Replier<'_>, settings: Option<&Value>) -> ControlReply {
+fn apply_flag_settings(replier: &Replier<'_>, settings: Option<&Value>) -> BridgeControlReply {
     match check_flag_settings(settings) {
         Err(text) => replier.error(&text),
         Ok(()) => replier.unsupported(
@@ -553,7 +557,7 @@ fn check_flag_settings(settings: Option<&Value>) -> Result<(), String> {
     Ok(())
 }
 
-fn mcp_set_servers(replier: &Replier<'_>, body: Option<&Value>) -> ControlReply {
+fn mcp_set_servers(replier: &Replier<'_>, body: Option<&Value>) -> BridgeControlReply {
     let servers = body.and_then(|body| body.get("servers"));
     let hint = body.and_then(|body| body.get("hint"));
     if servers.is_none() && hint.is_some_and(Value::is_string) {
