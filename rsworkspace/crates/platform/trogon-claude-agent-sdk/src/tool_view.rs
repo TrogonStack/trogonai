@@ -12,9 +12,9 @@ use crate::{
     },
 };
 
-/// The prefix the CLI gives every MCP tool name; `sdk-tools` types those inputs as `McpInput` and their results
-/// as `McpOutput`.
-const MCP_TOOL_PREFIX: &str = "mcp__";
+mod constants;
+
+use constants::MCP_TOOL_PREFIX;
 
 impl ToolInputSchemas {
     /// `input` as the `sdk-tools` input type of the tool `tool_name` names, a legacy alias resolved like the CLI

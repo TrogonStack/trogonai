@@ -11,18 +11,15 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
+mod constants;
+
+use constants::{
+    BASE_DELAY_MS, COST_KEYS, DELETE_OUTLIVES_STATUS, JITTER_MS, MAX_DELAY_MS, OWED_KEYS, REQUEUED_ALONE,
+    RIDES_A_STATUS,
+};
+
 /// One `PUT /worker` body, without the `worker_epoch` the request adds.
 pub type Patch = Map<String, Value>;
-
-const BASE_DELAY_MS: f64 = 500.0;
-const MAX_DELAY_MS: f64 = 30_000.0;
-const JITTER_MS: f64 = 500.0;
-/// The `internal_metadata` keys that only mean something next to a status.
-const RIDES_A_STATUS: [&str; 2] = ["reply_degraded", "card_turn_stamp"];
-/// The riders a `null` outlives the status for.
-const DELETE_OUTLIVES_STATUS: [&str; 1] = ["card_turn_stamp"];
-/// The keys that are re-sent one group at a time after a refusal.
-const REQUEUED_ALONE: [&str; 1] = ["disabled_mcp_servers"];
 
 fn has_status(patch: &Patch) -> bool {
     patch.contains_key("worker_status")
@@ -427,24 +424,6 @@ pub fn retry_delay(attempt: u32, jitter: f64) -> Duration {
         (BASE_DELAY_MS * 2_f64.powi(i32::try_from(attempt.saturating_sub(1)).unwrap_or(i32::MAX))).min(MAX_DELAY_MS);
     Duration::from_secs_f64((grown + jitter * JITTER_MS) / 1000.0)
 }
-
-const COST_KEYS: [&str; 8] = [
-    "cumulative_cost_usd",
-    "cumulative_input_tokens",
-    "cumulative_output_tokens",
-    "cumulative_cache_read_tokens",
-    "cumulative_cache_write_tokens",
-    "cost_state",
-    "memory_extract_place",
-    "model_turn_stored",
-];
-const OWED_KEYS: [&str; 5] = [
-    "last_served_model",
-    "worker_permission_mode",
-    "plan_doc",
-    "card_turn_stamp",
-    "card_answer_handed_on",
-];
 
 /// What goes back into the queue after the service refused a patch with `400`, `413` or `422`.
 #[derive(Clone, Debug, Default, PartialEq)]

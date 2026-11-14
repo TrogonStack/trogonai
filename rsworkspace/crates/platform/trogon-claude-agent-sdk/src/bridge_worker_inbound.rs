@@ -15,11 +15,9 @@ use std::collections::HashSet;
 
 use serde_json::{Map, Value, json};
 
-/// How many uuids each of the two sets remembers (`x9`).
-pub const INBOUND_DEDUP_CAPACITY: usize = 2_000;
+mod constants;
 
-/// The only `origin` a queued notification may carry (`Kb`).
-pub const NOTIFICATION_ORIGIN: &str = "mcp_send_message";
+pub use constants::{INBOUND_DEDUP_CAPACITY, NOTIFICATION_ORIGIN};
 
 /// A bounded set of strings that forgets the oldest one first (`If`). Adding a member it already has changes nothing.
 #[derive(Clone, Debug)]

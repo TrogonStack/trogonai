@@ -5,6 +5,10 @@ use crate::{
 use indexmap::IndexMap;
 use serde_json::{Number, Value};
 
+mod constants;
+
+use constants::{PYTHON_ORDER, TYPESCRIPT_ORDER};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentExecution {
     Foreground,
@@ -71,45 +75,6 @@ pub struct AgentDefinition {
     /// dataclass cannot carry undeclared keys.
     pub extra: JsonObject,
 }
-
-/// The declaration order of TypeScript `AgentDefinition`, which a caller writing every field in order sends.
-const TYPESCRIPT_ORDER: &[&str] = &[
-    "description",
-    "tools",
-    "disallowedTools",
-    "prompt",
-    "model",
-    "mcpServers",
-    "criticalSystemReminder_EXPERIMENTAL",
-    "skills",
-    "initialPrompt",
-    "maxTurns",
-    "autoCompactWindow",
-    "background",
-    "omitClaudeMd",
-    "memory",
-    "effort",
-    "permissionMode",
-    "observer",
-    "observerMessage",
-];
-
-/// The field order of the Python dataclass, which `asdict` keeps when it drops the `None` values.
-const PYTHON_ORDER: &[&str] = &[
-    "description",
-    "prompt",
-    "tools",
-    "disallowedTools",
-    "model",
-    "skills",
-    "memory",
-    "mcpServers",
-    "initialPrompt",
-    "maxTurns",
-    "background",
-    "effort",
-    "permissionMode",
-];
 
 fn tool_list(tools: Option<&Vec<ToolName>>) -> Option<Value> {
     tools.map(|tools| tools.iter().map(|tool| Value::from(tool.as_str())).collect())

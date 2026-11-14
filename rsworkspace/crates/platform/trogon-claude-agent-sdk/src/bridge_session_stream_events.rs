@@ -7,25 +7,17 @@
 //! them, so the deltas reach the viewer first. Any other row ends the window at once and goes out after what was
 //! held. The session upload task owns the clock: [`StreamEvents`] only says when the window is due.
 
-use std::time::Duration;
-
 use serde_json::{Map, Value};
 use tokio::time::Instant;
 
 use crate::bridge_session::client_event;
 use crate::bridge_worker_events::ClientEvent;
 
-type Frame = Map<String, Value>;
+mod constants;
 
-/// `o5`: how long the first stream event waits for the ones that follow.
-const WINDOW: Duration = Duration::from_millis(100);
-/// `ea`: the most a live-view row may weigh once serialized; a heavier one is dropped.
-const EPHEMERAL_LIMIT: usize = 61_440;
-/// `MG`: the most a merged delta may weigh, which leaves room for the row around it.
-const MERGE_LIMIT: usize = EPHEMERAL_LIMIT - 4096;
-/// No character takes more than this many bytes once escaped, so a batch of this many characters or fewer is safe
-/// to merge without measuring.
-const WIDEST_ESCAPE: usize = 6;
+use constants::{EPHEMERAL_LIMIT, MERGE_LIMIT, WIDEST_ESCAPE, WINDOW};
+
+type Frame = Map<String, Value>;
 
 /// The events held back, the rows waiting behind them, and when the window ends.
 #[derive(Default)]

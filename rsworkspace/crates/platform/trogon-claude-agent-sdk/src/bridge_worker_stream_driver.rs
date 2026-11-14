@@ -17,12 +17,9 @@ use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 use crate::bridge_worker_stream::{Reopen, StreamEffect, StreamOpen, StreamRequest, StreamSession, liveness_timeout};
 
-/// How long a request may take to answer before it is given up (`e9`).
-pub const CONNECT_TIMEOUT: Duration = Duration::from_millis(30_000);
-/// How long the body of a refused request is read before the refusal is acted on (`IA`).
-pub const REFUSAL_BODY_TIMEOUT: Duration = Duration::from_millis(3_000);
-/// The wait of a reopen at once: a Node timer of zero runs after one millisecond.
-pub const REOPEN_AT_ONCE: Duration = Duration::from_millis(1);
+mod constants;
+
+pub use constants::{CONNECT_TIMEOUT, REFUSAL_BODY_TIMEOUT, REOPEN_AT_ONCE};
 
 /// A request or a body that failed. The cause is only for the log: every failure is retried the same way.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

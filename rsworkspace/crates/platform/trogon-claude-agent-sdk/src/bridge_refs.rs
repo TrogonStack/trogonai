@@ -18,12 +18,9 @@ use crate::bridge_js::js_trim;
 use crate::bridge_paths::PathGuard;
 use crate::bridge_platform::EntryKind;
 
-const FALLBACK: &str = "main";
-const COMMON_FALLBACKS: [&str; 2] = ["main", "master"];
-const READ_LIMIT: u64 = 65536;
-const REF_DEPTH: u32 = 5;
-const ORIGIN: &str = "refs/remotes/origin/";
-const REFTABLE_MARKER: &str = "refs/heads/.invalid";
+mod constants;
+
+use constants::{COMMON_FALLBACKS, FALLBACK, ORIGIN, READ_LIMIT, REF_DEPTH, REFTABLE_MARKER};
 
 /// The default branch of the repository around `directory`; `main` when nothing says otherwise, never empty.
 pub(crate) async fn guess_default_branch(context: &GitProbeContext, directory: &Path) -> String {

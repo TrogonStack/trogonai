@@ -7,9 +7,9 @@ use crate::{
     sse_utf8_decoder::SseUtf8Decoder,
 };
 
-const BODY_LIMIT: usize = 4096;
-const REASON_LIMIT: usize = 128;
-const PERMANENT_STATUSES: [u16; 3] = [401, 403, 404];
+mod constants;
+
+use constants::{BODY_LIMIT, PERMANENT_STATUSES, REASON_LIMIT};
 
 /// A failed HTTP request of the browser transport: what was attempted, the status code and, when the error body
 /// named one, a short reason.

@@ -34,8 +34,10 @@ use crate::bridge_worker_stream_driver::{StreamClocks, run_stream};
 use crate::bridge_worker_stream_http::HttpStreamConnector;
 use crate::bridge_worker_types::{InitError, MismatchReason, RegisterFailure};
 
-/// `onClose` when the worker could not be initialised for good (`4091`).
-pub const CLOSE_INIT_FAILED: u16 = 4091;
+mod constants;
+
+pub use constants::CLOSE_INIT_FAILED;
+use constants::{LIVE_ONLY_LIMIT, OVERSIZED_REPLY};
 
 /// What the host reads the environment with (`process.env`).
 pub type EnvironmentLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -579,10 +581,6 @@ pub(crate) fn client_event(frame: Value) -> Option<ClientEvent> {
         ephemeral: live_only || thinking,
     })
 }
-
-/// `$y`: how large a live-only reply may be, in bytes.
-const LIVE_ONLY_LIMIT: usize = 57_344;
-const OVERSIZED_REPLY: &str = "The reply is too large to be sent without storing it";
 
 fn oversized_reply(payload: &Map<String, Value>) -> Map<String, Value> {
     let mut replaced = Map::new();

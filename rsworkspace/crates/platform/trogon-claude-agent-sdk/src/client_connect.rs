@@ -6,8 +6,9 @@ use futures_util::{StreamExt, stream::BoxStream};
 use super::ClaudeSdkClient;
 use crate::{ClaudeAgentOptions, Error, Prompt, SessionId, UserInput};
 
-/// The session id Python's `ClaudeSDKClient.connect(str)` and `query` write when the caller names none.
-const PYTHON_DEFAULT_SESSION: &str = "default";
+mod constants;
+
+use constants::PYTHON_DEFAULT_SESSION;
 
 /// The prompt of Python's `ClaudeSDKClient.connect(prompt)`.
 #[derive(Default)]

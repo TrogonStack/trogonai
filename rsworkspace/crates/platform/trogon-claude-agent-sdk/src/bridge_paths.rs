@@ -17,37 +17,9 @@ use crate::bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe};
 use crate::bridge_unicode::js_lowercase;
 use unicode_normalization::UnicodeNormalization;
 
-const LINK_DEPTH: u32 = 40;
-const PARTIAL_DEPTH: usize = 6;
-const AUTOFS_TYPE: i64 = 391;
-const ASKED_TWICE: u32 = 2;
-const EXPECTED_ERRORS: [&str; 7] = [
-    "ENOENT",
-    "ENOTDIR",
-    "EACCES",
-    "EPERM",
-    "ENOSYS",
-    "ENOTSUP",
-    "EOPNOTSUPP",
-];
-const DATA_VOLUME_ROOTS: [&str; 16] = [
-    "usr/local",
-    "usr/libexec/cups",
-    "usr/share/snmp",
-    "AppleInternal",
-    "Applications",
-    "Library",
-    "Users",
-    "Volumes",
-    "cores",
-    "home",
-    "media",
-    "mnt",
-    "opt",
-    "pkg",
-    "private",
-    "sw",
-];
+mod constants;
+
+use constants::{ASKED_TWICE, AUTOFS_TYPE, DATA_VOLUME_ROOTS, EXPECTED_ERRORS, LINK_DEPTH, PARTIAL_DEPTH};
 
 /// The automount roots upstream has already ruled out, and the lookups that failed once without being expected to.
 #[derive(Default)]

@@ -12,6 +12,10 @@ use crate::{
     wire::runtime_payload::RequestPayload,
 };
 
+mod constants;
+
+use constants::CLAIM_FLAGS;
+
 struct StartInput<T, F: crate::adapters::SessionFileSystem> {
     options: ClaudeAgentOptions,
     session: Option<crate::SessionRuntime<F>>,
@@ -1571,14 +1575,6 @@ fn interrupt_receipt(response: Option<serde_json::Value>) -> crate::InterruptRec
         _ => crate::InterruptReceipt::from_json(JsonObject::new()),
     }
 }
-
-/// The applied flags `claimSession` carries over from the earlier initialization result.
-const CLAIM_FLAGS: [&str; 4] = [
-    "hooks_applied",
-    "plugins_applied",
-    "managed_settings_applied",
-    "code_running_mcp_tools_applied",
-];
 
 /// TypeScript `claimSession`'s merge. It reads the applied flags off the earlier result, none when that failed,
 /// which throws when the result is missing or `null`; then off the claim's `initialize`, which throws when that

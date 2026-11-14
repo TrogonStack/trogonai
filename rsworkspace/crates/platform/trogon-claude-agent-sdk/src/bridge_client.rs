@@ -20,8 +20,10 @@ use crate::settings_numbers::js_value;
 use crate::settings_parse::parse_json;
 use crate::{BranchDropLogDedup, SensitiveString};
 
-pub(crate) const USER_AGENT: &str = "claude-code/0.3.323";
-const ENTRYPOINT_VARIABLE: &str = "CLAUDE_CODE_ENTRYPOINT";
+mod constants;
+
+use constants::ENTRYPOINT_VARIABLE;
+pub(crate) use constants::USER_AGENT;
 
 static REQUEST_ID: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"^req_[A-Za-z0-9_-]{1,36}$").ok());
 static SNAKE_CASE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"^[a-z0-9_]{1,64}$").ok());

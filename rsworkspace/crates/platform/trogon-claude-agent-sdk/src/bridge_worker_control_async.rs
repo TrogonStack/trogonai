@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
@@ -21,38 +20,10 @@ use crate::bridge_worker_control::{
     CallbackResult, DeferredControl, HostError, HostFuture, ModelVerdict, PendingControl, Replier, clean_control_text,
 };
 
-/// `HPe`: how long the host has to answer a side question.
-pub const SIDE_QUESTION_DEADLINE: Duration = Duration::from_millis(660_000);
+mod constants;
 
-const SIDE_QUESTION_TIMEOUT: &str = "side_question timed out: the host did not answer in time";
-const SIDE_QUESTION_NO_ANSWER: &str =
-    "(No answer available for this side question. Try again, or ask in the main conversation.)";
-const BACKGROUND_TASKS_DISABLED: &str = "Background tasks are disabled in this session.";
-/// `By`: the model verdict codes a reply may carry.
-const MODEL_CODES: [&str; 22] = [
-    "invalid_request",
-    "catalog_unknown",
-    "not_found",
-    "restricted_by_org",
-    "unavailable_for_account",
-    "not_offered",
-    "alias_1m_disabled",
-    "alias_1m_unsupported",
-    "blocked_by_hook",
-    "hooks_unchecked",
-    "hooks_unchecked_plugin_not_loaded",
-    "check_failed",
-    "check_unreachable",
-    "check_server_error",
-    "check_rejected",
-    "credits_required",
-    "rate_limit",
-    "auth_failed",
-    "oauth_org_not_allowed",
-    "model_not_current",
-    "verdict_pending",
-    "internal_error",
-];
+pub use constants::SIDE_QUESTION_DEADLINE;
+use constants::{BACKGROUND_TASKS_DISABLED, MODEL_CODES, SIDE_QUESTION_NO_ANSWER, SIDE_QUESTION_TIMEOUT};
 
 /// Where a frame goes: the transport's write.
 pub type FrameWriter = Box<dyn Fn(Value) + Send + Sync>;

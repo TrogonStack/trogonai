@@ -4,8 +4,9 @@ use indexmap::IndexMap;
 
 use crate::{SseDropCategory, SseLogLevel, SseLogRecord};
 
-const LOGGED_IN_FULL: u64 = 5;
-const SAMPLE_EVERY: u64 = 50;
+mod constants;
+
+use constants::{LOGGED_IN_FULL, SAMPLE_EVERY};
 
 /// Counts drops per category and decides which ones are worth a log line: the first five of each category, then
 /// every fiftieth, which carries the running total.

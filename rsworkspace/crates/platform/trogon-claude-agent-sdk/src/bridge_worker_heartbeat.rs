@@ -22,8 +22,10 @@ use crate::adapters::HttpExecute;
 use crate::bridge_worker::{WorkerClient, WorkerPacing};
 use crate::bridge_worker_types::MismatchReason;
 
-/// The longest delay a timer can have; a longer one is run after the shortest (`2147483647`).
-const LARGEST_TIMER_MS: f64 = 2_147_483_647.0;
+mod constants;
+
+use constants::LARGEST_TIMER_MS;
+pub use constants::PROBE_BEAT_SPACING;
 
 /// How long the timer waits before the next beat: the interval plus a spread of
 /// `max(interval * jitter_fraction, jitter_floor_ms) * (2 * random - 1)`, at most [`LARGEST_TIMER_MS`]. A delay below
@@ -34,9 +36,6 @@ pub fn heartbeat_delay(interval_ms: f64, jitter_fraction: f64, jitter_floor_ms: 
     let wait = if wait >= 1.0 { wait } else { 1.0 };
     Duration::from_secs_f64(wait / 1000.0)
 }
-
-/// The least time between a beat and the one a probe asks for (`probeBeatSpacingMs`, `U2e`).
-pub const PROBE_BEAT_SPACING: Duration = Duration::from_millis(5_000);
 
 struct Shared<H, P> {
     client: Arc<WorkerClient<H, P>>,

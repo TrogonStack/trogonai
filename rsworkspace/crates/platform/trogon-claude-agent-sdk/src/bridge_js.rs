@@ -9,7 +9,9 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::bridge_unicode::{is_forbidden, is_mark, is_punctuation, is_space};
 
-const DETAIL_LIMIT: usize = 1024;
+mod constants;
+
+use constants::DETAIL_LIMIT;
 
 static ESCAPE_CODES: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[\]PX^_][^\x1b\x07]*(?:\x07|\x1b\\)").ok()

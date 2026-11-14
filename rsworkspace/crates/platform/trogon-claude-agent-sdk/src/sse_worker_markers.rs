@@ -4,32 +4,9 @@ use serde_json::Value;
 
 use crate::{JsonObject, js_text::is_js_whitespace};
 
-const PEER_NOTICE: &str = "Another Claude session sent a message";
-const ARRIVED_PREFIX: &str = "A message arrived from ";
-const WORKER_PREFIXES: [&str; 7] = [
-    "<bash-stdout",
-    "<bash-stderr",
-    "<local-command-stdout",
-    "<local-command-stderr",
-    "<channel source=\"",
-    "<teammate-message ",
-    "<teammate-message>",
-];
-const NOTICE_PREFIXES: [&str; 3] = [
-    "Another Claude session sent a message while you were working:\n",
-    "Another Claude session sent a message:\n",
-    "A peer session sent a message while you were working:\n",
-];
-const EMBEDDED_MARKERS: [&str; 8] = [
-    "<bash-input>",
-    "<command-message>",
-    "<user-memory-input>",
-    "<task-notification",
-    "<mcp-resource-update",
-    "<mcp-polling-update",
-    "<fork-boilerplate>",
-    "<local-command-caveat>",
-];
+mod constants;
+
+use constants::{ARRIVED_PREFIX, EMBEDDED_MARKERS, NOTICE_PREFIXES, PEER_NOTICE, WORKER_PREFIXES};
 
 /// Whether `text` opens with a `<cross-session-message ...>` tag: the tag name, then either `>` or a space or tab and
 /// attribute text up to a `>` on the same line.

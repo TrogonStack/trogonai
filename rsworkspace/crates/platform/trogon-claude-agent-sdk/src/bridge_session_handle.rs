@@ -17,6 +17,10 @@ use crate::bridge_worker_delivery::DeliveryStatus;
 use crate::bridge_worker_events::ClientEvent;
 use crate::bridge_worker_stream::StreamSession;
 
+mod constants;
+
+use constants::NOT_CARRIED_AS_ECHO;
+
 /// What `reconnectTransport` is given.
 pub struct ReconnectOptions {
     pub api_base_url: String,
@@ -35,14 +39,6 @@ pub enum ReconnectError {
     #[error("Invalid URL")]
     InvalidUrl,
 }
-
-/// The frame types a rebuilt transport does not take back as its own writes.
-const NOT_CARRIED_AS_ECHO: [&str; 4] = [
-    "control_request",
-    "control_response",
-    "control_cancel_request",
-    "result",
-];
 
 /// `Jp`: the usage block of a result nobody ran a turn for.
 fn zero_usage() -> Value {

@@ -18,10 +18,9 @@ use serde_json::{Value, json};
 
 use crate::bridge_worker_events::retry_delay;
 
-/// Acknowledgements per request (`maxBatchSize`).
-pub const MAX_BATCH_ACKS: usize = 64;
-/// Acknowledgements the queue holds before a caller has to wait (`maxQueueSize`).
-pub const MAX_QUEUE_ACKS: usize = 64;
+mod constants;
+
+pub use constants::{MAX_BATCH_ACKS, MAX_QUEUE_ACKS};
 
 /// What a delivery acknowledgement reports about an inbound event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

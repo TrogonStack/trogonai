@@ -25,14 +25,11 @@ use serde_json::{Map, Value, json};
 
 use crate::bridge_js::{clean_label, clean_reply_text};
 
-const ERROR_CODE_UNSUPPORTED: &str = "unsupported_request";
-const PERMISSION_MODES: [&str; 6] = ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"];
-/// `NPe`: the settings a Remote Control client may change, `MPe` how many unknown names an error lists, and `UPe` how
-/// long each is.
-const FLAG_SETTINGS: [&str; 2] = ["effortLevel", "ultracode"];
-const FLAG_KEYS_SHOWN: usize = 5;
-const FLAG_KEY_LIMIT: usize = 40;
-const THINKING_DISPLAYS: [&str; 3] = ["summarized", "omitted", "highlights"];
+mod constants;
+
+use constants::{
+    ERROR_CODE_UNSUPPORTED, FLAG_KEY_LIMIT, FLAG_KEYS_SHOWN, FLAG_SETTINGS, PERMISSION_MODES, THINKING_DISPLAYS,
+};
 
 /// What a host callback that reports success or failure returned. A callback that returns nothing is `None` where
 /// the callback type says `Option<CallbackResult>`.

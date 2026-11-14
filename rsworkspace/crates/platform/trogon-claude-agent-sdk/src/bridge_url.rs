@@ -8,8 +8,9 @@ use url::Url;
 
 use crate::bridge_unicode::{is_space, js_lowercase};
 
-const GITHUB: &str = "github.com";
-const SPECIAL_SCHEMES: [&str; 5] = ["http", "https", "ws", "wss", "ftp"];
+mod constants;
+
+use constants::{GITHUB, SPECIAL_SCHEMES};
 
 /// Whether an address is refused outright; `text` is already trimmed.
 pub(crate) fn rejected(text: &str) -> bool {
