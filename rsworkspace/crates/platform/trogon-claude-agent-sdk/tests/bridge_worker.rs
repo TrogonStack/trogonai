@@ -9,12 +9,13 @@ use serde_json::{Map, Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use trogon_claude_agent_sdk::{
-    AUTH_FAILURES_BEFORE_EXIT, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
+    AUTH_FAILURES_BEFORE_EXIT, ClientEvent, DEFAULT_HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_CEILING_MS,
     HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS, HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS,
-    InitError, InitFailure, InvalidSessionId, MismatchReason, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RegisterFailure,
-    RequestFailure, RequestOutcome, RequiresActionDetails, SensitiveString, SessionState, StatusClass, TokioPacing,
-    WorkerClient, WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout,
-    refusal_source, retry_after_ms, session_url, token_expiry,
+    InitError, InitFailure, InvalidSessionId, MismatchReason, NOT_FOUND_BEFORE_EXIT, NonOrigin403,
+    POST_TIMEOUT_FLOOR_MS, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails, SHRINK_FROM_BYTES,
+    SensitiveString, SessionState, StatusClass, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing, classify_status,
+    external_metadata_patch, heartbeat_timeout, lane_for_path, refusal_source, retry_after_ms, session_url,
+    token_expiry, upload_timeout,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -184,6 +185,7 @@ async fn serve_all(
         landings,
         json!({"status": 200, "headers": [], "body": "{}"}),
         Duration::ZERO,
+        vec![],
     )
     .await
 }
@@ -196,6 +198,7 @@ async fn serve_record(
     landings: Vec<Value>,
     record: Value,
     record_delay: Duration,
+    events: Vec<Value>,
 ) -> Result<(String, Log), std::io::Error> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
@@ -203,7 +206,7 @@ async fn serve_record(
     let log: Log = Arc::default();
     let shared = log.clone();
     tokio::spawn(async move {
-        let (mut put_count, mut beat_count, mut landing_count) = (0, 0, 0);
+        let (mut put_count, mut beat_count, mut landing_count, mut event_count) = (0, 0, 0, 0);
         let mut held = Vec::new();
         while let Ok((mut stream, _)) = listener.accept().await {
             let Some(mut request) = read_request(&mut stream).await else {
@@ -231,6 +234,7 @@ async fn serve_record(
                 "PUT /worker" => next_response(&puts, &mut put_count),
                 "PUT /worker/landing" => next_response(&landings, &mut landing_count),
                 "POST /worker/heartbeat" => next_response(&beats, &mut beat_count),
+                "POST /worker/events" => next_response(&events, &mut event_count),
                 _ => json!({"status": 404, "headers": [], "body": ""}),
             };
             if let Ok(mut captured) = shared.lock() {
@@ -372,6 +376,7 @@ async fn run_case(case: &Value) -> TestResult {
         queue(case, "landing"),
         record,
         record_delay,
+        queue(case, "events"),
     )
     .await?;
     let pacing = Recorded::new(0.0);
@@ -426,6 +431,15 @@ async fn run_case(case: &Value) -> TestResult {
     }
     if connected {
         for step in field(case, "steps").as_array().into_iter().flatten() {
+            if field(step, "op").as_str() == Some("events") {
+                match post_events(&mut worker, step).await? {
+                    Ok(()) => continue,
+                    Err(reason) => {
+                        ending = Ending::mismatch(reason);
+                        break;
+                    }
+                }
+            }
             if field(step, "op").as_str() == Some("burst") {
                 match burst(&mut worker, step).await? {
                     Ok(()) => continue,
@@ -474,7 +488,10 @@ async fn run_case(case: &Value) -> TestResult {
     if let Some(expected) = field(case, "epoch").as_i64() {
         assert_eq!(worker.epoch(), expected, "{name} epoch");
     }
-    if let Some(bases) = field(case, "retry_base_ms").as_array() {
+    if let Some(bases) = field(case, "retry_base_ms")
+        .as_array()
+        .or_else(|| field(case, "event_gaps_ms").as_array())
+    {
         let waited: Vec<u128> = pacing.delays().iter().map(Duration::as_millis).collect();
         let want: Vec<u128> = bases.iter().filter_map(Value::as_u64).map(u128::from).collect();
         assert_eq!(waited, want, "{name} retry delays");
@@ -483,7 +500,11 @@ async fn run_case(case: &Value) -> TestResult {
     let captured = log.lock().map_err(|_| "poisoned log")?;
     assert_eq!(captured.len(), expected.len(), "{name} request count");
     for (position, (want, got)) in expected.iter().zip(captured.iter()).enumerate() {
-        assert_request(&format!("{name} #{position}"), want, got);
+        let mut got = got.clone();
+        if got.path == "/worker/events" {
+            got.body = hide_uuids(&got.body);
+        }
+        assert_request(&format!("{name} #{position}"), want, &got);
     }
     Ok(())
 }
@@ -513,6 +534,55 @@ async fn burst(
         worker.close_queue();
     }
     Ok(worker.flush().await.map(|_| ()))
+}
+
+/// Replaces every random uuid with `<uuid>`, as the recorder does for what it cannot repeat.
+fn hide_uuids(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let bytes = body.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        let end = at + 36;
+        let shaped = end <= bytes.len()
+            && bytes[at..end].iter().enumerate().all(|(i, byte)| match i {
+                8 | 13 | 18 | 23 => *byte == b'-',
+                _ => byte.is_ascii_digit() || (b'a'..=b'f').contains(byte),
+            });
+        if shaped {
+            out.push_str("<uuid>");
+            at = end;
+        } else {
+            out.push(char::from(bytes[at]));
+            at += 1;
+        }
+    }
+    out
+}
+
+/// Writes the events of one step as a caller would: the first goes out alone and the rest arrive while it is in
+/// flight (a failed first request is retried with them).
+async fn post_events(
+    worker: &mut WorkerClient<reqwest::Client, Recorded>,
+    step: &Value,
+) -> Result<Result<(), MismatchReason>, Box<dyn std::error::Error>> {
+    let mut events = Vec::new();
+    for item in queue(step, "writes") {
+        let mut payload = item.as_object().cloned().ok_or("event")?;
+        payload.insert("session_id".to_owned(), json!("cse_abc"));
+        let ephemeral = field(&item, "subtype").as_str() == Some("thinking_tokens");
+        events.push(ClientEvent { payload, ephemeral });
+    }
+    let rest = events.split_off(1.min(events.len()));
+    if let Err(reason) = worker.submit_events(events).await {
+        return Ok(Err(reason));
+    }
+    if let Err(reason) = worker.pump_events(Some(1)).await {
+        return Ok(Err(reason));
+    }
+    if let Err(reason) = worker.submit_events(rest).await {
+        return Ok(Err(reason));
+    }
+    Ok(worker.flush_events().await.map(|_| ()))
 }
 
 async fn replay(section: &str, minimum: usize) -> TestResult {
@@ -559,6 +629,11 @@ async fn queued_reports_match_the_upstream_client() -> TestResult {
     replay("queue", 8).await
 }
 
+#[tokio::test]
+async fn client_events_match_the_upstream_client() -> TestResult {
+    replay("events", 12).await
+}
+
 #[test]
 fn pure_rules_match_the_upstream_client() -> TestResult {
     let goldens: Value = serde_json::from_str(GOLDENS)?;
@@ -590,6 +665,25 @@ fn pure_rules_match_the_upstream_client() -> TestResult {
     ] {
         assert_eq!(constants[key].as_u64(), Some(value), "{key}");
     }
+    for pair in pure["lanes"].as_array().ok_or("no lanes")? {
+        assert_eq!(
+            lane_for_path(pair[0].as_str().unwrap_or_default()),
+            pair[1].as_str(),
+            "{pair}"
+        );
+    }
+    assert_eq!(lane_for_path("/worker/other"), None);
+    for row in pure["upload_timeouts"].as_array().ok_or("no upload timeouts")? {
+        let bytes = usize::try_from(row[0].as_u64().ok_or("bytes")?)?;
+        let count = u32::try_from(row[2].as_u64().ok_or("count")?)?;
+        let timeout = upload_timeout(bytes, row[1].as_bool().ok_or("cuttable")?, count);
+        assert_eq!(Some(timeout.as_millis()), row[3].as_u64().map(u128::from), "{row}");
+    }
+    assert_eq!(pure["upload_floor_ms"].as_u64(), Some(POST_TIMEOUT_FLOOR_MS));
+    assert_eq!(
+        pure["upload_shrink_from_bytes"].as_u64(),
+        u64::try_from(SHRINK_FROM_BYTES).ok()
+    );
     for (name, code) in pure["close_codes"].as_object().ok_or("no close codes")? {
         let reason = reason_named(name)?;
         assert_eq!(code.as_u64(), Some(u64::from(reason.close_code(true))), "{name}");

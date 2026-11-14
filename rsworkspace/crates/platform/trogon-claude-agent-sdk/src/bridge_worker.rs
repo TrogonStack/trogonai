@@ -1,6 +1,10 @@
 //! The worker half of the bridge: registering a worker for a remote session and keeping the service told about it
 //! (`PUT /worker` state and metadata, `POST /worker/heartbeat`), with the request path rules the upstream bridge
-//! entrypoint applies to every answer.
+//! entrypoint applies to every answer, and the client event upload (`POST /worker/events`, [`crate::EventQueue`]).
+//!
+//! Not ported yet, and reachable: the events a flush policy holds or merges, stream-event buffering, the control
+//! request urgent lane, rider and receipt uploads (`/worker/event-batch`), delivery acknowledgements and the internal
+//! event uploader. The event queue takes durable rows and `thinking_tokens` rows only until those land.
 //!
 //! Draft, pending upstream call-graph evidence for each entry below. The port covers what a caller reaches through
 //! `attachBridgeSession` and the handle it returns, and what a service answer can trigger. These branches of the
@@ -32,6 +36,7 @@ use crate::adapters::HttpExecute;
 use crate::bridge_client::{USER_AGENT, client_platform, header_text};
 use crate::bridge_js::{js_number, js_parse_int, plain_detail, safe_integer};
 use crate::bridge_types::SessionState;
+use crate::bridge_worker_events::{ClientEvent, EventNext, EventQueue, refused_for_good, upload_body, upload_timeout};
 use crate::bridge_worker_queue::{Next, Patch, PatchQueue, requeue_after_refusal, without_status};
 use crate::bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
@@ -526,6 +531,8 @@ pub struct WorkerClient<H, P = TokioPacing> {
     session_access_token: Option<SensitiveString>,
     non_origin_403: NonOrigin403,
     queue: PatchQueue,
+    events: EventQueue,
+    dropped_durable_event_batches: u32,
     record_at_start: Option<Map<String, Value>>,
     reported_keys: Vec<String>,
     reply_degraded: bool,
@@ -555,6 +562,8 @@ impl<H, P> WorkerClient<H, P> {
             session_access_token: config.session_access_token,
             non_origin_403: config.non_origin_403,
             queue: PatchQueue::new(),
+            events: EventQueue::default(),
+            dropped_durable_event_batches: 0,
             record_at_start: None,
             reported_keys: Vec::new(),
             reply_degraded: false,
@@ -926,6 +935,128 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         }
     }
 
+    /// Queues client events for `POST /worker/events` (`writeEvents`). An event without a string `uuid` gets one.
+    /// When the queue is full the call sends until there is room, as the upstream writer waits for it.
+    pub async fn submit_events(&mut self, events: Vec<ClientEvent>) -> Result<(), MismatchReason> {
+        let events: Vec<ClientEvent> = events.into_iter().map(with_uuid).collect();
+        for chunk in events.chunks(self.events_capacity()) {
+            while !self.events.has_room_for(chunk.len()) && !self.events.is_closed() {
+                self.pump_events(Some(1)).await?;
+            }
+            self.events.enqueue(chunk.to_vec());
+        }
+        Ok(())
+    }
+
+    fn events_capacity(&self) -> usize {
+        self.events.capacity()
+    }
+
+    /// Sends the queued events, retrying with the upstream backoff until the service takes every batch. Returns
+    /// whether the queue drained; a mismatch ends the flush.
+    pub async fn flush_events(&mut self) -> Result<bool, MismatchReason> {
+        self.pump_events(None).await
+    }
+
+    /// How many batches of durable events the service refused for good and the client dropped.
+    pub fn dropped_durable_event_batches(&self) -> u32 {
+        self.dropped_durable_event_batches
+    }
+
+    /// Closes the event queue (`close`); with `retain` the events not yet taken stay available to the caller.
+    pub fn close_events(&mut self, retain: bool) -> usize {
+        self.events.close(retain)
+    }
+
+    /// The events kept by [`WorkerClient::close_events`].
+    pub fn take_undelivered_events(&mut self) -> Vec<ClientEvent> {
+        self.events.take_undelivered()
+    }
+
+    /// The event queue.
+    pub fn event_queue(&self) -> &EventQueue {
+        &self.events
+    }
+
+    /// [`WorkerClient::flush_events`] that stops once `attempts` requests were made and another request or a retry
+    /// wait is next.
+    pub async fn pump_events(&mut self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
+        let mut made = 0_u32;
+        loop {
+            if attempts.is_some_and(|cap| made >= cap) {
+                return Ok(self.events.is_idle());
+            }
+            match self.events.poll() {
+                EventNext::Idle => return Ok(true),
+                EventNext::Pause(delay) => self.pacing.pause(delay).await,
+                EventNext::Send(batch) => {
+                    made += 1;
+                    let timeout = upload_timeout(batch.bytes, batch.cuttable, batch.retry_count);
+                    let body = upload_body(self.epoch, &batch.events);
+                    let outcome = self
+                        .request_with(
+                            Method::POST,
+                            "/worker/events",
+                            &body,
+                            timeout,
+                            false,
+                            Some(batch.attempt.as_str()),
+                        )
+                        .await?;
+                    self.take_event_answer(outcome).await?;
+                }
+            }
+        }
+    }
+
+    /// What the upload does with the answer to a batch (the end of the `send` of the client event uploader, bridge.mjs
+    /// offset 1036000 to 1040000).
+    async fn take_event_answer(&mut self, outcome: RequestOutcome) -> Result<(), MismatchReason> {
+        let RequestOutcome::Failed(failure) = outcome else {
+            self.events.done();
+            return Ok(());
+        };
+        let status = failure.status;
+        if self.closed && status == Some(409) && self.events.in_flight_events().iter().all(|event| event.ephemeral) {
+            self.events.done();
+            return Ok(());
+        }
+        if status.is_some_and(refused_for_good) {
+            let dropped = self.events.keep_only(|event| !event.ephemeral);
+            let durable = self.events.in_flight_events();
+            if dropped > 0 {
+                if durable.is_empty() {
+                    self.events.done();
+                    return Ok(());
+                }
+                let body = upload_body(self.epoch, &durable);
+                let bytes = durable.iter().map(ClientEvent::json_bytes).sum();
+                let timeout = upload_timeout(bytes, durable.len() > 1, 0);
+                let retry = self
+                    .request_with(Method::POST, "/worker/events", &body, timeout, false, Some("resend"))
+                    .await?;
+                match retry {
+                    RequestOutcome::Accepted(_) => {
+                        self.events.done();
+                        return Ok(());
+                    }
+                    RequestOutcome::Failed(again) if !again.status.is_some_and(refused_for_good) => {
+                        let jitter = self.pacing.jitter();
+                        self.events.failed(jitter, again.retry_after_ms, again.fetch_failed);
+                        return Ok(());
+                    }
+                    RequestOutcome::Failed(_) => {}
+                }
+            }
+            self.dropped_durable_event_batches += 1;
+            self.events.done();
+            return Ok(());
+        }
+        let jitter = self.pacing.jitter();
+        self.events.failed(jitter, failure.retry_after_ms, failure.fetch_failed);
+        Ok(())
+    }
+
     /// One heartbeat. An accepted answer that advises a beat interval changes the interval the worker keeps.
     pub async fn heartbeat(&mut self) -> Result<RequestOutcome, MismatchReason> {
         let body = json!({"session_id": self.session_id, "worker_epoch": self.epoch});
@@ -951,6 +1082,20 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         body: &Value,
         timeout: Duration,
         parse_body: bool,
+    ) -> Result<RequestOutcome, MismatchReason> {
+        self.request_with(method, path, body, timeout, parse_body, None).await
+    }
+
+    /// [`WorkerClient::request`] that also tells the service whether it may have seen the rows before
+    /// (`x-ccr-upload-attempt`).
+    async fn request_with(
+        &mut self,
+        method: Method,
+        path: &str,
+        body: &Value,
+        timeout: Duration,
+        parse_body: bool,
+        upload_attempt: Option<&'static str>,
     ) -> Result<RequestOutcome, MismatchReason> {
         let unanswered = |reason: &str| {
             Ok(RequestOutcome::Failed(RequestFailure {
@@ -980,6 +1125,9 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             if let Ok(value) = HeaderValue::from_str(value) {
                 headers.insert(*name, value);
             }
+        }
+        if let Some(attempt) = upload_attempt {
+            headers.insert("x-ccr-upload-attempt", HeaderValue::from_static(attempt));
         }
         headers.insert("accept", HeaderValue::from_static("*/*"));
         *request.body_mut() = Some(js_stringify(body).into_bytes().into());
@@ -1105,6 +1253,16 @@ async fn read_worker_record<H: HttpExecute, P: WorkerPacing>(
         }
     }
     Ok(None)
+}
+
+/// An event that has no string `uuid` gets a random one (`toClientEvent`).
+fn with_uuid(mut event: ClientEvent) -> ClientEvent {
+    if !event.payload.get("uuid").is_some_and(Value::is_string) {
+        event
+            .payload
+            .insert("uuid".to_owned(), Value::String(uuid::Uuid::new_v4().to_string()));
+    }
+    event
 }
 
 fn decode_text(bytes: &[u8]) -> String {

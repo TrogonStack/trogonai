@@ -55,6 +55,7 @@ const heartbeatTable = evaluate(between('var e5={},I5=', 'function Wn('), ['I5',
 const closeTable = evaluate(between('var rHe=10,U5=', 'async function uHe('), ['rHe', 'U5', 'oHe', 'sHe', 'iHe', 'aHe', 'Au', 'cHe']);
 const uploadTable = evaluate(between('var dHe=1e4', 'function ZA('), ['dHe', 'pHe', 'l5', 'fHe', 'd5']);
 const sessionTable = evaluate(`${between('var S$e=180000', 'async function RC(')}`.replace('var S$e', 'var Sc').replace('y$e', 'yc'), ['Sc', 'yc']);
+const eventTable = evaluate(`var ${between('oC="/worker/event-batch"', 'var X2e=')};var ${between('JA={', ',mHe=512')};`, ['JA', 'a5', 'sC', 'iC', 'hm']);
 const markerTable = evaluate(`var mHe=512,hHe="upgrade_relay_marker";`, ['mHe', 'hHe']);
 const dedupCapacity = evaluate('var x9=2000;', ['x9']).x9;
 if (!/var x9=2000;/.test(source) || !source.includes('mHe=512,hHe="upgrade_relay_marker"')) throw new Error('bundle layout changed');
@@ -115,6 +116,13 @@ const pure = {
     refused_uuid_capacity: markerTable.mHe,
     upgrade_relay_marker: markerTable.hHe,
   },
+  lanes: Object.entries(eventTable.JA),
+  upload_timeouts: [
+    [100, true, 0], [100, false, 0], [262143, false, 3], [262144, true, 0], [262144, false, 0], [262144, false, 1], [262144, false, 2],
+    [1048576, false, 0], [1048576, false, 4], [3145728, false, 0], [10485760, false, 0], [10485760, true, 5], [0, false, 9],
+  ].map(([bytes, cuttable, retryCount]) => [bytes, cuttable, retryCount, eventTable.a5({ bytes, cuttable, retryCount }, { maxMs: 120000 })]),
+  upload_floor_ms: eventTable.sC,
+  upload_shrink_from_bytes: eventTable.iC,
   close_codes: closeTable.U5,
   retryable: closeTable.oHe,
   classify_status: statuses.map((status) => [status ?? null, uploadTable.d5(status)]),
@@ -140,7 +148,7 @@ const pure = {
 const json = (status, value, headers = []) => ({ status, headers: [['content-type', 'application/json'], ...headers], body: JSON.stringify(value) });
 const raw = (status, body, headers = []) => ({ status, headers, body });
 const conflict = (reason) => json(409, {}, [['x-ccr-conflict-reason', reason]]);
-const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [] };
+const cases = { register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [] };
 const expired = jwt({ exp: 1 });
 const future = jwt({ exp: 99999999999 });
 const originRefusal = (status) => raw(status, '', [['request-id', 'req_abc']]);
@@ -262,8 +270,26 @@ add('record', 'objects_compare_deeply', { epoch: 6, record: stored({ context_usa
 add('record', 'an_unreadable_record_suppresses_nothing', { epoch: 6, record: raw(400, ''), steps: [{ op: 'metadata', value: { last_served_model: 'm1' }, sends: true }] });
 add('record', 'a_record_that_is_not_an_object_counts_as_empty', { epoch: 6, record: json(200, { worker: { external_metadata: 'x' } }), steps: [{ op: 'metadata', value: { rate_limit_info: null }, sends: false }] });
 
+// ---- client events (POST /worker/events) ----
+const note = (text, uuid) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] }, ...(uuid && { uuid }) });
+const thinking = (uuid) => ({ type: 'system', subtype: 'thinking_tokens', uuid });
+const post = (expect, writes, extra = {}) => ({ op: 'events', expect, writes, ...extra });
+add('events', 'a_write_is_posted_with_the_epoch', { epoch: 6, steps: [post(1, [note('a', 'u1')])] });
+add('events', 'a_burst_after_the_first_is_one_batch', { epoch: 6, steps: [post(2, [note('a', 'u1'), note('b', 'u2'), note('c', 'u3')])] });
+add('events', 'a_missing_uuid_is_filled_in', { epoch: 6, steps: [post(1, [note('a')])] });
+add('events', 'a_failed_batch_is_resent_with_what_arrived_meanwhile', { epoch: 6, events: [raw(500, ''), json(200, {})], eventGaps: [500], steps: [post(2, [note('a', 'u1'), note('b', 'u2')])] });
+add('events', 'a_refused_batch_is_resent_whole', { epoch: 6, events: [raw(503, ''), json(200, {})], eventGaps: [500], steps: [post(2, [note('a', 'u1')])] });
+add('events', 'retry_after_sets_the_wait', { epoch: 6, events: [raw(429, '', [['retry-after', '2']]), json(200, {})], eventGaps: [2000], steps: [post(2, [note('a', 'u1')])] });
+add('events', 'the_wait_doubles_while_it_keeps_failing', { epoch: 6, events: [raw(500, ''), raw(500, ''), raw(500, ''), json(200, {})], eventGaps: [500, 1000, 2000], steps: [post(4, [note('a', 'u1')])] });
+add('events', 'a_refused_durable_batch_is_dropped', { epoch: 6, events: [raw(400, ''), json(200, {})], steps: [post(1, [note('a', 'u1')]), post(1, [note('b', 'u2')])] });
+add('events', 'a_too_large_batch_is_dropped', { epoch: 6, events: [raw(413, ''), json(200, {})], steps: [post(1, [note('a', 'u1')]), post(1, [note('b', 'u2')])] });
+add('events', 'a_mixed_batch_keeps_only_the_durable_rows', { epoch: 6, events: [raw(500, ''), raw(422, ''), json(200, {})], steps: [post(3, [note('a', 'u1'), thinking('t1')])] });
+add('events', 'an_ephemeral_batch_that_is_refused_is_dropped', { epoch: 6, events: [raw(400, ''), json(200, {})], steps: [post(1, [thinking('t1')]), post(1, [note('b', 'u2')])] });
+add('events', 'a_refused_resend_of_a_mixed_batch_is_dropped', { epoch: 6, events: [raw(500, ''), raw(400, ''), raw(400, ''), json(200, {})], steps: [post(3, [note('a', 'u1'), thinking('t1')]), post(1, [note('c', 'u3')])] });
+add('events', 'a_dropped_batch_does_not_stall_the_next', { epoch: 6, events: [raw(400, ''), json(200, {}), json(200, {})], steps: [post(1, [note('a', 'u1')]), post(1, [note('b', 'u2')])] });
+
 // ---- runner ----
-const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq']);
+const KEPT = new Set(['accept', 'content-type', 'authorization', 'anthropic-version', 'anthropic-client-platform', 'user-agent', 'x-ccr-ticket-rev', 'x-ccr-ticket-session', 'x-ccr-ticket-seq', 'x-ccr-upload-attempt']);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const until = async (predicate, ms) => {
   const end = Date.now() + ms;
@@ -272,7 +298,7 @@ const until = async (predicate, ms) => {
 
 async function run(spec) {
   const requests = [];
-  const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], landing: [...(spec.landing ?? [])] };
+  const queues = { register: [...(spec.register === undefined ? [json(200, { worker_epoch: 5 })] : [spec.register])], put: [...(spec.puts ?? [])], beat: [...(spec.beat ?? [])], events: [...(spec.events ?? [])], landing: [...(spec.landing ?? [])] };
   const pick = (key) => {
     const queue = queues[key];
     if (queue.length === 0) return json(200, {});
@@ -293,6 +319,7 @@ async function run(spec) {
       else if (route === '/worker/register') response = pick('register');
       else if (req.method === 'PUT') response = pick('put');
       else if (route === '/worker/heartbeat') response = pick('beat');
+      else if (route === '/worker/events') response = pick('events');
       res.statusCode = response.status;
       for (const [name, value] of response.headers) res.setHeader(name, value.replace('{base}', `http://127.0.0.1:${server.address().port}`));
       if (isRead && spec.recordDelayMs) setTimeout(() => res.end(response.body), spec.recordDelayMs);
@@ -306,7 +333,7 @@ async function run(spec) {
   const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: true, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code) };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
-  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
+  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], ...(spec.events !== undefined && { events: spec.events }), landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
   if (spec.sessionToken !== undefined) process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = spec.sessionToken;
   try {
@@ -319,6 +346,15 @@ async function run(spec) {
     await until(() => count('/worker') + count('/worker/register') > 0 && requests.some((r) => r.method === 'PUT') || closes.length > 0, spec.initWaitMs ?? 8000);
     for (const step of spec.steps ?? []) {
       const before = requests.filter((r) => r.method === 'PUT').length;
+      if (step.op === 'events') {
+        const seen = () => requests.filter((r) => r.path.endsWith('/worker/events')).length;
+        const start = seen();
+        for (const item of step.writes) handle.write(item);
+        await until(() => seen() >= start + step.expect, 12000);
+        if (seen() < start + step.expect) throw new Error(`${spec.name}: expected ${step.expect} event posts`);
+        await sleep(250);
+        continue;
+      }
       if (step.op === 'burst') {
         for (const item of step.ops) {
           if (item.afterMs) await sleep(item.afterMs);
@@ -364,6 +400,15 @@ async function run(spec) {
     if (!ok) throw new Error(`${spec.name}: retry gaps ${gaps} outside ${spec.retryBases}`);
     result.retry_base_ms = spec.retryBases;
   }
+  if (spec.eventGaps !== undefined) {
+    const posts = requests.filter((r) => r.path.endsWith('/worker/events'));
+    const gaps = posts.slice(1).map((r, i) => r.at - posts[i].at);
+    const ok = gaps.length === spec.eventGaps.length && gaps.every((gap, i) => gap >= spec.eventGaps[i] - 5 && gap < spec.eventGaps[i] + 500 + 400);
+    if (!ok) throw new Error(`${spec.name}: event gaps ${gaps} outside ${spec.eventGaps}`);
+    result.event_gaps_ms = spec.eventGaps;
+  }
+  const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+  for (const r of kept) if (r.path.endsWith('/worker/events')) r.body = r.body.replace(uuidPattern, '<uuid>');
   result.requests = kept.map(({ at, ...r }) => ({ ...r, path: r.path.replace(/^\/v1\/code\/sessions\/cse_abc/, '') }));
   result.closes = [...closes];
   result.reason = reasons[0] ?? null;
@@ -447,8 +492,8 @@ async function fetchFailureCase(mode) {
   return result;
 }
 
-const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], network: [], fetch_failures: [] };
-for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record']) {
+const goldens = { pure, register: [], init: [], state: [], heartbeat: [], auth: [], queue: [], record: [], events: [], network: [], fetch_failures: [] };
+for (const section of ['register', 'init', 'state', 'heartbeat', 'auth', 'queue', 'record', 'events']) {
   for (const spec of cases[section]) goldens[section].push(await run(spec));
 }
 for (const mode of ['refused', 'localhost', 'notfound', '', 'ftp', 'destroy', 'loop', 'truncated']) goldens.network.push(await networkCase(mode));

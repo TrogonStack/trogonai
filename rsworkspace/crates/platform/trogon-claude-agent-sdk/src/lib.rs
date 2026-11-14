@@ -16,6 +16,7 @@ mod bridge_git;
 mod bridge_js;
 mod bridge_types;
 mod bridge_worker;
+mod bridge_worker_events;
 mod bridge_worker_queue;
 mod bridge_worker_types;
 mod builtin_tool_name;
@@ -193,6 +194,11 @@ pub use bridge_worker::{
     InvalidSessionId, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
     WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, refusal_source,
     retry_after_ms, session_url, token_expiry,
+};
+pub use bridge_worker_events::{
+    Attempt, Batch, ClientEvent, EventNext, EventQueue, MAX_BATCH_BYTES, MAX_BATCH_EVENTS, MAX_QUEUE_EVENTS,
+    POST_TIMEOUT_CEILING_MS, POST_TIMEOUT_FLOOR_MS, SHRINK_FROM_BYTES, lane_for_path, refused_for_good,
+    retry_delay as event_retry_delay, upload_body, upload_timeout,
 };
 pub use bridge_worker_queue::{
     Next, Patch, PatchQueue, Requeue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches,
