@@ -245,6 +245,14 @@ pub enum Error {
     /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` that is not an integer.
     #[error("invalid literal for int() with base 10: {literal}")]
     InvalidStreamCloseTimeout { literal: String },
+    /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` with more digits than its default limit.
+    #[error(
+        "Exceeds the limit (4300 digits) for integer string conversion: value has {digits} digits; use sys.set_int_max_str_digits() to increase the limit"
+    )]
+    StreamCloseTimeoutDigits { digits: usize },
+    /// Python's error when `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` is too large for the float it is divided as.
+    #[error("int too large to convert to float")]
+    StreamCloseTimeoutOverflow,
     #[error("the {operation} control request was rejected")]
     ControlRejected {
         operation: ControlOperation,

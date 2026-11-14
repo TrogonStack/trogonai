@@ -22,8 +22,8 @@ use crate::{
         SETTINGS_PATH_WITH_SANDBOX_ERROR,
     },
     process_options::ArgvStyle,
-    python_json::python_repr,
     python_json_value::{PythonJsonValue, PythonNumber, python_json_dumps, python_json_loads},
+    python_text,
     settings_json::{js_normalize, js_stringify, python_dumps},
     settings_numbers::same_value_zero,
 };
@@ -272,7 +272,10 @@ fn python_os_error(error: &io::Error, path: &Path) -> String {
             let reason = text
                 .rsplit_once(" (os error")
                 .map_or(text.as_str(), |(reason, _)| reason);
-            format!("[Errno {code}] {reason}: {}", python_repr(&path.to_string_lossy()))
+            format!(
+                "[Errno {code}] {reason}: {}",
+                python_text::repr(&python_text::from_os_str(path.as_os_str()))
+            )
         }
         None => text,
     }

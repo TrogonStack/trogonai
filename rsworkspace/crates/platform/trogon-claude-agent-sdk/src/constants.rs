@@ -1224,3 +1224,9 @@ pub(crate) const MCP_MANIFEST_CAPTURE_DEADLINE: Duration = Duration::from_millis
 
 /// `F8`: the protocol version the manifest capture's `initialize` asks for.
 pub(crate) const MCP_MANIFEST_CAPTURE_PROTOCOL_VERSION: &str = "2025-11-25";
+
+/// Python's precision in `invalid literal for int() with base 10: %.200R`.
+pub(crate) const PYTHON_INT_LITERAL_REPR_CHARS: usize = 200;
+
+/// Python's floor and default for the initialize wait, in seconds: `max(int(...) / 1000.0, 60.0)`.
+pub(crate) const PYTHON_INITIALIZE_TIMEOUT_SECONDS: f64 = 60.0;

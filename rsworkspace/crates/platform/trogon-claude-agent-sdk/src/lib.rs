@@ -84,6 +84,7 @@ mod pydantic_validation_error;
 mod python_json;
 mod python_json_value;
 mod python_value_repr;
+mod python_text;
 mod queue_capacity;
 mod raw_json_id;
 #[cfg(unix)]
