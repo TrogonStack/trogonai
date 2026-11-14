@@ -29,7 +29,7 @@ use std::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
     ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, HookEvent, HookFuture, HookOutput, HookRegistration, Message,
-    PermissionDecision, Prompt, Query, ToolPermissionRequest,
+    PermissionDecision, Prompt, Query, RunEndTimeout, ToolPermissionRequest,
     adapters::{NativeFileSystem, RuntimeAdapters},
     query_turn_with_adapters, query_with_adapters,
     test_support::FixedEnvironment,
@@ -300,6 +300,7 @@ fn python_options(needs: bool) -> ClaudeAgentOptions {
         argv_style: ArgvStyle::Python,
         ..options(false)
     };
+    options.limits.run_end_timeout = RunEndTimeout::Python;
     if needs {
         options.hooks = vec![HookRegistration {
             event: HookEvent::PreToolUse,

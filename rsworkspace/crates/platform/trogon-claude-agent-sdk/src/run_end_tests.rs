@@ -183,8 +183,11 @@ fn python_does_not_arm_the_ceiling_during_a_turn_or_without_needs() {
 }
 
 fn ms(style: ArgvStyle, raw: Option<&str>) -> Option<u64> {
-    crate::run_end::ceiling_from_text(style, raw)
-        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+    match style {
+        ArgvStyle::TypeScript => crate::run_end_ceiling::typescript(raw),
+        ArgvStyle::Python => crate::run_end_ceiling::python(raw),
+    }
+    .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
 }
 
 #[test]

@@ -14,7 +14,9 @@ use tokio::{
 use crate::{
     ClaudeAgentOptions, ControlOperation, ControlRejectionError, ControlRequestId, Error, JsonObject, Limits, Message,
     PermissionDecision, ProtocolError, StderrTail, ToolPermissionHandler, Transport,
-    constants::{self, PYTHON_INITIALIZE_TIMEOUT_SECONDS, PYTHON_INT_LITERAL_REPR_CHARS, TYPESCRIPT_INITIALIZE_TIMEOUT},
+    constants::{
+        self, PYTHON_INITIALIZE_TIMEOUT_SECONDS, PYTHON_INT_LITERAL_REPR_CHARS, TYPESCRIPT_INITIALIZE_TIMEOUT,
+    },
     python_text,
     wire::{
         self, ControlResponse, Frame, IncomingControl,
@@ -620,8 +622,6 @@ pub(crate) struct Initialization {
     timeout: Option<Duration>,
     /// The run-end ceiling, or `None` when the environment asks for no limit.
     run_end: Option<Duration>,
-    /// The run-end ceiling, `None` when disabled.
-    run_end_ceiling: Option<Duration>,
 }
 
 impl Initialization {
@@ -646,7 +646,6 @@ impl Initialization {
             expectations,
             timeout,
             run_end: crate::run_end_ceiling::resolve(options, environment),
-            run_end_ceiling: crate::run_end::configured_ceiling(options, environment),
         })
     }
 }
@@ -756,7 +755,7 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         wire_ids: None,
         state: State::Initializing,
         run_state: RunState::default(),
-        run_end: crate::run_end::RunEnd::new(options.argv_style, initialization.run_end_ceiling),
+        run_end: crate::run_end::RunEnd::new(options.argv_style, initialization.run_end),
         argv_style: options.argv_style,
         message_decoding: options.message_decoding,
         js_runtime: options.js_runtime,

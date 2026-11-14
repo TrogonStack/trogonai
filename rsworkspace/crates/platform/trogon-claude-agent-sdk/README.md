@@ -238,7 +238,7 @@ input closes stdin as soon as it is written. Otherwise stdin closes when the run
 ends, and only the frames decide that, per dialect (`src/run_end.rs`). Under
 TypeScript a result ends the run when the session reported no state or is idle, and
 otherwise `idle` does, or the ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, read
-from `options.env` or the environment as the dialect's SDK does, 600000 ms by default and
+and parsed as `limits.run_end_timeout` selects, 600000 ms by default and
 disabled by 0) when no `idle` follows; reported tasks
 and queued turns play no part. `query()` with a prompt is `sdk.mjs`'s single user turn,
 which closes stdin the moment its run ends. With a session store, a result reaches that machine only after its transcript flush, as in both
