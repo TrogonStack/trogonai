@@ -438,11 +438,11 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
 
     /// Moves the frames the control dispatch wrote into the upload queue.
     pub(crate) async fn drain_outbox(&mut self) {
-        let frames = self.uploads.take();
-        if frames.is_empty() || self.is_closed() {
+        self.uploads.fire();
+        let events = self.uploads.take();
+        if events.is_empty() || self.is_closed() {
             return;
         }
-        let events: Vec<ClientEvent> = frames.into_iter().filter_map(client_event).collect();
         let submitted = self.worker.submit_events(events).await;
         self.settle(submitted);
     }
@@ -489,7 +489,12 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
         if !self.mark_closed() {
             return;
         }
+        let waiting = self.uploads.close_window();
         if !self.lifecycle.is_ended() {
+            if !waiting.is_empty() {
+                let _held = self.worker.submit_events(waiting).await;
+                let _sent = self.worker.pump_events(Some(1)).await;
+            }
             self.worker.goodbye().await;
         }
         wind_down(self.worker.as_ref());

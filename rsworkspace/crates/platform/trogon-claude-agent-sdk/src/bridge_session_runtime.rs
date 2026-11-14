@@ -11,9 +11,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde_json::Value;
 use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 use crate::adapters::HttpExecute;
-use crate::bridge_session::{CloseCallback, client_event};
+use crate::bridge_session::CloseCallback;
+use crate::bridge_session_stream_events::StreamEvents;
 use crate::bridge_worker::{WorkerClient, WorkerPacing};
 use crate::bridge_worker_events::ClientEvent;
 use crate::bridge_worker_types::MismatchReason;
@@ -90,10 +92,17 @@ pub(crate) fn wind_down<H: HttpExecute, P: WorkerPacing>(worker: &WorkerClient<H
     worker.close_deliveries();
 }
 
-/// The frames the handle wrote and the counters the upload task and its waiters agree on.
+/// What the handle wrote that is ready to upload, and the stream events still waiting in their window.
+#[derive(Default)]
+struct Held {
+    ready: Vec<ClientEvent>,
+    window: StreamEvents,
+}
+
+/// The events the handle wrote and the counters the upload task and its waiters agree on.
 #[derive(Default)]
 pub(crate) struct Uploads {
-    frames: Mutex<Vec<Value>>,
+    held: Mutex<Held>,
     wake: Notify,
     requested: AtomicU64,
     drained: AtomicU64,
@@ -101,14 +110,53 @@ pub(crate) struct Uploads {
 }
 
 impl Uploads {
-    /// Queues a frame for the upload task.
+    fn held(&self) -> std::sync::MutexGuard<'_, Held> {
+        self.held.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Queues a frame for the upload task. A stream event waits in its window; the wake lets the task see when the
+    /// window ends.
     pub(crate) fn push(&self, frame: Value) {
-        self.frames.lock().unwrap_or_else(PoisonError::into_inner).push(frame);
+        let now = Instant::now();
+        {
+            let mut held = self.held();
+            let sent = held.window.write(frame, now);
+            held.ready.extend(sent);
+        }
         self.wake();
     }
 
-    pub(crate) fn take(&self) -> Vec<Value> {
-        std::mem::take(&mut *self.frames.lock().unwrap_or_else(PoisonError::into_inner))
+    /// The events ready to upload.
+    pub(crate) fn take(&self) -> Vec<ClientEvent> {
+        std::mem::take(&mut self.held().ready)
+    }
+
+    /// When the stream window ends, if one is open.
+    pub(crate) fn due(&self) -> Option<Instant> {
+        self.held().window.due()
+    }
+
+    /// Ends the stream window when its time has come; true when events became ready.
+    pub(crate) fn fire(&self) -> bool {
+        let mut held = self.held();
+        if !held.window.due().is_some_and(|due| due <= Instant::now()) {
+            return false;
+        }
+        let sent = held.window.take();
+        held.ready.extend(sent);
+        true
+    }
+
+    /// `flushStreamEventBuffer`: ends the stream window now.
+    pub(crate) fn flush_window(&self) {
+        let mut held = self.held();
+        let sent = held.window.take();
+        held.ready.extend(sent);
+    }
+
+    /// The handle closing or reconnecting: drops the held stream events and hands back the rows that waited.
+    pub(crate) fn close_window(&self) -> Vec<ClientEvent> {
+        self.held().window.close()
     }
 
     /// Tells the upload task that something is queued; a wake before the task runs is kept.
@@ -160,7 +208,22 @@ async fn upload_loop<H, P>(
     P: WorkerPacing + Send + Sync + 'static,
 {
     loop {
-        uploads.wake.notified().await;
+        let due = uploads.due();
+        let window = async {
+            match due {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            () = uploads.wake.notified() => {}
+            () = window => {
+                if !uploads.fire() {
+                    continue;
+                }
+                uploads.requested.fetch_add(1, Ordering::SeqCst);
+            }
+        }
         let seen = uploads.requested.load(Ordering::SeqCst);
         if lifecycle.is_closed() {
             uploads.finish(seen);
@@ -176,9 +239,8 @@ async fn upload_loop<H, P>(
 
 /// `drain_outbox` and `pump` of the session, run by the task.
 async fn drain<H: HttpExecute, P: WorkerPacing>(uploads: &Uploads, lifecycle: &Lifecycle, worker: &WorkerClient<H, P>) {
-    let frames = uploads.take();
-    if !frames.is_empty() {
-        let events: Vec<ClientEvent> = frames.into_iter().filter_map(client_event).collect();
+    let events = uploads.take();
+    if !events.is_empty() {
         let submitted = worker.submit_events(events).await;
         settle(lifecycle, worker, submitted);
     }

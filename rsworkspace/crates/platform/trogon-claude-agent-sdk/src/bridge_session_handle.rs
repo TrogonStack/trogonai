@@ -186,6 +186,7 @@ impl<H: HttpExecute, P: WorkerPacing> BridgeSession<H, P> {
 
     /// `flush`: sends the events the session holds. The reports and acknowledgements are not part of it.
     pub async fn flush(&mut self) {
+        self.uploads.flush_window();
         self.drain_outbox().await;
         let flushed = self.worker.flush_events().await;
         self.settle(flushed);
@@ -227,6 +228,12 @@ where
             return Ok(());
         }
         self.drain_outbox().await;
+        let mut waiting = self.uploads.close_window();
+        let held = self.worker.submit_events(waiting.clone()).await;
+        self.settle(held);
+        if !waiting.is_empty() && !matches!(self.worker.pump_events(Some(1)).await, Ok(true)) {
+            waiting.clear();
+        }
         self.token = options.ingress_token.clone();
         let sequence = self.stream.last_sequence();
         let epoch = options.epoch.unwrap_or_else(|| self.worker.epoch());
@@ -265,11 +272,12 @@ where
         self.stream = StreamSession::seeded(Some(sequence));
         self.lifecycle.revive();
         self.connect(epoch).await;
-        let carried: Vec<ClientEvent> = previous
+        let mut carried: Vec<ClientEvent> = previous
             .take_undelivered_events()
             .into_iter()
             .filter(|event| !event.ephemeral)
             .collect();
+        carried.extend(waiting);
         for event in &carried {
             let kind = event.payload.get("type").and_then(Value::as_str).unwrap_or_default();
             if NOT_CARRIED_AS_ECHO.contains(&kind) {
@@ -281,6 +289,7 @@ where
         }
         let adopted = self.worker.submit_events(carried).await;
         self.settle(adopted);
+        self.uploads.wake();
         Ok(())
     }
 }
