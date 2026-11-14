@@ -3,7 +3,7 @@
 
 use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error};
 use crate::{
-    CallbackError, CancellationToken, JsonObject, McpToolRequest, SdkTool, SdkTools,
+    CallbackError, CancellationToken, JsonObject, McpToolRequest, OutputSchema, SdkTool, SdkTools,
     constants::{self, SUPPORTED_PROTOCOL_VERSIONS},
     sdk_mcp_js::stringify_primitive,
     sdk_mcp_zod,
@@ -224,13 +224,19 @@ fn list_tools(state: &ServerState, tools: &SdkTools) -> Vec<Value> {
         .collect()
 }
 
-fn listed_tool(state: &ServerState, tool: &SdkTool) -> JsonObject {
+/// The input schema as `tools/list` advertises it: draft-07 unless the tool declares its own `$schema`.
+fn listed_input_schema(tool: &SdkTool) -> JsonObject {
     let declared = tool.input_schema().as_json();
     let mut input_schema = JsonObject::new();
     if !declared.contains_key("$schema") {
         input_schema.insert("$schema".into(), constants::MCP_TS_JSON_SCHEMA_DRAFT_07.into());
     }
     input_schema.extend(declared.iter().map(|(key, value)| (key.clone(), value.clone())));
+    input_schema
+}
+
+fn listed_tool(state: &ServerState, tool: &SdkTool) -> JsonObject {
+    let input_schema = listed_input_schema(tool);
     let mut listed = JsonObject::from_iter([
         ("name".into(), tool.name().as_str().into()),
         ("description".into(), tool.description().into()),
@@ -273,11 +279,13 @@ async fn call_tool(
     let Some(tool) = state.tools.as_ref().and_then(|tools| tools.get(name)) else {
         return Ok(Ok(tool_error(format!("MCP error -32602: Tool {name} not found"))));
     };
-    let schema = tool.input_schema();
+    let declared = tool.input_schema();
+    // Compiled under the draft the listing advertises, so a draft-07 tuple (`items` as a list) compiles.
+    let schema = OutputSchema::new(listed_input_schema(tool));
     if let Some(error) = schema.compile_error() {
         return Ok(Ok(tool_error(error.to_owned())));
     }
-    let Ok(prepared) = tool.validation().prepare(schema.as_json()) else {
+    let Ok(prepared) = tool.validation().prepare(declared.as_json()) else {
         return Ok(Ok(tool_error(format!(
             "MCP error -32602: Tool {name} has a validation choice outside its input schema"
         ))));
@@ -286,7 +294,7 @@ async fn call_tool(
         .parse(arguments.map_or(Input::Undefined, Input::Json));
     let mut issues = parsed.issues;
     if issues.is_empty()
-        && sdk_mcp_zod::has_unmodeled(schema.as_json())
+        && sdk_mcp_zod::has_unmodeled(declared.as_json())
         && !schema.is_valid(arguments.unwrap_or(&Value::Null))
     {
         issues.push(custom(Vec::new()));
