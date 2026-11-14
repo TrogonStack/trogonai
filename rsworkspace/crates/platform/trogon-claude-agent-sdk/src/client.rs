@@ -613,8 +613,11 @@ impl ClaudeSdkClient {
         self.runtime.handle.stream_input(&mut stream).await
     }
 
+    /// Python `ClaudeSDKClient.query(prompt)`: writes the prompt in session `"default"` under the Python style, or
+    /// in the empty session `sdk.mjs` writes under the TypeScript style. See `query_in_session`.
     pub async fn query(&self, prompt: Prompt) -> Result<(), Error> {
-        self.runtime.handle.send_prompt(prompt).await
+        self.query_in_session(prompt, connect::default_session(self.runtime.handle.style))
+            .await
     }
 
     /// Cancellation-safe: cancelling this wait does not discard a message.
@@ -1665,6 +1668,10 @@ impl Query {
 
 #[path = "client_stream.rs"]
 mod stream;
+
+#[path = "client_connect.rs"]
+mod connect;
+pub use connect::{ClientConnector, ConnectPrompt, CustomTransport, NativeCli, UnconnectedClient};
 
 #[cfg(test)]
 #[path = "client_tests.rs"]

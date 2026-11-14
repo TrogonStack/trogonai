@@ -313,12 +313,22 @@
       },
       "rust_api": [
         "ClaudeSdkClient.connect",
+        "ClaudeSdkClient.new",
+        "UnconnectedClient.with_transport",
+        "UnconnectedClient.with_adapters",
+        "UnconnectedClient.connect",
+        "UnconnectedClient.scope",
+        "ConnectPrompt",
+        "ClientConnector",
+        "NativeCli",
+        "CustomTransport",
         "ClaudeSdkClient.close",
         "ClientHandle.close",
         "Query.close",
         "ClaudeSdkClient.disconnect",
         "Query.disconnect",
-        "Error.QueryClosed"
+        "Error.QueryClosed",
+        "Error.Cleanup"
       ],
       "tests": [
         {
@@ -344,10 +354,42 @@
         {
           "path": "tests/client_lifecycle_stream.rs",
           "name": "breaking_out_and_return_map_to_disconnect_like_sdk_mjs"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_without_a_prompt_writes_nothing_after_initialize"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_text_writes_it_in_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_verbatim_text_stamps_it"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_text_under_typescript_uses_the_empty_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "connect_with_a_stream_streams_it_in_the_background"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_connects_runs_the_body_and_disconnects"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_returns_the_body_error_after_disconnecting"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "scope_reports_a_failed_disconnect_beside_the_body_error"
         }
       ],
       "status": "supported",
-      "rationale": "connect is an async factory: under the TypeScript style it returns once the initialize request is queued, as the Query constructor does, and the initialize outcome is read through the async metadata getters; under the Python style it returns only after initialization is answered, as Python's connect does. close(&self) on a Query, the client or any handle is TypeScript Query.close: idempotent and callable while the stream is read, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) on the query or the client is Python's awaitable disconnect and what the TypeScript iterator's return(), Symbol.asyncDispose and a for await that breaks await: it closes, waits for the process to stop and discards messages not read yet; consuming the owner makes a second disconnect or a read after it unrepresentable instead of a no-op."
+      "rationale": "connect is an async factory: under the TypeScript style it returns once the initialize request is queued, as the Query constructor does, and the initialize outcome is read through the async metadata getters; under the Python style it returns only after initialization is answered, as Python's connect does. close(&self) on a Query, the client or any handle is TypeScript Query.close: idempotent and callable while the stream is read, it closes the transport without aborting the caller's abort controller, already received messages stay readable and the stream then ends cleanly, and a control request still waiting for its answer fails with Query closed before response received under the TypeScript style while the Python style leaves it to run out its own control timeout as Python's close does. disconnect(self) on the query or the client is Python's awaitable disconnect and what the TypeScript iterator's return(), Symbol.asyncDispose and a for await that breaks await: it closes, waits for the process to stop and discards messages not read yet; consuming the owner makes a second disconnect or a read after it unrepresentable instead of a no-op. ClaudeSdkClient::new(options) is Python's ClaudeSDKClient(options), with with_transport and with_adapters for its transport argument; the UnconnectedClient it returns has no methods but connect and scope, so Python's \"Not connected\" error is unrepresentable. UnconnectedClient::connect(prompt) goes through the same factory as ClaudeSdkClient::connect and then writes a ConnectPrompt::Text as query does, or streams a ConnectPrompt::Stream from a background task, as Python's connect(str | AsyncIterable) does; when writing the prompt fails it disconnects and returns the error. sdk.mjs has no separate connect: its query({prompt}) writes a string prompt and streams an AsyncIterable the same way, aborting the query when streaming fails, which the TypeScript style follows, while the Python style drops the failure and leaves the client running, where Python's stream_input logs it and carries on. UnconnectedClient::scope is Python's async with: it connects with no prompt, runs the body and always disconnects; when both fail it returns Error::Cleanup with the body's error as primary and the disconnect's as cleanup, the pair Python chains as the disconnect exception's __context__."
     },
     {
       "id": "interactive-client",
@@ -375,7 +417,11 @@
         "ClaudeSdkClient.receive_messages",
         "ClaudeSdkClient.receive_response",
         "ClaudeSdkClient.next_message",
-        "Query.next_message"
+        "Query.next_message",
+        "ClaudeSdkClient.query",
+        "ClaudeSdkClient.query_in_session",
+        "ClaudeSdkClient.query_stream",
+        "ClaudeSdkClient.query_stream_in_session"
       ],
       "tests": [
         {
@@ -389,10 +435,26 @@
         {
           "path": "tests/client_lifecycle_stream.rs",
           "name": "receive_response_ends_with_the_stream_like_python"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_writes_in_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_in_session_writes_in_that_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_stream_fills_the_default_session"
+        },
+        {
+          "path": "tests/client_lifecycle_connect.rs",
+          "name": "query_stream_in_session_keeps_named_sessions"
         }
       ],
       "status": "partial",
-      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Query and ClaudeSdkClient are futures_util Streams of Result<Message, Error>, the TypeScript async iterator, ending where next_message returns None; receive_messages() and receive_response() are Python's, the latter yielding through the next result and leaving later messages queued. Python's get_server_info() is ClientHandle::initialization_result, mapped under initialization. Every other ClaudeSDKClient and Query method is mapped by its own row. Still partial: Python __init__, __aenter__, __aexit__ and query(prompt, session_id) have no mapped Rust counterpart or evidence yet, Query.streamInput is partial under queued-input, and when the CLI exits in the middle of a turn Rust ends receive_response with Error::UnexpectedEof where Python ends quietly."
+      "rationale": "Rust separates process ownership, cloneable controls and message consumption. Query and ClaudeSdkClient are futures_util Streams of Result<Message, Error>, the TypeScript async iterator, ending where next_message returns None; receive_messages() and receive_response() are Python's, the latter yielding through the next result and leaving later messages queued. Python's get_server_info() is ClientHandle::initialization_result, mapped under initialization. Every other ClaudeSDKClient and Query method is mapped by its own row. Python __init__, __aenter__ and __aexit__ are ClaudeSdkClient::new, UnconnectedClient::connect and scope under client-lifecycle. query(prompt, session_id) is query_in_session; query writes in Python's \"default\" session under the Python style and in the empty session sdk.mjs writes under the TypeScript style. query_stream and query_stream_in_session fill the session only on inputs that name none and leave stdin open, as Python's query(AsyncIterable) does. Still partial: when the CLI exits in the middle of a turn Rust ends receive_response with Error::UnexpectedEof where Python ends quietly."
     },
     {
       "id": "full-run-query",

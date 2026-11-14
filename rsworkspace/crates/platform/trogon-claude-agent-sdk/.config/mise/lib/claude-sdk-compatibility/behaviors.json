@@ -3948,6 +3948,45 @@
       ]
     },
     {
+      "id": "c34-interactive-client-default-session",
+      "concept": "Session id written on a prompt that names none",
+      "python": {
+        "file": "src/claude_agent_sdk/client.py",
+        "line_start": 272,
+        "line_end": 306,
+        "sha256": "2acba8e2ecaabfff88538e160c1474b6c5eea96e305bfc5ea32967086abcac45"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "type:\"user\",session_id:\"\",message:{role:\"user\",content:[{type:\"text\",text:",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 110,
+        "sha256": "546fa8bafa0f1c7b94879e70a1de24a31bac6a7b7185630c1277ccb9cf9067d9"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python ClaudeSDKClient.query and connect(str) write a string prompt in session \"default\" unless query names another, and query(AsyncIterable) sets that session only on messages without a session_id key. sdk.mjs writes a string prompt with an empty session_id and passes an AsyncIterable prompt through unchanged."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect, so ClaudeSdkClient::query writes the empty session. Under ArgvStyle::Python it writes \"default\", and query_in_session, query_stream and query_stream_in_session follow Python's query(prompt, session_id)."
+      },
+      "contracts": [
+        "client_lifecycle_connect::connect_with_text_writes_it_in_the_default_session",
+        "client_lifecycle_connect::connect_with_text_under_typescript_uses_the_empty_session",
+        "client_lifecycle_connect::query_writes_in_the_default_session",
+        "client_lifecycle_connect::query_in_session_writes_in_that_session",
+        "client_lifecycle_connect::query_stream_fills_the_default_session",
+        "client_lifecycle_connect::query_stream_in_session_keeps_named_sessions"
+      ],
+      "rust": [
+        "src/client.rs",
+        "src/client_connect.rs"
+      ]
+    },
+    {
       "id": "p01-startup-initialize-timer",
       "concept": "How long startup() waits for the CLI to answer initialize",
       "python": {

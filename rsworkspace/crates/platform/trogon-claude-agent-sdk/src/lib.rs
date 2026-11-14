@@ -187,8 +187,9 @@ pub use bundled_cli::{
 pub use cli_discovery::CliNotFoundError;
 pub use cli_path::{CliPathError, WindowsBatchCli};
 pub use client::{
-    ClaudeSdkClient, ClientHandle, Query, query, query_turn, query_turn_with_adapters, query_turn_with_transport,
-    query_with_adapters, query_with_transport,
+    ClaudeSdkClient, ClientConnector, ClientHandle, ConnectPrompt, CustomTransport, NativeCli, Query,
+    UnconnectedClient, query, query_turn, query_turn_with_adapters, query_turn_with_transport, query_with_adapters,
+    query_with_transport,
 };
 pub use client_app::{format_client_app, normalize_client_app};
 pub use client_app_derivation::{BundledCli, ClientAppDerivation};

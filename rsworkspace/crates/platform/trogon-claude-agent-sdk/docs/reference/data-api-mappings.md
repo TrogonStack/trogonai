@@ -115,6 +115,11 @@ integrity-verified published `0.3.319` declaration archive.
 | `disconnect(self)` on `Query` or `ClaudeSdkClient` | `disconnect()` | `close()` plus waiting for the process; the iterator's `return()`, `Symbol.asyncDispose` and a `for await` that breaks, which discard messages not read yet |
 | `Stream` for `Query` and `ClaudeSdkClient`, `ClaudeSdkClient::receive_messages` | `receive_messages()` | `for await (const message of query)` |
 | `ClaudeSdkClient::receive_response` | `receive_response()` (through the next `ResultMessage`) | not applicable |
+| `ClaudeSdkClient::new(options)`, `UnconnectedClient::with_transport`, `with_adapters` | `ClaudeSDKClient(options, transport)` | not applicable |
+| `UnconnectedClient::connect(ConnectPrompt)` (`Empty`, `Text`, `Stream`) | `connect(prompt)` with `None`, a `str` or an `AsyncIterable` | `query({prompt})` with a string or an `AsyncIterable` |
+| `UnconnectedClient::scope(body)`, `Error::Cleanup` when the body and the disconnect both fail | `async with ClaudeSDKClient() as client:`, the disconnect exception chained to the body's | not applicable |
+| `query(prompt)`, `query_in_session(prompt, session_id)` | `query(prompt, session_id="default")` | a string prompt with `session_id: ""` |
+| `query_stream(stream)`, `query_stream_in_session(stream, session_id)` | `query(AsyncIterable, session_id)`, the session set only where a message has none | not applicable |
 | `Error::QueryClosed` | a waiting control request runs out its timeout | "Query closed before response received" |
 | `Error::NotReadyForWriting` | `CLIConnectionError` (not ready for writing) | same text |
 | `Error::WriteToTerminatedProcess { exit_code }` | `CLIConnectionError` (terminated process) | same text without the code |

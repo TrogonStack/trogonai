@@ -561,6 +561,15 @@ connected client, and `disconnect(self)` consumes it, so a second disconnect
 cannot be written rather than being a no-op. TypeScript's `Query.close()` is
 `close()` on the query, the client or a handle. Python's `get_server_info()` is
 `ClientHandle::initialization_result()`.
+`ClaudeSdkClient::new(options)` keeps Python's construct-then-connect shape: the
+`UnconnectedClient` it returns takes a transport or adapters and then
+`connect(prompt)` with no prompt, a string, or a stream that a background task
+writes, through the same factories. `scope(body)` is `async with`: it connects,
+runs the body and always disconnects, returning `Error::Cleanup` when both fail.
+`query` writes a string prompt in Python's `"default"` session under
+`ArgvStyle::Python` and in the empty session `sdk.mjs` writes otherwise;
+`query_in_session` names the session, and `query_stream_in_session` sets it only
+on inputs that name none.
 
 Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.
