@@ -3139,17 +3139,17 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "backgroundTasks returns response.backgrounded, true when it is null or absent, and throws when the response itself is absent."
+        "behavior": "backgroundTasks returns response.backgrounded of whatever type, true when it is null or absent or the response is not an object, and throws when the response itself is null or absent."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A backgrounded that is not a boolean is a protocol error, where TypeScript returns the value untyped."
+        "kind": "upstream"
       },
       "contracts": [
         "golden_controls::background_tasks_reads_backgrounded_like_typescript",
         "golden_controls::typescript_rejections_keep_a_well_formed_error_code"
       ],
       "rust": [
+        "src/backgrounded.rs",
         "src/client.rs"
       ]
     },
@@ -3377,13 +3377,17 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default dialect and SummaryDialect::Python on the session store selects the Python timeout text. The Python adapter-failure wrapper text is not reproduced."
+        "reason": "TypeScript is the default dialect and lets a store failure through unchanged; SummaryDialect::Python on the session store selects Python's timeout text and wraps a failing store call in its resume materialization text."
       },
       "contracts": [
+        "session_failure_contracts::python_resume_joins_relative_configuration_and_requires_listing_for_latest",
+        "session_store::a_store_failure_of_rust_origin_keeps_its_own_text_in_the_python_wrapper",
+        "session_store::python_dialect_reports_the_resume_materialization_text",
         "session_store::resume_load_timeout_does_not_install_any_files",
-        "session_store::python_dialect_reports_the_resume_materialization_text"
+        "session_store::store_failures_during_resume_read_like_each_sdk"
       ],
       "rust": [
+        "src/session_error.rs",
         "src/session_resume.rs"
       ]
     },

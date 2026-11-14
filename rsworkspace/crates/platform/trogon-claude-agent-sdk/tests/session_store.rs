@@ -12,9 +12,9 @@ use std::{
 use serde_json::json;
 use trogon_claude_agent_sdk::{
     Environment, EnvironmentMode, InMemorySessionStore, MirrorEnqueueError, MirrorFailureError, SessionEntry,
-    SessionError, SessionId, SessionKey, SessionProjectKey, SessionRuntime, SessionStore, SessionStoreError,
-    SessionStoreFuture, SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume, SummaryDialect,
-    Timeout, TranscriptMirror,
+    SessionError, SessionId, SessionKey, SessionListEntry, SessionProjectKey, SessionRuntime, SessionStore,
+    SessionStoreError, SessionStoreFuture, SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume,
+    SummaryDialect, Timeout, TranscriptMirror,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -840,4 +840,110 @@ async fn synchronous_flush_fences_keep_later_pending_appends_out_of_an_earlier_r
         2
     );
     Ok(())
+}
+
+const STORE_FAILURE_GOLDENS: &str = include_str!("fixtures/session_resume/python_store_failures.json");
+
+/// The recorded Python store: the call a case names raises with that backend message, and every other call answers
+/// one transcript entry, with a subagent `agent-a` when the store lists subkeys.
+struct FailingStore {
+    case: String,
+    entry: SessionEntry,
+}
+
+impl FailingStore {
+    fn refuse<'a, T: Send + 'a>(message: &'static str) -> SessionStoreFuture<'a, T> {
+        Box::pin(async move { Err(SessionStoreError::backend(std::io::Error::other(message))) })
+    }
+}
+
+impl SessionStore for FailingStore {
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        match operation {
+            SessionStoreOperation::Append | SessionStoreOperation::Load => true,
+            SessionStoreOperation::List => self.case == "list_sessions",
+            SessionStoreOperation::ListSubkeys => matches!(self.case.as_str(), "list_subkeys" | "subkey_load"),
+            _ => false,
+        }
+    }
+    fn append<'a>(&'a self, _: &'a SessionKey, _: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn load<'a>(&'a self, key: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>> {
+        match (self.case.as_str(), key.subpath()) {
+            ("load", None) => Self::refuse("backend refused the load"),
+            ("subkey_load", Some(_)) => Self::refuse("subagent load refused"),
+            _ => Box::pin(async { Ok(Some(vec![self.entry.clone()])) }),
+        }
+    }
+    fn list_sessions<'a>(&'a self, _: &'a SessionProjectKey) -> SessionStoreFuture<'a, Vec<SessionListEntry>> {
+        if self.case == "list_sessions" {
+            return Self::refuse("listing refused");
+        }
+        Box::pin(async { Err(SessionStoreError::Unsupported(SessionStoreOperation::List)) })
+    }
+    fn list_subkeys<'a>(&'a self, _: &'a SessionKey) -> SessionStoreFuture<'a, Vec<String>> {
+        if self.case == "list_subkeys" {
+            return Self::refuse("subkey listing refused");
+        }
+        Box::pin(async { Ok(vec!["agent-a".to_owned()]) })
+    }
+}
+
+/// Python's `_with_timeout` wraps a failing store call in its resume materialization text, matched against
+/// `claude_agent_sdk` itself; TypeScript lets the store's own error through.
+#[tokio::test]
+async fn store_failures_during_resume_read_like_each_sdk() -> TestResult {
+    let goldens: serde_json::Value = serde_json::from_str(STORE_FAILURE_GOLDENS)?;
+    let session = goldens["session"].as_str().ok_or("session")?;
+    for case in goldens["cases"].as_array().ok_or("cases")? {
+        let name = case["name"].as_str().ok_or("name")?;
+        let resume_from = match case["resume"].as_str() {
+            Some("session") => StoreResume::Session(SessionId::from(session)),
+            _ => StoreResume::Latest,
+        };
+        for dialect in [SummaryDialect::Python, SummaryDialect::TypeScript] {
+            let root = tempfile::tempdir()?;
+            let store = Arc::new(FailingStore {
+                case: name.to_owned(),
+                entry: SessionEntry::try_from(json!({"type":"user","uuid":"u1"}))?,
+            });
+            let mut options = options(store, root.path())?;
+            options.dialect = dialect;
+            let Err(error) = resume(&options, resume_from.clone(), root.path()).await else {
+                return Err(format!("{name} resumed under {dialect:?}").into());
+            };
+            match dialect {
+                SummaryDialect::Python => {
+                    assert_eq!(Some(error.to_string().as_str()), case["python"].as_str(), "{name}");
+                    assert!(matches!(error, SessionError::ResumeStore { .. }), "{name}");
+                }
+                SummaryDialect::TypeScript => assert!(
+                    matches!(
+                        error,
+                        SessionError::Store(SessionStoreError::Backend(_)) | SessionError::ContinueRequiresList
+                    ),
+                    "{name}: {error}"
+                ),
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_store_failure_of_rust_origin_keeps_its_own_text_in_the_python_wrapper() {
+    for (source, text) in [
+        (SessionStoreError::Poisoned, "session store lock is poisoned"),
+        (SessionStoreError::ClockExhausted, "session store clock exhausted"),
+    ] {
+        let error = SessionError::ResumeStore {
+            call: "SessionStore.load()".to_owned(),
+            source,
+        };
+        assert_eq!(
+            error.to_string(),
+            format!("SessionStore.load() failed during resume materialization: {text}")
+        );
+    }
 }

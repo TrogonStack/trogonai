@@ -12,8 +12,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     Environment, EnvironmentMode, JsonObject, SessionEntry, SessionError, SessionId, SessionKey, SessionProjectKey,
-    SessionProjectKeyError, SessionStoreOperation, SessionStoreOptions, SessionSubpath, SummaryDialect,
-    TranscriptMirror,
+    SessionProjectKeyError, SessionStoreFuture, SessionStoreOperation, SessionStoreOptions, SessionSubpath,
+    SummaryDialect, TranscriptMirror,
     adapters::{
         EnvironmentVariable, NativeFileSystem, SessionFileSystem, SpawnProcess, SystemEnvironment, TemporaryDirectory,
         TokioProcessSpawner,
@@ -253,15 +253,13 @@ async fn load_candidate(
     id: SessionId,
 ) -> Result<Option<(SessionId, Vec<SessionEntry>)>, SessionError> {
     let key = SessionKey::new(project.clone(), id.clone());
-    let entries = timeout(options.limits.load_timeout.as_duration(), options.store.load(&key))
-        .await
-        .map_err(|_| {
-            load_timeout(
-                options,
-                format!("SessionStore.load() timed out after {{ms}}ms for session {id}"),
-                format!("SessionStore.load() for session {id}"),
-            )
-        })??;
+    let entries = store_call(
+        options,
+        options.store.load(&key),
+        format!("SessionStore.load() timed out after {{ms}}ms for session {id}"),
+        format!("SessionStore.load() for session {id}"),
+    )
+    .await?;
     Ok(entries
         .filter(|entries| !entries.is_empty())
         .map(|entries| (id, entries)))
@@ -271,18 +269,13 @@ async fn latest_candidate(
     options: &SessionStoreOptions,
     project: &SessionProjectKey,
 ) -> Result<Option<(SessionId, Vec<SessionEntry>)>, SessionError> {
-    let mut sessions = timeout(
-        options.limits.load_timeout.as_duration(),
+    let mut sessions = store_call(
+        options,
         options.store.list_sessions(project),
+        "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
+        "SessionStore.list_sessions()".to_owned(),
     )
-    .await
-    .map_err(|_| {
-        load_timeout(
-            options,
-            "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
-            "SessionStore.list_sessions()".to_owned(),
-        )
-    })??;
+    .await?;
     if entry_limit_exceeded(options, sessions.len()) {
         return Err(SessionError::EntryLimit);
     }
@@ -311,18 +304,13 @@ async fn latest_candidate_ts(
     if !options.store.supports(SessionStoreOperation::List) {
         return Err(SessionError::ContinueRequiresList);
     }
-    let mut sessions = timeout(
-        options.limits.load_timeout.as_duration(),
+    let mut sessions = store_call(
+        options,
         options.store.list_sessions(project),
+        "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
+        "SessionStore.list_sessions()".to_owned(),
     )
-    .await
-    .map_err(|_| {
-        load_timeout(
-            options,
-            "SessionStore.listSessions() timed out after {ms}ms".to_owned(),
-            "SessionStore.list_sessions()".to_owned(),
-        )
-    })??;
+    .await?;
     if entry_limit_exceeded(options, sessions.len()) {
         return Err(SessionError::EntryLimit);
     }
@@ -334,6 +322,27 @@ async fn latest_candidate_ts(
         return Ok(None);
     }
     load_candidate(options, project, first.session_id).await
+}
+
+/// One store call within the load timeout. TypeScript lets a store failure through unchanged; Python's
+/// `_with_timeout` wraps it as `<call> failed during resume materialization: <error>`.
+async fn store_call<T>(
+    options: &SessionStoreOptions,
+    call: SessionStoreFuture<'_, T>,
+    typescript_timeout: String,
+    python_call: String,
+) -> Result<T, SessionError> {
+    match timeout(options.limits.load_timeout.as_duration(), call).await {
+        Err(_) => Err(load_timeout(options, typescript_timeout, python_call)),
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(source)) => Err(match options.dialect {
+            SummaryDialect::TypeScript => SessionError::Store(source),
+            SummaryDialect::Python => SessionError::ResumeStore {
+                call: python_call,
+                source,
+            },
+        }),
+    }
 }
 
 /// The timeout error with the dialect's text; `{ms}` stands for the configured limit in milliseconds.
@@ -524,21 +533,16 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
     async fn materialize_subkeys(&mut self, project_dir: &Path) -> Result<(), SessionError> {
         let options = self.store_options;
         let key = SessionKey::new(self.project.clone(), self.id.clone());
-        let subpaths = timeout(
-            options.limits.load_timeout.as_duration(),
+        let subpaths = store_call(
+            options,
             options.store.list_subkeys(&key),
+            format!(
+                "SessionStore.listSubkeys() timed out after {{ms}}ms for session {}",
+                self.id
+            ),
+            format!("SessionStore.list_subkeys() for session {}", self.id),
         )
-        .await
-        .map_err(|_| {
-            load_timeout(
-                options,
-                format!(
-                    "SessionStore.listSubkeys() timed out after {{ms}}ms for session {}",
-                    self.id
-                ),
-                format!("SessionStore.list_subkeys() for session {}", self.id),
-            )
-        })??;
+        .await?;
         if options
             .limits
             .max_subkeys
@@ -565,18 +569,16 @@ impl<F: SessionFileSystem> Materialization<'_, F> {
                 }
             };
             let subkey = key.clone().with_subpath(subpath.clone());
-            let entries = timeout(options.limits.load_timeout.as_duration(), options.store.load(&subkey))
-                .await
-                .map_err(|_| {
-                    load_timeout(
-                        options,
-                        format!(
-                            "SessionStore.load() timed out after {{ms}}ms for session {} subpath {subpath}",
-                            self.id
-                        ),
-                        format!("SessionStore.load() for session {} subpath {subpath}", self.id),
-                    )
-                })??;
+            let entries = store_call(
+                options,
+                options.store.load(&subkey),
+                format!(
+                    "SessionStore.load() timed out after {{ms}}ms for session {} subpath {subpath}",
+                    self.id
+                ),
+                format!("SessionStore.load() for session {} subpath {subpath}", self.id),
+            )
+            .await?;
             let Some(entries) = entries.filter(|entries| !entries.is_empty()) else {
                 continue;
             };

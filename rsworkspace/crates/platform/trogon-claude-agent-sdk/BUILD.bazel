@@ -92,7 +92,10 @@ workspace_crate(
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
         "golden_controls": {
-            "compile_data": glob(["tests/support/*.rs"]),
+            "compile_data": glob([
+                "tests/fixtures/background_tasks/*.json",
+                "tests/support/*.rs",
+            ]),
             "data": [":claude_sdk_relay"],
             "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
         },
@@ -189,7 +192,7 @@ workspace_crate(
         "session_id": {},
         "session_key_upstream": {"compile_data": ["tests/fixtures/session_key/transcript_paths.json"]},
         "session_project_key": {},
-        "session_store": {},
+        "session_store": {"compile_data": ["tests/fixtures/session_resume/python_store_failures.json"]},
         "session_values": {},
         "setting_sources": {},
         "stderr_tail": {},

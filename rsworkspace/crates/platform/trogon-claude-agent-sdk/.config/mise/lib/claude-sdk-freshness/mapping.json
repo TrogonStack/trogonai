@@ -3175,6 +3175,8 @@
         "ClientHandle.reload_output_styles",
         "ClientHandle.seed_read_state",
         "ClientHandle.background_tasks",
+        "Backgrounded",
+        "BackgroundedError",
         "ControlReply",
         "ControlRejectionError"
       ],
@@ -3205,7 +3207,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks is true for an absent backgrounded. A rejection keeps its error_code when it matches the TypeScript pattern. backgroundTasks refuses a non-boolean backgrounded where TypeScript returns it untyped. Python 0.2.181 has none of these methods."
+      "rationale": "Every request matches sdk.mjs 0.3.323 byte for byte, captured from the published package with JSON.stringify number spelling, optional fields omitted when unset and the same request ids. Replies keep the value the CLI sent (ControlReply::as_json), None when the reply has no response where TypeScript returns undefined, with the generated upstream type available through decode, and each method returns what the TypeScript method returns: readFile is None on any failure, setMcpPermissionModeOverride is {} for an absent response, backgroundTasks hands back backgrounded as sent through Backgrounded, true when it is null or absent, with the opt-in Backgrounded::into_bool refusing a non-boolean. A rejection keeps its error_code when it matches the TypeScript pattern. Python 0.2.181 has none of these methods."
     },
     {
       "id": "custom-transport",
@@ -3971,12 +3973,16 @@
           "name": "python_dialect_reports_the_resume_materialization_text"
         },
         {
+          "path": "tests/session_store.rs",
+          "name": "store_failures_during_resume_read_like_each_sdk"
+        },
+        {
           "path": "src/run_as/tests.rs",
           "name": "setting_the_uid_to_the_current_one_needs_no_privilege"
         }
       ],
       "status": "supported",
-      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
+      "rationale": "toolConfig, getOAuthToken, getHostAuthToken, workload, executable and executableArgs, and the load timeout texts are pinned to goldens recorded from the TypeScript 0.3.323 bundle; ArgvStyle::Python answers both token refreshes with the Python unsupported-subtype error even when a handler is set, and the Python timeout wording is selected by argv_style. The Python session store dialect also wraps a failing store call in the resume materialization text recorded from claude_agent_sdk 0.2.181. debug_stderr is an upstream no-op, so the Rust field is accepted and ignored. add_dirs, user and max_buffer_size map to additional_directories, user and limits.max_buffer_size. Known limits: a host token handler returns a string or none, never the bare number the bundle would forward, and token callbacks use the opt-in callback_timeout limit."
     },
     {
       "id": "core-options",
