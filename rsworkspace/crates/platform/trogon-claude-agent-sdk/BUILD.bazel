@@ -233,6 +233,7 @@ workspace_crate(
         },
         "browser_query": {"compile_data": ["tests/fixtures/browser_query/cases.json"]},
         "js_stringify_goldens": {"compile_data": ["tests/fixtures/js_stringify/goldens.json"]},
+        "launch_directory": {},
         "sse_frame_filter_goldens": {"compile_data": ["tests/fixtures/sse_frames/sessions.json"]},
         "sse_frames_goldens": {"compile_data": ["tests/fixtures/sse_frames/parser.json"]},
         "json_object": {},

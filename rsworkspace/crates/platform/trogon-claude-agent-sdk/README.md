@@ -726,9 +726,8 @@ parent process). The result carries per-key provenance and `machinePolicy.didNot
 command output. A `ResolverState` holds what upstream keeps between calls;
 `ResolverState::with_rereads(PolicyRereads::Inline)` runs machine policy re-reads on the calling
 thread, so the host's clock alone decides when one has ended. Upstream reads the launch directory
-when the SDK module is imported; nothing here runs at load time, so `resolve_settings` reads it on
-its first call unless the binary calls `adapters::capture_launch_directory()` at the top of `main`,
-which gives the upstream timing. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+when the SDK module is imported; here the loader reads it when the binary that links the crate
+loads, before `main`, and `adapters::capture_launch_directory()` returns that reading. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
 byte for byte. Numbers read as `JSON.parse` reads them: integers above 2^53 round, and a number
 past the double range reads as `Infinity`. A typed setting refuses `Infinity`, an `env` value spells

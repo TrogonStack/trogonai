@@ -3899,10 +3899,12 @@
         "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Rust runs nothing at load time: capture_launch_directory reads the directory once into a OnceLock the first time the settings resolver needs it, and a binary that calls it at the top of main gets the upstream import-time reading."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "launch_directory::the_launch_directory_is_read_when_the_binary_loads",
+        "settings_resolve_connector::the_launch_directory_and_node_dialect_can_be_given"
+      ],
       "rust": [
         "src/adapters/environment.rs",
         "src/settings_resolve_state.rs",
