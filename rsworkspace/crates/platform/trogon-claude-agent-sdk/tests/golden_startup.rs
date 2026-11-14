@@ -27,8 +27,8 @@ mod scripted_process;
 mod startup_cli;
 
 use startup_cli::{
-    COLD_ARGUMENTS, INIT, MARKS, Outcome, Script, WAIT, WORK, arguments, hook_response, hook_started, mark, options,
-    start, user, uuid,
+    COLD_ARGUMENTS, HookGate, INIT, MARKS, Outcome, Script, WAIT, WORK, arguments, hook_response, hook_started, mark,
+    options, start, user, uuid,
 };
 
 #[tokio::test]
@@ -90,11 +90,17 @@ const BACKGROUND: &str = "A hook that runs in the background counts as not finis
 const UNREPORTED: &str =
     "Claude Code did not answer the initialize request and reported no SessionStart or Setup hook running.";
 
-async fn default_timeout_error(script: Script) -> Outcome<InitializeTimeoutError> {
+/// The default limit under a paused clock. The hook gate only observes: `onStartupHooksRunning` changes nothing the
+/// timer counts.
+async fn default_timeout_error(mut script: Script) -> Outcome<InitializeTimeoutError> {
+    let gate = HookGate::default();
+    script.hooks = Some(gate.clone());
     let (adapters, run) = start(script, &[]);
-    let error = startup_with_adapters(StartupOptions::new(options(WORK)), adapters)
-        .await
-        .err();
+    let params = StartupOptions {
+        on_startup_hooks_running: Some(gate.callback()),
+        ..StartupOptions::new(options(WORK))
+    };
+    let error = startup_with_adapters(params, adapters).await.err();
     run.server.abort();
     match error {
         Some(Error::InitializeTimeout(error)) => Ok(error),

@@ -7,7 +7,15 @@
 //! for byte, answers initialize and the claim, and can hold its answers until it has read the lines the SDK
 //! writes right after the request, which shows which writes happen before an answer and which wait for one.
 
-use std::{collections::BTreeMap, error::Error as StdError, ffi::OsString, io, path::PathBuf, time::Duration};
+use std::{
+    collections::BTreeMap,
+    error::Error as StdError,
+    ffi::OsString,
+    io,
+    path::PathBuf,
+    sync::{Arc, Condvar, Mutex},
+    time::Duration,
+};
 
 use serde_json::{Value, json};
 use tokio::{
@@ -15,7 +23,7 @@ use tokio::{
     task::JoinHandle,
 };
 use trogon_claude_agent_sdk::{
-    ClaudeAgentOptions, JsonObject,
+    ClaudeAgentOptions, JsonObject, StartupHooksRunning,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -59,6 +67,49 @@ pub struct Script {
     pub timeline: Vec<(Duration, Value)>,
     /// The exit code the process reports once the input ended or it refused to start.
     pub exit_code: i32,
+    /// Holds the clock after each timeline frame until the SDK noted it as a startup hook frame.
+    pub hooks: Option<HookGate>,
+}
+
+/// Counts the startup hook frames the SDK noted, through `onStartupHooksRunning`, so the scripted CLI can hold a
+/// paused clock until the hook frame it wrote arrived. The frame crosses the relay process, and a paused tokio clock
+/// advances to the next timer whenever the runtime waits on that real IO, so without the hold the SDK could read a
+/// frame written at 0 seconds only after its own 60 second deadline.
+#[derive(Clone, Default)]
+pub struct HookGate(Arc<(Mutex<usize>, Condvar)>);
+
+impl HookGate {
+    pub fn callback(&self) -> StartupHooksRunning {
+        let gate = self.clone();
+        Arc::new(move |_| gate.noted())
+    }
+
+    fn noted(&self) {
+        let (count, noted) = &*self.0;
+        if let Ok(mut count) = count.lock() {
+            *count += 1;
+        }
+        noted.notify_all();
+    }
+
+    /// Waits until `frames` frames were noted. The wait runs on a blocking thread because the current-thread
+    /// runtime does not advance a paused clock while a blocking task is running.
+    async fn hold_until(&self, frames: usize) -> io::Result<()> {
+        let gate = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let (count, noted) = &*gate.0;
+            let count = count.lock().map_err(|_| io::Error::other("hook gate poisoned"))?;
+            let (_, waited) = noted
+                .wait_timeout_while(count, WAIT, |count| *count < frames)
+                .map_err(|_| io::Error::other("hook gate poisoned"))?;
+            if waited.timed_out() {
+                return Err(io::Error::other("the SDK did not note the hook frame"));
+            }
+            Ok(())
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
 }
 
 pub fn uuid(last: u8) -> String {
@@ -148,6 +199,7 @@ pub async fn serve(process: ScriptedProcessHarness, script: Script) -> io::Resul
     let mut held: Option<Vec<String>> = None;
     let origin = tokio::time::Instant::now();
     let mut timeline: std::collections::VecDeque<(Duration, Value)> = script.timeline.iter().cloned().collect();
+    let mut sent = 0;
     loop {
         let next = timeline.front().map(|(after, _)| origin + *after);
         let due = async {
@@ -160,6 +212,10 @@ pub async fn serve(process: ScriptedProcessHarness, script: Script) -> io::Resul
             () = due => {
                 if let Some((_, frame)) = timeline.pop_front() {
                     send(&mut stdout, &frame).await?;
+                    sent += 1;
+                    if let Some(gate) = &script.hooks {
+                        gate.hold_until(sent).await?;
+                    }
                 }
                 continue;
             }
