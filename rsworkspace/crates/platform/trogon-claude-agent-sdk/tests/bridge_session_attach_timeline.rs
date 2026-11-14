@@ -82,7 +82,13 @@ impl HttpExecute for Service {
             note(&inner.log, inner.start, "request POST /worker/heartbeat");
             hang = inner.answers.get(inner.beats.fetch_add(1, Ordering::SeqCst)).is_some();
         } else if path.ends_with("/worker/events/stream") {
-            note(&inner.log, inner.start, "request GET /worker/events/stream");
+            // The recorder logged the stream's route with its query, so a resumed open shows where it resumes from.
+            let query = url.query().map(|query| format!("?{query}")).unwrap_or_default();
+            note(
+                &inner.log,
+                inner.start,
+                &format!("request GET /worker/events/stream{query}"),
+            );
             conn = Some(
                 inner
                     .conns
