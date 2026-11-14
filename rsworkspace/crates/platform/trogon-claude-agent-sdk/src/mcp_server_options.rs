@@ -1,4 +1,4 @@
-use crate::{ConfigValue, Environment, JsonObject, McpServerToolPolicy, McpUrl};
+use crate::{ConfigValue, Environment, JsonObject, McpServerName, McpServerToolPolicy, McpUrl};
 use serde::ser::Error as _;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -96,6 +96,20 @@ impl std::fmt::Debug for McpSdkServerOptions {
             .field("tools", &self.tools)
             .field("extra", &RedactedExtra)
             .finish()
+    }
+}
+
+impl McpSdkServerOptions {
+    /// The `{type: "sdk", name, timeout}` config the TypeScript `createSdkMcpServer` returns for a server: the
+    /// per-server tool-call timeout is kept only when it is a positive integer, as upstream's `cy` does.
+    #[must_use]
+    pub fn for_server(name: &McpServerName, timeout: Option<u64>) -> Self {
+        Self {
+            name: name.as_str().to_owned(),
+            timeout: timeout.filter(|milliseconds| *milliseconds > 0),
+            tools: None,
+            extra: JsonObject::new(),
+        }
     }
 }
 

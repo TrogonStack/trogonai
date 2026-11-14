@@ -152,6 +152,7 @@ mod settings_resolve_values;
 mod settings_resolve_vetting;
 mod settings_resolve_writable;
 mod settings_sandbox;
+mod settings_sandbox_schema;
 mod settings_schema;
 mod settings_schema_builtins;
 mod settings_schema_hosts;
@@ -339,6 +340,7 @@ pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{
     SandboxCredentialsConfig, SandboxFilesystemConfig, SandboxIgnoreViolations, SandboxNetworkConfig, SandboxSettings,
 };
+pub use settings_sandbox_schema::{SandboxConfigRejected, SandboxConfigSchema};
 pub use stderr_tail::StderrTail;
 pub use summary_dialect::SummaryDialect;
 pub use system_prompt::{CustomPrompt, PresetPrompt};

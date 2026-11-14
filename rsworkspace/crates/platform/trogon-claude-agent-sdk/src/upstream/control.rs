@@ -10926,3 +10926,84 @@ impl<'de> Deserialize<'de> for ControlErrorResponse {
         Ok(decoded)
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SDKControlCancelRequestType {
+    /// `control_cancel_request`
+    ControlCancelRequest,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl SDKControlCancelRequestType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ControlCancelRequest => "control_cancel_request",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for SDKControlCancelRequestType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SDKControlCancelRequestType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "control_cancel_request" => Self::ControlCancelRequest,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+/// Tells the other side that the sender no longer needs the answer to one of its own in-flight control_requests (for example a pending can_use_tool prompt after the turn was interrupted, or one that another client already answered). Either side may send it for a request it originated. The sender stops waiting at once and ignores any control_response that still arrives for that request_id; a receiver that can abort the work does so and may still reply (typically with an error), otherwise it simply completes the request. There is no reply to the cancel itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SDKControlCancelRequest {
+    pub r#type: SDKControlCancelRequestType,
+    /// The request_id of the control_request being withdrawn.
+    pub request_id: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "SDKControlCancelRequest")]
+struct SDKControlCancelRequestWire {
+    pub r#type: SDKControlCancelRequestType,
+    pub request_id: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl SDKControlCancelRequest {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "request_id"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["control_cancel_request"])])
+    }
+}
+
+impl Serialize for SDKControlCancelRequest {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(SDKControlCancelRequestWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SDKControlCancelRequest {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = SDKControlCancelRequestWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
