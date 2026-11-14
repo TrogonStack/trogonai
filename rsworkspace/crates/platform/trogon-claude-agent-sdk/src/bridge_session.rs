@@ -512,8 +512,10 @@ pub(crate) fn client_event(frame: Value) -> Option<ClientEvent> {
         && payload
             .get("subtype")
             .is_some_and(|subtype| subtype == "thinking_tokens");
+    let historical = payload.get("historical").is_some_and(|flag| flag == true);
     Some(ClientEvent {
         payload,
+        historical,
         ephemeral: live_only || thinking,
     })
 }

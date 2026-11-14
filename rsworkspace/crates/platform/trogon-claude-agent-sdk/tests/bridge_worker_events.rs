@@ -16,6 +16,7 @@ fn event(text: &str) -> ClientEvent {
     payload.insert("text".to_owned(), json!(text));
     ClientEvent {
         payload,
+        historical: false,
         ephemeral: false,
     }
 }

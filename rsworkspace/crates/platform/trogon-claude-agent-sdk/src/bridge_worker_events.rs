@@ -65,10 +65,12 @@ pub fn upload_timeout(bytes: usize, cuttable: bool, retry_count: u32) -> Duratio
     Duration::from_millis(ms as u64)
 }
 
-/// One event as it is uploaded: the payload, and whether it is a live-view row the store does not keep.
+/// One event as it is uploaded: the payload, whether it replays history (`historical: true` on the row), and
+/// whether it is a live-view row the store does not keep.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClientEvent {
     pub payload: Map<String, Value>,
+    pub historical: bool,
     pub ephemeral: bool,
 }
 
@@ -76,6 +78,9 @@ impl ClientEvent {
     pub fn to_json(&self) -> Value {
         let mut event = Map::new();
         event.insert("payload".to_owned(), Value::Object(self.payload.clone()));
+        if self.historical {
+            event.insert("historical".to_owned(), Value::Bool(true));
+        }
         if self.ephemeral {
             event.insert("ephemeral".to_owned(), Value::Bool(true));
         }

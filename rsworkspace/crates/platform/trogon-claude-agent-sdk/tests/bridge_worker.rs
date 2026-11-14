@@ -616,7 +616,11 @@ async fn post_events(
         let mut payload = item.as_object().cloned().ok_or("event")?;
         payload.insert("session_id".to_owned(), json!("cse_abc"));
         let ephemeral = field(&item, "subtype").as_str() == Some("thinking_tokens");
-        events.push(ClientEvent { payload, ephemeral });
+        events.push(ClientEvent {
+            payload,
+            historical: false,
+            ephemeral,
+        });
     }
     let rest = events.split_off(1.min(events.len()));
     if let Err(reason) = worker.submit_events(events).await {

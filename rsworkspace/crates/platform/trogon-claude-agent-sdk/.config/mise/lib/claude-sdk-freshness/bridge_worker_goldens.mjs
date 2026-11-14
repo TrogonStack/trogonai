@@ -1201,6 +1201,10 @@ const prompt = (id, subtype, extra = {}) => ({ type: 'control_request', request_
 const reply = (id, extra = {}) => ({ type: 'control_response', response: { subtype: 'success', request_id: id, response: {} }, ...extra });
 handled('a_uuid_is_written_once', { steps: [post(1, [note('a', 'u1')]), post(0, [note('b', 'u1')])] });
 handled('a_write_without_a_uuid_is_posted', { steps: [post(1, [note('a')])] });
+handled('a_historical_write_is_flagged', { steps: [post(1, [{ ...note('a', 'u1'), historical: true }])] });
+handled('a_write_that_is_not_historical_is_not_flagged', { steps: [post(1, [{ ...note('a', 'u1'), historical: false }])] });
+handled('a_historical_flag_that_is_not_true_is_not_flagged', { steps: [post(1, [{ ...note('a', 'u1'), historical: 1 }])] });
+handled('a_historical_thinking_row_is_flagged_and_live_only', { steps: [post(1, [{ type: 'system', subtype: 'thinking_tokens', uuid: 'u1', historical: true }])] });
 handled('a_result_is_the_empty_success_of_a_turn', { steps: [{ op: 'result', expect: 1 }] });
 handled('a_tool_permission_prompt_is_posted_with_the_session_id', { steps: [post(1, [via('sendControlRequest', prompt('r1', 'can_use_tool', { tool_name: 'Bash', input: {}, tool_use_id: 't1' }))])] });
 handled('a_dialog_prompt_is_posted_with_the_session_id', { steps: [post(1, [via('sendControlRequest', prompt('r2', 'request_user_dialog', { dialog_kind: 'x', payload: {} }))])] });
