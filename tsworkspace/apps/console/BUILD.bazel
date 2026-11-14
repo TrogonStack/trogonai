@@ -94,6 +94,17 @@ vitest_bin.vitest_test(
         "//tsworkspace:node_modules/vitest",
     ],
     env = {"VITE_PRESERVE_SYMLINKS": "1"},
+    # React is CommonJS. Node resolves require() through the rules_js fs
+    # patches, which stop at the runfiles tree, but resolves ESM imports
+    # without them, so those follow the symlinks into the output tree
+    # (https://github.com/aspect-build/rules_js/issues/362). React reached
+    # both ways loads twice and hooks fail with "Invalid hook call". Without
+    # the patches both loaders resolve to the same file, and because data is
+    # copied to the output tree, that file is still a declared input.
+    patch_node_fs = False,
+    # vitest spreads the test files over a pool of worker processes, so the
+    # test occupies several cores rather than the one Bazel assumes.
+    tags = ["cpu:4"],
 )
 
 oxlint_bin.oxlint_test(
