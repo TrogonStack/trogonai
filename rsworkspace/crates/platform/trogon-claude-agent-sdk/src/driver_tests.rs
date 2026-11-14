@@ -636,10 +636,15 @@ async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects
         );
         // The prompt is dropped unsent, and the held control fails with the same message.
         assert!(matches!(prompted.await?, Ok(())));
-        assert!(matches!(
-            controlled.await?,
-            Err(Error::InitializationFailed(inner)) if inner.to_string() == expected
-        ));
+        let controlled = controlled.await?;
+        assert!(
+            matches!(controlled, Err(Error::InitializationFailed(_))),
+            "{controlled:?}"
+        );
+        assert_eq!(
+            controlled.err().map(|error| error.to_string()).as_deref(),
+            Some(expected)
+        );
         assert!(fixture.driver.held_commands.is_empty());
         fixture.finish().await?;
     }
