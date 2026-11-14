@@ -16,6 +16,7 @@ mod bridge_git;
 mod bridge_js;
 mod bridge_types;
 mod bridge_worker;
+mod bridge_worker_queue;
 mod bridge_worker_types;
 mod builtin_tool_name;
 mod bundled_cli;
@@ -192,6 +193,10 @@ pub use bridge_worker::{
     InvalidSessionId, NOT_FOUND_BEFORE_EXIT, NonOrigin403, RefusalSource, StatusClass, TokioPacing, WorkerClient,
     WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, refusal_source,
     retry_after_ms, session_url, token_expiry,
+};
+pub use bridge_worker_queue::{
+    Next, Patch, PatchQueue, Requeue, merge_patches, requeue_after_refusal, retry_delay, subtract_patches,
+    without_status,
 };
 pub use bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,

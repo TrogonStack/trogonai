@@ -14,6 +14,7 @@ use crate::adapters::HttpExecute;
 use crate::bridge_client::{USER_AGENT, client_platform, header_text};
 use crate::bridge_js::{js_number, js_parse_int, plain_detail, safe_integer};
 use crate::bridge_types::SessionState;
+use crate::bridge_worker_queue::{Next, Patch, PatchQueue, requeue_after_refusal};
 use crate::bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
 };
@@ -150,8 +151,11 @@ pub struct WorkerConfig {
 }
 
 /// What a `403` that the service did not send (`request-id` absent or malformed) counts as: `nonOrigin403Transient`.
-/// The attach entrypoint leaves it unset, which reads as `false`. Its windowed form needs the upload lanes and their
-/// backlog, which the attach entrypoint never configures, so it is not part of this client.
+/// The attach entrypoint leaves it unset, which reads as `false` (bridge.mjs offsets 1027202 and 1054671), so
+/// `Counted` is the default and matches the recorded goldens. `Transient` is the upstream `true` form of the option,
+/// which the attach entrypoint cannot be made to set, so it has no recorded golden and is covered by a test of this
+/// client alone. The object form (windows and the `onRefused` callbacks, offsets 1054671 to 1057168) needs the
+/// upload lanes and their backlog, which the attach entrypoint never configures, so it is not part of this client.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum NonOrigin403 {
     /// The refusal counts like any other `401` or `403`.
@@ -489,6 +493,7 @@ pub struct WorkerClient<H, P = TokioPacing> {
     tickets: Tickets,
     session_access_token: Option<SensitiveString>,
     non_origin_403: NonOrigin403,
+    queue: PatchQueue,
 }
 
 impl<H, P> WorkerClient<H, P> {
@@ -510,6 +515,7 @@ impl<H, P> WorkerClient<H, P> {
             tickets: Tickets::default(),
             session_access_token: config.session_access_token,
             non_origin_403: config.non_origin_403,
+            queue: PatchQueue::new(),
         })
     }
 
@@ -662,6 +668,96 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         });
         self.request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
             .await
+    }
+
+    /// Queues a state report the way `reportState` does: nothing is queued when the state is the one already
+    /// reported and no details ride along. Returns whether a patch was queued. [`WorkerClient::flush`] sends it.
+    pub fn submit_state(&mut self, state: SessionState, details: Option<&RequiresActionDetails>) -> bool {
+        if state == self.state && details.is_none() {
+            return false;
+        }
+        self.state = state;
+        let mut patch = Patch::new();
+        patch.insert("worker_status".to_owned(), json!(state.as_str()));
+        patch.insert(
+            "requires_action_details".to_owned(),
+            details.map_or(Value::Null, RequiresActionDetails::to_json),
+        );
+        patch.insert("internal_metadata".to_owned(), json!({"reply_degraded": false}));
+        self.queue.enqueue(patch);
+        true
+    }
+
+    /// Queues `external_metadata` the way `reportMetadata` does. [`WorkerClient::flush`] sends it.
+    pub fn submit_metadata(&mut self, metadata: &Map<String, Value>) {
+        let mut patch = Patch::new();
+        patch.insert(
+            "external_metadata".to_owned(),
+            Value::Object(external_metadata_patch(metadata)),
+        );
+        self.queue.enqueue(patch);
+    }
+
+    /// Stops the queue from taking new patches; see [`PatchQueue::close_to_new_patches`].
+    pub fn close_queue_to_new_patches(&mut self) {
+        self.queue.close_to_new_patches();
+    }
+
+    /// Drops what the queue still holds and stops it for good.
+    pub fn close_queue(&mut self) {
+        self.queue.close();
+    }
+
+    /// The queue behind [`WorkerClient::submit_state`] and [`WorkerClient::submit_metadata`].
+    pub fn queue(&self) -> &PatchQueue {
+        &self.queue
+    }
+
+    /// Sends what is queued, retrying with the upstream backoff until the service takes every patch. A `400`,
+    /// `413` or `422` drops the patch and puts back what must still reach the service. Returns whether everything
+    /// went out and nothing was dropped; a mismatch ends the flush.
+    pub async fn flush(&mut self) -> Result<bool, MismatchReason> {
+        let drained = self.pump(None).await?;
+        Ok(drained && !self.queue.has_dropped_something() && !self.queue.is_closed())
+    }
+
+    /// [`WorkerClient::flush`] that stops once `attempts` requests were made and another request or a retry wait
+    /// is next, so patches queued meanwhile are seen by the wait that follows. Returns whether the queue drained.
+    pub async fn pump(&mut self, attempts: Option<u32>) -> Result<bool, MismatchReason> {
+        let mut made = 0_u32;
+        loop {
+            let capped = attempts.is_some_and(|cap| made >= cap);
+            match self.queue.poll(self.pacing.jitter()) {
+                Next::Idle => return Ok(true),
+                Next::Pause(_) | Next::Send(_) if capped => return Ok(false),
+                Next::Pause(delay) => self.pacing.pause(delay).await,
+                Next::Send(patch) => {
+                    made += 1;
+                    let mut body = Patch::new();
+                    body.insert("worker_epoch".to_owned(), json!(self.epoch));
+                    for (key, value) in &patch {
+                        body.insert(key.clone(), value.clone());
+                    }
+                    let outcome = self
+                        .request(Method::PUT, "/worker", &Value::Object(body), REQUEST_TIMEOUT, false)
+                        .await?;
+                    match outcome {
+                        RequestOutcome::Accepted(_) => self.queue.sent(true),
+                        RequestOutcome::Failed(failure) if matches!(failure.status, Some(400 | 413 | 422)) => {
+                            let back = requeue_after_refusal(&patch);
+                            if let Some(metadata) = back.metadata {
+                                self.queue.requeue_metadata(metadata);
+                            }
+                            if let Some(status) = back.status {
+                                self.queue.requeue_status(status);
+                            }
+                            self.queue.sent(true);
+                        }
+                        RequestOutcome::Failed(_) => self.queue.sent(false),
+                    }
+                }
+            }
+        }
     }
 
     /// One heartbeat. An accepted answer that advises a beat interval changes the interval the worker keeps.
