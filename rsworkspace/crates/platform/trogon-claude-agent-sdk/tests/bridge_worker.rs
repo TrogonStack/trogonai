@@ -183,6 +183,7 @@ async fn serve_all(
         beats,
         landings,
         json!({"status": 200, "headers": [], "body": "{}"}),
+        Duration::ZERO,
     )
     .await
 }
@@ -194,6 +195,7 @@ async fn serve_record(
     beats: Vec<Value>,
     landings: Vec<Value>,
     record: Value,
+    record_delay: Duration,
 ) -> Result<(String, Log), std::io::Error> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let base = format!("http://{}", listener.local_addr()?);
@@ -214,7 +216,11 @@ async fn serve_record(
                 .to_owned();
             let route = format!("{} {}", request.method, request.path);
             if route == "GET /worker" {
-                let _ = write_response(&mut stream, &record, &origin).await;
+                let (record, origin) = (record.clone(), origin.clone());
+                tokio::spawn(async move {
+                    tokio::time::sleep(record_delay).await;
+                    let _ = write_response(&mut stream, &record, &origin).await;
+                });
                 continue;
             }
             let response = match route.as_str() {
@@ -351,12 +357,21 @@ async fn run_case(case: &Value) -> TestResult {
         .get("record")
         .cloned()
         .unwrap_or_else(|| json!({"status": 200, "headers": [], "body": "{}"}));
+    // The upstream bound is ten seconds. A case that outlasts it is replayed with a bound of 100 ms and the same
+    // overshoot, which keeps the order of the two events without waiting.
+    let recorded_delay = field(case, "record_delay_ms").as_u64().unwrap_or(0);
+    let bound = Duration::from_millis(100);
+    let record_delay = match recorded_delay {
+        delay if delay > 10_000 => bound + Duration::from_millis(delay - 10_000),
+        delay => Duration::from_millis(delay),
+    };
     let (base, log) = serve_record(
         register.clone(),
         queue(case, "puts"),
         queue(case, "beat"),
         queue(case, "landing"),
         record,
+        record_delay,
     )
     .await?;
     let pacing = Recorded::new(0.0);
@@ -368,6 +383,9 @@ async fn run_case(case: &Value) -> TestResult {
             ..config(&base, "tok")
         },
     )?;
+    if recorded_delay > 10_000 {
+        worker.set_init_state_get_ordering_bound(bound);
+    }
     let mut epoch = field(case, "epoch_option").as_i64();
     let mut ending = Ending {
         closes: Vec::new(),
@@ -490,6 +508,9 @@ async fn burst(
                 worker.submit_metadata(field(&item, "metadata").as_object().ok_or("metadata")?);
             }
         }
+    }
+    if field(step, "close").as_bool() == Some(true) {
+        worker.close_queue();
     }
     Ok(worker.flush().await.map(|_| ()))
 }

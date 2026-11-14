@@ -1,8 +1,26 @@
 //! The worker half of the bridge: registering a worker for a remote session and keeping the service told about it
 //! (`PUT /worker` state and metadata, `POST /worker/heartbeat`), with the request path rules the upstream bridge
 //! entrypoint applies to every answer.
+//!
+//! Draft, pending upstream call-graph evidence for each entry below. The port covers what a caller reaches through
+//! `attachBridgeSession` and the handle it returns, and what a service answer can trigger. These branches of the
+//! upstream client look out of reach there and are not ported yet:
+//!
+//! - the worker socket (`workerSocket`, `O?"origin"`, offsets 1051556 to 1052200), which no attach option creates;
+//! - the heartbeat probe and the token-lifetime extras (`advertiseHeartbeatProbeSupport`, `skipRedundantHeartbeats`,
+//!   offset 1048000), which the attach options leave off;
+//! - the flush policy (`flushPolicy`: `waitsForStatus`, `mergesSameRun`, `metadataNeverSent`, offsets 1032337 and
+//!   1057745), which is only set by a policy the attach options never deliver;
+//! - `e3()` for `reply_degraded` (offset 856241), which evaluates to false for an attached session;
+//! - the init metadata `f` in `recordAtStart` (offsets 1029258 and 1045899): `initExternalMetadata` and
+//!   `metadataNeverSent` are unset, so `f` is always empty;
+//! - `reportInternalMetadata` and the `disabled_mcp_servers` refused-alone bookkeeping (offsets 1030099 to 1031477,
+//!   1128273 to 1128840): the attach handle exposes `reportState`, `reportMetadata` and `reportDelivery` only, so no
+//!   patch carries `disabled_mcp_servers`;
+//! - `onConnectNeedsRecord` (offset 1196900): never set, so the stored record read is abandoned at registration.
 
 use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Method;
@@ -14,7 +32,7 @@ use crate::adapters::HttpExecute;
 use crate::bridge_client::{USER_AGENT, client_platform, header_text};
 use crate::bridge_js::{js_number, js_parse_int, plain_detail, safe_integer};
 use crate::bridge_types::SessionState;
-use crate::bridge_worker_queue::{Next, Patch, PatchQueue, requeue_after_refusal};
+use crate::bridge_worker_queue::{Next, Patch, PatchQueue, requeue_after_refusal, without_status};
 use crate::bridge_worker_types::{
     InitError, InitFailure, MismatchReason, RegisterFailure, RequestFailure, RequestOutcome, RequiresActionDetails,
 };
@@ -493,8 +511,8 @@ impl Tickets {
 
 /// Talks to the worker endpoints of one remote session the way the upstream bridge entrypoint does.
 pub struct WorkerClient<H, P = TokioPacing> {
-    http: H,
-    pacing: P,
+    http: Arc<H>,
+    pacing: Arc<P>,
     session_url: String,
     session_id: String,
     token: SensitiveString,
@@ -511,6 +529,10 @@ pub struct WorkerClient<H, P = TokioPacing> {
     record_at_start: Option<Map<String, Value>>,
     reported_keys: Vec<String>,
     reply_degraded: bool,
+    init_state_get_ordering_bound: Duration,
+    closed: bool,
+    dropped_state_patches: u32,
+    dropped_owed_metadata_patches: u32,
 }
 
 impl<H, P> WorkerClient<H, P> {
@@ -518,8 +540,8 @@ impl<H, P> WorkerClient<H, P> {
         let session_url = session_url(&config.api_base_url, &config.session_id)?;
         let interval = config.heartbeat_interval_ms.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL_MS);
         Ok(Self {
-            http,
-            pacing,
+            http: Arc::new(http),
+            pacing: Arc::new(pacing),
             session_url,
             session_id: config.session_id,
             token: config.token,
@@ -536,6 +558,10 @@ impl<H, P> WorkerClient<H, P> {
             record_at_start: None,
             reported_keys: Vec::new(),
             reply_degraded: false,
+            init_state_get_ordering_bound: INIT_STATE_GET_ORDERING_BOUND,
+            closed: false,
+            dropped_state_patches: 0,
+            dropped_owed_metadata_patches: 0,
         })
     }
 
@@ -610,7 +636,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
         headers.insert("user-agent", HeaderValue::from_static(USER_AGENT));
         *request.body_mut() = Some("{}".as_bytes().to_vec().into());
-        let reply = exchange(&self.http, request, REGISTER_TIMEOUT)
+        let reply = exchange(&*self.http, request, REGISTER_TIMEOUT)
             .await
             .map_err(|fault| match fault {
                 Fault::TimedOut => RegisterFailure::TimedOut,
@@ -625,25 +651,62 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         worker_epoch(&decode(body))
     }
 
-    /// The first `PUT /worker`: registers the worker as idle and retries what is worth retrying.
+    /// The first `PUT /worker`: registers the worker as idle and retries what is worth retrying. The stored record is
+    /// read at the same time (`GET /worker`, bridge.mjs offset 1049109): the registration starts once the read is
+    /// answered or `initStateGetOrderingBoundMs` has passed, and a read still pending when the registration is
+    /// accepted is abandoned, which leaves the stored record unknown, as `stateReadEndsAtRegistration` does for an
+    /// attached session (offset 1196900, where `onConnectNeedsRecord` is never set).
     pub async fn initialize(&mut self, epoch: i64) -> Result<(), InitError> {
         self.epoch = epoch;
-        let record = self.read_worker_record().await.map_err(InitError::Mismatch)?;
+        let mut read = Box::pin(read_worker_record(
+            self.http.clone(),
+            self.pacing.clone(),
+            self.authorization(true),
+            reqwest::Url::parse(&format!("{}/worker", self.session_url)).ok(),
+            self.platform,
+        ));
+        let mut answered = None;
+        tokio::select! {
+            result = &mut read => answered = Some(result),
+            () = tokio::time::sleep(self.init_state_get_ordering_bound) => {}
+        }
+        if let Some(Err(reason)) = answered {
+            return Err(InitError::Mismatch(reason));
+        }
         let body = json!({
             "worker_status": "idle",
             "worker_epoch": epoch,
             "external_metadata": {"pending_action": null, "pending_actions": null, "task_summary": null},
         });
+        let registered = {
+            let registration = self.register_idle(&body);
+            tokio::pin!(registration);
+            loop {
+                tokio::select! {
+                    result = &mut registration => break result,
+                    result = &mut read, if answered.is_none() => answered = Some(result),
+                }
+            }
+        };
+        registered?;
+        match answered {
+            Some(Err(reason)) => return Err(InitError::Mismatch(reason)),
+            Some(Ok(record)) => self.record_at_start = record,
+            None => {}
+        }
+        Ok(())
+    }
+
+    async fn register_idle(&mut self, body: &Value) -> Result<(), InitError> {
         let mut attempt = 0;
         let failure = loop {
             attempt += 1;
             let outcome = self
-                .request(Method::PUT, "/worker", &body, REQUEST_TIMEOUT, false)
+                .request(Method::PUT, "/worker", body, REQUEST_TIMEOUT, false)
                 .await
                 .map_err(InitError::Mismatch)?;
             let RequestOutcome::Failed(failure) = outcome else {
                 self.state = SessionState::Idle;
-                self.record_at_start = record;
                 return Ok(());
             };
             if matches!(failure.status, Some(400 | 413 | 422)) || attempt >= INIT_ATTEMPTS {
@@ -658,65 +721,6 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             http_status: failure.status,
             no_answer: failure.fetch_failed,
         }))
-    }
-
-    /// `getWorkerState` as `initialize` runs it: `GET /worker` with up to ten attempts, bridge.mjs offset 1049109. The
-    /// answer is the `external_metadata` the stored record holds, or `None` when the read failed. The read is not
-    /// waited on past `initStateGetOrderingBoundMs`; upstream lets it finish behind the first `PUT /worker`, which a
-    /// single borrow of the client cannot do, so a read that takes longer is given up.
-    async fn read_worker_record(&mut self) -> Result<Option<Map<String, Value>>, MismatchReason> {
-        let read = self.read_worker_record_with_retry();
-        match tokio::time::timeout(INIT_STATE_GET_ORDERING_BOUND, read).await {
-            Ok(result) => result,
-            Err(_) => Ok(None),
-        }
-    }
-
-    async fn read_worker_record_with_retry(&mut self) -> Result<Option<Map<String, Value>>, MismatchReason> {
-        let (Some(authorization), Ok(url)) = (
-            self.authorization(true),
-            reqwest::Url::parse(&format!("{}/worker", self.session_url)),
-        ) else {
-            return Ok(None);
-        };
-        for attempt in 1..=GET_ATTEMPTS {
-            let mut request = reqwest::Request::new(Method::GET, url.clone());
-            let headers = request.headers_mut();
-            headers.insert("authorization", authorization.clone());
-            headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-            headers.insert("anthropic-client-platform", HeaderValue::from_static(self.platform));
-            headers.insert("user-agent", HeaderValue::from_static(USER_AGENT));
-            if let Ok(reply) = exchange(&self.http, request, GET_TIMEOUT).await {
-                let status = reply.status;
-                if (200..300).contains(&status) {
-                    let data = reply
-                        .body
-                        .as_deref()
-                        .and_then(|bytes| parse_json(&decode_text(bytes)).ok());
-                    if let Some(data) = data {
-                        let record = data
-                            .get("worker")
-                            .and_then(|worker| worker.get("external_metadata"))
-                            .and_then(Value::as_object)
-                            .cloned();
-                        return Ok(Some(record.unwrap_or_default()));
-                    }
-                } else if status == 409 {
-                    return Err(
-                        conflict_reason(&reply.headers, reply.body.as_deref()).unwrap_or(MismatchReason::EpochConflict)
-                    );
-                } else if matches!(status, 400 | 413 | 422) {
-                    return Ok(None);
-                }
-            }
-            if attempt < GET_ATTEMPTS {
-                let backoff = (500_u64 << (attempt - 1)).min(INIT_BACKOFF_CEILING_MS);
-                self.pacing
-                    .pause(Duration::from_millis(backoff) + Duration::from_secs_f64(self.pacing.jitter() * 0.5))
-                    .await;
-            }
-        }
-        Ok(None)
     }
 
     /// Reports the worker state. Nothing is sent when the state is the one already reported and no details ride
@@ -827,20 +831,39 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
 
     /// Drops what the queue still holds and stops it for good.
     pub fn close_queue(&mut self) {
+        self.closed = true;
         self.queue.close();
     }
 
-    /// The queue behind [`WorkerClient::submit_state`] and [`WorkerClient::submit_metadata`].
-    /// Sets the `external_metadata` the stored record held when the session started (`recordAtStart`).
+    /// How many patches the client gave up on (`droppedWorkerStatePatchCount`, bridge.mjs offset 1128273).
+    pub fn dropped_state_patches(&self) -> u32 {
+        self.dropped_state_patches
+    }
+
+    /// How many of those still owed metadata (`droppedOwedMetadataPatchCount`).
+    pub fn dropped_owed_metadata_patches(&self) -> u32 {
+        self.dropped_owed_metadata_patches
+    }
+
+    /// Rust only. Sets the `external_metadata` the stored record held when the session started (`recordAtStart`);
+    /// `initialize` sets it from the read it makes.
     pub fn set_record_at_start(&mut self, record: Option<Map<String, Value>>) {
         self.record_at_start = record;
     }
 
-    /// Sets the `reply_degraded` value every status report carries (`e3()`, bridge.mjs offset 856241).
+    /// Rust only. Sets `initStateGetOrderingBoundMs` (offset 1049109, `dHe` = 10 seconds), which no public option of
+    /// the bridge reaches; it lets a test keep the ordering exact without waiting out the real bound.
+    /// Rust only. Sets the `reply_degraded` value every status report carries. The bridge evaluates `e3()` (offset
+    /// 856241) to false for an attached session, so the value is false unless a caller sets it.
+    pub fn set_init_state_get_ordering_bound(&mut self, bound: Duration) {
+        self.init_state_get_ordering_bound = bound;
+    }
+
     pub fn set_reply_degraded(&mut self, degraded: bool) {
         self.reply_degraded = degraded;
     }
 
+    /// The queue behind [`WorkerClient::submit_state`] and [`WorkerClient::submit_metadata`].
     pub fn queue(&self) -> &PatchQueue {
         &self.queue
     }
@@ -875,7 +898,18 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                         .await?;
                     match outcome {
                         RequestOutcome::Accepted(_) => self.queue.sent(true),
+                        RequestOutcome::Failed(failure) if self.closed && failure.status == Some(409) => {
+                            self.dropped_state_patches += 1;
+                            if without_status(&patch).is_some() {
+                                self.dropped_owed_metadata_patches += 1;
+                            }
+                            self.queue.sent(true);
+                        }
                         RequestOutcome::Failed(failure) if matches!(failure.status, Some(400 | 413 | 422)) => {
+                            self.dropped_state_patches += 1;
+                            if without_status(&patch).is_some() {
+                                self.dropped_owed_metadata_patches += 1;
+                            }
                             let back = requeue_after_refusal(&patch);
                             if let Some(metadata) = back.metadata {
                                 self.queue.requeue_metadata(metadata);
@@ -949,7 +983,7 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
         }
         headers.insert("accept", HeaderValue::from_static("*/*"));
         *request.body_mut() = Some(js_stringify(body).into_bytes().into());
-        let reply = match exchange(&self.http, request, timeout).await {
+        let reply = match exchange(&*self.http, request, timeout).await {
             Ok(reply) => reply,
             Err(Fault::TimedOut) => return unanswered("fetch_failed:TimeoutError"),
             Err(Fault::Unreachable(_)) => return unanswered("fetch_failed:TypeError"),
@@ -968,6 +1002,15 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
                 })
                 .flatten();
             return Ok(RequestOutcome::Accepted(data));
+        }
+        if self.closed {
+            return Ok(RequestOutcome::Failed(RequestFailure {
+                status: Some(status),
+                reason: format!("http_{status}"),
+                retry_after_ms: None,
+                fetch_failed: false,
+                non_origin_refusal: false,
+            }));
         }
         if status == 409 {
             return Err(conflict_reason(&reply.headers, reply.body.as_deref()).unwrap_or(MismatchReason::EpochConflict));
@@ -1009,6 +1052,59 @@ impl<H: HttpExecute, P: WorkerPacing> WorkerClient<H, P> {
             non_origin_refusal,
         }))
     }
+}
+
+/// `getWorkerState` as `initialize` runs it: `GET /worker` with up to ten attempts, bridge.mjs offset 1049109. The
+/// answer is the `external_metadata` the stored record holds (empty when it holds none), or `None` when the read
+/// failed for good.
+async fn read_worker_record<H: HttpExecute, P: WorkerPacing>(
+    http: Arc<H>,
+    pacing: Arc<P>,
+    authorization: Option<HeaderValue>,
+    url: Option<reqwest::Url>,
+    platform: &'static str,
+) -> Result<Option<Map<String, Value>>, MismatchReason> {
+    let (Some(authorization), Some(url)) = (authorization, url) else {
+        return Ok(None);
+    };
+    for attempt in 1..=GET_ATTEMPTS {
+        let mut request = reqwest::Request::new(Method::GET, url.clone());
+        let headers = request.headers_mut();
+        headers.insert("authorization", authorization.clone());
+        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+        headers.insert("anthropic-client-platform", HeaderValue::from_static(platform));
+        headers.insert("user-agent", HeaderValue::from_static(USER_AGENT));
+        if let Ok(reply) = exchange(&*http, request, GET_TIMEOUT).await {
+            let status = reply.status;
+            if (200..300).contains(&status) {
+                let data = reply
+                    .body
+                    .as_deref()
+                    .and_then(|bytes| parse_json(&decode_text(bytes)).ok());
+                if let Some(data) = data {
+                    let record = data
+                        .get("worker")
+                        .and_then(|worker| worker.get("external_metadata"))
+                        .and_then(Value::as_object)
+                        .cloned();
+                    return Ok(Some(record.unwrap_or_default()));
+                }
+            } else if status == 409 {
+                return Err(
+                    conflict_reason(&reply.headers, reply.body.as_deref()).unwrap_or(MismatchReason::EpochConflict)
+                );
+            } else if matches!(status, 400 | 413 | 422) {
+                return Ok(None);
+            }
+        }
+        if attempt < GET_ATTEMPTS {
+            let backoff = (500_u64 << (attempt - 1)).min(INIT_BACKOFF_CEILING_MS);
+            pacing
+                .pause(Duration::from_millis(backoff) + Duration::from_secs_f64(pacing.jitter() * 0.5))
+                .await;
+        }
+    }
+    Ok(None)
 }
 
 fn decode_text(bytes: &[u8]) -> String {

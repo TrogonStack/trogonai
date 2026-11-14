@@ -248,8 +248,11 @@ add('queue', 'refused_state_is_dropped', { epoch: 6, puts: [json(200, {}), raw(4
 add('queue', 'refused_metadata_is_dropped', { epoch: 6, puts: [json(200, {}), raw(413, ''), json(200, {})], steps: [burst(1, { metadata: { a: 1 } }), burst(1, { metadata: { b: 1 } })] });
 add('queue', 'refused_mixed_patch_requeues_the_status', { epoch: 6, puts: [json(200, {}), json(200, {}), raw(422, ''), json(200, {})], steps: [burst(3, { state: 'running' }, { state: 'idle' }, { metadata: { a: 1 } })] });
 add('queue', 'refused_mixed_patch_requeues_owed_metadata', { epoch: 6, puts: [json(200, {}), json(200, {}), raw(422, ''), json(200, {})], steps: [burst(4, { state: 'running' }, { state: 'idle' }, { metadata: { plan_doc: 'x', model: 'm' } })] });
+add('queue', 'closed_client_drops_a_conflicting_patch', { epoch: 6, puts: [json(200, {}), raw(409, ''), json(200, {})], steps: [{ ...burst(1, { state: 'running' }), close: true }] });
 add('queue', 'a_later_patch_joins_the_retry', { epoch: 6, puts: [json(200, {}), raw(500, ''), json(200, {})], steps: [burst(2, { state: 'running' }, { metadata: { a: 1 }, afterMs: 100 })] });
 const stored = (metadata) => json(200, { worker: { external_metadata: metadata } });
+add('record', 'slow_read_is_abandoned_at_registration', { epoch: 6, record: stored({ last_served_model: 'm1' }), recordDelayMs: 10600, initWaitMs: 16000, steps: [{ op: 'metadata', value: { last_served_model: 'm1' }, sends: true }] });
+add('record', 'read_finishing_inside_the_bound_is_used', { epoch: 6, record: stored({ last_served_model: 'm1' }), recordDelayMs: 1500, steps: [{ op: 'metadata', value: { last_served_model: 'm1' }, sends: false }] });
 add('record', 'repeat_of_the_record_is_not_sent', { epoch: 6, record: stored({ last_served_model: 'm1' }), steps: [{ op: 'metadata', value: { last_served_model: 'm1' }, sends: false }, { op: 'metadata', value: { last_served_model: 'm1' }, sends: true }] });
 add('record', 'only_the_repeated_keys_are_left_out', { epoch: 6, record: stored({ permission_mode: 'plan' }), steps: [{ op: 'metadata', value: { permission_mode: 'plan', other: 1 }, sends: true }] });
 add('record', 'a_changed_value_is_sent', { epoch: 6, record: stored({ permission_mode: 'plan' }), steps: [{ op: 'metadata', value: { permission_mode: 'auto' }, sends: true }] });
@@ -282,7 +285,8 @@ async function run(spec) {
       const headers = [];
       for (let i = 0; i < req.rawHeaders.length; i += 2) if (KEPT.has(req.rawHeaders[i].toLowerCase())) headers.push([req.rawHeaders[i], req.rawHeaders[i + 1]]);
       const route = req.url.replace(/^\/v1\/code\/sessions\/cse_abc/, '');
-      if (!(req.method === 'GET' && route === '/worker')) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: Date.now() });
+      const isRead = req.method === 'GET' && route === '/worker';
+      if (!isRead) requests.push({ method: req.method, path: req.url, headers, body: Buffer.concat(chunks).toString(), at: Date.now() });
       let response = json(200, {});
       if (req.method === 'GET' && route === '/worker') response = spec.record ?? response;
       else if (route === '/worker/landing') response = pick('landing');
@@ -291,7 +295,8 @@ async function run(spec) {
       else if (route === '/worker/heartbeat') response = pick('beat');
       res.statusCode = response.status;
       for (const [name, value] of response.headers) res.setHeader(name, value.replace('{base}', `http://127.0.0.1:${server.address().port}`));
-      res.end(response.body);
+      if (isRead && spec.recordDelayMs) setTimeout(() => res.end(response.body), spec.recordDelayMs);
+      else res.end(response.body);
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -301,7 +306,7 @@ async function run(spec) {
   const options = { sessionId: 'cse_abc', apiBaseUrl: base, ingressToken: 'tok', outboundOnly: true, heartbeatIntervalMs: spec.interval ?? 600000, onClose: (code) => closes.push(code) };
   if (spec.epoch !== null && spec.epoch !== undefined) options.epoch = spec.epoch;
   const count = (route) => requests.filter((r) => r.path.endsWith(route)).length;
-  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
+  const result = { name: spec.name, ...(spec.record !== undefined && { record: spec.record }), ...(spec.recordDelayMs !== undefined && { record_delay_ms: spec.recordDelayMs }), epoch_option: spec.epoch ?? null, interval_ms: spec.interval ?? 600000, session_token: spec.sessionToken ?? null, register: spec.register ?? null, puts: spec.puts ?? [], beat: spec.beat ?? [], landing: spec.landing ?? [], steps: spec.steps ?? [], beats: 0 };
   let handle;
   if (spec.sessionToken !== undefined) process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = spec.sessionToken;
   try {
@@ -311,7 +316,7 @@ async function run(spec) {
     result.rejection = { message: String(error.message), code: error.code ?? null };
   }
   if (handle !== undefined) {
-    await until(() => count('/worker') + count('/worker/register') > 0 && requests.some((r) => r.method === 'PUT') || closes.length > 0, 8000);
+    await until(() => count('/worker') + count('/worker/register') > 0 && requests.some((r) => r.method === 'PUT') || closes.length > 0, spec.initWaitMs ?? 8000);
     for (const step of spec.steps ?? []) {
       const before = requests.filter((r) => r.method === 'PUT').length;
       if (step.op === 'burst') {
@@ -320,6 +325,7 @@ async function run(spec) {
           if (item.state !== undefined) handle.reportState(item.state);
           else handle.reportMetadata(item.metadata);
         }
+        if (step.close) handle.close();
         await until(() => requests.filter((r) => r.method === 'PUT').length >= before + step.expect, 12000);
         await sleep(250);
         continue;
