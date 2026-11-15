@@ -2,7 +2,8 @@
 // source: trogonai/peers/v1alpha1/recipient_receipt.proto
 
 /// The sender settles capacity only from an authoritative recipient receipt.
-#[derive(Clone, PartialEq, Default, ::serde::Serialize, ::serde::Deserialize)]
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct RecipientReceipt {
     /// Field 1: `message_id`
@@ -86,28 +87,40 @@ impl RecipientReceipt {
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::message_id`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_message_id(mut self, value: impl Into<::buffa::alloc::string::String>) -> Self {
+    pub fn with_message_id(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
         self.message_id = Some(value.into());
         self
     }
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::recipient_peer_id`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_recipient_peer_id(mut self, value: impl Into<::buffa::alloc::string::String>) -> Self {
+    pub fn with_recipient_peer_id(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
         self.recipient_peer_id = Some(value.into());
         self
     }
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::outcome`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_outcome(mut self, value: impl Into<::buffa::EnumValue<PreparationOutcome>>) -> Self {
+    pub fn with_outcome(
+        mut self,
+        value: impl Into<::buffa::EnumValue<PreparationOutcome>>,
+    ) -> Self {
         self.outcome = Some(value.into());
         self
     }
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::batch_id`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_batch_id(mut self, value: impl Into<::buffa::alloc::string::String>) -> Self {
+    pub fn with_batch_id(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
         self.batch_id = Some(value.into());
         self
     }
@@ -121,7 +134,10 @@ impl RecipientReceipt {
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::sender_peer_id`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_sender_peer_id(mut self, value: impl Into<::buffa::alloc::string::String>) -> Self {
+    pub fn with_sender_peer_id(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
         self.sender_peer_id = Some(value.into());
         self
     }
@@ -165,14 +181,20 @@ impl ::buffa::Message for RecipientReceipt {
             let __slot = __cache.reserve();
             let inner_size = self.decided_at.compute_size(__cache);
             __cache.set(__slot, inner_size);
-            size += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64 + inner_size as u64;
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if let Some(ref v) = self.sender_peer_id {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         ::buffa::saturate_size(size)
     }
-    fn write_to(&self, __cache: &mut ::buffa::SizeCache, buf: &mut impl ::buffa::EncodeSink) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::EncodeSink,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if let Some(ref v) = self.message_id {
@@ -191,7 +213,11 @@ impl ::buffa::Message for RecipientReceipt {
             ::buffa::types::put_uint64_field(5u32, v, buf);
         }
         if self.decided_at.is_set() {
-            ::buffa::types::put_len_delimited_header(6u32, u64::from(__cache.consume_next()), buf);
+            ::buffa::types::put_len_delimited_header(
+                6u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.decided_at.write_to(__cache, buf);
         }
         if let Some(ref v) = self.sender_peer_id {
@@ -205,49 +231,83 @@ impl ::buffa::Message for RecipientReceipt {
         ctx: ::buffa::DecodeContext<'_>,
     ) -> ::core::result::Result<(), ::buffa::DecodeError> {
         #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        #[allow(unused_imports)]
         use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
         match tag.field_number() {
             1u32 => {
-                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
                 ::buffa::types::merge_string(
-                    self.message_id.get_or_insert_with(::buffa::alloc::string::String::new),
+                    self
+                        .message_id
+                        .get_or_insert_with(::buffa::alloc::string::String::new),
                     buf,
                 )?;
             }
             2u32 => {
-                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
                 ::buffa::types::merge_string(
-                    self.recipient_peer_id
+                    self
+                        .recipient_peer_id
                         .get_or_insert_with(::buffa::alloc::string::String::new),
                     buf,
                 )?;
             }
             3u32 => {
-                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::Varint)?;
-                self.outcome =
-                    ::core::option::Option::Some(::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?));
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.outcome = ::core::option::Option::Some(
+                    ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
+                );
             }
             4u32 => {
-                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
                 ::buffa::types::merge_string(
-                    self.batch_id.get_or_insert_with(::buffa::alloc::string::String::new),
+                    self
+                        .batch_id
+                        .get_or_insert_with(::buffa::alloc::string::String::new),
                     buf,
                 )?;
             }
             5u32 => {
-                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::Varint)?;
-                self.recipient_revision = ::core::option::Option::Some(::buffa::types::decode_uint64(buf)?);
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.recipient_revision = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
             }
             6u32 => {
-                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
-                ::buffa::Message::merge_length_delimited(self.decided_at.get_or_insert_default(), buf, ctx)?;
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.decided_at.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
             }
             7u32 => {
-                ::buffa::encoding::check_wire_type(tag, ::buffa::encoding::WireType::LengthDelimited)?;
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
                 ::buffa::types::merge_string(
-                    self.sender_peer_id
+                    self
+                        .sender_peer_id
                         .get_or_insert_with(::buffa::alloc::string::String::new),
                     buf,
                 )?;
@@ -269,10 +329,15 @@ impl ::buffa::Message for RecipientReceipt {
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for RecipientReceipt {
-    fn serialize_proto_json<S: ::serde::Serializer>(v: &Self, s: S) -> ::core::result::Result<S::Ok, S::Error> {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
         ::serde::Serialize::serialize(v, s)
     }
-    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(d: D) -> ::core::result::Result<Self, D::Error> {
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
         <Self as ::serde::Deserialize>::deserialize(d)
     }
 }
