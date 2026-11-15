@@ -110,6 +110,7 @@ pub(crate) fn schema_error_text(
     let lead = " ".repeat(12);
     let text = format!(
         "{lead}{message}\n\n{lead}Failed validating {validator} in {schema_path}:\n{prefix}{schema}\n\n{lead}On {instance_path}:\n{prefix}{instance}\n{lead}",
+        message = message,
         validator = validator.map_or_else(|| "None".to_owned(), |name| py_repr(&name.into())),
         schema = pretty(schema, &prefix),
         instance = pretty(instance, &prefix),
@@ -123,6 +124,7 @@ pub(crate) fn unknown_type_text(type_repr: &str, schema: &Value, instance: &Valu
     let lead = " ".repeat(12);
     let text = format!(
         "{lead}Unknown type {type_repr} for validator with schema:\n{prefix}{schema}\n\n{lead}While checking instance:\n{prefix}{instance}\n{lead}",
+        type_repr = type_repr,
         schema = pretty(schema, &prefix),
         instance = pretty(instance, &prefix),
     );

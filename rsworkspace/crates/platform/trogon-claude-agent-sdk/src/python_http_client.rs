@@ -223,21 +223,23 @@ pub(crate) fn getaddrinfo(
     while let Some(info) = unsafe { entry.as_ref() } {
         // The families asked for are `AF_INET` and `AF_UNSPEC`, which answer IPv4 and IPv6 entries only.
         if info.ai_family == libc::AF_INET {
-            // SAFETY: an `AF_INET` entry carries a `sockaddr_in`.
-            let address = unsafe { &*info.ai_addr.cast::<libc::sockaddr_in>() };
-            addresses.push(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::from(u32::from_be(address.sin_addr.s_addr)),
-                u16::from_be(address.sin_port),
-            )));
+            // SAFETY: a non-null `ai_addr` of an `AF_INET` entry points at a `sockaddr_in`.
+            if let Some(address) = unsafe { info.ai_addr.cast::<libc::sockaddr_in>().as_ref() } {
+                addresses.push(SocketAddr::V4(SocketAddrV4::new(
+                    Ipv4Addr::from(u32::from_be(address.sin_addr.s_addr)),
+                    u16::from_be(address.sin_port),
+                )));
+            }
         } else if info.ai_family == libc::AF_INET6 {
-            // SAFETY: an `AF_INET6` entry carries a `sockaddr_in6`.
-            let address = unsafe { &*info.ai_addr.cast::<libc::sockaddr_in6>() };
-            addresses.push(SocketAddr::V6(SocketAddrV6::new(
-                Ipv6Addr::from(address.sin6_addr.s6_addr),
-                u16::from_be(address.sin6_port),
-                address.sin6_flowinfo,
-                address.sin6_scope_id,
-            )));
+            // SAFETY: a non-null `ai_addr` of an `AF_INET6` entry points at a `sockaddr_in6`.
+            if let Some(address) = unsafe { info.ai_addr.cast::<libc::sockaddr_in6>().as_ref() } {
+                addresses.push(SocketAddr::V6(SocketAddrV6::new(
+                    Ipv6Addr::from(address.sin6_addr.s6_addr),
+                    u16::from_be(address.sin6_port),
+                    address.sin6_flowinfo,
+                    address.sin6_scope_id,
+                )));
+            }
         }
         entry = info.ai_next;
     }
