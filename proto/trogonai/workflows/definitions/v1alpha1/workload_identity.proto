@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.workflows.definitions.v1alpha1;
+
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+// The exact independently admitted execution policy for an identity-aware
+// workflow. It enters the workflow definition bytes and digest. A profile change
+// requires an explicit definition revision; an old reader must refuse version 2
+// instead of discarding the requirement (ADR#0098).
+message WorkflowIdentityRequirement {
+  trogonai.platform.workload_federation.v1alpha1.ExecutionProfileRef execution_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}

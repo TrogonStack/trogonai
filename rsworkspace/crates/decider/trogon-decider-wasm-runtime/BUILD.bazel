@@ -1,27 +1,17 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-decider-wasm-runtime",
-    dev_deps = [
-        "//rsworkspace/crates/decider/trogon-decider-nats",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
     integration_tests = {
-        "act_chain_execution": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_act_chain_decider.wasm,
-            # built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
-        "nats_execution": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-            # built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
+        # Loads target/wasm32-unknown-unknown/release/trogon_act_chain_decider.wasm,
+        # built by cargo component outside Bazel.
+        "act_chain_execution": {"tags": ["manual"]},
+        # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
+        # built by cargo component outside Bazel.
+        "nats_execution": {"tags": ["manual"]},
+        # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
+        # built by cargo component outside Bazel.
         "schedules_execution": {
-            "compile_data": glob(["tests/support/*.rs"]),
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-            # built by cargo component outside Bazel.
+            "compile_data": ["tests/support/*.rs"],
             "tags": ["manual"],
         },
     },
@@ -64,11 +54,5 @@ workspace_crate(
         "registry::tests::activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapshot",
         "--skip",
         "registry::tests::activate_under_live_jetstream_keeps_in_flight_dispatch_pinned_to_its_resolved_module",
-    ],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-        "//rsworkspace/crates/decider/trogon-decider-wit",
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-std",
     ],
 )

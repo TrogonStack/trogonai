@@ -1,12 +1,8 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-workload-registration",
-    binaries = {"trogon-workload-registration": {}},
+    # These start NATS JetStream servers in containers through Docker.
     integration_tests = {
-        "approval": {},
-        "approval_boundaries": {},
-        # Start NATS JetStream servers in containers through Docker.
         "cluster": {"tags": ["requires-network"]},
         "native_registration_artifacts": {
             "compile_data": ["tests/support/registration_archive_fixture.rs"],
@@ -15,28 +11,13 @@ workspace_crate(
         "producer": {"tags": ["requires-network"]},
         "production": {"tags": ["requires-network"]},
         "recovery": {"tags": ["requires-network"]},
-        "registration_archive_values": {},
         "runner": {
-            "data": [
-                "Cargo.toml",
-                ":trogon-workload-registration_bin",
-            ],
-            "rustc_env": {
-                "CARGO_BIN_EXE_trogon-workload-registration": "$(rootpath :trogon-workload-registration_bin)",
-                # input_boundary_tests opens Cargo.toml relative to the manifest directory at run time.
-                "CARGO_MANIFEST_DIR": package_name(),
-            },
+            # input_boundary_tests opens Cargo.toml relative to the manifest directory at run time.
+            "data": ["Cargo.toml"],
+            "rustc_env": {"CARGO_MANIFEST_DIR": "{package}"},
             "tags": ["requires-network"],
         },
-        "successor": {},
     },
     # Some unit tests start a NATS JetStream server in a container through Docker.
     unit_test_tags = ["requires-network"],
-    deps = [
-        "//rsworkspace/crates/platform/trogon-audit",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogon-workload-identity",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
 )
