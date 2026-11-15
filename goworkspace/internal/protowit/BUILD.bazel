@@ -1,4 +1,6 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//.config/bazel:go.bzl", "gofmt_test")
 load(":bazel_test.bzl", "protowit_test")
 
 go_library(
@@ -26,6 +28,7 @@ go_test(
     srcs = ["generate_test.go"],
     data = glob(["testdata/**"]),
     embed = [":protowit"],
+    race = "on",
     tags = ["manual"],
     deps = [
         "@com_github_stretchr_testify//assert",
@@ -42,4 +45,23 @@ protowit_test(
     buf = "//.config/bazel:buf",
     schemas = "//proto/trogonai/scheduler/schedules/v1:schedule_fixture_sources",
     go_mod = "//goworkspace:go.mod",
+)
+
+gofmt_test(
+    name = "gofmt_test",
+    srcs = glob(["*.go"]),
+)
+
+# The snapshots must stay valid WIT packages, not just match what the generator
+# last produced.
+sh_test(
+    name = "wit_snapshots_test",
+    srcs = ["wit_snapshots_test.sh"],
+    args = [
+        "$(rootpath @mise//tools/wasm-tools)",
+        package_name() + "/testdata/snapshots",
+    ],
+    data = [
+        "@mise//tools/wasm-tools",
+    ] + glob(["testdata/snapshots/**/*.wit"]),
 )

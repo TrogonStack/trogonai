@@ -1,0 +1,277 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+// Public provider policy metadata only. The owner resolves the immutable exact
+// policy, verifies its digest and proves resource enforcement during admission.
+message ProviderPolicyRef {
+  ProviderPolicyId policy_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  bytes policy_sha256 = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+// STS AssumeRoleWithWebIdentity is distinct from AssumeRole/ExternalId in the
+// business KMS access contract. IAM trust must match issuer, subject and audience
+// exactly. Credentials remain broker-held even when their expiry is later than
+// original local authority. Partition/account/role validity is provider-proved.
+message AwsWebIdentityRecipient {
+  option (buf.validate.message).cel = {
+    id: "aws_web_identity.account"
+    message: "the AWS role must belong to the configured account"
+    expression: "this.role_arn.matches('^arn:[a-z0-9-]+:iam::' + this.account_id + ':role/.+$')"
+  };
+  string account_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9]{12}$"
+  ];
+  string role_arn = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+  IssuerProfileRef issuer_profile_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  string assertion_subject = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^[^*]+$"
+    }
+  ];
+  string assertion_audience = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^[^*]+$"
+    }
+  ];
+  // The documented web-identity minimum is 900 seconds. Provider role limits
+  // may be stricter; a requested session never extends local permitted use.
+  google.protobuf.Duration requested_session_duration = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gte: {seconds: 900}
+      lte: {seconds: 43200}
+    }
+  ];
+  oneof session_policy {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty role_policy_only = 7;
+    ProviderPolicyRef restricted_session_policy_ref = 8;
+  }
+}
+
+// Certificate profile, algorithm and exact subject conditions require real
+// Roles Anywhere qualification. Trusting every certificate under the anchor is
+// insufficient. Endpoints derive from admitted provider metadata, not a caller.
+message AwsRolesAnywhereRecipient {
+  option (buf.validate.message).cel = {
+    id: "aws_roles_anywhere.account"
+    message: "Roles Anywhere resources must belong to the configured account"
+    expression: "this.role_arn.matches('^arn:[a-z0-9-]+:iam::' + this.account_id + ':role/.+$') && this.trust_anchor_arn.matches('^arn:[a-z0-9-]+:rolesanywhere:[a-z0-9-]+:' + this.account_id + ':trust-anchor/.+$') && this.profile_arn.matches('^arn:[a-z0-9-]+:rolesanywhere:[a-z0-9-]+:' + this.account_id + ':profile/.+$')"
+  };
+  string account_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9]{12}$"
+  ];
+  string role_arn = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+  string trust_anchor_arn = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+  string profile_arn = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+  string certificate_spiffe_id = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^spiffe://"
+    }
+  ];
+  google.protobuf.Duration requested_session_duration = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+}
+
+// Direct resource access and service-account impersonation are distinct
+// profiles. No service-account key, broad pool grant or implicit fallback exists.
+message GoogleCloudAccessMode {
+  oneof mode {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty direct_resource_access = 1;
+    string impersonated_service_account = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }];
+  }
+}
+
+// assertion_audience is the token's single aud. provider_resource is the exact
+// STS exchange audience/resource; they are separate protocol values. Admission
+// verifies subject mapping, attribute conditions, resource IAM and scopes.
+message GoogleCloudOidcRecipient {
+  string provider_resource = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+  IssuerProfileRef issuer_profile_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  string assertion_subject = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^[^*]+$"
+    }
+  ];
+  string assertion_audience = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^[^*]+$"
+    }
+  ];
+  GoogleCloudAccessMode access = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Uses the documented mTLS STS profile. Exact URI mapping and root/holder
+// matching must be proved for the selected SVID and actual target API.
+message GoogleCloudX509Recipient {
+  string provider_resource = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+  string certificate_spiffe_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^spiffe://"
+    }
+  ];
+  GoogleCloudAccessMode access = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// These opaque identities resolve independent protected provider-review records
+// for this exact scope and recipient. Their records bind the final recipient
+// artifact, profile, actual resource enforcement and finite approval validity.
+// The IDs do not embed the referencing Definition's own configuration digest.
+message ProviderPreviewApprovalRef {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderPreviewApprovalId approval_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ProviderCompatibilityQualificationRef {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderCompatibilityQualificationId qualification_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Preview support is an explicit qualification, not a claim inferred from cnf
+// or successful STS exchange. The receipt proves target resource enforcement of
+// the certificate binding and expires independently of provider credentials.
+message GoogleCloudCertificateBoundOidcRecipient {
+  GoogleCloudOidcRecipient oidc = 1 [features.field_presence = LEGACY_REQUIRED];
+  string certificate_spiffe_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^spiffe://"
+    }
+  ];
+  ProviderPreviewApprovalRef preview_approval_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  ProviderCompatibilityQualificationRef resource_binding_qualification_ref = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The compatible issuer is qualified separately for RS256 and the conservative
+// RSA-only JWKS rule retained by draft ADR#0053. The directory/client/resource,
+// exact issuer-subject-single-audience mapping and provider propagation limits
+// are verified against the actual Entra recipient before activation.
+message EntraRecipient {
+  string directory_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  string client_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  IssuerProfileRef issuer_profile_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  string assertion_subject = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^[^*]+$"
+    }
+  ];
+  string assertion_audience = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^[^*]+$"
+    }
+  ];
+  string resource_scope = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+}
+
+// Each arm names a separately qualified protocol. No generic token endpoint,
+// provider SDK request, credential chain or fallback is caller-configurable.
+message ExternalRecipient {
+  oneof provider {
+    option (buf.validate.oneof).required = true;
+    AwsWebIdentityRecipient aws_web_identity = 1;
+    AwsRolesAnywhereRecipient aws_roles_anywhere = 2;
+    GoogleCloudOidcRecipient google_cloud_oidc = 3;
+    GoogleCloudX509Recipient google_cloud_x509 = 4;
+    GoogleCloudCertificateBoundOidcRecipient google_cloud_certificate_bound_oidc = 5;
+    EntraRecipient entra = 6;
+  }
+}

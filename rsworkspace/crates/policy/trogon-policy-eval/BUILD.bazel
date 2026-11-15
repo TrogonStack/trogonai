@@ -1,17 +1,7 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-policy-eval",
-    crate_features = ["decider"],
     integration_tests = {
-        "decider_adapter": {"compile_data": glob(["tests/common/*.rs"])},
-        "evaluation": {"compile_data": glob(["tests/common/*.rs"])},
-        "mode_and_staleness": {"compile_data": glob(["tests/common/*.rs"])},
-        "ordering_and_invariants": {"compile_data": glob(["tests/common/*.rs"])},
-        "value_objects": {"compile_data": glob(["tests/common/*.rs"])},
+        "*": {"compile_data": ["tests/common/*.rs"]},
     },
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
 )

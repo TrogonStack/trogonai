@@ -1,0 +1,107 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/lifecycle.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_federation/v1alpha1/trust_registration.proto";
+
+// Owner ingress resolves the exact independent approval and authenticated
+// validation receipts. A well-shaped reference is not an authorization proof.
+message TrustRegistrationActivation {
+  option (buf.validate.message).cel = {
+    id: "trust_registration_activation.evidence"
+    message: "activation receipts must bind the exact target scope and version"
+    expression: "this.approval_ref.owner_kind == 1 && this.validation_ref.owner_kind == 1 && this.approval_ref.operation_purpose == 1 && this.validation_ref.operation_purpose == 1 && this.trust_registration_ref.scope == this.approval_ref.scope && this.trust_registration_ref.version == this.approval_ref.version && this.trust_registration_ref.scope == this.validation_ref.scope && this.trust_registration_ref.version == this.validation_ref.version"
+  };
+  TrustRegistrationRef trust_registration_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationApprovalRef approval_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationValidationRef validation_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Normal revision stays in one owner/fence and strictly advances the accepted
+// revision. Restore requires an independently provisioned fence and old-writer
+// revocation, never a normal update to restored state (ADR#0098).
+message TrustRegistrationRevision {
+  option (buf.validate.message).cel = {
+    id: "trust_registration_revision.continuity"
+    message: "a staged revision must preserve owner scope and fence and advance the revision"
+    expression: "this.current_trust_registration_ref.scope == this.proposed.trust_registration_ref.scope && this.current_trust_registration_ref.version.id == this.proposed.trust_registration_ref.version.id && this.current_trust_registration_ref.version.recovery_fence == this.proposed.trust_registration_ref.version.recovery_fence && this.proposed.trust_registration_ref.version.revision > this.current_trust_registration_ref.version.revision"
+  };
+  TrustRegistrationRef current_trust_registration_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  TrustRegistration proposed = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Each owner has a separate stream. Create uses NoStream; later commands use
+// the observed stream revision and stable Decider command_id. Ingress enforces
+// actor permissions, exact immutable artifacts, valid transitions and receipts.
+// Widening is independently approved. Emergency withdrawal needs no grant
+// approval and invalidates use before audit/bookkeeping recovery.
+message CreateTrustRegistration {
+  TrustRegistration configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message StageTrustRegistrationRevision {
+  TrustRegistrationRevision revision = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ActivateTrustRegistration {
+  TrustRegistrationActivation activation = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WithdrawTrustRegistration {
+  TrustRegistrationRef trust_registration_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RetireTrustRegistration {
+  TrustRegistrationRef trust_registration_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Envelopes retain actor/time. Replay verifies artifacts, receipt provenance and
+// legal prior-state transitions; ordinary logs do not implement that evidence.
+message TrustRegistrationEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    TrustRegistration created = 1;
+    TrustRegistrationRevision revision_staged = 2;
+    TrustRegistrationActivation activated = 3;
+    TrustRegistrationRef withdrawn = 4;
+    TrustRegistrationRef retired = 5;
+  }
+}
+
+message TrustRegistrationState {
+  option (buf.validate.message).cel = {
+    id: "trust_registration_state.activation"
+    message: "an active configuration requires its exact activation evidence"
+    expression: "this.lifecycle != 2 || (has(this.activation) && this.activation.trust_registration_ref == this.configuration.trust_registration_ref)"
+  };
+  option (buf.validate.message).cel = {
+    id: "trust_registration_state.retirement"
+    message: "a retired configuration cannot admit use"
+    expression: "this.lifecycle != 3 || this.admission == 2"
+  };
+  option (buf.validate.message).cel = {
+    id: "trust_registration_state.staging"
+    message: "staged configuration must belong to the current owner and fence with a newer revision"
+    expression: "!has(this.staged) || (this.staged.current_trust_registration_ref == this.configuration.trust_registration_ref)"
+  };
+  TrustRegistration configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConfigurationAdmission admission = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  TrustRegistrationActivation activation = 4;
+  TrustRegistrationRevision staged = 5;
+}
