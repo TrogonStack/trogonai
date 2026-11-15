@@ -15,6 +15,7 @@ workspace_crate(
     # Some unit tests start NATS and OpenBao servers in containers through Docker.
     unit_test_tags = ["requires-network"],
     deps = [
+        "//rsworkspace/crates/credential/trogon-credential-aggregate",
         "//rsworkspace/crates/credential/trogon-credential-domain",
         "//rsworkspace/crates/credential/trogon-secret-store",
         "//rsworkspace/crates/decider/trogon-decider-nats",
