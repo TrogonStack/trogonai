@@ -24,3 +24,13 @@ pub use peer_reply_subject::{PeerReplySubject, PeerReplySubjectError};
 pub use peer_route::PeerRoute;
 pub use peer_tenant::PeerTenant;
 pub use routing_token_error::RoutingTokenError;
+
+mod peer_request_error;
+mod peer_request_timeout;
+mod peer_requester;
+mod peer_requester_config;
+
+pub use peer_request_error::PeerRequestError;
+pub use peer_request_timeout::{PeerRequestTimeout, PeerRequestTimeoutError};
+pub use peer_requester::PeerRequester;
+pub use peer_requester_config::PeerRequesterConfig;
