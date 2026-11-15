@@ -10,6 +10,9 @@ pub struct IntakeMessage {
     pub(crate) now: DateTime<Utc>,
 }
 impl IntakeMessage {
+    pub fn evidence(&self) -> &AcceptedMessage {
+        &self.evidence
+    }
     pub fn new(evidence: AcceptedMessage, now: DateTime<Utc>) -> Self {
         Self { evidence, now }
     }
