@@ -801,7 +801,7 @@ fn file_urls_refuse_remote_hosts_and_unreadable_paths() -> TestResult {
     }
     let locked = format!("{directory}/locked.json");
     std::fs::write(&locked, b"{}")?;
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0))?;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o0))?;
     if let Err(error) = std::fs::File::open(&locked) {
         assert_eq!(
             urlopen(&format!("file://{locked}"), &no_context).err(),

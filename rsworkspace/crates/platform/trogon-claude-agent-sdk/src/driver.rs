@@ -2142,7 +2142,7 @@ where
         };
         let expects_response = message
             .as_ref()
-            .is_some_and(|message| crate::mcp_routing::typescript_expects_response(message));
+            .is_some_and(crate::mcp_routing::typescript_expects_response);
         if expects_response && let Some(message) = message {
             if !self.admit_capacity(&id).await? {
                 return Ok(());

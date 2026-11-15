@@ -187,8 +187,8 @@ fn is_ipv6(text: &[u8]) -> bool {
         return false;
     }
     let mut skip_index: Option<usize> = None;
-    for index in 1..parts.len() - 1 {
-        if parts[index].is_empty() {
+    for (index, part) in parts.iter().enumerate().take(parts.len() - 1).skip(1) {
+        if part.is_empty() {
             if skip_index.is_some() {
                 return false;
             }

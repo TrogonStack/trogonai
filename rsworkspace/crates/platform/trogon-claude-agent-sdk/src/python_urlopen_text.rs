@@ -40,7 +40,7 @@ impl PythonInt {
 
     /// The value as a C `ssize_t`, `None` when it does not fit.
     pub(crate) fn to_i64(&self) -> Option<i64> {
-        let magnitude = u64::from_str_radix(&self.digits, 10).ok()?;
+        let magnitude = self.digits.parse::<u64>().ok()?;
         if self.negative {
             0i64.checked_sub_unsigned(magnitude)
         } else {

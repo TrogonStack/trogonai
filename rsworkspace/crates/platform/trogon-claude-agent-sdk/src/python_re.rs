@@ -1780,10 +1780,8 @@ fn optimize_charset(charset: &[SetItem], fold: Fold) -> (Vec<SetItem>, bool) {
                         }
                         hascased = true;
                     }
-                    SetItem::Literal(av) => {
-                        if !hascased && fold.iscased(av) {
-                            hascased = true;
-                        }
+                    SetItem::Literal(av) if !hascased && fold.iscased(av) => {
+                        hascased = true;
                     }
                     _ => {}
                 }

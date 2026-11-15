@@ -208,7 +208,7 @@ fn validate_inline(
 ) -> Outcome {
     let draft = match drafts::validator_for(schema, Draft::Draft202012) {
         Ok(draft) => draft,
-        Err(text) => return Outcome::Raised(text.into()),
+        Err(text) => return Outcome::Raised(text),
     };
     if let Err(outcome) = check_schema_spending(draft, schema, budget) {
         return outcome;
@@ -249,8 +249,8 @@ pub(crate) fn check_schema(draft: Draft, schema: &Value) -> Result<(), Outcome> 
 
 /// `check_schema` spending `budget`, whose caches the validation that follows goes on using.
 fn check_schema_spending(draft: Draft, schema: &Value, budget: &mut Budget) -> Result<(), Outcome> {
-    let metaschema = referencing::metaschema(draft).map_err(|text| Outcome::Raised(text.into()))?;
-    let class = drafts::validator_for(metaschema, draft).map_err(|text| Outcome::Raised(text.into()))?;
+    let metaschema = referencing::metaschema(draft).map_err(Outcome::Raised)?;
+    let class = drafts::validator_for(metaschema, draft).map_err(Outcome::Raised)?;
     let mut sink = Sink::new(true);
     if let Err(Stop::Raise(text)) = run(class, metaschema, schema, true, &mut sink, &NoRetrieval, budget) {
         return Err(budget.raised(text));

@@ -217,7 +217,7 @@ fn responses_read_as_http_client_reads_them() {
 
 #[test]
 fn parse_headers_matches_the_compat32_email_parser() {
-    let cases: [(&[u8], &[(&str, &str)]); 21] = [
+    let cases: [HeaderCase; 21] = [
         (b"A: 1\r\nB:2\r\n\r\n", &[("A", "1"), ("B", "2")]),
         (b"A: 1\r\n  cont\r\n\r\n", &[("A", "1\r\n  cont")]),
         (b"A: 1\rB: 2\r\n\r\n", &[("A", "1"), ("B", "2")]),
@@ -689,7 +689,7 @@ fn send_wraps_a_write_error_in_url_error() {
 fn read_errors_surface_as_raised() {
     let os = failure(os_error_class(&reset()), os_error_text(&reset(), None));
     let tls = RemoteSchemaError::new("SSLError", "[SSL] record layer failure (_ssl.c:2580)");
-    let cases: [(&[u8], fn() -> io::Error, &RemoteSchemaError); 8] = [
+    let cases: [FailureCase<'_>; 8] = [
         (b"", ssl_error, &tls),
         (b"HTTP/1.1 200 OK\r\n", reset, &os),
         (b"HTTP/1.1 200 OK\r\n\r\nabc", reset, &os),
@@ -789,6 +789,12 @@ fn wire_error_keeps_a_raised_tls_error() {
 
 /// The heads a server read.
 type Served = std::thread::JoinHandle<io::Result<Vec<Vec<u8>>>>;
+
+type HeaderCase = (&'static [u8], &'static [(&'static str, &'static str)]);
+
+type FailureCase<'a> = (&'a [u8], fn() -> io::Error, &'a RemoteSchemaError);
+
+type TunnelCase<'a> = (Tunnel, Vec<u8>, Result<(), RemoteSchemaError>, &'a str);
 
 /// A server that, on its first connection, reads a request head and answers it with the next of `answers`, for each
 /// answer in turn, then closes and hands back the heads it read.
@@ -904,7 +910,7 @@ fn open_tunnel_sends_connect_and_reads_the_answer() -> TestResult {
         b"\r\n".to_vec(),
     ]
     .concat();
-    let cases: Vec<(Tunnel, Vec<u8>, Result<(), RemoteSchemaError>, &str)> = vec![
+    let cases: Vec<TunnelCase<'_>> = vec![
         (
             tunnel("::1", Some("Basic dTpw")),
             b"HTTP/1.1 200 Connection established\r\n\r\n".to_vec(),

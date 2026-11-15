@@ -205,7 +205,7 @@ impl Tables {
                 let index = code - S_BASE;
                 output.push(L_BASE + index / N_COUNT);
                 output.push(V_BASE + index % N_COUNT / T_COUNT);
-                if index % T_COUNT != 0 {
+                if !index.is_multiple_of(T_COUNT) {
                     output.push(T_BASE + index % T_COUNT);
                 }
             } else if let Some(decomposition) = self.decompositions.get(&code) {

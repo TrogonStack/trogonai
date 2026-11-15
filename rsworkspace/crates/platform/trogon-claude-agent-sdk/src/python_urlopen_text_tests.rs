@@ -1,6 +1,8 @@
 use super::*;
 use crate::constants::READ_SIZE_OVERFLOW;
 
+type Base64Case = (&'static [u8], Result<&'static [u8], &'static str>);
+
 #[test]
 fn parse_int_matches_python_int_of_a_str() {
     let cases: [(&str, Option<&str>); 12] = [
@@ -79,7 +81,7 @@ fn parse_hex_bytes_matches_python_int_of_bytes_in_base_16() {
 
 #[test]
 fn a2b_base64_matches_binascii_without_strict_mode() {
-    let cases: [(&[u8], Result<&[u8], &str>); 9] = [
+    let cases: [Base64Case; 9] = [
         (b"aGVsbG8=", Ok(b"hello")),
         (b"aGVsbG8", Err("Incorrect padding")),
         (
