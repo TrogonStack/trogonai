@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Check the Go workspace"
+#MISE depends=["check:go"]
+set -euo pipefail

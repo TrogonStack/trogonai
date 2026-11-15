@@ -1,6 +1,8 @@
 use serde_json::{Map, Value};
 
-use crate::constants::{POLICY_META_KEYS, REPLACED_ARRAY_KEYS, SETTINGS_SCHEMA_KEY_ORDER};
+use crate::settings_schema::{SettingsSchema, schema};
+
+use crate::{constants::POLICY_META_KEYS, settings_merge_spec::MergeSpec, settings_numbers::same_value_zero};
 
 pub(crate) type SettingsMap = Map<String, Value>;
 
@@ -44,10 +46,10 @@ fn is_primitive(value: &Value) -> bool {
 }
 
 /// `Xe([...a, ...b])` upstream: a `Set` keeps one of each primitive and every object by identity.
-fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
+pub(crate) fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
     let mut merged: Vec<Value> = Vec::with_capacity(left.len() + right.len());
     for value in left.iter().chain(right) {
-        if is_primitive(value) && merged.iter().any(|seen| seen == value) {
+        if is_primitive(value) && merged.iter().any(|seen| same_value_zero(seen, value)) {
             continue;
         }
         merged.push(value.clone());
@@ -55,31 +57,49 @@ fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
     merged
 }
 
-fn merge_existing(key: &str, destination: &mut Value, source: &Value) {
+fn merge_existing(rules: &MergeSpec, key: &str, destination: &mut Value, source: &Value) {
+    let listed = |keys: &[String]| keys.iter().any(|listed| listed == key);
+    if listed(&rules.replaced) {
+        *destination = source.clone();
+        return;
+    }
     match (destination, source) {
+        (Value::Object(left), Value::Object(right)) if listed(&rules.shallow_objects) => {
+            for (name, value) in right {
+                left.insert(name.clone(), value.clone());
+            }
+        }
         (Value::Array(left), Value::Array(right)) => {
-            if REPLACED_ARRAY_KEYS.contains(&key) {
+            if listed(&rules.replaced_arrays) {
                 *left = right.clone();
             } else {
                 *left = union_arrays(left, right);
             }
         }
-        (Value::Object(left), Value::Object(right)) => merge_with_union(left, right),
+        (Value::Object(left), Value::Object(right)) => merge_rules(rules, left, right),
         (Value::Array(_), Value::Object(_)) => {}
         (destination, source) => *destination = source.clone(),
     }
 }
 
-/// Deep merge with the upstream customizer: arrays union, objects recurse, scalars replace, and an
-/// existing key keeps its position while a new key appends (lodash `mergeWith`).
-pub(crate) fn merge_with_union(destination: &mut SettingsMap, source: &SettingsMap) {
+fn merge_rules(rules: &MergeSpec, destination: &mut SettingsMap, source: &SettingsMap) {
     for (key, value) in source {
         match destination.get_mut(key) {
-            Some(existing) => merge_existing(key, existing, value),
+            Some(existing) => merge_existing(rules, key, existing, value),
             None => {
                 destination.insert(key.clone(), value.clone());
             }
         }
+    }
+}
+
+/// Deep merge with the upstream customizer: arrays union, objects recurse, scalars replace, and an
+/// existing key keeps its position while a new key appends (lodash `mergeWith`). The keys the customizer
+/// treats specially come from the extracted schema description.
+pub(crate) fn merge_with_union(destination: &mut SettingsMap, source: &SettingsMap) {
+    match schema() {
+        Some(schema) => merge_rules(schema.merge_spec(), destination, source),
+        None => merge_rules(&MergeSpec::default(), destination, source),
     }
 }
 
@@ -92,13 +112,42 @@ pub(crate) fn get_path<'a>(settings: &'a SettingsMap, path: &[&str]) -> Option<&
     Some(current)
 }
 
+/// `Qt` upstream: sets (or, with `None`, removes) the value at `path`, copying each object on the way and pruning
+/// objects that a removal leaves empty.
+pub(crate) fn set_path(map: &mut SettingsMap, path: &[&str], value: Option<&Value>) {
+    let Some((first, rest)) = path.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        match value {
+            Some(value) => {
+                map.insert((*first).to_owned(), value.clone());
+            }
+            None => {
+                map.shift_remove(*first);
+            }
+        }
+        return;
+    }
+    let mut child = match map.get(*first) {
+        Some(Value::Object(existing)) => existing.clone(),
+        _ => SettingsMap::new(),
+    };
+    set_path(&mut child, rest, value);
+    if value.is_none() && child.is_empty() {
+        map.shift_remove(*first);
+    } else {
+        map.insert((*first).to_owned(), Value::Object(child));
+    }
+}
+
 /// Reorders a settings document the way the upstream schema parse does: schema keys first in
 /// schema order, then every other key in its original order.
 pub(crate) fn in_schema_order(settings: &SettingsMap) -> SettingsMap {
     let mut ordered = SettingsMap::new();
-    for key in SETTINGS_SCHEMA_KEY_ORDER {
+    for key in schema().map(SettingsSchema::keys).unwrap_or_default() {
         if let Some(value) = settings.get(key) {
-            ordered.insert(key.to_owned(), value.clone());
+            ordered.insert(key.clone(), value.clone());
         }
     }
     for (key, value) in settings {
@@ -108,3 +157,7 @@ pub(crate) fn in_schema_order(settings: &SettingsMap) -> SettingsMap {
     }
     ordered
 }
+
+#[cfg(test)]
+#[path = "settings_resolve_values_tests.rs"]
+mod tests;

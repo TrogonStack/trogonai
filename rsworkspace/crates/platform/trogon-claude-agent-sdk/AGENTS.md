@@ -4,9 +4,10 @@ Read [the lifecycle decision](docs/explanation/lifecycle.md) before changing
 client ownership, startup, query completion, hooks or shutdown.
 
 - Keep one bidirectional protocol runtime behind the interactive client and
-  query helpers. Return a usable owner only after asynchronous initialization.
-  Decode connection metadata once at that boundary and expose it through the
-  non-fallible cached `connection_info()` getter.
+  query helpers. Under the TypeScript dialect return the owner as soon as the
+  initialize request is queued, as `sdk.mjs` does; only the Python dialect
+  waits for the response. Expose the first initialize response through the
+  awaitable `initialization_result()` and the getters built on it.
 - Use named configuration structs for constructors that assemble several
   independent settings. Name SDK-owned public constructor and input settings
   types `*Options`, whether fields are required or have defaults. Keep required
@@ -21,6 +22,12 @@ client ownership, startup, query completion, hooks or shutdown.
   `SdkTools` rejects duplicate exact tool names before infallible
   `LocalMcpServer::from` assembly. Preserve its private registry and immutable
   access; keep `Default` empty and single-tool conversion infallible.
+  `SdkTools::with_duplicates` is the Python dialect's opt-in exception.
+- `LocalMcpServer` answers like the TypeScript `createSdkMcpServer` by default;
+  `McpServerDialect::Python` answers like the Python `create_sdk_mcp_server`.
+  Keep each dialect's envelope, error and listing behavior in its own module,
+  replayed against the recorded upstream exchanges in
+  `tests/fixtures/sdk_mcp/dialects.json`.
 - Register callbacks before user input. Service controls and callbacks in the
   driver, with bounded queues, callback admission and waits. Preserve explicit
   overflow errors rather than silently dropping messages.

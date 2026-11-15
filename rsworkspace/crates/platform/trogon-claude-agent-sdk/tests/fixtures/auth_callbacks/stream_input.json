@@ -1,0 +1,263 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323",
+    "python": "claude_agent_sdk 0.2.181"
+  },
+  "method": {
+    "typescript": "Query.streamInput",
+    "python": "Query.stream_input"
+  },
+  "scenarios": {
+    "empty_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "control_response",
+        "eof"
+      ],
+      "client_composed": []
+    },
+    "two_no_needs_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "m2",
+        "eof"
+      ],
+      "client_composed": [
+        false,
+        false
+      ]
+    },
+    "two_needs_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "m2",
+        "result",
+        "result",
+        "eof"
+      ],
+      "client_composed": [
+        false,
+        false
+      ]
+    },
+    "abort_mid_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "eof"
+      ],
+      "client_composed": [
+        false
+      ]
+    },
+    "close_mid_ts": {
+      "outcome": "rejected",
+      "error": "ProcessTransport is not ready for writing",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "eof"
+      ],
+      "client_composed": [
+        false
+      ]
+    },
+    "throws_after_one_ts": {
+      "outcome": "rejected",
+      "error": "boom",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1"
+      ],
+      "client_composed": [
+        false
+      ]
+    },
+    "throws_first_ts": {
+      "outcome": "rejected",
+      "error": "boom",
+      "cli": [
+        "initialize",
+        "control_response"
+      ],
+      "client_composed": []
+    },
+    "hold_failed_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "control_response",
+        "eof"
+      ],
+      "client_composed": []
+    },
+    "hold_ok_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "m2",
+        "result",
+        "result",
+        "eof"
+      ],
+      "client_composed": [
+        false,
+        false
+      ]
+    },
+    "hold_closed_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "eof"
+      ],
+      "client_composed": []
+    },
+    "verbatim_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "eof"
+      ],
+      "client_composed": [
+        true
+      ]
+    },
+    "empty_after_prompt_needs_ts": {
+      "outcome": "resolved",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "eof"
+      ],
+      "client_composed": [
+        false
+      ]
+    },
+    "empty_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "eof"
+      ],
+      "client_composed": []
+    },
+    "two_no_needs_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "m2",
+        "eof"
+      ],
+      "client_composed": [
+        false,
+        false
+      ]
+    },
+    "two_needs_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "m2",
+        "result",
+        "result",
+        "eof"
+      ],
+      "client_composed": [
+        false,
+        false
+      ]
+    },
+    "close_mid_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "eof"
+      ],
+      "client_composed": [
+        false
+      ]
+    },
+    "throws_after_one_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "eof"
+      ],
+      "client_composed": [
+        false
+      ]
+    },
+    "throws_after_one_needs_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "result",
+        "eof"
+      ],
+      "client_composed": [
+        false
+      ]
+    },
+    "throws_first_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "eof"
+      ],
+      "client_composed": []
+    },
+    "verbatim_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "eof"
+      ],
+      "client_composed": [
+        true
+      ]
+    },
+    "empty_after_prompt_needs_py": {
+      "outcome": "returned",
+      "cli": [
+        "initialize",
+        "control_response",
+        "m1",
+        "eof"
+      ],
+      "client_composed": [
+        false
+      ]
+    }
+  }
+}

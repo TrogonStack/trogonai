@@ -30,6 +30,10 @@ for (const required of ['typescript_package', 'config', 'out_root']) {
 const config = JSON.parse(fs.readFileSync(options.config, 'utf8'));
 let declarations;
 let sourceFile;
+let foreign;
+
+// Samples for the wire shapes a target's `foreign` map gives to names the source does not declare.
+const FOREIGN = { string: () => 'text', object: () => ({ foreign: 'object' }), unknown: () => ({ any: ['thing', null] }) };
 
 const isNull = type => ts.isLiteralTypeNode(type) && type.literal.kind === ts.SyntaxKind.NullKeyword;
 
@@ -58,9 +62,22 @@ function sample(node, variant) {
     return sample(members[variant % members.length], variant);
   }
   if (ts.isTypeLiteralNode(node)) return object(node.members, variant, false);
+  if (ts.isIntersectionTypeNode(node)) return Object.assign({}, ...node.types.map(type => sample(type, variant)));
+  if (ts.isIndexedAccessTypeNode(node)) {
+    const owner = node.objectType.typeName?.getText(sourceFile);
+    // A property of a type from another package samples like the generator types it: any JSON.
+    if (foreign.has(owner)) return { any: ['thing', null] };
+    return sample(property(declarations.get(owner), node.indexType.literal.text), variant);
+  }
   if (ts.isTypeReferenceNode(node)) {
-    const name = node.typeName.getText(sourceFile);
+    // `coreTypes` re-exports declarations of the same file, so `coreTypes.X` is `X`.
+    const name = ts.isQualifiedName(node.typeName) && node.typeName.left.getText(sourceFile) === 'coreTypes'
+      ? node.typeName.right.text
+      : node.typeName.getText(sourceFile);
+    // `Partial<T>` only makes keys optional, and the samples set every key.
+    if (name === 'Partial') return sample(node.typeArguments[0], variant);
     if (name === 'Record') return { key: sample(node.typeArguments[1], variant) };
+    if (foreign.has(name)) return FOREIGN[foreign.get(name)]();
     return declared(name, variant);
   }
   throw new Error(`Unsupported type ${ts.SyntaxKind[node.kind]}`);
@@ -81,8 +98,16 @@ function object(members, variant, top, keep) {
   return out;
 }
 
+function property(declaration, name) {
+  const members = ts.isInterfaceDeclaration(declaration) ? declaration.members : declaration.type.members;
+  const member = members?.find(candidate => ts.isPropertySignature(candidate) && candidate.name.text === name);
+  if (!member) throw new Error(`Indexed access to ${name}, which ${declaration.name.text} does not declare`);
+  return member.type;
+}
+
 function declared(name, variant, top, keep) {
   const node = declarations.get(name);
+  if (!node) throw new Error(`Undeclared type ${name}`);
   return ts.isInterfaceDeclaration(node) ? object(node.members, variant, top, keep) : sample(node.type, variant);
 }
 
@@ -142,6 +167,7 @@ for (const target of config.targets) {
   const file = path.join(options.typescript_package, target.source);
   sourceFile = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
   declarations = new Map();
+  foreign = new Map(Object.entries(target.foreign ?? {}));
   for (const statement of sourceFile.statements) {
     if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) declarations.set(statement.name.text, statement);
   }
