@@ -73,6 +73,11 @@ def _mise_tool_impl(rctx):
             break
     if executable == None:
         fail("{}@{} provides no `{}` executable".format(rctx.attr.tool, rctx.attr.version, rctx.attr.executable))
+    if executable == rctx.attr.executable:
+        # The executable sits at the install root, so its file target already
+        # has the public name and an alias of the same name would point at itself.
+        rctx.file("BUILD.bazel", 'exports_files(["{}"])\n'.format(executable))
+        return
     rctx.file("BUILD.bazel", """\
 alias(
     name = "{name}",

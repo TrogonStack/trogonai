@@ -8,19 +8,16 @@ filegroup(
 )
 
 workspace_crate(
-    name = "trogon-decider-wit",
     compile_data = [":wit"],
-    crate_features = [
-        "guest",
-        "host",
-    ],
     data = [":wit"],
-    # WIT_DIR bakes CARGO_MANIFEST_DIR into a constant that `export_decider!`
-    # reads while other crates compile. Inside a sandbox that path is private to
-    # this action, so compiling outside it keeps the path valid for every reader.
+    integration_tests = {
+        # Runs nested cargo builds of this crate per feature and target, which Bazel
+        # cannot provide.
+        "feature_build": {"tags": ["manual"]},
+    },
+    # WIT_DIR bakes CARGO_MANIFEST_DIR into a constant that `export_decider!` reads
+    # while other crates compile. Inside a sandbox that path is private to this
+    # action, so compiling outside it keeps the path valid for every reader.
     library_tags = ["no-sandbox"],
     unit_test_tags = ["no-sandbox"],
-    # The `guest` feature's optional dependency, which no workspace member
-    # enables, so crate_universe leaves it out of this crate's dependencies.
-    deps = ["@crates//:wit-bindgen"],
 )
