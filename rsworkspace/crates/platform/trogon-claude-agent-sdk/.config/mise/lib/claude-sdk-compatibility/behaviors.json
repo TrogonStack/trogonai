@@ -2292,7 +2292,7 @@
       },
       "contracts": [
         "value_contracts::s18_structured_input_blocks_pass_through_unvalidated",
-        "user_input::structured_input_carries_blocks_and_every_identity_field"
+        "user_input::structured_input_carries_blocks_and_every_field_in_declaration_order"
       ],
       "rust": [
         "src/user_input.rs"
