@@ -48,6 +48,14 @@
 //! [`error_chain`] is the one line the binary logs when the service stops on
 //! an error: the error and every cause under it.
 //!
+//! [`InvalidationStream`] is the contract of [`INVALIDATION_STREAM`], where
+//! the notices telling holders to drop a released value are kept on
+//! [`INVALIDATION_SUBJECTS`]: the configuration it is created with, and the
+//! check that refuses, with an [`InvalidationStreamMismatchError`], an existing
+//! stream that would lose, expire early, duplicate, or let anyone remove a
+//! notice that a holder resuming [`INVALIDATION_REPLAY_WINDOW`] back still
+//! needs.
+//!
 //! # Features
 //!
 //! - `test-support`: adds `InMemoryCredentialStates` and
@@ -71,6 +79,8 @@ mod error_chain;
 mod fixtures;
 #[cfg(any(test, feature = "test-support"))]
 mod in_memory_credential_states;
+mod invalidation_stream;
+mod invalidation_stream_mismatch_error;
 mod jetstream_credential_states;
 mod login_retry;
 mod nats_section_wire;
@@ -135,7 +145,8 @@ pub use admission_limit::AdmissionLimit;
 pub use admission_limit_error::AdmissionLimitError;
 pub use config_setting::ConfigSetting;
 pub use constants::{
-    RELEASE_DEADLINE, RELEASE_SUBSCRIPTION, RELEASE_TTL_BOUND, THROTTLED_RETRY_AFTER, UNBUNDLED_GENERATION,
+    INVALIDATION_REPLAY_WINDOW, INVALIDATION_STREAM, INVALIDATION_SUBJECTS, RELEASE_DEADLINE, RELEASE_SUBSCRIPTION,
+    RELEASE_TTL_BOUND, THROTTLED_RETRY_AFTER, UNBUNDLED_GENERATION,
 };
 pub use credential_release::CredentialRelease;
 pub use credential_release_error::CredentialReleaseError;
@@ -146,6 +157,8 @@ pub use denial_record::DenialRecord;
 pub use error_chain::error_chain;
 #[cfg(any(test, feature = "test-support"))]
 pub use in_memory_credential_states::InMemoryCredentialStates;
+pub use invalidation_stream::InvalidationStream;
+pub use invalidation_stream_mismatch_error::InvalidationStreamMismatchError;
 pub use jetstream_credential_states::JetStreamCredentialStates;
 pub use openbao_address::OpenBaoAddress;
 pub use openbao_address_error::OpenBaoAddressError;
