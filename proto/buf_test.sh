@@ -85,9 +85,11 @@ typescript)
   package="${check_args[0]}"
   protoc_gen_es="$PWD/${check_args[1]}"
 
-  # buf.key-custody.gen.yaml runs the plugin pnpm links into node_modules.
+  # buf.key-custody.gen.yaml runs the plugin pnpm links into node_modules. The
+  # launcher refuses to start without BAZEL_BINDIR, and "." keeps it in the
+  # directory buf starts it from.
   mkdir -p "$ws/$package/node_modules/.bin"
-  printf '#!/bin/sh\nexec "%s" "$@"\n' "$protoc_gen_es" >"$ws/$package/node_modules/.bin/protoc-gen-es"
+  printf '#!/bin/sh\nBAZEL_BINDIR=. exec "%s" "$@"\n' "$protoc_gen_es" >"$ws/$package/node_modules/.bin/protoc-gen-es"
   chmod +x "$ws/$package/node_modules/.bin/protoc-gen-es"
 
   "$ws/$package/generate-key-custody.sh" "$buf"
