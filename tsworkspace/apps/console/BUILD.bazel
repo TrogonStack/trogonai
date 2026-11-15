@@ -101,13 +101,12 @@ vitest_bin.vitest_test(
         ":sources",
         "//tsworkspace:node_modules/vitest",
     ],
-    env = {"VITE_PRESERVE_SYMLINKS": "1"},
-    # Excluded from //... until vitest can load one copy of each package from a
-    # runfiles tree. With symlinks preserved, Vite reaches React, react-dom and
-    # testing-library through runfiles while Node loads the dependencies vitest
-    # keeps external from their real paths, so tests see two copies and fail.
-    # Without it, Vite cannot load the test sources outside the runfiles tree.
-    tags = ["manual"],
+    env = {"VITE_ALLOW_OUTSIDE_ROOT": "1"},
+    # Vite and Node must reach React and testing-library by the same paths, or
+    # the tests load two copies of each. Without the rules_js fs patch both
+    # follow the runfiles symlinks to the real files, which sit outside the
+    # Vite root, so the env var lets Vite load them.
+    patch_node_fs = False,
 )
 
 oxlint_bin.oxlint_test(
