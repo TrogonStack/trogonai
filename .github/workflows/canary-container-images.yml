@@ -67,7 +67,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_SHA: ${{ github.sha }}
-        run: mise run --skip-tools github-actions:canary-is-branch-tip
+        run: mise run --skip-tools github:workflows:canary-container-images:canary-is-branch-tip
 
       - name: Log in to GHCR
         if: steps.tip.outputs.current == 'true'
@@ -82,7 +82,7 @@ jobs:
         id: published
         env:
           IMAGE_REF: ${{ env.IMAGE }}:${{ github.sha }}
-        run: mise run --skip-tools github-actions:image-published
+        run: mise run --skip-tools github:workflows:canary-container-images:image-published
 
       - name: Setup Rust
         if: steps.published.outputs.published == 'false'
@@ -105,7 +105,7 @@ jobs:
           SERVICE: ${{ matrix.service }}
           IMAGE_ARCH: ${{ matrix.arch }}
           OUTPUT_DIR: ${{ runner.temp }}/image-binaries
-        run: mise run --skip-tools github-actions:image-binary
+        run: mise run --skip-tools github:workflows:canary-container-images:image-binary
 
       - name: Upload release binary
         if: steps.published.outputs.published == 'false'
@@ -145,7 +145,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_SHA: ${{ github.sha }}
-        run: mise run --skip-tools github-actions:canary-is-branch-tip
+        run: mise run --skip-tools github:workflows:canary-container-images:canary-is-branch-tip
 
       - name: Set up Docker Buildx
         if: steps.tip.outputs.current == 'true'
@@ -164,7 +164,7 @@ jobs:
         id: published
         env:
           IMAGE_REF: ${{ env.IMAGE }}:${{ github.sha }}
-        run: mise run --skip-tools github-actions:image-published
+        run: mise run --skip-tools github:workflows:canary-container-images:image-published
 
       - name: Resolve image metadata
         if: steps.published.outputs.published == 'false'
@@ -210,7 +210,7 @@ jobs:
         id: image
         env:
           DIGEST: ${{ steps.published.outputs.digest || steps.build_image.outputs.digest }}
-        run: echo "digest=${DIGEST}" >>"$GITHUB_OUTPUT"
+        run: mise run --skip-tools github:workflows:canary-container-images:image-digest
 
       - name: Scan image for vulnerabilities
         if: steps.tip.outputs.current == 'true'
@@ -239,4 +239,4 @@ jobs:
           IMAGE_NAME: ${{ env.IMAGE }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           RUNTIME_BASE: debian:trixie-20261104-slim
-        run: mise run --skip-tools github-actions:image-audit-summary
+        run: mise run --skip-tools github:workflows:canary-container-images:image-audit-summary

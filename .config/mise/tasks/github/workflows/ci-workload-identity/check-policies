@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Test generated SPIRE admission expressions without cached results"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+# Exact versions instead of the project toolset keep this gate on the versions
+# the workflow installs, independent of what the shared config pins.
+exec mise exec go@1.27.3 python@3.14.5 -- python3 devops/kubernetes/spire/check_policies.py

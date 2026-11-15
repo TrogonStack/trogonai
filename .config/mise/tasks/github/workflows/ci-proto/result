@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Fail unless every selected Proto job succeeded, so branch rules can require a single check"
+set -euo pipefail
+
+# shellcheck source=../../../../lib/ci-result.sh
+source "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/.config/mise/lib/ci-result.sh"
+ci_result "Proto jobs"

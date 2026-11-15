@@ -18,14 +18,19 @@ mod scripted_process;
 #[cfg(all(unix, feature = "test-support"))]
 use scripted_process::{ScriptedProcessEvent, ScriptedProcessSpawner};
 
-/// A usable owner requires a real initialization reply, and disconnect closes the child's input.
+/// Python `connect()` returns only after a real initialization reply (TypeScript hands the client out as soon as the
+/// request is queued), and disconnect closes the child's input.
 #[cfg(all(unix, feature = "test-support"))]
 #[tokio::test]
-async fn connect_waits_for_initialization_and_disconnect_closes_input() -> Result<(), Box<dyn std::error::Error>> {
+async fn python_connect_waits_for_initialization_and_disconnect_closes_input() -> Result<(), Box<dyn std::error::Error>>
+{
     let (process, harness) = ScriptedProcessSpawner::new();
     let observer = process.observer();
     let connecting = tokio::spawn(ClaudeSdkClient::connect_with_adapters(
-        ClaudeAgentOptions::default(),
+        ClaudeAgentOptions {
+            argv_style: trogon_claude_agent_sdk::ArgvStyle::Python,
+            ..ClaudeAgentOptions::default()
+        },
         RuntimeAdapters {
             environment: FixedEnvironment {
                 directory: PathBuf::from("unused-memory-directory"),

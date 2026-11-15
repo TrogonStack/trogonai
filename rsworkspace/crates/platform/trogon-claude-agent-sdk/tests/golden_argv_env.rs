@@ -14,8 +14,11 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
-    ArgvStyle, ClaudeAgentOptions, ClaudeCodeMarker, ClaudeSdkClient, Environment, EnvironmentMode, ExtraArgument,
-    HookEvent, HookOutput, HookRegistration, McpDiscovery, ScriptRuntime, SystemPrompt, TraceContext,
+    ArgvStyle, BundledCli, ClaudeAgentOptions, ClaudeCodeMarker, ClaudeSdkClient, ClientAppDerivation, Environment,
+    EnvironmentMode, ExtraArgument, HookEvent, HookOutput, HookRegistration, LocalMcpServer, LocalMcpServerOptions,
+    McpDiscovery, McpRemoteServerOptions, McpSdkServerOptions, McpServerDialect, McpServerName, McpServerOptions,
+    McpServerToolPolicy, McpStdioServerOptions, McpToolPermissionPolicy, SDK_VERSION, ScriptRuntime, SdkMcpServer,
+    SdkTools, SystemPrompt, TraceContext, UsdBudget,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -229,6 +232,7 @@ async fn hooks_omit_on_failure_when_unset() -> Result<(), Box<dyn std::error::Er
 #[tokio::test]
 async fn overlay_environment_matches_python() -> Result<(), Box<dyn std::error::Error>> {
     let mut options = base();
+    options.environment_mode = EnvironmentMode::Overlay;
     options.cwd = Some("work".into());
     options.client_app = Some("my-app/1.2.3".into());
     options.trace_context = Some(TraceContext {
@@ -256,6 +260,37 @@ async fn overlay_environment_matches_python() -> Result<(), Box<dyn std::error::
     assert_eq!(
         environment(&capture, "CLAUDE_CODE_SDK_READS_SESSION_STATE"),
         Some(Some("1".into()))
+    );
+    Ok(())
+}
+
+/// TypeScript derives no client app label, so by default even the bundled executable under the Python environment
+/// gets none; `ClientAppDerivation::Bundled` selects Python's trigger, which labels it with this crate.
+#[tokio::test]
+async fn s34_only_the_python_derivation_labels_the_bundled_cli() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let bundled = root.path().join("_bundled");
+    std::fs::create_dir(&bundled)?;
+    std::fs::write(bundled.join("claude"), "")?;
+    std::fs::write(bundled.join("claude.version"), "999.0.0\n")?;
+    let mut options = base();
+    options.cli_path = Some(bundled.join("claude"));
+    options.environment_mode = EnvironmentMode::Overlay;
+
+    let typescript = run(options.clone(), &[]).await?;
+    assert_eq!(
+        environment(&typescript, "CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP"),
+        Some(None)
+    );
+
+    options.client_app_derivation = ClientAppDerivation::Bundled(BundledCli {
+        package_root: root.path().to_path_buf(),
+        pinned_version: "999.0.0".into(),
+    });
+    let python = run(options, &[]).await?;
+    assert_eq!(
+        environment(&python, "CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP"),
+        Some(Some(format!("trogon-claude-agent-sdk/{SDK_VERSION}")))
     );
     Ok(())
 }
@@ -311,5 +346,192 @@ async fn a_custom_spawner_skips_cli_discovery_like_upstream_custom_transports() 
             .iter()
             .any(|argument| argument == "--await-initialize")
     );
+    Ok(())
+}
+
+/// Neither SDK validates the budget, so every amount reaches argv in the selected SDK's spelling.
+#[tokio::test]
+async fn r03_budgets_reach_argv_unvalidated_in_each_sdk_spelling() -> Result<(), Box<dyn std::error::Error>> {
+    for (amount, typescript, python) in [
+        (0.0, "--max-budget-usd=0", "0.0"),
+        (-1.0, "--max-budget-usd=-1", "-1.0"),
+        (1e-7, "--max-budget-usd=1e-7", "1e-07"),
+        (f64::NAN, "--max-budget-usd=NaN", "nan"),
+        (f64::INFINITY, "--max-budget-usd=Infinity", "inf"),
+    ] {
+        let mut options = base();
+        options.max_budget_usd = Some(UsdBudget::new(amount));
+        let capture = run(options, &[]).await?;
+        assert!(arguments(&capture).iter().any(|value| value == typescript), "{amount}");
+
+        let mut options = base();
+        options.argv_style = ArgvStyle::Python;
+        options.max_budget_usd = Some(UsdBudget::new(amount));
+        let arguments = arguments(&run(options, &[]).await?);
+        let flag = arguments
+            .iter()
+            .position(|value| value == "--max-budget-usd")
+            .ok_or("missing --max-budget-usd")?;
+        assert_eq!(arguments.get(flag + 1).map(String::as_str), Some(python), "{amount}");
+    }
+    Ok(())
+}
+
+/// The servers both upstream probes were given, in the same insertion order: an `http` server with every
+/// field and a caller key, a `stdio` server without `type`, an `sse` server whose URL is not a URL, an
+/// `sdk` config without an instance, and one in-process server.
+fn mcp_options(style: ArgvStyle) -> Result<ClaudeAgentOptions, Box<dyn std::error::Error>> {
+    let mut options = base();
+    options.argv_style = style;
+    let mut tool = McpServerToolPolicy::new("search");
+    tool.permission_policy = Some(McpToolPermissionPolicy::AlwaysAsk);
+    let mut remote = McpRemoteServerOptions::new("https://example.com/mcp");
+    remote.headers = Some(BTreeMap::from([("Authorization".into(), "Bearer fixture".into())]));
+    remote.tools = Some(vec![tool]);
+    remote.timeout = Some(5000);
+    remote.always_load = Some(true);
+    remote.extra = serde_json::from_value(json!({"oauth":{"clientId":"fixture"}}))?;
+    options
+        .mcp_servers
+        .insert(McpServerName::from("remote"), McpServerOptions::Http(remote));
+    options.mcp_servers.insert(
+        McpServerName::from("local"),
+        McpServerOptions::Stdio(McpStdioServerOptions {
+            command: PathBuf::from("server"),
+            args: Some(vec!["--flag".into(), "\u{e9}".into()]),
+            env: Some(Environment::from([("K".into(), "v".into())])),
+            ..McpStdioServerOptions::default()
+        }),
+    );
+    options.mcp_servers.insert(
+        McpServerName::from("events"),
+        McpServerOptions::Sse(McpRemoteServerOptions::new("not a url")),
+    );
+    options.mcp_servers.insert(
+        McpServerName::from("orphan"),
+        McpServerOptions::Sdk(McpSdkServerOptions {
+            name: "orphan".into(),
+            ..McpSdkServerOptions::default()
+        }),
+    );
+    let inproc: Arc<dyn SdkMcpServer> = Arc::new(LocalMcpServer::from(LocalMcpServerOptions {
+        name: McpServerName::from("inproc"),
+        version: Some("1.0.0".into()),
+        tools: Some(SdkTools::default()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
+    }));
+    options.sdk_mcp_servers.insert(McpServerName::from("inproc"), inproc);
+    Ok(options)
+}
+
+fn mcp_config_values(capture: &Capture) -> Vec<String> {
+    let arguments = arguments(capture);
+    arguments
+        .windows(2)
+        .filter(|pair| pair[0] == "--mcp-config")
+        .map(|pair| pair[1].clone())
+        .collect()
+}
+
+/// Captured from `query()` in `sdk.mjs` 0.3.323 with a stand-in CLI: the in-process server is left out of
+/// `--mcp-config` and named in `initialize` instead, and every other config is `JSON.stringify`'d as given.
+#[tokio::test]
+async fn typescript_mcp_config_matches_upstream_bytes() -> Result<(), Box<dyn std::error::Error>> {
+    let capture = run(mcp_options(ArgvStyle::TypeScript)?, &[]).await?;
+    assert_eq!(
+        mcp_config_values(&capture),
+        [concat!(
+            r#"{"mcpServers":{"remote":{"type":"http","url":"https://example.com/mcp","headers":{"Authorization":"Bearer fixture"},"#,
+            r#""tools":[{"name":"search","permission_policy":"always_ask"}],"timeout":5000,"alwaysLoad":true,"oauth":{"clientId":"fixture"}},"#,
+            r#""local":{"command":"server","args":["--flag","é"],"env":{"K":"v"}},"events":{"type":"sse","url":"not a url"},"#,
+            r#""orphan":{"type":"sdk","name":"orphan"}}}"#
+        )]
+    );
+    assert_eq!(capture.initialize["request"]["sdkMcpServers"], json!(["inproc"]));
+    Ok(())
+}
+
+/// Captured from `SubprocessCLITransport._build_command` in Python 0.2.181: `json.dumps` spacing and ASCII
+/// escapes, the in-process server listed as `{"type": "sdk", "name": ...}`, and nothing in `initialize`.
+#[tokio::test]
+async fn python_mcp_config_matches_upstream_bytes() -> Result<(), Box<dyn std::error::Error>> {
+    let capture = run(mcp_options(ArgvStyle::Python)?, &[]).await?;
+    assert_eq!(
+        mcp_config_values(&capture),
+        [concat!(
+            r#"{"mcpServers": {"remote": {"type": "http", "url": "https://example.com/mcp", "headers": {"Authorization": "Bearer fixture"}, "#,
+            r#""tools": [{"name": "search", "permission_policy": "always_ask"}], "timeout": 5000, "alwaysLoad": true, "oauth": {"clientId": "fixture"}}, "#,
+            r#""local": {"command": "server", "args": ["--flag", "\u00e9"], "env": {"K": "v"}}, "events": {"type": "sse", "url": "not a url"}, "#,
+            r#""orphan": {"type": "sdk", "name": "orphan"}, "inproc": {"type": "sdk", "name": "inproc"}}}"#
+        )]
+    );
+    assert!(capture.initialize["request"].get("sdkMcpServers").is_none());
+    Ok(())
+}
+
+/// Python passes a `str` or `Path` `mcp_servers` straight through as the `--mcp-config` value.
+#[tokio::test]
+async fn python_mcp_config_path_is_passed_verbatim() -> Result<(), Box<dyn std::error::Error>> {
+    let mut options = base();
+    options.argv_style = ArgvStyle::Python;
+    options.mcp_config = Some("/srv/mcp.json".into());
+    let capture = run(options, &[]).await?;
+    assert_eq!(mcp_config_values(&capture), ["/srv/mcp.json"]);
+    Ok(())
+}
+
+/// Python passes a `str` holding JSON text through as the `--mcp-config` value just like a path.
+#[tokio::test]
+async fn python_mcp_config_json_text_is_passed_verbatim() -> Result<(), Box<dyn std::error::Error>> {
+    let mut options = base();
+    options.argv_style = ArgvStyle::Python;
+    options.mcp_config = Some(r#"{"mcpServers":{}}"#.into());
+    let capture = run(options, &[]).await?;
+    assert_eq!(mcp_config_values(&capture), [r#"{"mcpServers":{}}"#]);
+    Ok(())
+}
+
+/// TypeScript sends no `--mcp-config` when only in-process servers are configured.
+#[tokio::test]
+async fn typescript_in_process_servers_alone_send_no_mcp_config() -> Result<(), Box<dyn std::error::Error>> {
+    let mut options = mcp_options(ArgvStyle::TypeScript)?;
+    options.mcp_servers.clear();
+    let capture = run(options, &[]).await?;
+    assert!(mcp_config_values(&capture).is_empty());
+    assert_eq!(capture.initialize["request"]["sdkMcpServers"], json!(["inproc"]));
+    Ok(())
+}
+
+/// A config path or JSON text given as `mcp_config` follows the built `--mcp-config` value in the TypeScript
+/// argv too, as its own verbatim value.
+#[tokio::test]
+async fn typescript_mcp_config_path_is_passed_verbatim() -> Result<(), Box<dyn std::error::Error>> {
+    let mut options = base();
+    options.argv_style = ArgvStyle::TypeScript;
+    options.mcp_config = Some("/srv/mcp.json".into());
+    let capture = run(options, &[]).await?;
+    assert_eq!(mcp_config_values(&capture), ["/srv/mcp.json"]);
+    Ok(())
+}
+
+/// TypeScript spreads the in-process servers over the configured ones, so an external server that shares an
+/// in-process server's name is left out of `--mcp-config` and the name is sent in `initialize` once.
+#[tokio::test]
+async fn typescript_in_process_server_replaces_an_external_one_with_its_name() -> Result<(), Box<dyn std::error::Error>>
+{
+    let expected = mcp_config_values(&run(mcp_options(ArgvStyle::TypeScript)?, &[]).await?);
+    let mut options = mcp_options(ArgvStyle::TypeScript)?;
+    options.mcp_servers.insert(
+        McpServerName::from("inproc"),
+        McpServerOptions::Stdio(McpStdioServerOptions {
+            command: PathBuf::from("shadowed"),
+            ..McpStdioServerOptions::default()
+        }),
+    );
+    let capture = run(options, &[]).await?;
+    assert_eq!(mcp_config_values(&capture), expected);
+    assert_eq!(capture.initialize["request"]["sdkMcpServers"], json!(["inproc"]));
     Ok(())
 }
