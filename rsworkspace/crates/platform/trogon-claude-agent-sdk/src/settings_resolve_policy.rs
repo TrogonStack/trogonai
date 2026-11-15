@@ -33,6 +33,7 @@ use crate::{
     settings_resolve_tier::{LoadState, TierRead},
     settings_resolve_values::{SettingsMap, in_schema_order, omit, pick},
     settings_resolve_writable_document::{DocumentProbe, user_can_write},
+    settings_schema::schema,
     settings_strings::reserve_text,
 };
 
@@ -70,7 +71,7 @@ fn read_policy_bytes<H: ReadFile<Error = io::Error>>(
         tier.settings = None;
         return (tier, false);
     }
-    (reader.read(&bytes), true)
+    (reader.read(&bytes, path), true)
 }
 
 /// Reserves the private-use code points of every managed settings document [`resolve_policy`] may read for `kind`,
@@ -129,6 +130,10 @@ struct Folder {
     content: bool,
     state: LoadState,
     unreadable: bool,
+    /// The default mode merged so far stands in for one a document could not read (`floors` upstream).
+    floored: bool,
+    /// A document merged a value it wrote, not only values put in place of what it wrote (`authored` upstream).
+    authored: bool,
 }
 
 impl Folder {
@@ -139,20 +144,27 @@ impl Folder {
             content: false,
             state: LoadState::Absent,
             unreadable: false,
+            floored: false,
+            authored: false,
         }
     }
 
     /// Merges the `settings` a document kept into the folder (`UP` upstream). A merge that runs out of stack or
     /// throws keeps what it wrote and leaves the rest of the folder as it was.
     fn merge(&mut self, document: &TierRead, settings: Option<SettingsMap>, reader: ManagedReader<'_>) -> NodeMerge {
-        if let Some(settings) = settings
+        if let Some(mut settings) = settings
             && !settings.is_empty()
         {
+            if let Some(schema) = schema() {
+                self.floored =
+                    schema.hold_default_mode_floor(&self.merged, &mut settings, document.floored, self.floored);
+            }
             let merged = reader.merge_into_folder(&mut self.merged, &settings);
             if merged != NodeMerge::Merged {
                 return merged;
             }
             self.found = true;
+            self.authored |= has_authored_value(&settings) && !document.only_substitutes;
         }
         self.content |= document.holds_policy_content();
         self.unreadable |= document.unreadable;
@@ -168,12 +180,14 @@ impl Folder {
 
     /// `rX` upstream: the tier the merged documents make.
     fn finish(self) -> TierRead {
+        let settings = (self.found && has_policy_content(&self.merged)).then_some(self.merged);
         TierRead {
-            settings: (self.found && has_policy_content(&self.merged)).then_some(self.merged),
+            only_substitutes: !self.authored && settings.as_ref().is_some_and(has_authored_value),
+            settings,
             has_policy_content: self.content,
             load_state: self.state,
-            user_writable: false,
             unreadable: self.unreadable,
+            ..TierRead::absent()
         }
     }
 }
@@ -404,7 +418,7 @@ fn read_managed_file<H: SettingsHost>(
     let kept = held.settings.clone().unwrap_or_default();
     let added = restricted.settings.clone().unwrap_or_default();
     let mut flags = Held {
-        held_only: !has_authored_value(&kept),
+        held_only: !has_authored_value(&kept) || held.only_substitutes,
         ..Held::default()
     };
     if added.is_empty() {
@@ -555,19 +569,20 @@ fn held_by_other_tier(
 }
 
 fn select_admin(
-    remote: Option<&SettingsMap>,
+    remote: Option<&TierRead>,
     mdm: &TierRead,
     file: &TierRead,
     held: &Held,
     parent: Option<&SettingsMap>,
     platform: &str,
 ) -> Selection {
+    let remote_settings = remote.and_then(|remote| remote.settings.as_ref());
     let mdm_settings = mdm.settings.as_ref().filter(|settings| !settings.is_empty());
-    let remote_candidate = nonempty(remote);
+    let remote_candidate = nonempty(remote_settings);
     let mdm_candidate = nonempty(mdm_settings);
     let file_candidate = nonempty(file.settings.as_ref());
-    let remote_authored = remote.is_some_and(has_authored_value);
-    let mdm_authored = mdm_settings.is_some_and(has_authored_value);
+    let remote_authored = remote.is_some_and(TierRead::is_authored);
+    let mdm_authored = mdm.is_authored();
     let file_authored = file.is_authored();
     let remote_score = score(remote_candidate, remote_authored);
     let mdm_score = score(mdm_candidate, mdm_authored);
@@ -611,7 +626,7 @@ fn select_admin(
         tiers.push(tier.clone());
     }
     let slots = [
-        (remote, remote_wins),
+        (remote_settings, remote_wins),
         (mdm_settings, mdm_wins),
         (file.settings.as_ref(), file_candidate.is_some()),
     ];
@@ -648,7 +663,7 @@ fn select_admin(
         (admin, _) => admin,
     };
     let held_empty = composed.is_none();
-    let empty_remote = held_empty && remote.is_some_and(has_policy_content);
+    let empty_remote = held_empty && remote.is_some_and(TierRead::holds_policy_content);
     let empty_mdm = held_empty && mdm.holds_policy_content();
     let empty_file = held_empty && file.holds_policy_content();
     let first_empty = if empty_remote {
@@ -778,10 +793,8 @@ fn pin_machine_login(
     let machine_mdm = if mdm.user_writable {
         TierRead {
             settings: Some(SettingsMap::new()),
-            has_policy_content: false,
             load_state: LoadState::Loaded,
-            user_writable: false,
-            unreadable: false,
+            ..TierRead::absent()
         }
     } else {
         mdm.clone()
@@ -838,7 +851,7 @@ impl Composition {
 fn compose(
     kind: PlatformKind,
     parent_managed: Option<&SettingsMap>,
-    remote: Option<&SettingsMap>,
+    remote: Option<&TierRead>,
     evaluation: &MdmEvaluation,
     file: &TierRead,
     held: &Held,
@@ -913,13 +926,12 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
     state: &ResolverState,
     kind: PlatformKind,
     parent_managed: Option<&SettingsMap>,
-    remote: Option<&SettingsMap>,
+    remote: Option<&TierRead>,
     evaluation: &MdmEvaluation,
     reader: ManagedReader<'_>,
 ) -> Result<PolicyResolution, ResolveSettingsError> {
     let (file, held) = read_managed_file(host, state, kind, evaluation, reader)?;
     let parent_managed = parent_managed.filter(|parent| !parent.is_empty());
-    let remote = remote.filter(|settings| !settings.is_empty());
     let composition = compose(kind, parent_managed, remote, evaluation, &file, &held);
     let origin = composition.origin(kind, evaluation);
     let file_did_not_load = file.load_state == LoadState::DidNotLoad;
@@ -1043,12 +1055,11 @@ pub(crate) fn reevaluate_policy<H: SettingsHost>(
     state: &ResolverState,
     kind: PlatformKind,
     parent_managed: Option<&SettingsMap>,
-    remote: Option<&SettingsMap>,
+    remote: Option<&TierRead>,
     evaluation: &MdmEvaluation,
     reader: ManagedReader<'_>,
 ) -> Result<PolicyReevaluation, ResolveSettingsError> {
     let parent_managed = parent_managed.filter(|parent| !parent.is_empty());
-    let remote = remote.filter(|settings| !settings.is_empty());
     let (origin_file, origin_held) =
         read_managed_file(host, state, kind, evaluation, reader.in_pass(ManagedPass::Origin))?;
     let origin = compose(kind, parent_managed, remote, evaluation, &origin_file, &origin_held).origin(kind, evaluation);

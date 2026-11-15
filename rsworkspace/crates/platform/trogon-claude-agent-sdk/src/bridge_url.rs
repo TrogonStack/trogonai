@@ -8,7 +8,7 @@ use url::Url;
 
 use crate::bridge_unicode::{is_space, js_lowercase};
 
-mod constants;
+pub(crate) mod constants;
 
 use constants::{GITHUB, SPECIAL_SCHEMES};
 
@@ -31,12 +31,14 @@ fn split_scheme(text: &str, digit_first: bool) -> Option<(&str, &str)> {
 
 /// The hostname the URL standard reads out of `input`, when there is one.
 fn hostname(input: &str) -> Option<String> {
-    Url::parse(input)
-        .ok()
-        .and_then(|url| url.host_str().filter(|host| !host.is_empty()).map(str::to_owned))
+    Url::parse(input).ok().as_ref().and_then(url_hostname)
 }
 
-fn hex_pair(bytes: &[u8], at: usize) -> Option<u8> {
+fn url_hostname(url: &Url) -> Option<String> {
+    url.host_str().filter(|host| !host.is_empty()).map(str::to_owned)
+}
+
+pub(crate) fn hex_pair(bytes: &[u8], at: usize) -> Option<u8> {
     let digit = |offset: usize| {
         bytes
             .get(at + offset)
@@ -134,7 +136,7 @@ fn scp_bracket_prefix(text: &str) -> Option<(&str, usize)> {
 }
 
 /// Refuses `file` addresses and any address with a bracket that is not a well formed IPv6 host.
-fn bracket_form(text: &str) -> bool {
+pub(crate) fn bracket_form(text: &str) -> bool {
     let trimmed = text.trim_start_matches(|c: char| u32::from(c) <= 32);
     let scheme = split_scheme(trimmed, true);
     let rest = scheme.map_or(trimmed, |(_, after)| after);
@@ -185,8 +187,9 @@ fn after_last_at(text: &str) -> &str {
     text.rsplit_once('@').map_or(text, |(_, rest)| rest)
 }
 
-/// The host in an address split at the first `separator` (`:` for `scp` style, `/` for URLs) outside brackets.
-fn split_host(text: &str, separator: char) -> Option<String> {
+/// The host and path of an address split at the first `separator` (`:` for `scp` style, `/` for URLs) outside
+/// brackets; the path keeps the slash a URL separator starts it with.
+fn split_address(text: &str, separator: char) -> Option<(String, String)> {
     let open = text.find("@[").map_or(0, |at| at + 1);
     let open = text[open..].starts_with('[').then_some(open);
     let close = open.and_then(|open| text[open + 1..].find(']').map(|at| open + 1 + at));
@@ -200,6 +203,9 @@ fn split_host(text: &str, separator: char) -> Option<String> {
     {
         return None;
     }
+    let path = cut
+        .map_or("", |cut| &text[if separator == ':' { cut + 1 } else { cut }..])
+        .to_owned();
     if let (Some(open), Some(close)) = (open, close) {
         let port = &text[close + 1..cut.unwrap_or(text.len())];
         let inside = format!("{}{}", &text[..open], &text[open + 1..close]);
@@ -210,7 +216,7 @@ fn split_host(text: &str, separator: char) -> Option<String> {
         };
         let host = after_last_at(&merged);
         let parsed = hostname(&format!("ssh://[{host}]/"));
-        return (!host.is_empty()).then(|| parsed.unwrap_or_else(|| host.to_owned()));
+        return (!host.is_empty()).then(|| (parsed.unwrap_or_else(|| host.to_owned()), path));
     }
     let authority = cut.map_or(text, |cut| &text[..cut]);
     let host = after_last_at(authority);
@@ -221,32 +227,43 @@ fn split_host(text: &str, separator: char) -> Option<String> {
         Some((before, port)) if separator == '/' && port.bytes().all(|byte| byte.is_ascii_digit()) => before,
         _ => host,
     };
-    (!host.is_empty()).then(|| host.to_owned())
+    (!host.is_empty()).then(|| (host.to_owned(), path))
 }
 
-/// The host of an address read the way a Git client would.
-fn git_host(text: &str, rewritten: bool) -> Option<String> {
+/// The host and path of an address read the way a Git client would (`Ul`).
+pub(crate) fn git_address(text: &str, rewritten: bool) -> Option<(String, String)> {
     let trimmed = text.trim_start_matches(is_space);
     match split_scheme(trimmed, false) {
         Some((scheme, _)) if scheme.eq_ignore_ascii_case("file") => None,
         Some((scheme, _)) if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") => {
-            hostname(trimmed)
+            let url = Url::parse(trimmed).ok()?;
+            url_hostname(&url).map(|host| (host, url.path().to_owned()))
         }
-        Some((_, after)) => split_host(&decode_uri_runs(after), '/'),
-        None if rewritten => split_host(&decode_uri_runs(trimmed), ':'),
-        None => split_host(trimmed, ':'),
+        Some((_, after)) => split_address(&decode_uri_runs(after), '/'),
+        None if rewritten => split_address(&decode_uri_runs(trimmed), ':'),
+        None => split_address(trimmed, ':'),
+    }
+}
+
+/// The host of an address read the way a Git client would.
+fn git_host(text: &str, rewritten: bool) -> Option<String> {
+    git_address(text, rewritten).map(|(host, _)| host)
+}
+
+/// The address parsed after decoding the escapes in everything but web schemes (`x6`).
+pub(crate) fn rewritten_url(text: &str) -> Option<Url> {
+    let trimmed = text.trim_start_matches(is_space);
+    match split_scheme(trimmed, false) {
+        Some((scheme, after)) if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")) => {
+            Url::parse(&format!("{scheme}://{}", decode_uri_runs(after))).ok()
+        }
+        _ => Url::parse(trimmed).ok(),
     }
 }
 
 /// The host of an address after decoding the escapes in everything but web schemes.
 fn decoded_url_host(text: &str) -> Option<String> {
-    let trimmed = text.trim_start_matches(is_space);
-    match split_scheme(trimmed, false) {
-        Some((scheme, after)) if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")) => {
-            hostname(&format!("{scheme}://{}", decode_uri_runs(after)))
-        }
-        _ => hostname(trimmed),
-    }
+    rewritten_url(text).as_ref().and_then(url_hostname)
 }
 
 fn trim_trailing_dots(text: &str) -> &str {
@@ -254,7 +271,7 @@ fn trim_trailing_dots(text: &str) -> &str {
 }
 
 /// A host lower cased, stripped of a trailing dot and normalized the way the URL standard normalizes a host.
-fn fold_host(host: &str) -> String {
+pub(crate) fn fold_host(host: &str) -> String {
     let cleaned: String = host.chars().filter(|c| !matches!(c, '\t' | '\n' | '\r')).collect();
     let lowered = trim_trailing_dots(&js_lowercase(&cleaned)).to_owned();
     if lowered.is_empty()
@@ -279,7 +296,7 @@ fn fold_host(host: &str) -> String {
     trim_trailing_dots(url.host_str().unwrap_or_default()).to_owned()
 }
 
-fn is_github(host: &str) -> bool {
+pub(crate) fn is_github(host: &str) -> bool {
     let mut folded = fold_host(host);
     while let Some(rest) = folded.strip_prefix("www.") {
         folded = rest.to_owned();
@@ -287,13 +304,13 @@ fn is_github(host: &str) -> bool {
     folded == GITHUB
 }
 
-fn canonical_host(host: &str) -> String {
+pub(crate) fn canonical_host(host: &str) -> String {
     let folded = fold_host(host);
     if is_github(&folded) { GITHUB.to_owned() } else { folded }
 }
 
 /// Whether a backslash can move the end of the authority, which the web schemes and Git read differently.
-fn backslash_authority(text: &str) -> bool {
+pub(crate) fn backslash_authority(text: &str) -> bool {
     let cleaned: String = text
         .trim_start_matches(|c: char| u32::from(c) <= 0x20)
         .chars()

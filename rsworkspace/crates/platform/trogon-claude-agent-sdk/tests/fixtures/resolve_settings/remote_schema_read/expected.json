@@ -1,0 +1,1 @@
+[{"name":"remote_schema_read","result":{"effective":{"permissions":{"allow":["Read"]}},"provenance":{"permissions":{"source":"managed","policyOrigin":"remote"}},"sources":[{"source":"managed","settings":{"permissions":{"allow":["Read"]}},"policyOrigin":"remote"}],"machinePolicy":{"didNotLoad":false}},"filtered":{"permissions":{"allow":["Read"]}}}]

@@ -1,0 +1,1 @@
+    Settings    REG_SZ    {"model":5,"permissions":{"allow":["Read"]},"wslInheritsWindowsSettings":true}

@@ -1,0 +1,14 @@
+{
+  "model": 5,
+  "permissions": {
+    "allow": [
+      "bad rule",
+      "Read"
+    ],
+    "defaultMode": "manual"
+  },
+  "custom": {
+    "a": 1
+  },
+  "cleanupPeriodDays": 1e400
+}

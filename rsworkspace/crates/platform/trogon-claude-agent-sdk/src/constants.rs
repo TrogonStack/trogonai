@@ -231,6 +231,24 @@ pub(crate) const POLICY_READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Keys that do not make a managed settings document count as policy content (`Qi` upstream).
 pub(crate) const POLICY_META_KEYS: [&str; 2] = ["managedSourcesBehavior", "wslInheritsWindowsSettings"];
 
+/// Blocks whose fail-closed reading never counts as a stand-in for policy content (`K3` upstream).
+pub(crate) const POLICY_UNSYNTHESIZED_BLOCKS: [&str; 2] = ["remoteTools", "remoteControl"];
+
+/// Locks a managed document never replaces with their restrictive value (`neverSubstitute` upstream).
+pub(crate) const POLICY_NEVER_SUBSTITUTED: [&str; 1] = ["sandbox.failIfUnavailable"];
+
+/// Locks left out of the restrictive skeleton of a block that is not an object (`skeletonExclude` upstream).
+pub(crate) const POLICY_SKELETON_EXCLUDED: [&str; 1] = ["sandbox.enabled"];
+
+/// Prefix of the variable names a managed AWS pair that cannot be read is given (`Zx` upstream).
+pub(crate) const POLICY_INVALID_PAIR_PREFIX: &str = "_INVALID_PAIR_";
+
+/// FNV-1a offset basis of the managed file hash in stand-in pair names.
+pub(crate) const POLICY_FILE_HASH_OFFSET: u32 = 2_166_136_261;
+
+/// FNV-1a prime of the managed file hash in stand-in pair names.
+pub(crate) const POLICY_FILE_HASH_PRIME: u32 = 16_777_619;
+
 /// Keys only honored from administrator-controlled sources (`mE` upstream).
 pub(crate) const MANAGED_ONLY_KEYS: [&str; 3] = ["managedMcpServers", "isolation", "attributionProjectPolicy"];
 
@@ -275,6 +293,24 @@ pub(crate) const REGISTRY_USER_KEY: &str = "HKCU\\SOFTWARE\\Policies\\ClaudeCode
 
 /// Registry value that holds the settings document.
 pub(crate) const REGISTRY_VALUE_NAME: &str = "Settings";
+
+/// What upstream calls the managed settings a host passes in when it reads them (`iX`).
+pub(crate) const PARENT_MANAGED_FILE: &str = "parent managed settings";
+
+/// What upstream calls the server-managed settings when it reads them.
+pub(crate) const REMOTE_MANAGED_FILE: &str = "remote managed settings";
+
+/// What upstream calls the signed-in user's managed preferences document when it reads it (`Cx`).
+pub(crate) const PER_USER_PLIST_FILE: &str = "per-user managed preferences";
+
+/// What upstream calls the device-level managed preferences document when it reads it.
+pub(crate) const DEVICE_PLIST_FILE: &str = "device-level managed preferences";
+
+/// What upstream calls the machine-wide registry document when it reads it.
+pub(crate) const REGISTRY_MACHINE_FILE: &str = "Registry: HKLM\\SOFTWARE\\Policies\\ClaudeCode\\Settings";
+
+/// What upstream calls the per-user registry document when it reads it.
+pub(crate) const REGISTRY_USER_FILE: &str = "Registry: HKCU\\SOFTWARE\\Policies\\ClaudeCode\\Settings";
 
 /// Text `reg query` prints when the key or value does not exist.
 pub(crate) const REGISTRY_NOT_FOUND_TEXT: &str = "unable to find the specified registry key or value";
@@ -590,6 +626,9 @@ pub(crate) const SETTINGS_PROVIDER_NAMES: [&str; 8] = [
     "mantle",
     "gateway",
 ];
+
+/// Upstream `x3e`: the prefix of the provider names an `allowedProviders` entry may carry beyond `Gf`.
+pub(crate) const SETTINGS_PROVIDER_FAMILY: &str = "anthropic";
 
 /// Upstream `E3e`: server fields a managed settings server must not carry.
 pub(crate) const SETTINGS_MANAGED_SERVER_FORBIDDEN: [&str; 4] = ["command", "args", "env", "headersHelper"];

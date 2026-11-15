@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": "Bash",
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Read"
+    ]
+  },
+  "model": "a"
+}

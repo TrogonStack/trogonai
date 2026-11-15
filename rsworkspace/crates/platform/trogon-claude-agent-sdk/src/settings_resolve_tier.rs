@@ -1,8 +1,8 @@
 use serde_json::Value;
 
 use crate::{
-    constants::MANAGED_ONLY_KEYS,
-    settings_policy_content::{has_authored_value, has_policy_content},
+    constants::MANAGED_ONLY_KEYS, settings_dialect::SettingsDialect, settings_numbers::normalize_numbers,
+    settings_policy_content::has_authored_value, settings_read::read_policy_object,
     settings_resolve_values::SettingsMap,
 };
 
@@ -36,6 +36,10 @@ pub(crate) struct TierRead {
     pub(crate) user_writable: bool,
     /// An error of class `unreadable` was recorded for this tier.
     pub(crate) unreadable: bool,
+    /// Every key that carries content holds only a value put in place of what was written (`onlySubstitutes`).
+    pub(crate) only_substitutes: bool,
+    /// The default mode holds the value put in place of one that could not be read.
+    pub(crate) floored: bool,
 }
 
 impl TierRead {
@@ -46,6 +50,8 @@ impl TierRead {
             load_state: LoadState::Absent,
             user_writable: false,
             unreadable: false,
+            only_substitutes: false,
+            floored: false,
         }
     }
 
@@ -54,13 +60,33 @@ impl TierRead {
             settings: Some(SettingsMap::new()),
             has_policy_content: false,
             load_state: LoadState::DidNotLoad,
-            user_writable: false,
             unreadable,
+            ..Self::absent()
         }
     }
 
-    /// `hm` upstream: parse a policy document handed over as text.
-    pub(crate) fn from_hm(text: &str, user_writable: bool) -> Self {
+    /// `pm` upstream (`j7e`): a managed document handed over as an object, read the way `file` is read, numbers
+    /// the way `dialect` reads them. Settings with no key read as none, and only settings can hold nothing but
+    /// stand-ins. Upstream also lists the keys the read dropped (`removed`), which nothing reads.
+    pub(crate) fn from_pm(mut raw: SettingsMap, dialect: SettingsDialect, file: &str) -> Self {
+        for entry in raw.values_mut() {
+            normalize_numbers(entry, dialect);
+        }
+        read_policy_object(raw, Some(file)).map_or(Self::did_not_load(false), |read| {
+            let settings = (!read.settings.is_empty()).then_some(read.settings);
+            Self {
+                only_substitutes: read.only_substitutes && settings.is_some(),
+                has_policy_content: read.has_policy_content,
+                floored: read.floored,
+                settings,
+                load_state: LoadState::Loaded,
+                ..Self::absent()
+            }
+        })
+    }
+
+    /// `hm` upstream: parse a policy document handed over as text, read the way `file` is read.
+    pub(crate) fn from_hm(text: &str, user_writable: bool, file: &str) -> Self {
         let parsed = (!text.is_empty())
             .then(|| crate::settings_parse::parse_json(text).ok())
             .flatten();
@@ -78,12 +104,11 @@ impl TierRead {
             }
             strip_enabling_plugins(&mut document);
         }
+        let read = Self::from_pm(document, SettingsDialect::TypeScript, file);
         Self {
-            has_policy_content: has_policy_content(&document),
-            settings: Some(document),
-            load_state: LoadState::Loaded,
+            settings: Some(read.settings.unwrap_or_default()),
             user_writable,
-            unreadable: false,
+            ..read
         }
     }
 
@@ -97,9 +122,10 @@ impl TierRead {
         !self.user_writable && (self.has_policy_content || self.load_state == LoadState::DidNotLoad)
     }
 
-    /// Whether the tier holds a value that is not an empty object tree (`Nu` upstream).
+    /// Whether the tier holds a value that is not an empty object tree, and not only values put in place of what was
+    /// written (`Nu` upstream).
     pub(crate) fn is_authored(&self) -> bool {
-        self.settings.as_ref().is_some_and(has_authored_value)
+        !self.only_substitutes && self.settings.as_ref().is_some_and(has_authored_value)
     }
 }
 

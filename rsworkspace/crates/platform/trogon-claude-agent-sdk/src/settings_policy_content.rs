@@ -11,7 +11,7 @@ pub(crate) fn has_policy_content(settings: &Map<String, Value>) -> bool {
     settings.keys().any(|key| !POLICY_META_KEYS.contains(&key.as_str()))
 }
 
-fn is_empty_tree(value: &Value) -> bool {
+pub(crate) fn is_empty_tree(value: &Value) -> bool {
     match value {
         Value::Object(map) => map.values().all(is_empty_tree),
         _ => false,
