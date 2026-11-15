@@ -61,8 +61,9 @@ fn a_merge_that_runs_out_keeps_what_it_wrote_and_none_of_the_fresh_value_it_was_
     if let Some(Value::Object(p)) = source.get_mut("p") {
         p.insert("z".to_owned(), deep(1300));
     }
+    let mut warmth = MergeWarmth::WARM;
     assert_eq!(
-        merge_within(&rules(), &mut destination, &source, room(1241), &mut MergeWarmth::WARM),
+        merge_within(&rules(), &mut destination, &source, room(1241), &mut warmth),
         NodeMerge::Overflowed
     );
     assert_eq!(
@@ -88,8 +89,9 @@ fn a_merge_that_fits_writes_every_member_as_the_settings_customizer_says() {
         "__proto__": {"b": 1},
         "scalar": {"__proto__": 1},
     }));
+    let mut warmth = MergeWarmth::WARM;
     assert_eq!(
-        merge_within(&rules(), &mut destination, &source, room(10), &mut MergeWarmth::WARM),
+        merge_within(&rules(), &mut destination, &source, room(10), &mut warmth),
         NodeMerge::Merged
     );
     assert_eq!(
@@ -109,8 +111,9 @@ fn a_merge_that_fits_writes_every_member_as_the_settings_customizer_says() {
 fn a_merge_on_a_stack_with_no_room_writes_nothing() {
     let mut destination = Map::new();
     let source = object(json!({"a": 1}));
+    let mut warmth = MergeWarmth::WARM;
     assert_eq!(
-        merge_within(&rules(), &mut destination, &source, room(0), &mut MergeWarmth::WARM),
+        merge_within(&rules(), &mut destination, &source, room(0), &mut warmth),
         NodeMerge::Overflowed
     );
     assert!(destination.is_empty());
