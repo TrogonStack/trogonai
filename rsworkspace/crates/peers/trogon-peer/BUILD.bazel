@@ -1,0 +1,10 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    integration_tests = {
+        "creation_precondition": {},
+        "enrollment": {},
+        "enrollment_timestamp": {},
+        "validation": {},
+    },
+)
