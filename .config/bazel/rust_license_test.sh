@@ -25,10 +25,16 @@ fi
 violations=0
 while IFS= read -r manifest; do
   # Only a literal value in [package] counts; an inherited one would not be
-  # visible to tools that read the crate's manifest alone.
+  # visible to tools that read the crate's manifest alone. Lines inside a
+  # multiline string are skipped so text in a value such as a description
+  # cannot pass for the license key.
   declared="$(awk '
+    function opens(line, delim,    copy) { copy = line; return gsub(delim, "", copy) % 2 }
+    open_delim != "" { if (index($0, open_delim)) open_delim = ""; next }
     /^[[:space:]]*\[/ { in_package = ($0 ~ /^[[:space:]]*\[package\][[:space:]]*(#.*)?$/) }
     in_package && /^[[:space:]]*license[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]*(#.*)?$/, ""); print; exit }
+    opens($0, "\"\"\"") { open_delim = "\"\"\""; next }
+    opens($0, "'"'''"'") { open_delim = "'"'''"'" }
   ' "${manifest}")"
   if [ "${declared}" != "\"${expected_license}\"" ]; then
     echo "${manifest#"${workspace}/"}: license is ${declared:-missing}" >&2
