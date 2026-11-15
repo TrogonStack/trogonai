@@ -1,16 +1,6 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "channel-bridge-telegram",
-    binaries = {"channel-bridge-telegram": {}},
-    library = False,
     # Tests inside the binary start a NATS JetStream server in a container through Docker.
     unit_test_tags = ["requires-network"],
-    deps = [
-        "//rsworkspace/crates/acp/acp-nats",
-        "//rsworkspace/crates/channel/trogon-channel",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogon-telemetry",
-    ],
 )

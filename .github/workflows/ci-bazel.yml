@@ -5,20 +5,8 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened]
-    # //... globs files from almost every directory, so a list of inputs kept
-    # falling behind new packages. Everything triggers except files no Bazel
-    # target or GitHub Action reads; later patterns win over earlier ones.
-    paths:
-      - '**'
-      - '!*.md'
-      - '!LICENSE'
-      - '!CITATION.cff'
-      - '!.agents/**'
-      - '!.claude/**'
-      - '!.github/workflows/**'
-      - '!.github/dependabot.yml'
-      - '!.github/release-please-*.json'
-      - '.github/workflows/ci-bazel.yml'
+    # No paths filter: branch rules require Bazel result, and a pull request
+    # the filter skipped would wait forever on a check nothing reports.
 
 concurrency:
   group: ci-bazel-${{ github.ref }}
@@ -39,7 +27,7 @@ jobs:
       - name: Install build tools via mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
-          install_args: bazel buf go node rust
+          install_args: bazel buf go kubeconform node rust cargo:wasm-tools
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Restore Bazel cache
@@ -85,3 +73,29 @@ jobs:
             ${{ runner.temp }}/bazel-disk-cache
             ${{ runner.temp }}/bazel-repository-cache
           key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
+
+  result:
+    # Branch rules require this job instead of verify, because a job named
+    # verify also exists in other workflows and a cancelled run skips it.
+    name: Bazel result
+    needs: [verify]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
+      - name: Check Bazel jobs
+        env:
+          SELECTION_RESULT: success
+          SELECTED: 'true'
+          JOB_RESULTS: ${{ needs.verify.result }}
+        run: mise run --skip-tools github:workflows:ci-bazel:result

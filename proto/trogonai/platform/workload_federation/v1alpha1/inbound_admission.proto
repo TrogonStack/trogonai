@@ -1,0 +1,49 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+// Metadata from the protected inbound-admission owner. Ingress resolves the
+// admission_id and checks its source, exact policy/trust revisions, principal,
+// original validity and current withdrawal state. Receiving these fields from
+// a caller proves nothing. No raw assertion or claim payload is retained.
+message InboundAdmissionEvidence {
+  option (buf.validate.message).cel = {
+    id: "inbound_admission_evidence.scope"
+    message: "inbound binding and trust evidence must have the same scope"
+    expression: "this.subject_binding_ref.scope == this.trust_registration_ref.scope"
+  };
+  option (buf.validate.message).cel = {
+    id: "inbound_admission_evidence.validity"
+    message: "inbound admission must expire after admission and no later than its original source"
+    expression: "this.expires_at > this.admitted_at && this.expires_at <= this.source_expires_at"
+  };
+  InboundAdmissionId admission_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SubjectBindingRef subject_binding_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  TrustRegistrationRef trust_registration_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.PrincipalId principal_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp admitted_at = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp source_expires_at = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp expires_at = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  oneof presentation {
+    option (buf.validate.oneof).required = true;
+    bytes peer_leaf_sha256 = 8 [(buf.validate.field).bytes.len = 32];
+    // Bearer verification never claims proof of possession or sender binding.
+    google.protobuf.Empty bearer = 9;
+  }
+}
