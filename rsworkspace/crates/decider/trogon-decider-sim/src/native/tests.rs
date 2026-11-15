@@ -132,10 +132,6 @@ struct CounterBundle;
 impl NativeDeciderBundle for CounterBundle {
     type State = CounterState;
 
-    fn initial_state() -> Self::State {
-        CounterState::default()
-    }
-
     fn stream_id(_command: &WireEnvelope) -> Result<String, NativeDomainError> {
         Ok("counter".to_string())
     }

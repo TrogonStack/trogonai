@@ -33,10 +33,6 @@ struct SchedulesBundle;
 impl NativeDeciderBundle for SchedulesBundle {
     type State = trogon_scheduler_domain::ScheduleState;
 
-    fn initial_state() -> Self::State {
-        Self::State::default()
-    }
-
     fn stream_id(command: &WireEnvelope) -> Result<String, NativeDomainError> {
         match command.type_url.as_str() {
             CREATE_SCHEDULE_TYPE_URL => {

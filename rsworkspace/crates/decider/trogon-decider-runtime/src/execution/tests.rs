@@ -237,20 +237,6 @@ impl ExistingOnlyCommand {
     }
 }
 
-fn initial_test_state() -> TestState {
-    TestState::Missing
-}
-
-fn evolve_test_state(_state: TestState, event: &TestEvent) -> Result<TestState, TestCommandError> {
-    match event {
-        TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
-        TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled: *enabled }),
-        TestEvent::Removed { .. } => Ok(TestState::Missing),
-        TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
-        TestEvent::Untyped { .. } | TestEvent::Unencodable { .. } => Ok(TestState::Present { enabled: true }),
-    }
-}
-
 impl Decider for TestCommand {
     type StreamId = str;
     type State = TestState;
@@ -3202,7 +3188,7 @@ fn a_chunked_replay_resumes_from_a_snapshot_and_still_walks_the_rest() {
 
 impl Default for TestState {
     fn default() -> Self {
-        initial_test_state()
+        TestState::Missing
     }
 }
 
@@ -3210,6 +3196,12 @@ impl crate::Evolve<TestEvent> for TestState {
     type Error = TestCommandError;
 
     fn evolve(self, event: &TestEvent) -> Result<Self, Self::Error> {
-        evolve_test_state(self, event)
+        match event {
+            TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
+            TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled: *enabled }),
+            TestEvent::Removed { .. } => Ok(TestState::Missing),
+            TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
+            TestEvent::Untyped { .. } | TestEvent::Unencodable { .. } => Ok(TestState::Present { enabled: true }),
+        }
     }
 }

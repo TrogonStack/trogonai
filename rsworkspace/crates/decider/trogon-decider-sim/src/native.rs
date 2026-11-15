@@ -147,10 +147,7 @@ where
 /// wasm guest's generated `decide`/`evolve`/`stream_id` exports do.
 pub trait NativeDeciderBundle {
     /// The bundle's shared decider state.
-    type State: Clone;
-
-    /// Returns the state before any events have been replayed.
-    fn initial_state() -> Self::State;
+    type State: Clone + Default;
 
     /// Resolves the stream id a command envelope targets.
     fn stream_id(command: &WireEnvelope) -> Result<String, NativeDomainError>;
@@ -198,7 +195,7 @@ pub fn run_native<N: NativeDeciderBundle>(scenario: &ScenarioIr) -> Result<Scena
         Err(error) => StreamIdOutcome::Failed(error.into()),
     });
 
-    let mut state = N::initial_state();
+    let mut state = N::State::default();
     for (index, event) in scenario.given.iter().enumerate() {
         state = N::evolve(state, event).map_err(|source| NativeRunError::Given { index, source })?;
     }
