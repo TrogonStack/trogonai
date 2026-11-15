@@ -5,8 +5,10 @@ workspace_crate(
 
 
     integration_tests = {'requester_bounds_tests': {},
+     'requester_headers_tests': {},
      'routing_contract': {},
      'rpc_admission_tests': {},
+     'rpc_client_tests': {},
      'rpc_dispatch_contract': {},
      'store_admission_tests': {}},
 )
