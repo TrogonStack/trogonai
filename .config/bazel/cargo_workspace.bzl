@@ -3,7 +3,8 @@
 The repository rule runs `cargo metadata --no-deps` against the workspace
 manifest and writes `crates.bzl`, whose `CRATES` dict maps each member's Bazel
 package to what `workspace_crate()` needs: its targets, enabled features, and
-workspace dependencies. Bazel reruns it whenever a member manifest, the
+workspace dependencies. Members a wasm component reaches also carry the
+features and dependencies of their wasm32 build, under `wasm`. Bazel reruns it whenever a member manifest, the
 lockfile, or a directory Cargo discovers targets from changes.
 """
 
@@ -102,6 +103,91 @@ def _unified_features(packages, by_name):
             return unified
     fail("workspace feature unification did not converge")
 
+def _is_proc_macro(package):
+    return any([target["kind"][0] == "proc-macro" for target in package["targets"]])
+
+def _is_component(package):
+    cdylib = any(["cdylib" in target["crate_types"] for target in package["targets"]])
+    return cdylib and "component" in (package.get("metadata") or {})
+
+def _wasm_features(packages, by_name, by_dir):
+    """The features each crate gets when Cargo builds the wasm components.
+
+    A component is a member whose library is a cdylib and whose manifest has
+    `[package.metadata.component]`. Cargo builds it for wasm32 on its own, so only the normal dependencies it
+    reaches count, with the features they ask for. Proc macros run on the host
+    and keep their workspace build.
+    """
+    wanted = {}
+    for package in packages:
+        if _is_component(package):
+            wanted[package["name"]] = _as_set(["default"] if "default" in package["features"] else [])
+    for _ in range(len(packages) * 64):
+        changed = False
+        for name in list(wanted.keys()):
+            package = by_name[name]
+            closure = _feature_closure(package, wanted[name].keys())
+            for dep in package["dependencies"]:
+                key = _dep_key(dep)
+                if dep["kind"] or not dep.get("path") or (dep["optional"] and key not in closure.activated):
+                    continue
+                if dep.get("target"):
+                    fail("{} has a platform-specific path dependency, which the wasm build does not support yet".format(name))
+                target = by_dir[dep["path"]]
+                if _is_proc_macro(target):
+                    continue
+                features = list(dep["features"])
+                if dep["uses_default_features"] and "default" in target["features"]:
+                    features.append("default")
+                for request_key, feature, weak in closure.requests:
+                    if request_key == key and (not weak or not dep["optional"] or key in closure.activated):
+                        features.append(feature)
+                if target["name"] not in wanted:
+                    wanted[target["name"]] = {}
+                    changed = True
+                for feature in features:
+                    if feature not in wanted[target["name"]]:
+                        wanted[target["name"]][feature] = True
+                        changed = True
+        if not changed:
+            return wanted
+    fail("wasm feature resolution did not converge")
+
+def _wasm_crate(package, features, workspace_package, workspace_root, by_dir):
+    """What the wasm build of a crate needs: its features and dependencies.
+
+    Workspace dependencies point at their own wasm build, external ones at the
+    `@crates_wasm` resolution, and proc macros at their workspace build.
+    """
+    closure = _feature_closure(package, features.keys())
+    deps = []
+    proc_macro_deps = []
+    aliases = {}
+    for dep in package["dependencies"]:
+        key = _dep_key(dep)
+        if dep["kind"] or (dep["optional"] and key not in closure.activated):
+            continue
+        if dep.get("target"):
+            fail("{} has a platform-specific dependency, which the wasm build does not support yet".format(package["name"]))
+        if dep.get("path"):
+            member = by_dir[dep["path"]]
+            label = "//{}/{}:{}".format(workspace_package, _relative(_dirname(member["manifest_path"]), workspace_root), member["name"])
+            if _is_proc_macro(member):
+                proc_macro_deps.append(label)
+                continue
+            label = label + "_wasm"
+        else:
+            label = "@crates_wasm//:" + dep["name"]
+        if dep.get("rename"):
+            aliases[label] = dep["rename"].replace("-", "_")
+        deps.append(label)
+    return {
+        "aliases": aliases,
+        "crate_features": sorted(closure.enabled.keys()),
+        "deps": deps,
+        "proc_macro_deps": proc_macro_deps,
+    }
+
 def _relative(path, root):
     if path == root:
         return ""
@@ -112,7 +198,7 @@ def _relative(path, root):
 def _dirname(path):
     return path.rpartition("/")[0]
 
-def _crate(package, workspace_package, workspace_root, by_dir, unified):
+def _crate(package, workspace_package, workspace_root, by_dir, unified, wasm):
     manifest_dir = _dirname(package["manifest_path"])
     bazel_package = workspace_package + "/" + _relative(manifest_dir, workspace_root)
 
@@ -197,9 +283,12 @@ def _crate(package, workspace_package, workspace_root, by_dir, unified):
         "examples": examples,
         "integration_tests": integration_tests,
         "library": library,
+        "component": _is_component(package),
+        "metadata": package.get("metadata") or {},
         "name": package["name"],
         "proc_macro_deps": deps["proc_macro"],
         "version": package["version"],
+        "wasm": _wasm_crate(package, wasm[package["name"]], workspace_package, workspace_root, by_dir) if package["name"] in wasm else None,
     }
 
 def _watch_dir(path):
@@ -239,6 +328,7 @@ def _cargo_workspace_impl(rctx):
     by_name = {package["name"]: package for package in packages}
     by_dir = {_dirname(package["manifest_path"]): package for package in packages}
     unified = _unified_features(packages, by_name)
+    wasm = _wasm_features(packages, by_name, by_dir)
 
     crates = {}
     watched_dirs = {}
@@ -256,7 +346,7 @@ def _cargo_workspace_impl(rctx):
         for target_dir in _TARGET_DIRS:
             watched_dirs[manifest_dir + "/" + target_dir] = True
 
-        bazel_package, crate = _crate(package, workspace_package, workspace_root, by_dir, unified)
+        bazel_package, crate = _crate(package, workspace_package, workspace_root, by_dir, unified, wasm)
         crates[bazel_package] = crate
 
     for directory in sorted(watched_dirs.keys()):

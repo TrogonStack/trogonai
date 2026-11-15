@@ -78,23 +78,11 @@ jobs:
         env:
           CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
-      - name: Check formatting
-        run: mise run --skip-tools github:workflows:ci-rust:fmt
-
       - name: Test repo Rust policy lints
         run: mise run github:workflows:ci-rust:dylint-tests
 
       - name: Run repo Rust policy lints
         run: mise run --skip-tools github:workflows:ci-rust:rust-dylint
-
-      - name: Run clippy
-        run: mise run --skip-tools github:workflows:ci-rust:clippy
-
-      - name: Run clippy (a2a-gateway, default features)
-        run: mise run --skip-tools github:workflows:ci-rust:clippy-a2a-gateway
-
-      - name: Run clippy (a2a-gateway, spicedb)
-        run: mise run --skip-tools github:workflows:ci-rust:clippy-a2a-gateway-spicedb
 
   test:
     needs: changes

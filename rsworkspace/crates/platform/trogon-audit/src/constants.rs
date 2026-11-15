@@ -56,8 +56,10 @@ pub const TRACE_ID_HEX_LEN: usize = 32;
 
 /// Characters beyond ASCII alphanumerics that a name may hold. Whitespace, quotes,
 /// `=`, `,`, `;` and control characters are absent on purpose: they are what
-/// separates a header, a query string or a body from a name.
-pub const NAME_PUNCTUATION: &str = "._:/@+-[]";
+/// separates a header, a query string or a body from a name. `~` is present
+/// because it is RFC 3986 unreserved, so names such as query parameters use it,
+/// and it separates nothing.
+pub const NAME_PUNCTUATION: &str = "._:/@+-[]~";
 
 /// Characters beyond ASCII alphanumerics an opaque snapshot token may hold: the
 /// base64 and base64url alphabets with their padding, plus `.`, `:` and `~`.

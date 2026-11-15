@@ -371,6 +371,7 @@ test('actionlint installs through the supported mise backend', () => {
 // no reasonable bash equivalent.
 const pythonTasks = new Set([
   '.config/mise/tasks/github/workflows/ci-adr/lint-adr-refs',
+  '.config/mise/tasks/github/workflows/ci-bazel/coverage-report',
   '.config/mise/tasks/github/workflows/ci-rust/decider-test-suites',
   '.config/mise/tasks/github/workflows/ci-rust/enforce-cargo-license',
 ]);

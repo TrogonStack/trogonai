@@ -10,9 +10,10 @@ workspace = true
 
 [features]
 default = []
-# Every feature that compiles the generated tree needs buffa-descriptor: the policy and
-# model_access packages import buf.validate (ADR 0064), and include_imports emits it
-# into the shared tree. The annotations stay documentation; nothing enforces them.
+# Every feature that compiles the generated tree needs buffa-descriptor: the policy,
+# model_access and secrets.exchange packages import buf.validate (ADR 0064), and
+# include_imports emits it into the shared tree. The annotations stay documentation;
+# nothing enforces them.
 chrono = ["dep:buffa-types", "dep:chrono"]
 gateway = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde", "dep:trogon-decider", "dep:trogon-decider-runtime"]
 schedules = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde", "dep:trogon-decider", "chrono"]
@@ -33,6 +34,11 @@ model-access = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:ser
 # like `policy`. A record names policy by `PolicyRuleRef`, so it enables `policy` for a
 # writer to name that type and the agent, tenant and project identifiers.
 audit = ["policy"]
+# Generated types for the secrets exchange contract (trogonai.secrets.exchange.v1alpha1)
+# that the release path serves. Types only, like `policy`. A release request names its
+# destination by `EgressHost` and its correlation by `AuditCorrelationId`, so it enables
+# `policy` for a caller to name those types.
+secrets-exchange = ["policy"]
 
 [dependencies]
 thiserror = { workspace = true }

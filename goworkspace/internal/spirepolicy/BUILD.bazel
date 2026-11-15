@@ -16,3 +16,10 @@ gofmt_test(
     name = "gofmt_test",
     srcs = glob(["*.go"]),
 )
+
+# //devops/kubernetes/spire checks that this reviewed copy still matches what
+# the deployment renders.
+exports_files(
+    ["testdata/deployment.json"],
+    visibility = ["//devops/kubernetes/spire:__pkg__"],
+)

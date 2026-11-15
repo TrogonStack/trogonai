@@ -3,12 +3,20 @@ load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
 load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
+load("@npm_tsworkspace//tsworkspace/packages/proto:@bufbuild/protoc-gen-es/package_json.bzl", protoc_gen_es_bin = "bin")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 npm_link_all_packages(name = "node_modules")
 
 filegroup(
     name = "sources",
     srcs = glob(["src/**/*.ts"]),
+)
+
+# Everything `mise run proto:generate-key-custody-typescript` writes to.
+filegroup(
+    name = "generated",
+    srcs = glob(["src/gen/**"]),
 )
 
 # The package exports its TypeScript source directly, so the source is the
@@ -62,4 +70,41 @@ js_library(
         ],
     ),
     visibility = ["//tsworkspace:__pkg__"],
+)
+
+protoc_gen_es_bin.protoc_gen_es_binary(
+    name = "protoc_gen_es",
+)
+
+# Regenerates the key custody bindings the way
+# `mise run proto:generate-key-custody-typescript` does and fails when any file
+# under src/gen differs from the committed tree.
+sh_test(
+    name = "key_custody_generated_test",
+    srcs = ["//proto:buf_test.sh"],
+    args = [
+        "$(rootpath //.config/bazel:buf)",
+        "$(rootpath //proto:buf_cache)",
+        "typescript",
+        package_name(),
+        "$(rootpath :protoc_gen_es)",
+        "--",
+        "$(rootpaths //:buf.lock)",
+        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths //proto:sources)",
+        "$(rootpaths buf.key-custody.gen.yaml)",
+        "$(rootpaths generate-key-custody.sh)",
+        "$(rootpaths :generated)",
+    ],
+    data = [
+        "buf.key-custody.gen.yaml",
+        "generate-key-custody.sh",
+        ":generated",
+        ":protoc_gen_es",
+        "//.config/bazel:buf",
+        "//:buf.lock",
+        "//:buf.yaml",
+        "//proto:buf_cache",
+        "//proto:sources",
+    ],
 )

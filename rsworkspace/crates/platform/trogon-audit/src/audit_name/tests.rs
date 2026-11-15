@@ -11,6 +11,7 @@ fn accepts_names_of_the_shapes_a_record_uses() {
         "tools:read",
         "[::1]",
         "a+b",
+        "user~1",
     ] {
         assert_eq!(AuditName::new(value).unwrap().as_str(), value);
     }

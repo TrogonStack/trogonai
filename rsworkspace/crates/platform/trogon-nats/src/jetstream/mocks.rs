@@ -28,11 +28,12 @@ use tokio::io::AsyncReadExt;
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
-    JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
-    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
-    JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher, JetStreamSubjectPurger, ProvisionedStreamField, reconciled_stream_config,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
+    JetStreamFirstRawMessageBySubject, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStream,
+    JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision,
+    JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet,
+    JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage, JetStreamPublisher,
+    JetStreamSubjectPurger, ProvisionedStreamField, reconciled_stream_config,
 };
 use crate::mocks::MockError;
 
@@ -709,6 +710,23 @@ impl JetStreamLastRawMessageBySubject for MockJetStreamPublishMessage {
             .find(|message| message.subject == subject)
             .map(MockPublishedOutboundMessage::stream_message)
             .ok_or_else(|| LastRawMessageError::new(LastRawMessageErrorKind::NoMessageFound))
+    }
+}
+
+impl JetStreamFirstRawMessageBySubject for MockJetStreamPublishMessage {
+    async fn get_first_raw_message_by_subject(
+        &self,
+        subject: &str,
+        sequence: u64,
+    ) -> Result<StreamMessage, RawMessageError> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|message| message.subject == subject && message.sequence >= sequence)
+            .min_by_key(|message| message.sequence)
+            .map(MockPublishedOutboundMessage::stream_message)
+            .ok_or_else(|| RawMessageError::new(LastRawMessageErrorKind::NoMessageFound))
     }
 }
 

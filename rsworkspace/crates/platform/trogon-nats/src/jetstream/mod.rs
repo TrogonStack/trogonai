@@ -54,12 +54,12 @@ pub use strict_kv::{
     strict_native_kv_raw_operation,
 };
 pub use traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
-    JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
-    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
-    JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher, JetStreamSubjectPurger, JsMessageOf, ProvisionedStreamField, PurgeOutcome,
-    reconciled_stream_config,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
+    JetStreamFirstRawMessageBySubject, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStream,
+    JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision,
+    JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet,
+    JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage, JetStreamPublisher,
+    JetStreamSubjectPurger, JsMessageOf, ProvisionedStreamField, PurgeOutcome, reconciled_stream_config,
 };
 
 #[cfg(any(test, feature = "test-support"))]
