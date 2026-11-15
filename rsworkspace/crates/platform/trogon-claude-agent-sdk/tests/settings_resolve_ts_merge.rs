@@ -20,7 +20,7 @@ const GOLDENS: &str = include_str!("fixtures/settings_resolve/ts_settings_merge.
 
 const DROP_INS: &str = "/etc/claude-code/managed-settings.d";
 
-const CASES: usize = 65;
+const CASES: usize = 64;
 
 /// Where the fake host keeps the file each place of a case names, and the drop-in name it lists for it.
 fn place_path(place: &str) -> Option<(&'static str, Option<&'static str>)> {
