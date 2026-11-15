@@ -1,9 +1,6 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-
-
-
     integration_tests = {
         "peer_semantic_fingerprint_contract": {},
         "recipient_receipt_sender": {},
