@@ -936,14 +936,19 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
     let origin = composition.origin(kind, evaluation);
     let file_did_not_load = file.load_state == LoadState::DidNotLoad;
     let reevaluates = reader.has_stack() && file_did_not_load;
-    let key_order = if origin == Some(PolicyOrigin::Parent) {
-        PolicyKeyOrder::Composed
-    } else if (composition.selection.file_index == Some(0) || composition.selection.withheld_only)
+    let admin_order = if (composition.selection.file_index == Some(0) || composition.selection.withheld_only)
         && composition.admin.is_some()
     {
         held.key_order
     } else {
         PolicyKeyOrder::Schema
+    };
+    // Upstream merges the parent's slice first and the admin after it, and never sorts the result again, so a slice
+    // leads the keys whichever tier the admin comes from.
+    let key_order = if composition.slice.is_some() {
+        PolicyKeyOrder::Composed
+    } else {
+        admin_order
     };
     let Composition {
         selection,
@@ -968,6 +973,10 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
         let mut merged = SettingsMap::new();
         let parent_part = slice.clone().unwrap_or_default();
         let kept = admin.as_ref().map(|admin| omit(admin, &released)).unwrap_or_default();
+        let kept = match admin_order {
+            PolicyKeyOrder::Schema => in_schema_order(&kept),
+            PolicyKeyOrder::Composed => kept,
+        };
         // Upstream merges the parent's slice and the admin settings in one lodash merge
         // (`On({}, a ?? {}, $n(i ?? {}, g), ao)`), which stops at the first source it runs out of stack on.
         for part in [&parent_part, &kept] {
