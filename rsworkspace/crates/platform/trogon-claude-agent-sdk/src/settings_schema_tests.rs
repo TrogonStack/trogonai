@@ -424,3 +424,35 @@ fn a_policy_helper_map_that_is_not_an_object_reads_as_an_empty_map() {
     );
     assert_eq!(read_policy(schema, json!({"policyHelpers": null})), json!({}));
 }
+
+#[test]
+fn a_managed_mcp_server_that_cannot_be_read_is_dropped_alone() {
+    let schema = schema().expect("schema loads");
+    let server = json!({"type": "http", "url": "https://e.com", "oauth": {"authServerMetadataUrl": "https://e.com/m"}});
+    let long = format!("https://e.com/{}", "a".repeat(4083));
+    let document = json!({"managedMcpServers": {
+        "kept": server,
+        "long": {"type": "http", "url": "https://e.com", "oauth": {"authServerMetadataUrl": long}},
+        "local": {"type": "stdio", "command": "x"},
+        "bad name": server,
+        "constructor": server,
+    }});
+    assert_eq!(
+        read_policy(schema, document),
+        json!({"managedMcpServers": {"kept": server}})
+    );
+    assert_eq!(
+        read_policy(schema, json!({"managedMcpServers": {"local": {"command": "x"}}})),
+        json!({"managedMcpServers": {}})
+    );
+}
+
+#[test]
+fn a_managed_mcp_server_map_that_is_not_an_object_is_left_unset() {
+    let schema = schema().expect("schema loads");
+    for value in [json!(null), json!(5), json!([{"type": "http", "url": "https://e.com"}])] {
+        assert_eq!(read_policy(schema, json!({"managedMcpServers": value})), json!({}));
+    }
+    let unkeyed = schema_with(json!({"managedMcpServers": {"type": "unknown"}}), json!([]));
+    assert_eq!(read_policy(&unkeyed, json!({"managedMcpServers": {}})), json!({}));
+}

@@ -272,6 +272,7 @@ impl SettingsSchema {
                 }
             }
             "policyHelpers" => read_policy_helpers(field, value),
+            "managedMcpServers" => read_managed_mcp_servers(field, value),
             _ => match self.top_level_restrictive(key) {
                 Some(restrictive) => {
                     if value.is_null() {
@@ -609,6 +610,32 @@ fn kept_payload(shape: &Shape<'_>, input: &Value) -> Option<Value> {
         );
     }
     Some(Value::Object(kept))
+}
+
+/// `TS`, the reader `cP` gives `managedMcpServers`: each server is read on its own against the entry schema of the
+/// field (`pk`), and one whose name the field does not take (`dk`) or that cannot be read is dropped alone, so the map
+/// stays even when no server is left. A value that is not an object leaves the key unset.
+fn read_managed_mcp_servers(field: &Node, value: &Value) -> Option<Value> {
+    let (name_schema, server_schema) = record_of(field)?;
+    Some(Value::Object(
+        value
+            .as_object()?
+            .iter()
+            .filter_map(|(name, server)| {
+                name_schema.validate(Some(&Value::String(name.clone()))).ok()?;
+                Some((name.clone(), server_schema.validate(Some(server)).ok()??))
+            })
+            .collect(),
+    ))
+}
+
+/// The name and entry schemas of a record schema behind its lazy wrapper.
+fn record_of(node: &Node) -> Option<(&Node, &Node)> {
+    match node {
+        Node::Lazy(inner) => record_of(inner),
+        Node::Record { key, value, .. } => Some((key, value)),
+        _ => None,
+    }
 }
 
 /// The schema inside a catch and an optional wrapper.
