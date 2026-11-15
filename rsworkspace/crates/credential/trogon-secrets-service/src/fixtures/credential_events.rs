@@ -2,7 +2,8 @@ use async_nats::HeaderMap;
 use async_nats::jetstream::message::{OutboundMessage, PublishMessage};
 use trogon_credential_aggregate::credential_event_subject;
 use trogon_credential_aggregate::proto::{
-    activated_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto, write_requested_to_proto,
+    activated_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto, rotated_to_proto,
+    write_requested_to_proto,
 };
 use trogon_credential_domain::{
     CredentialDestroyReason, CredentialFingerprint, CredentialIdentity, CredentialMetadata, CredentialRef,
@@ -34,6 +35,18 @@ pub(crate) fn activated(identity: &CredentialIdentity) -> v1::CredentialEvent {
         CredentialStatus::Active,
         CredentialFingerprint::new("fingerprint").unwrap(),
     )))
+}
+
+/// A completed rotation from the first version of [`reference`] to the second.
+pub(crate) fn rotated(identity: &CredentialIdentity) -> v1::CredentialEvent {
+    event(rotated_to_proto(
+        &reference(identity),
+        &CredentialMetadata::new(
+            CredentialRef::new(identity.clone(), CredentialVersion::new(2).unwrap()),
+            CredentialStatus::Active,
+            CredentialFingerprint::new("rotated-fingerprint").unwrap(),
+        ),
+    ))
 }
 
 pub(crate) fn revoked(identity: &CredentialIdentity) -> v1::CredentialEvent {

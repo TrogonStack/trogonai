@@ -86,6 +86,10 @@ pub const INVALIDATION_STREAM: &str = "SECRETS_INVALIDATION";
 /// account first so each account imports only its own (ADR#0081 Decision 3).
 pub const INVALIDATION_SUBJECTS: &str = "*.secrets.invalidation.v1.>";
 
+/// What follows the tenant account in a notice subject, before the owner
+/// token and the credential id.
+pub(crate) const INVALIDATION_SUBJECT_INFIX: &str = "secrets.invalidation.v1";
+
 /// How long the invalidation stream keeps a notice: the hour ADR#0083
 /// Decision 7 keeps sealing-key invalidations for. It is well past
 /// [`INVALIDATION_REPLAY_WINDOW`], and short enough that the stream stays

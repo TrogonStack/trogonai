@@ -56,6 +56,14 @@
 //! notice that a holder resuming [`INVALIDATION_REPLAY_WINDOW`] back still
 //! needs.
 //!
+//! [`InvalidationOutcome::of`] reads one message of the credential stream and
+//! decides whether it calls for an [`InvalidationNotice`]: a completed
+//! rotation, a revocation, or a destruction does, on the subject of the one
+//! tenant [`OwnerTenants`] names as holding the credential's owner, and every
+//! other event does not. The notice's `Nats-Msg-Id` is the event's sequence,
+//! so a redelivered event is stored once. A message it cannot read is an
+//! [`InvalidationSourceError`] for the caller to settle, never a skip.
+//!
 //! # Features
 //!
 //! - `test-support`: adds `InMemoryCredentialStates` and
@@ -79,6 +87,9 @@ mod error_chain;
 mod fixtures;
 #[cfg(any(test, feature = "test-support"))]
 mod in_memory_credential_states;
+mod invalidation_notice;
+mod invalidation_outcome;
+mod invalidation_source_error;
 mod invalidation_stream;
 mod invalidation_stream_mismatch_error;
 mod jetstream_credential_states;
@@ -157,6 +168,9 @@ pub use denial_record::DenialRecord;
 pub use error_chain::error_chain;
 #[cfg(any(test, feature = "test-support"))]
 pub use in_memory_credential_states::InMemoryCredentialStates;
+pub use invalidation_notice::InvalidationNotice;
+pub use invalidation_outcome::InvalidationOutcome;
+pub use invalidation_source_error::InvalidationSourceError;
 pub use invalidation_stream::InvalidationStream;
 pub use invalidation_stream_mismatch_error::InvalidationStreamMismatchError;
 pub use jetstream_credential_states::JetStreamCredentialStates;
