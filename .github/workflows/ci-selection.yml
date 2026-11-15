@@ -33,7 +33,7 @@ jobs:
   # share a runner with the selector's dependency install.
   runner:
     if: ${{ inputs.runner-jobs != '' }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     timeout-minutes: 5
     # Listing self-hosted runners needs the Baton app; GITHUB_TOKEN cannot.
     # Its key is readable from main and from pull requests opened from a
