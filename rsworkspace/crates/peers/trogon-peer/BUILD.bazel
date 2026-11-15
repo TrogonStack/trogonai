@@ -4,5 +4,9 @@ workspace_crate(
 
 
 
-    integration_tests = {'creation_precondition': {}, 'enrollment': {}, 'enrollment_timestamp': {}, 'validation': {}},
+    integration_tests = {'attachment': {},
+     'creation_precondition': {},
+     'enrollment': {},
+     'enrollment_timestamp': {},
+     'validation': {}},
 )
