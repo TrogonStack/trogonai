@@ -41,6 +41,31 @@ python.toolchain(
     python_version = "3.14",
 )
 
+# The Kubernetes schemas //devops/kubernetes/spire:schemas_test validates the
+# generated resources against, at the commit check_schemas.py pins, one file
+# per resource kind the deployment renders.
+kubernetes_json_schema = use_repo_rule("//.config/bazel:kubernetes_json_schema.bzl", "kubernetes_json_schema")
+
+kubernetes_json_schema(
+    name = "kubernetes_json_schema",
+    commit = "102361970337d65537d40141dc29b991b8e95786",
+    kubernetes_version = "1.37.2",
+    schemas = {
+        "clusterrole-rbac-v1": "3fd79fbc322d89090be016a046630b6a399941547e7fbf7501645ee379e4fccb",
+        "clusterrolebinding-rbac-v1": "3f83a2198fe9c178bf742849df9a3fb719fe2f3bb8ef425fee855931dad554cf",
+        "configmap-v1": "fed751af12c2873a7db2b4cd1294c2959497fda8520f1fc8e5d21adf967ad72e",
+        "daemonset-apps-v1": "410871aa51ca678b861fddf530925f1fc6c9f38766975cbae3bb113c339fcecc",
+        "namespace-v1": "324fae677b98d1a6d54340db0c334d053e8ffbafceb3f73326e41de2610d5843",
+        "networkpolicy-networking-v1": "f6324cc464f62228b0418f438d167208e4f86c7e3677ba30f608e79a8b26ba79",
+        "poddisruptionbudget-policy-v1": "0f7e20f2683a2c5a1b890a14f8837d41c70dd0237eb44ba1f4204ae9c2138f4d",
+        "service-v1": "8bf019854daed511e7c174896a898173fa65d88ec5937c687a37303d4cc9351b",
+        "serviceaccount-v1": "8193d6c3561475c6d3d5c44e1faedb1df53905373d904bc17015694326d659cf",
+        "statefulset-apps-v1": "05cb2c0c4cb956b1e76ca1b3ecbfc90275b47f210fe5654e084d3c5d4f17eb10",
+        "validatingadmissionpolicy-admissionregistration-v1": "6f694e5637b097f781139af4fc466afa63b992d3dc55d28808028c99746be35e",
+        "validatingadmissionpolicybinding-admissionregistration-v1": "829b6a2fabcad663ba303c13e493a9b8c18a5737b0ca91c45dc0cf49a24c3927",
+    },
+)
+
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 
 # Resolve Rust dependencies from the Cargo workspace lockfile. crate_universe
