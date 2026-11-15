@@ -8,11 +8,17 @@ features, as the Cargo CI test run does.
 What Cargo cannot express, such as test tags, skipped tests, and extra files,
 is passed to `workspace_crate()` in the crate's BUILD.bazel, so Cargo.toml stays
 Cargo-only.
+
+A crate that a wasm component reaches through its normal dependencies also gets
+a `<name>_wasm` library, built with the features and dependencies Cargo would
+use for the component's wasm32 build. A component's own `<name>_wasm` is its
+core module; `decider.bzl` turns it into the component.
 """
 
 load("@cargo_workspace//:crates.bzl", "CRATES")
 load("@crates//:defs.bzl", "all_crate_deps", crate_aliases = "aliases")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library", "rust_proc_macro", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library", "rust_proc_macro", "rust_shared_library", "rust_test")
+load("//.config/bazel:decider.bzl", "decider_component")
 
 _RUSTC_FLAGS = ["-Dwarnings"]
 
@@ -65,6 +71,7 @@ def _dedupe(items):
 def workspace_crate(
         compile_data = [],
         data = [],
+        env = {},
         rustc_env = {},
         library_tags = [],
         unit_test_args = [],
@@ -80,6 +87,8 @@ def workspace_crate(
     Args:
         compile_data: Files read at compile time by every target.
         data: Files read at run time by every test.
+        env: Environment for running every test. Values may use `$(rootpath ...)`
+            on a `data` label.
         rustc_env: Environment for compiling every target.
         library_tags: Tags for the library target.
         unit_test_args: Arguments for the library's unit test binary.
@@ -107,6 +116,7 @@ def workspace_crate(
     library = crate["library"]
     compile_data = _files(compile_data)
     data = _files(data)
+    test_env = _env(env)
     rustc_env = _env(rustc_env)
 
     # crate_aliases may return a select, which only `|` can merge into.
@@ -155,6 +165,7 @@ def workspace_crate(
             compile_data = compile_data + _files(settings["compile_data"]),
             crate_features = crate_features,
             data = data,
+            env = test_env,
             proc_macro_deps = test_proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
             tags = unit_test_tags,
@@ -181,6 +192,7 @@ def workspace_crate(
             crate_root = test["root"],
             data = data + binary_data + _files(settings["data"]),
             edition = edition,
+            env = test_env,
             proc_macro_deps = normal_proc_macro_deps + test_proc_macro_deps,
             rustc_env = rustc_env | binary_env | _env(settings["rustc_env"]),
             rustc_flags = _RUSTC_FLAGS,
@@ -236,6 +248,30 @@ def workspace_crate(
         deps = normal_deps,
     )
 
+    wasm = crate["wasm"]
+    if wasm:
+        # Only buildable for wasm32; `bazel build //...` on the host skips it.
+        wasm_rule = rust_shared_library if crate["component"] else rust_library
+        wasm_rule(
+            name = name + "_wasm",
+            aliases = wasm["aliases"],
+            srcs = library_srcs,
+            compile_data = compile_data,
+            crate_features = wasm["crate_features"],
+            crate_name = library["crate_name"],
+            crate_root = library_root,
+            edition = edition,
+            proc_macro_deps = wasm["proc_macro_deps"],
+            rustc_env = rustc_env,
+            rustc_flags = _RUSTC_FLAGS,
+            target_compatible_with = ["@platforms//cpu:wasm32"],
+            version = version,
+            visibility = ["//visibility:public"],
+            deps = wasm["deps"],
+        )
+        if crate["component"]:
+            decider_component(name = name, crate_name = library["crate_name"])
+
     if library["test"]:
         rust_test(
             name = name + "_test",
@@ -246,6 +282,7 @@ def workspace_crate(
             # A test compiles the crate again and takes features from its own attributes.
             crate_features = crate_features,
             data = data,
+            env = test_env,
             proc_macro_deps = test_proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
             tags = unit_test_tags,
