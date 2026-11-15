@@ -9,9 +9,10 @@ mod event_stream_mismatch_error;
 pub(crate) mod store;
 pub(crate) mod stream;
 
+pub(crate) use commands::CredentialDecideError;
 pub use commands::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, RecordCredentialDestroyFailure,
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
     RequestCredentialWrite, RevokeCredential,
 };
-pub(crate) use commands::{CredentialDecideError, CredentialEvolveError, evolve_stream, initial_state};
+pub(crate) use trogon_credential_aggregate::{CredentialEvolveError, evolve_stream, initial_state};

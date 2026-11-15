@@ -1,11 +1,11 @@
 use std::time::Duration;
 
+use trogon_credential_aggregate::proto::{activated_to_proto, write_requested_to_proto};
 use trogon_decider_runtime::StreamPosition;
 use trogon_std::SecretString;
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::*;
-use crate::credential::commands::proto::{activated_to_proto, write_requested_to_proto};
 use crate::credential::{evolve_stream, initial_state};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use trogon_credential_domain::{CredentialIdentity, CredentialOwnerId, CredentialScope};

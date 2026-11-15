@@ -1,9 +1,10 @@
+use trogon_credential_aggregate::CredentialEvolveError;
+use trogon_credential_aggregate::proto::{decode_destroy_requested_state, destroyed_to_proto};
 use trogon_credential_domain::{CredentialKey, CredentialRef};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::proto::{decode_destroy_requested_state, destroyed_to_proto};
-use super::state::{CredentialDecideError, CredentialEvolveError, ensure_recorded_ref};
+use super::state::{CredentialDecideError, ensure_recorded_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompleteCredentialDestroy {
@@ -34,11 +35,11 @@ impl Decider for CompleteCredentialDestroy {
     }
 
     fn initial_state() -> Self::State {
-        super::state::initial_state()
+        trogon_credential_aggregate::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        trogon_credential_aggregate::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {

@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::warn;
+use trogon_credential_aggregate::proto::{
+    decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
+    decode_message_field, decode_revoked_state,
+};
 use trogon_credential_domain::{
     CredentialIdentity, CredentialKey, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
     CredentialStatus, CredentialVersion, SourceIntegrationId, SourceKind,
@@ -37,10 +41,6 @@ use self::idempotency::CredentialCommandInMemoryIdempotencyLedger;
 use self::idempotency::{
     CredentialCommandIdempotencyStore, CredentialCommandIdempotencyStoreError, IdempotencyDecision, IdempotencyKey,
     IdempotencyScope, RequestFingerprint,
-};
-use crate::credential::commands::proto::{
-    decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
-    decode_message_field, decode_revoked_state,
 };
 use crate::credential_lifecycle::handler::{
     CredentialHandlerError, CredentialRuntimeHandler, CredentialRuntimeHandlerError, DestroyStoredCredential,

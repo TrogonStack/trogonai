@@ -2,13 +2,13 @@ use axum::http::StatusCode;
 use buffa::MessageField;
 use std::sync::{Arc, Mutex};
 
-use crate::credential::commands::proto::{
+use chrono::Utc;
+use trogon_credential_aggregate::credential_event_subject;
+use trogon_credential_aggregate::proto::{
     activated_to_proto, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, identity_to_proto,
     revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
     write_requested_to_proto,
 };
-use crate::credential::stream::credential_event_subject;
-use chrono::Utc;
 use trogon_credential_domain::{
     AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint,
     CredentialIdentity, CredentialIdentityVersion, CredentialMetadata, CredentialScope, CredentialStatus,

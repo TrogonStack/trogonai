@@ -2,6 +2,15 @@ use std::sync::Mutex;
 
 use buffa::{Message as _, MessageField};
 use chrono::Utc;
+use trogon_credential_aggregate::proto::{
+    activated_to_proto, active_state_to_proto, decode_active_state, decode_pending_write_state, decode_write_requested,
+    destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, identity_to_proto,
+    pending_write_to_proto_state, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto,
+    rotation_requested_to_proto, write_failed_to_proto, write_requested_to_proto,
+};
+use trogon_credential_aggregate::{
+    CredentialEvolveError, CredentialFieldInvalidError, CredentialProtoDecodeError, evolve, initial_state,
+};
 use trogon_credential_domain::{
     CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialIdentity,
     CredentialIdentityVersion, CredentialKey, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef,
@@ -16,15 +25,8 @@ use trogon_decider_runtime::{
 };
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1 as proto};
 
-use super::proto::{
-    CredentialFieldInvalidError, CredentialProtoDecodeError, activated_to_proto, active_state_to_proto,
-    decode_active_state, decode_pending_write_state, decode_write_requested, destroy_failed_to_proto,
-    destroy_requested_to_proto, destroyed_to_proto, identity_to_proto, pending_write_to_proto_state, revoked_to_proto,
-    rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
-    write_requested_to_proto,
-};
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
-use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
+use super::state::CredentialDecideError;
 use super::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, RecordCredentialDestroyFailure,
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,

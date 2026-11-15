@@ -1,4 +1,9 @@
-use trogon_credential_domain::{CredentialIdentity, CredentialKind, CredentialScope, SourceKind};
+use trogon_credential_aggregate::{
+    CredentialEventSubjectResolver, CredentialEventSubjectResolverError, credential_event_subject,
+};
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKey, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
+};
 use trogon_decider_nats::{StreamSubjectResolver, SubjectState};
 use trogon_decider_runtime::{
     AppendStreamRequest, Event, EventId, Headers, StreamAppend, StreamPosition, StreamWritePrecondition,

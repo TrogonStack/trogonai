@@ -6,6 +6,11 @@ use std::sync::OnceLock;
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
+use trogon_credential_aggregate::CredentialProtoDecodeError;
+use trogon_credential_aggregate::proto::{
+    active_credential_ref, decode_destroy_requested_state, decode_destroyed_state, decode_message_field,
+    decode_pending_write_state, decode_revoked_state,
+};
 use trogon_credential_domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialFailureReason, CredentialId, CredentialIdentity,
     CredentialKey, CredentialRef, CredentialVersion, SourceKind,
@@ -24,10 +29,6 @@ use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, Credenti
 
 use super::constants::CREDENTIAL_LOCK_STRIPES;
 use crate::constants::METER_NAME;
-use crate::credential::commands::proto::{
-    CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
-    decode_message_field, decode_pending_write_state, decode_revoked_state,
-};
 use crate::credential::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, CredentialDecideError,
     CredentialEvolveError, RecordCredentialDestroyFailure, RecordCredentialRotationFailure,
