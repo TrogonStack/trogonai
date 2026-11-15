@@ -17,10 +17,12 @@ use crate::{
     node_text_file::read_node_text,
     session_prompt::js_trim,
     settings_dialect::SettingsDialect,
+    settings_numbers::normalize_numbers,
     settings_parse::parse_json,
     settings_policy_parse::{PolicyParse, parse_policy_text},
+    settings_read::read_policy_object,
     settings_resolve_tier::{LoadState, TierRead},
-    settings_resolve_values::{SettingsMap, has_policy_content, merge_with_union, merge_within},
+    settings_resolve_values::{SettingsMap, merge_unbounded, merge_within},
 };
 
 /// The managed settings documents a resolve read so far, by path, and whether each read opened its file: the parse
@@ -96,7 +98,8 @@ impl<'p> ManagedReader<'p> {
         fresh
     }
 
-    /// A managed settings document from the bytes of its file, which fit the size limit.
+    /// A managed settings document from the bytes of its file, which fit the size limit, sanitized and read by the
+    /// policy-tolerant schema parse in either dialect.
     pub(crate) fn read(self, bytes: &[u8]) -> TierRead {
         let parsed = match self.decoder {
             Decoder::Lossy => {
@@ -114,14 +117,24 @@ impl<'p> ManagedReader<'p> {
                 if js_trim(&text).is_empty() {
                     return loaded(SettingsMap::new());
                 }
-                parse_policy_text(&text, node, pass)
+                match parse_policy_text(&text, node, pass) {
+                    PolicyParse::Object(mut document) => {
+                        for entry in document.values_mut() {
+                            normalize_numbers(entry, SettingsDialect::TypeScript);
+                        }
+                        PolicyParse::Object(document)
+                    }
+                    other => other,
+                }
             }
         };
         match parsed {
-            PolicyParse::Object(document) => TierRead {
-                has_policy_content: has_policy_content(&document),
-                ..loaded(document)
-            },
+            PolicyParse::Object(document) => {
+                read_policy_object(document).map_or(not_loaded(false), |(settings, has_policy_content)| TierRead {
+                    has_policy_content,
+                    ..loaded(settings)
+                })
+            }
             PolicyParse::NotObject => not_loaded(false),
             PolicyParse::Overflow => not_loaded(true),
         }
@@ -153,10 +166,7 @@ impl<'p> ManagedReader<'p> {
         source: &SettingsMap,
     ) -> NodeMerge {
         match self.decoder {
-            Decoder::Lossy => {
-                merge_with_union(destination, source);
-                NodeMerge::Merged
-            }
+            Decoder::Lossy => merge_unbounded(destination, source),
             Decoder::Node(node, pass) => merge_within(node, call(pass), self.warmth, destination, source),
         }
     }

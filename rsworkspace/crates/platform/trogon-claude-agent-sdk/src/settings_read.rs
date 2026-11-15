@@ -409,18 +409,27 @@ pub(crate) fn read_policy_document(text: &str) -> PolicyRead {
         PythonCStack::MODULE,
         NodeStack::NODE_24_DARWIN_ARM64,
     );
-    let (Some(raw), Some(schema)) = (raw, schema()) else {
+    let Some((settings, has_policy_content)) = raw.and_then(read_policy_object) else {
         return not_loaded;
     };
+    PolicyRead {
+        has_policy_content: Some(has_policy_content),
+        settings: Some(settings),
+        loaded: true,
+    }
+}
+
+/// What `lE(text, file, true)` upstream makes of a managed settings document that parsed as an object: the document
+/// sanitized as a policy source and read by the policy-tolerant schema parse (`cP`), and whether the raw document held
+/// any policy content (`NX`). `None` when the schema description does not load.
+pub(crate) fn read_policy_object(raw: Map<String, Value>) -> Option<(SettingsMap, bool)> {
+    let schema = schema()?;
     let mut document = raw.clone();
     sanitize(&mut document, schema, schema.read_spec(), true);
     let document = js_property_order_map(document);
     let settings = js_property_order_map(schema.parse_policy_document(&document));
-    PolicyRead {
-        has_policy_content: Some(schema.policy_has_content(&raw, &settings)),
-        settings: Some(settings),
-        loaded: true,
-    }
+    let has_policy_content = schema.policy_has_content(&raw, &settings);
+    Some((settings, has_policy_content))
 }
 
 #[cfg(test)]

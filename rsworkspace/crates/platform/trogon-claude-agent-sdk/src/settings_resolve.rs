@@ -27,7 +27,7 @@ use crate::{
         local_settings_path, project_settings_path, read_settings_text, resolve_cwd, user_settings_path,
     },
     settings_resolve_state::ResolverState,
-    settings_resolve_values::{SettingsMap, in_schema_order, merge_with_union, merge_within},
+    settings_resolve_values::{SettingsMap, in_schema_order, merge_unbounded, merge_within},
     settings_strings::{
         SurrogateStandIns, approximate_strings, array_mark, escape_stand_ins, reserve_text, reserve_value,
     },
@@ -378,11 +378,13 @@ fn resolve_core<H: SettingsHost>(
     let mut effective = SettingsMap::new();
     for (_, _, settings) in &per_source {
         if let Some(settings) = settings {
-            if dialect == SettingsDialect::Python {
-                merge_with_union(&mut effective, settings);
-            } else if let Some(error) =
-                merge_within(node, NodeMergeCall::Source, &warmth, &mut effective, settings).rejection()
-            {
+            let merged = match dialect {
+                SettingsDialect::Python => merge_unbounded(&mut effective, settings),
+                SettingsDialect::TypeScript => {
+                    merge_within(node, NodeMergeCall::Source, &warmth, &mut effective, settings)
+                }
+            };
+            if let Some(error) = merged.rejection() {
                 return Err(error);
             }
         }
@@ -451,12 +453,10 @@ fn resolve_core<H: SettingsHost>(
         "didNotLoad".to_owned(),
         did_not_load(outcome_lost, mdm_did_not_load, file_did_not_load),
     );
-    // Merges in the TypeScript dialect leave holes and named properties in arrays, of the effective settings and of
-    // the managed policy source, which print as `JSON.stringify` prints them.
+    // Merges leave holes and named properties in arrays, of the effective settings and of the managed policy source,
+    // which print as `JSON.stringify` prints them.
     let mut settled = [Value::Object(effective), Value::Array(sources)];
-    if dialect == SettingsDialect::TypeScript {
-        settle(&mut settled, array_mark()).map_err(|StringTooLong| ResolveSettingsError::InvalidStringLength)?;
-    }
+    settle(&mut settled, array_mark()).map_err(|StringTooLong| ResolveSettingsError::InvalidStringLength)?;
     let [effective, sources] = settled;
     let mut result = Map::new();
     result.insert(

@@ -2,8 +2,11 @@
 
 use serde_json::Value;
 
-use super::{SettingsMap, merge_with_union, set_path};
-use crate::{constants::SETTINGS_SCHEMA_JSON, settings_json::js_stringify};
+use super::{SettingsMap, merge_unbounded, set_path};
+use crate::{
+    constants::SETTINGS_SCHEMA_JSON, js_array::settle, node_merge::NodeMerge, settings_json::js_stringify,
+    settings_strings::array_mark,
+};
 
 fn object(value: &Value) -> SettingsMap {
     value.as_object().expect("object").clone()
@@ -16,9 +19,15 @@ fn every_recorded_merge_matches_the_pinned_customizer() {
     assert!(!merges.is_empty());
     for probe in merges {
         let mut merged = object(&probe["destination"]);
-        merge_with_union(&mut merged, &object(&probe["source"]));
         assert_eq!(
-            js_stringify(&Value::Object(merged)),
+            merge_unbounded(&mut merged, &object(&probe["source"])),
+            NodeMerge::Merged
+        );
+        let mut settled = [Value::Object(merged)];
+        settle(&mut settled, array_mark()).expect("settles");
+        let [merged] = settled;
+        assert_eq!(
+            js_stringify(&merged),
             js_stringify(&probe["output"]),
             "merging {} into {}",
             probe["source"],

@@ -577,6 +577,21 @@ impl NodeStack {
         warmth.set(ran);
         merged
     }
+
+    /// Merges `source` into `destination` as [`Self::merge_within`] does with room for any depth, where no Node stack
+    /// bounds the merge: it stops only where lodash throws on every stack.
+    pub(crate) fn merge_unbounded(
+        self,
+        rules: &MergeSpec,
+        destination: &mut Map<String, Value>,
+        source: &Map<String, Value>,
+    ) -> NodeMerge {
+        let room = MergeRoom {
+            cost: self.merge,
+            available: usize::MAX,
+        };
+        merge_within(rules, destination, source, room, &mut MergeWarmth::default())
+    }
 }
 
 impl Default for NodeStack {
