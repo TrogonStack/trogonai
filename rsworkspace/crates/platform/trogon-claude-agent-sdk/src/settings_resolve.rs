@@ -226,7 +226,7 @@ pub fn resolve_python_settings_with_state<H: SettingsHost>(
 /// Runs `work` on a thread with [`SETTINGS_ENGINE_STACK_BYTES`] of stack. The engine walks a settings document
 /// recursively, once per level at several steps, the Python dialect reads documents nested almost as deep as
 /// CPython's C recursion limit, and the TypeScript dialect documents a few thousand levels deep. A panic in `work` resumes on the calling thread.
-fn on_engine_stack<T: Send>(
+pub(crate) fn on_engine_stack<T: Send>(
     work: impl FnOnce() -> Result<T, ResolveSettingsError> + Send,
 ) -> Result<T, ResolveSettingsError> {
     thread::scope(|scope| {

@@ -1,7 +1,9 @@
 use serde_json::Value;
 
 use super::{nests_past_serde_json, parse_json_deep, parses_as_object};
-use crate::settings_parse::parse_json;
+use crate::{
+    settings_parse::parse_json, settings_resolve::on_engine_stack, settings_resolve_error::ResolveSettingsError,
+};
 
 #[test]
 fn a_deep_parse_reads_what_the_shallow_parse_reads() {
@@ -33,17 +35,20 @@ fn a_deep_parse_reads_what_the_shallow_parse_reads() {
 }
 
 #[test]
-fn a_deep_parse_reads_past_serde_json_up_to_its_limit() {
-    let nested = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
-    assert!(!nests_past_serde_json(&nested(127)));
-    assert!(nests_past_serde_json(&nested(128)));
-    assert!(!nests_past_serde_json(&format!("\"{}\"", "[".repeat(200))));
-    let mut expected = Value::Array(Vec::new());
-    for _ in 1..3000 {
-        expected = Value::Array(vec![expected]);
-    }
-    assert_eq!(parse_json_deep(&nested(3000), 3000), Some(expected));
-    assert_eq!(parse_json_deep(&nested(3001), 3000), None);
+fn a_deep_parse_reads_past_serde_json_up_to_its_limit() -> Result<(), ResolveSettingsError> {
+    on_engine_stack(|| {
+        let nested = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        assert!(!nests_past_serde_json(&nested(127)));
+        assert!(nests_past_serde_json(&nested(128)));
+        assert!(!nests_past_serde_json(&format!("\"{}\"", "[".repeat(200))));
+        let mut expected = Value::Array(Vec::new());
+        for _ in 1..3000 {
+            expected = Value::Array(vec![expected]);
+        }
+        assert_eq!(parse_json_deep(&nested(3000), 3000), Some(expected));
+        assert_eq!(parse_json_deep(&nested(3001), 3000), None);
+        Ok(())
+    })
 }
 
 #[test]
