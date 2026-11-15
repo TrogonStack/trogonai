@@ -1,21 +1,16 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    integration_tests = {
-        "peer_semantic_fingerprint_contract": {},
-        "recipient_receipt_sender": {},
-    },
-)
+workspace_crate(integration_tests = {
+    "peer_semantic_fingerprint_contract": {},
+    "recipient_receipt_sender": {},
+})
 
-# The committed output of `mise run proto:generate`, which
-# //proto:trogonai_proto_generated_test regenerates and compares.
 filegroup(
     name = "generated",
     srcs = glob(["src/gen/**"]),
     visibility = ["//proto:__pkg__"],
 )
 
-# The test formats the regenerated tree with this crate's edition.
 exports_files(
     ["Cargo.toml"],
     visibility = ["//proto:__pkg__"],
