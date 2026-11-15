@@ -14,6 +14,7 @@ workspace_crate(
         "preparation": {},
         "receipt_replay": {},
         "sending": {},
+        "settlement": {},
         "validation": {},
     },
 )
