@@ -327,6 +327,62 @@ async fn a_write_that_has_to_wait_gives_way_to_the_close() -> Result<(), Box<dyn
     fixture.finish().await
 }
 
+/// The close reached the driver ahead of commands queued before it: the prompts go to stdin in order and everything
+/// else is handed back unapplied.
+#[tokio::test(start_paused = true)]
+async fn prompts_queued_behind_the_close_are_written_and_the_rest_handed_back() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut fixture = closed_before_a_write(None)?;
+    fixture.driver.shutdown_seen = true;
+    let (first, first_written) = prompt_command("queued first");
+    let (initialize, _initialized) = oneshot::channel();
+    let (second, second_written) = prompt_command("queued second");
+    for command in [
+        first,
+        Command::Initialize {
+            first: false,
+            response: initialize,
+        },
+        second,
+    ] {
+        fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+    }
+    let unapplied = fixture.driver.write_queued_prompts().await;
+    assert!(matches!(
+        unapplied.as_slice(),
+        [Command::Initialize { first: false, .. }]
+    ));
+    assert!(matches!(first_written.await?, Ok(())));
+    assert!(matches!(second_written.await?, Ok(())));
+    for expected in ["queued first", "queued second"] {
+        let written = fixture.harness.written.try_recv()?;
+        assert!(written.contains(expected), "{written}");
+    }
+    fixture.finish().await
+}
+
+/// A queued prompt the transport cannot take stops the flush, so the prompts behind it stay unwritten.
+#[tokio::test(start_paused = true)]
+async fn a_queued_prompt_that_cannot_be_written_stops_the_flush() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
+    fixture.driver.shutdown_seen = true;
+    fixture.driver.abort.cancel();
+    let (stuck, _stuck_written) = prompt_command("stuck");
+    let (behind, _behind_written) = prompt_command("behind");
+    for command in [stuck, behind] {
+        fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+    }
+    let started = Instant::now();
+    let unapplied = fixture.driver.write_queued_prompts().await;
+    assert!(unapplied.is_empty());
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::Prompt { .. })
+    ));
+    fixture.finish().await
+}
+
 #[tokio::test(start_paused = true)]
 async fn closing_the_command_port_ends_the_loop_without_another_cli_frame() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
