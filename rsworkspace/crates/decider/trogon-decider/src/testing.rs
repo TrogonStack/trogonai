@@ -504,11 +504,14 @@ where
     /// sequence value. Prefer [`given`](Self::given) or
     /// [`given_no_history`](Self::given_no_history) for any behavior reachable
     /// through real events.
-    pub fn given_state(mut self, state: C::State) -> TestCase<C, GivenState<C::State>> {
+    pub fn given_state<State>(mut self, state: State) -> TestCase<C, GivenState<C::State>>
+    where
+        State: Into<C::State>,
+    {
         self.completed = true;
         TestCase {
             marker: PhantomData,
-            stage: Some(GivenState { state }),
+            stage: Some(GivenState { state: state.into() }),
             completed: false,
         }
     }

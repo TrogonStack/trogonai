@@ -494,7 +494,7 @@ fn activation_rejects_a_pending_write_persisted_without_a_scope() {
     };
 
     TestCase::<ActivateCredentialWrite>::new()
-        .given_state(state.into())
+        .given_state(state)
         .when(ActivateCredentialWrite::new(metadata(1)))
         .then_error(CredentialDecideError::InvalidProto(
             CredentialProtoDecodeError::InvalidField {

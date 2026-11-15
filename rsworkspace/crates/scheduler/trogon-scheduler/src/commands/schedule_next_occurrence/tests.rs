@@ -214,7 +214,11 @@ fn rejects_occurrence_sequence_overflow() {
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
-        .given_state(enabled_state(Some(u64::MAX), None, MessageField::some(rrule_schedule(3))).into())
+        .given_state(enabled_state(
+            Some(u64::MAX),
+            None,
+            MessageField::some(rrule_schedule(3)),
+        ))
         .when(command(id, now))
         .then_error(ScheduleNextOccurrenceError::OccurrenceSequence {
             source: ScheduleOccurrenceSequenceError::Overflow,
@@ -274,7 +278,7 @@ fn rejects_when_schedule_definition_is_missing() {
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
-        .given_state(enabled_state(None, None, MessageField::default()).into())
+        .given_state(enabled_state(None, None, MessageField::default()))
         .when(command(id, now))
         .then_error(ScheduleNextOccurrenceError::MissingSchedule { id: schedule_id(id) });
 }
@@ -299,7 +303,7 @@ fn rejects_invalid_last_recorded_timestamp() {
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
-        .given_state(state.into())
+        .given_state(state)
         .when(command(id, now))
         .then_error(ScheduleNextOccurrenceError::LastRecordedAt { source });
 }
@@ -310,47 +314,38 @@ fn rejects_malformed_state_values() {
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
-        .given_state(
-            state_v1::State {
-                completed: None,
-                state: None,
-                last_occurrence_at: MessageField::default(),
-                last_occurrence_sequence: None,
-                schedule: MessageField::default(),
-                pending_occurrence_at: MessageField::default(),
-            }
-            .into(),
-        )
+        .given_state(state_v1::State {
+            completed: None,
+            state: None,
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
+        })
         .when(command(id, now))
         .then_error(ScheduleNextOccurrenceError::MissingStateValue);
 
     TestCase::<ScheduleNextOccurrence>::new()
-        .given_state(
-            state_v1::State {
-                completed: None,
-                state: Some(EnumValue::from(123)),
-                last_occurrence_at: MessageField::default(),
-                last_occurrence_sequence: None,
-                schedule: MessageField::default(),
-                pending_occurrence_at: MessageField::default(),
-            }
-            .into(),
-        )
+        .given_state(state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(123)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
+        })
         .when(command(id, now))
         .then_error(ScheduleNextOccurrenceError::UnknownStateValue { value: 123 });
 
     TestCase::<ScheduleNextOccurrence>::new()
-        .given_state(
-            state_v1::State {
-                completed: None,
-                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-                last_occurrence_at: MessageField::default(),
-                last_occurrence_sequence: None,
-                schedule: MessageField::default(),
-                pending_occurrence_at: MessageField::default(),
-            }
-            .into(),
-        )
+        .given_state(state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
+        })
         .when(command(id, now))
         .then_error(ScheduleNextOccurrenceError::UnknownStateValue { value: 0 });
 }

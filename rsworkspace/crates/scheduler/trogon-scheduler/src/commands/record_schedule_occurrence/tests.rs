@@ -254,47 +254,38 @@ fn rejects_malformed_state_values() {
     let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     TestCase::<RecordScheduleOccurrence>::new()
-        .given_state(
-            state_v1::State {
-                completed: None,
-                state: None,
-                last_occurrence_at: MessageField::default(),
-                last_occurrence_sequence: None,
-                schedule: MessageField::default(),
-                pending_occurrence_at: MessageField::default(),
-            }
-            .into(),
-        )
+        .given_state(state_v1::State {
+            completed: None,
+            state: None,
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
+        })
         .when(record(id))
         .then_error(RecordScheduleOccurrenceError::MissingStateValue);
 
     TestCase::<RecordScheduleOccurrence>::new()
-        .given_state(
-            state_v1::State {
-                completed: None,
-                state: Some(EnumValue::from(123)),
-                last_occurrence_at: MessageField::default(),
-                last_occurrence_sequence: None,
-                schedule: MessageField::default(),
-                pending_occurrence_at: MessageField::default(),
-            }
-            .into(),
-        )
+        .given_state(state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(123)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
+        })
         .when(record(id))
         .then_error(RecordScheduleOccurrenceError::UnknownStateValue { value: 123 });
 
     TestCase::<RecordScheduleOccurrence>::new()
-        .given_state(
-            state_v1::State {
-                completed: None,
-                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-                last_occurrence_at: MessageField::default(),
-                last_occurrence_sequence: None,
-                schedule: MessageField::default(),
-                pending_occurrence_at: MessageField::default(),
-            }
-            .into(),
-        )
+        .given_state(state_v1::State {
+            completed: None,
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
+        })
         .when(record(id))
         .then_error(RecordScheduleOccurrenceError::UnknownStateValue { value: 0 });
 }
