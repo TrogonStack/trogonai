@@ -258,7 +258,7 @@ def _crate_targets(
             compile_data = compile_data + _files(settings["compile_data"]),
             crate_features = crate_features,
             crate_root = test["root"],
-            data = data + binary_data + _files(settings["data"]),
+            data = _dedupe(data + binary_data + _files(settings["data"])),
             edition = edition,
             env = test_env,
             proc_macro_deps = normal_proc_macro_deps + test_proc_macro_deps,
