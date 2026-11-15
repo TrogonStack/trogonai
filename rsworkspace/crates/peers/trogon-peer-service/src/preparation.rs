@@ -1,5 +1,6 @@
 use crate::{
     attachment_input::attachment,
+    constants::CONFLICT_RETRY_LIMIT,
     content_ports::ContentOpen,
     identity_ports::BatchIdGenerator,
     peer_access::PeerAccess,
@@ -37,120 +38,158 @@ where
         owner: &TrustedPeerOwner,
         request: proto::PrepareBatchRequest,
     ) -> ApplicationResult<proto::PrepareBatchResponse, S> {
-        let reference = attachment(request.attachment_ref.as_option().ok_or(PeerApplicationError::Input)?)?;
-        let _prompt = request
-            .prompt_id
-            .filter(|value| !value.is_empty())
-            .map(PromptId::new)
-            .transpose()?;
-        let scope = self.authorize(owner, reference.peer_id(), PeerOperation::Prepare)?;
-        let state = self.load(owner, reference.peer_id()).await?;
-        self.live(owner, &reference, &state)?;
-        if let Some(batch) = state.batches.iter().find(|b| !b.acknowledged_at.is_set()) {
-            return self.replay(owner, reference.peer_id(), &state, batch).await;
-        }
-        let now = self.clock.now();
-        let mut eligible = Vec::new();
-        for record in state.inbox_entries() {
-            if !record.entry().disposition.is_set() && record.accepted_at() <= now && now < record.expires_at() {
-                eligible.push(record);
+        let mut retries_left = CONFLICT_RETRY_LIMIT.as_u32();
+        loop {
+            let reference = attachment(request.attachment_ref.as_option().ok_or(PeerApplicationError::Input)?)?;
+            let _prompt = request
+                .prompt_id
+                .clone()
+                .filter(|value| !value.is_empty())
+                .map(PromptId::new)
+                .transpose()?;
+            let scope = self.authorize(owner, reference.peer_id(), PeerOperation::Prepare)?;
+            let (state, candidate_position) = self.load_with_position(owner, reference.peer_id()).await?;
+            self.live(owner, &reference, &state)?;
+            if let Some(batch) = state.batches.iter().find(|b| !b.acknowledged_at.is_set()) {
+                return self.replay(owner, reference.peer_id(), &state, batch).await;
             }
-        }
-        eligible.sort_by_key(|record| record.entry().intake_ordinal);
-        if eligible.is_empty() {
-            return Ok(response(
-                None,
-                Vec::new(),
-                proto::ContentAvailability::CONTENT_AVAILABILITY_AVAILABLE,
-            ));
-        }
-        if now.timestamp_subsec_nanos() >= 1_000_000_000 {
-            return Err(PeerApplicationError::Evidence(MessageError::InvalidState(
-                trogon_peer::EvolveError::TimestampRange {
-                    field: "batch.prepared_at",
-                },
-            )));
-        }
-        let batch_id = self.ids.batch_id()?;
-        let mut batch = proto::PeerBatch {
-            batch_id: Some(batch_id.as_str().to_owned()),
-            prepared_at: MessageField::some(timestamp_from_datetime(&now)),
-            ..Default::default()
-        };
-        let mut messages = Vec::new();
-        let mut selected: Vec<MessageId> = Vec::new();
-        let mut frame = None;
-        for record in eligible.into_iter().take(MAX_MESSAGES) {
-            let metadata = record.metadata();
-            let content = binding(owner, record.content());
-            let Some(text) = self.content.open(&scope, &content).await? else {
-                if messages.is_empty() {
-                    return Ok(response(
-                        None,
-                        Vec::new(),
-                        proto::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE,
-                    ));
+            let now = self.clock.now();
+            let mut eligible = Vec::new();
+            for record in state.inbox_entries() {
+                if !record.entry().disposition.is_set() && record.accepted_at() <= now && now < record.expires_at() {
+                    eligible.push(record);
                 }
-                break;
+            }
+            eligible.sort_by_key(|record| record.entry().intake_ordinal);
+            if eligible.is_empty() {
+                return Ok(response(
+                    None,
+                    Vec::new(),
+                    proto::ContentAvailability::CONTENT_AVAILABILITY_AVAILABLE,
+                ));
+            }
+            if now.timestamp_subsec_nanos() >= 1_000_000_000 {
+                return Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+                    trogon_peer::EvolveError::TimestampRange {
+                        field: "batch.prepared_at",
+                    },
+                )));
+            }
+            let batch_id = self.ids.batch_id()?;
+            let mut batch = proto::PeerBatch {
+                batch_id: Some(batch_id.as_str().to_owned()),
+                prepared_at: MessageField::some(timestamp_from_datetime(&now)),
+                ..Default::default()
             };
-            if text.as_str().len() != content.content().size() as usize {
-                return Err(PeerApplicationError::Scope);
-            }
-            batch.message_ids.push(record.message_id().as_str().to_owned());
-            selected.push(record.message_id().clone());
-            messages.push(proto::PreparedMessage {
-                metadata: MessageField::some(metadata.clone()),
-                text: Some(text.as_str().to_owned()),
-            });
-            match PeerContext::render(&batch, &messages) {
-                Ok(rendered) => frame = Some(rendered),
-                Err(PeerContextError::ContractViolation) if messages.len() > 1 => {
-                    messages.pop();
-                    batch.message_ids.pop();
-                    selected.pop();
+            let mut messages = Vec::new();
+            let mut selected: Vec<MessageId> = Vec::new();
+            let mut frame = None;
+            for record in eligible.into_iter().take(MAX_MESSAGES) {
+                let metadata = record.metadata();
+                let content = binding(owner, record.content());
+                let Some(text) = self.content.open(&scope, &content).await? else {
+                    if messages.is_empty() {
+                        return Ok(response(
+                            None,
+                            Vec::new(),
+                            proto::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE,
+                        ));
+                    }
                     break;
+                };
+                if text.as_str().len() != content.content().size() as usize {
+                    return Err(PeerApplicationError::Scope);
                 }
-                Err(error) => return Err(PeerApplicationError::Context(error)),
+                batch.message_ids.push(record.message_id().as_str().to_owned());
+                selected.push(record.message_id().clone());
+                messages.push(proto::PreparedMessage {
+                    metadata: MessageField::some(metadata.clone()),
+                    text: Some(text.as_str().to_owned()),
+                });
+                match PeerContext::render(&batch, &messages) {
+                    Ok(rendered) => frame = Some(rendered),
+                    Err(PeerContextError::ContractViolation) if messages.len() > 1 => {
+                        messages.pop();
+                        batch.message_ids.pop();
+                        selected.pop();
+                        break;
+                    }
+                    Err(error) => return Err(PeerApplicationError::Context(error)),
+                }
             }
-        }
-        let frame = frame.ok_or(PeerApplicationError::Scope)?;
-        let plan = TrustedBatchPlan::from_renderer(selected, frame.as_str().len())?;
-        let key = PresentationKey::new(owner.tenant().clone(), reference.peer_id().clone(), batch_id.clone());
-        let record = PreparedPresentation::from_port(batch.clone(), messages, frame.as_str().to_owned());
-        self.cache.insert(&key, &record).await?;
-        let command = PrepareBatch::new(owner.clone(), reference.clone(), batch_id, plan, now);
-        match self.execute_message(owner, &command).await {
-            Ok(winner) => {
-                let batch = winner
-                    .batches
-                    .iter()
-                    .find(|b| !b.acknowledged_at.is_set())
-                    .ok_or(PeerApplicationError::Scope)?;
-                self.replay(owner, reference.peer_id(), &winner, batch).await
-            }
-            Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadyPrepared(prepared)))) => {
-                let winning_key = PresentationKey::new(
-                    owner.tenant().clone(),
-                    reference.peer_id().clone(),
-                    BatchId::new(prepared.batch_id.ok_or(PeerApplicationError::Scope)?)?,
-                );
-                if key != winning_key {
+            let frame = frame.ok_or(PeerApplicationError::Scope)?;
+            let plan = TrustedBatchPlan::from_renderer(selected, frame.as_str().len())?;
+            let key = PresentationKey::new(owner.tenant().clone(), reference.peer_id().clone(), batch_id.clone());
+            let record = PreparedPresentation::from_port(batch.clone(), messages, frame.as_str().to_owned());
+            self.cache.insert(&key, &record).await?;
+            let command = PrepareBatch::new(owner.clone(), reference.clone(), batch_id, plan, now);
+            return match self.execute_message_once(owner, &command).await {
+                Ok(winner) => {
+                    let batch = winner
+                        .batches
+                        .iter()
+                        .find(|b| !b.acknowledged_at.is_set())
+                        .ok_or(PeerApplicationError::Scope)?;
+                    self.replay(owner, reference.peer_id(), &winner, batch).await
+                }
+                Err(PeerApplicationError::Message(CommandError::Decide(MessageError::AlreadyPrepared(prepared)))) => {
+                    let winning_key = PresentationKey::new(
+                        owner.tenant().clone(),
+                        reference.peer_id().clone(),
+                        BatchId::new(prepared.batch_id.ok_or(PeerApplicationError::Scope)?)?,
+                    );
+                    if key != winning_key {
+                        self.cache.orphan(&key).await?;
+                    }
+                    let winner = self.load(owner, reference.peer_id()).await?;
+                    self.live(owner, &reference, &winner)?;
+                    let batch = winner
+                        .batches
+                        .iter()
+                        .find(|b| !b.acknowledged_at.is_set())
+                        .ok_or(PeerApplicationError::Scope)?;
+                    self.replay(owner, reference.peer_id(), &winner, batch).await
+                }
+                Err(error)
+                    if matches!(&error, PeerApplicationError::Message(CommandError::Append(source))
+                        if self.store.classify_append_failure(source) == trogon_decider_runtime::AppendFailure::WriteConflict)
+                        || matches!(
+                            &error,
+                            PeerApplicationError::Message(CommandError::Decide(MessageError::Guard(
+                                trogon_peer::HeartbeatError::ClockRegression
+                            )))
+                        ) =>
+                {
+                    let (winner, current_position) = self.load_with_position(owner, reference.peer_id()).await?;
+                    if matches!(&error, PeerApplicationError::Message(CommandError::Decide(_)))
+                        && current_position <= candidate_position
+                    {
+                        self.cache.orphan(&key).await?;
+                        return Err(error);
+                    }
+                    if !winner
+                        .batches
+                        .iter()
+                        .any(|batch| batch.batch_id.as_deref() == Some(key.batch().as_str()))
+                    {
+                        self.cache.orphan(&key).await?;
+                    }
+                    if let Some(batch) = winner.batches.iter().find(|batch| !batch.acknowledged_at.is_set()) {
+                        self.live(owner, &reference, &winner)?;
+                        self.replay(owner, reference.peer_id(), &winner, batch).await
+                    } else if retries_left > 0 {
+                        retries_left -= 1;
+                        continue;
+                    } else {
+                        Err(error)
+                    }
+                }
+                Err(PeerApplicationError::Message(CommandError::Decide(error))) => {
                     self.cache.orphan(&key).await?;
+                    Err(PeerApplicationError::Message(CommandError::Decide(error)))
                 }
-                let winner = self.load(owner, reference.peer_id()).await?;
-                self.live(owner, &reference, &winner)?;
-                let batch = winner
-                    .batches
-                    .iter()
-                    .find(|b| !b.acknowledged_at.is_set())
-                    .ok_or(PeerApplicationError::Scope)?;
-                self.replay(owner, reference.peer_id(), &winner, batch).await
-            }
-            Err(PeerApplicationError::Message(CommandError::Decide(error))) => {
-                self.cache.orphan(&key).await?;
-                Err(PeerApplicationError::Message(CommandError::Decide(error)))
-            }
-            Err(error) => Err(error),
+                Err(error) => Err(error),
+            };
         }
     }
     async fn replay(
