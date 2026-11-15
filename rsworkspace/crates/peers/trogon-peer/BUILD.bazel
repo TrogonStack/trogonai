@@ -5,10 +5,13 @@ workspace_crate(
     deps = ['//rsworkspace/crates/decider/trogon-decider', '//rsworkspace/crates/platform/trogonai-proto'],
     dev_deps = ['//rsworkspace/crates/decider/trogon-decider-runtime'],
     integration_tests = {'attachment': {},
+     'claim_check_validation': {},
+     'content_purposes': {},
      'creation_precondition': {},
      'detach': {},
      'enrollment': {},
      'enrollment_timestamp': {},
      'heartbeat': {},
+     'sending': {},
      'validation': {}},
 )
