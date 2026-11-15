@@ -16,8 +16,8 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
     ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, DialogKind, Error, HookEvent, HookFailureMode, HookOutput,
-    HookRegistration, JsonObject, OutputSchema, Prompt, SystemPrompt, Timeout, TimeoutError, UserDialogRequest,
-    UserDialogResponse,
+    HookRegistration, JsonObject, LocalPlugin, ManagedSettingsDelivery, OutputSchema, PluginDelivery, Prompt, Settings,
+    SystemPrompt, Timeout, TimeoutError, UserDialogRequest, UserDialogResponse,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -338,6 +338,71 @@ async fn a_non_object_initialize_response_is_kept_in_typescript_and_empty_in_pyt
         );
         client.disconnect().await?;
         server.await??;
+    }
+    Ok(())
+}
+
+fn managed_settings() -> Result<ClaudeAgentOptions, serde_json::Error> {
+    Ok(ClaudeAgentOptions {
+        managed_settings: Some(serde_json::from_str::<Settings>(
+            r#"{"permissions":{"allow":["Read"]}}"#,
+        )?),
+        managed_settings_delivery: ManagedSettingsDelivery::Initialize,
+        ..base()
+    })
+}
+
+/// `sdk.mjs` ends the session when managed settings went out with `managedSettingsDelivery: 'initialize'` and the
+/// response does not say `managed_settings_applied: true`, whether the field is false, null or missing.
+#[tokio::test]
+async fn managed_settings_that_were_not_confirmed_end_the_session() -> Result<(), Box<dyn std::error::Error>> {
+    for response in [
+        json!({}),
+        json!({"managed_settings_applied":false}),
+        json!({"managed_settings_applied":null}),
+    ] {
+        let (client, _server) = connect(managed_settings()?, response.clone()).await;
+        let error = refusal(client).await?;
+        assert!(
+            matches!(*error, Error::ManagedSettingsNotApplied),
+            "{response}: {error:?}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn confirmed_managed_settings_keep_the_session() -> Result<(), Box<dyn std::error::Error>> {
+    let (client, server) = connect(managed_settings()?, json!({"managed_settings_applied":true})).await;
+    let client = client?;
+    assert!(client.handle().initialization_result().await?.as_json().is_some());
+    client.send_prompt(Prompt::from("hi")).await?;
+    client.disconnect().await?;
+    server.await??;
+    Ok(())
+}
+
+/// `sdk.mjs` only logs a warning when plugins went out with `pluginDelivery: 'initialize'` and the response does
+/// not say `plugins_applied: true`: the session keeps running with the plugins the process was launched with.
+#[tokio::test]
+async fn plugins_that_were_not_applied_keep_the_session() -> Result<(), Box<dyn std::error::Error>> {
+    for response in [json!({}), json!({"plugins_applied":false})] {
+        let mut options = base();
+        options.plugin_delivery = PluginDelivery::Initialize;
+        options.plugins = vec![LocalPlugin::new("/plugins/one")];
+        let (client, server) = connect(options, response.clone()).await;
+        let client = client?;
+        assert_eq!(
+            client.handle().initialization_result().await?.as_json(),
+            Some(&response)
+        );
+        client.send_prompt(Prompt::from("hi")).await?;
+        client.disconnect().await?;
+        let lines = server.await??;
+        assert!(
+            lines.iter().any(|line| line.contains(r#""type":"user""#)),
+            "{response}: {lines:?}"
+        );
     }
     Ok(())
 }

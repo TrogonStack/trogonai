@@ -82,6 +82,41 @@ fn explicit_cwd_selects_the_project_files() {
     assert_eq!(result["effective"], json!({"model": "elsewhere"}));
 }
 
+/// `wX(oE(t), t.canonicalGitRoot)` upstream: with no launch store root, no project config dir and no canonical git
+/// root, which the SDK never sets, the local settings live under the working directory.
+#[test]
+fn local_settings_live_under_the_working_directory() {
+    let host = cascade_host().file(
+        "/elsewhere/.claude/settings.local.json",
+        r#"{"model":"local-elsewhere"}"#,
+    );
+    let result = resolve(&host, json!({"cwd": "/elsewhere", "settingSources": ["local"]}));
+    assert_eq!(result["effective"], json!({"model": "local-elsewhere"}));
+    assert_eq!(
+        result["provenance"]["model"]["path"],
+        "/elsewhere/.claude/settings.local.json"
+    );
+}
+
+/// `cwd: Eet(e.cwd ?? cwd())` upstream: a relative working directory is made absolute against the process directory
+/// before any source is read, so the resolve error for a relative working directory is never reached.
+#[test]
+fn a_relative_working_directory_is_made_absolute_before_any_source_is_read() {
+    let host = cascade_host()
+        .file("/work/project/sub/.claude/settings.json", r#"{"model":"project-sub"}"#)
+        .file("/work/project/sub/.claude/settings.local.json", r#"{"env":{"C":"3"}}"#);
+    let result = resolve(&host, json!({"cwd": "sub", "settingSources": ["project", "local"]}));
+    assert_eq!(result["effective"], json!({"model": "project-sub", "env": {"C": "3"}}));
+    assert_eq!(
+        result["provenance"]["model"]["path"],
+        "/work/project/sub/.claude/settings.json"
+    );
+    assert_eq!(
+        result["provenance"]["env"]["path"],
+        "/work/project/sub/.claude/settings.local.json"
+    );
+}
+
 #[test]
 fn config_dir_variable_moves_the_user_file() {
     let host = FakeHost::linux()

@@ -1,0 +1,17 @@
+load("@rules_python//python:py_test.bzl", "py_test")
+
+# ADR citations live in markdown, proto and YAML files across the whole
+# repository, in dozens of packages that no glob here can reach, and a new
+# package must be covered the day it lands. So the lint reads the checkout
+# itself through git, outside the sandbox, and is never cached, because Bazel
+# cannot see the files it reads as inputs.
+py_test(
+    name = "lint_adr_refs_test",
+    size = "small",
+    srcs = ["lint_adr_refs.py"],
+    main = "lint_adr_refs.py",
+    tags = [
+        "external",
+        "local",
+    ],
+)
