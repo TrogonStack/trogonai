@@ -3,5 +3,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 workspace_crate(
 
 
-    integration_tests = {'error_contract': {}, 'model_tools': {}, 'prompt_hook': {}},
+    integration_tests = {'error_contract': {},
+     'model_tools': {},
+     'prompt_hook': {'compile_data': ['//plugins/claude/peer:hooks/hooks.json']}},
+    compile_data = ['//plugins/claude/peer:hooks'],
 )

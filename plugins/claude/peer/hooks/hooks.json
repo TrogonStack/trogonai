@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:trogon-peer:peer",
+            "tool": "peer_prompt_hook",
+            "timeout": 2,
+            "input": {
+              "session_id": "${session_id}",
+              "prompt_id": "${prompt_id}",
+              "hook_event_name": "${hook_event_name}"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
