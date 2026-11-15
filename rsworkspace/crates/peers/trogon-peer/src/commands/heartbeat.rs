@@ -132,7 +132,8 @@ impl Decider for Heartbeat {
     }
 }
 
-pub(super) fn guard_live_attachment<'a>(
+/// Reads the live owner-bound attachment from an authentic peer history without deciding a write.
+pub fn guard_live_attachment<'a>(
     state: &'a PeerState,
     owner: &TrustedPeerOwner,
     reference: &AttachmentRef,
