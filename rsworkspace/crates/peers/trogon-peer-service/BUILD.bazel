@@ -3,7 +3,6 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 workspace_crate(
 
 
-
     integration_tests = {'application_tests': {},
      'command_grants': {},
      'content_binding_value': {},
