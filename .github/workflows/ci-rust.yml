@@ -78,9 +78,6 @@ jobs:
         env:
           CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
-      - name: Check formatting
-        run: mise run --skip-tools github:workflows:ci-rust:fmt
-
       - name: Test repo Rust policy lints
         run: mise run github:workflows:ci-rust:dylint-tests
 

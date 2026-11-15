@@ -31,6 +31,7 @@ rust.toolchain(versions = [])
 register_toolchains(
     "@mise_rust//:rust_toolchain",
     "@mise_rust//:cargo_toolchain",
+    "@mise_rust//:rustfmt_toolchain",
 )
 
 # Python targets run on a pinned interpreter that rules_python downloads, so

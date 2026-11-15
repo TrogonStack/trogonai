@@ -69,6 +69,12 @@ jobs:
       - name: Build Bazel targets
         run: mise run --skip-tools github:workflows:ci-bazel:build
 
+      # Lint even when tests or the build fail, so their findings are not
+      # hidden behind an unrelated failure.
+      - name: Lint Bazel targets
+        if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' }}
+        run: mise run --skip-tools github:workflows:ci-bazel:lint
+
       - name: Trim Bazel disk cache
         if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: mise run --skip-tools github:workflows:ci-bazel:trim-disk-cache

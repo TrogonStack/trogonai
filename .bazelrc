@@ -24,11 +24,13 @@ test:ci --test_summary=terse
 common:ci --experimental_disk_cache_gc_max_size=4G
 common:ci --experimental_disk_cache_gc_idle_delay=0s
 
-# Lint aspects (rustfmt, clippy) attach here, so that `bazel build
-# --config=lint //...` checks the same targets CI builds. Empty until those
-# aspects land; --keep_going only defines the config and reports every
-# finding instead of the first.
+# Lint checks run as aspects over the Rust targets, so that `bazel build
+# --config=lint //...` checks the same targets CI builds. The checks are an
+# output group, so a build with this config also fails on unformatted sources;
+# --keep_going reports every finding instead of the first.
 build:lint --keep_going
+build:lint --aspects=//.config/bazel:rustfmt.bzl%rustfmt_aspect
+build:lint --output_groups=+rustfmt_checks
 
 # CI runs the tests through `bazel coverage` and builds with this config too,
 # so both commands share one configuration and its cached actions. Only the

@@ -28,6 +28,7 @@ rust.toolchain(versions = [])
 register_toolchains(
     "@mise_rust//:rust_toolchain",
     "@mise_rust//:cargo_toolchain",
+    "@mise_rust//:rustfmt_toolchain",
 )
 
 # Registered in the root module, ahead of the toolchains rules_nodejs
@@ -49,7 +50,7 @@ installation hint.
 | any executable tool | `@mise//tools/<executable>`, for example `@mise//tools/buf` |
 | `go` | `@mise_go//:ROOT`, for `go_sdk.wrap` in `rules_go` |
 | `node` | `@mise_node//:node_toolchain` and `@mise_node//:node_runtime_toolchain` for `rules_nodejs`, and so for `rules_js` and `rules_ts`, plus `@mise_node//:ROOT` |
-| `rust` | `@mise_rust//:rust_toolchain` and `@mise_rust//:cargo_toolchain` for `rules_rust`, plus `@mise_rust//:ROOT` for crate_universe `host_tools` |
+| `rust` | `@mise_rust//:rust_toolchain`, `@mise_rust//:cargo_toolchain` and `@mise_rust//:rustfmt_toolchain` for `rules_rust`, plus `@mise_rust//:ROOT` for crate_universe `host_tools` |
 
 The version comes from the tool's entry in the configuration. When an entry
 lists several versions, the first one is used. The executable name defaults to

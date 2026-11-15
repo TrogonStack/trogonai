@@ -126,7 +126,7 @@ def _mise_rust_impl(rctx):
         fail("rust@{} for {} is not installed; run `mise install rust`".format(version, host.triple))
     source = source.realpath
     rctx.watch_tree(source)
-    for relative in ["bin/rustc", "bin/cargo", "lib/rustlib/{}/bin/llvm-cov".format(host.triple)]:
+    for relative in ["bin/rustc", "bin/cargo", "bin/rustfmt", "lib/rustlib/{}/bin/llvm-cov".format(host.triple)]:
         if not source.get_child(relative).exists:
             fail("The Rust toolchain at {} lacks {}; check the configured components".format(source, relative))
     for entry in source.readdir():

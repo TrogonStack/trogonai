@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Check rsworkspace formatting"
-#MISE dir="rsworkspace"
-set -euo pipefail
-
-exec cargo fmt --all -- --check
