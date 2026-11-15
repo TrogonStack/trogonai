@@ -1,0 +1,22 @@
+[package]
+name = "trogon-key-management"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Provider-neutral envelope-wrapping contract and conformance harness"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-support = ["dep:aws-lc-rs"]
+
+[dependencies]
+thiserror = { workspace = true }
+zeroize = "=1.8.2"
+aws-lc-rs = { version = "=1.18.1", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
