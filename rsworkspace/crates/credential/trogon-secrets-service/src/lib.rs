@@ -64,6 +64,15 @@
 //! so a redelivered event is stored once. A message it cannot read is an
 //! [`InvalidationSourceError`] for the caller to settle, never a skip.
 //!
+//! [`InvalidationPublisher`] is that caller: it reads the credential stream
+//! through the shared durable [`INVALIDATION_PUBLISHER_DURABLE`], stores each
+//! notice on the invalidation stream, and acknowledges the event only once the
+//! notice is stored. Each [`CredentialEventDelivery`] is settled by the policy
+//! on the publisher's docs, so an event it cannot publish is retried or
+//! terminated without holding back the revocations after it. A delivery that
+//! does not say where it was stored is a [`DeliveryInfoError`], and a publisher
+//! that stops reading before shutdown is an [`InvalidationPublisherError`].
+//!
 //! # Features
 //!
 //! - `test-support`: adds `InMemoryCredentialStates` and
@@ -76,10 +85,12 @@ mod admission_limit_error;
 mod audit_section_wire;
 mod config_setting;
 mod constants;
+mod credential_event_delivery;
 mod credential_release;
 mod credential_release_error;
 mod credential_state_read;
 mod credential_state_read_error;
+mod delivery_info_error;
 mod denial_reason;
 mod denial_record;
 mod error_chain;
@@ -89,6 +100,8 @@ mod fixtures;
 mod in_memory_credential_states;
 mod invalidation_notice;
 mod invalidation_outcome;
+mod invalidation_publisher;
+mod invalidation_publisher_error;
 mod invalidation_source_error;
 mod invalidation_stream;
 mod invalidation_stream_mismatch_error;
@@ -156,13 +169,15 @@ pub use admission_limit::AdmissionLimit;
 pub use admission_limit_error::AdmissionLimitError;
 pub use config_setting::ConfigSetting;
 pub use constants::{
-    INVALIDATION_REPLAY_WINDOW, INVALIDATION_STREAM, INVALIDATION_SUBJECTS, RELEASE_DEADLINE, RELEASE_SUBSCRIPTION,
-    RELEASE_TTL_BOUND, THROTTLED_RETRY_AFTER, UNBUNDLED_GENERATION,
+    INVALIDATION_PUBLISHER_DURABLE, INVALIDATION_REPLAY_WINDOW, INVALIDATION_STREAM, INVALIDATION_SUBJECTS,
+    RELEASE_DEADLINE, RELEASE_SUBSCRIPTION, RELEASE_TTL_BOUND, THROTTLED_RETRY_AFTER, UNBUNDLED_GENERATION,
 };
+pub use credential_event_delivery::CredentialEventDelivery;
 pub use credential_release::CredentialRelease;
 pub use credential_release_error::CredentialReleaseError;
 pub use credential_state_read::CredentialStateRead;
 pub use credential_state_read_error::CredentialStateReadError;
+pub use delivery_info_error::DeliveryInfoError;
 pub use denial_reason::DenialReason;
 pub use denial_record::DenialRecord;
 pub use error_chain::error_chain;
@@ -170,6 +185,8 @@ pub use error_chain::error_chain;
 pub use in_memory_credential_states::InMemoryCredentialStates;
 pub use invalidation_notice::InvalidationNotice;
 pub use invalidation_outcome::InvalidationOutcome;
+pub use invalidation_publisher::InvalidationPublisher;
+pub use invalidation_publisher_error::InvalidationPublisherError;
 pub use invalidation_source_error::InvalidationSourceError;
 pub use invalidation_stream::InvalidationStream;
 pub use invalidation_stream_mismatch_error::InvalidationStreamMismatchError;
