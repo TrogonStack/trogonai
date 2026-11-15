@@ -6,16 +6,20 @@ use std::{
     time::Duration,
 };
 use trogon_nats::jetstream::{NativeKvKey, NativeKvScope, StrictNativeStreamReader};
-use trogon_nats::{NatsToken, connect_once_with_inbox_prefix, test_support::TlsJetStreamCluster};
+use trogon_nats::{NatsConfig, NatsToken, connect_once_with_inbox_prefix, test_support::TlsJetStreamCluster};
 use trogon_workload_registration::{
     ProducerConfig, RegistrationArchive, RegistrationArchiveCapacity, RegistrationArchiveConfig,
-    RegistrationArchiveProfile, RegistrationArchiveRole, RegistrationArtifactKind, Sha256Digest,
+    RegistrationArchiveProfile, RegistrationArchiveRole, RegistrationArtifactKind, RegistrationRole, Sha256Digest,
+    StreamProfile,
 };
 
 pub struct RegistrationArchiveFixture {
     pub archive: Arc<RegistrationArchive>,
+    pub archive_config: RegistrationArchiveConfig,
     pub profile: RegistrationArchiveProfile,
     pub config: ProducerConfig,
+    pub admin_config: NatsConfig,
+    pub reader_config: NatsConfig,
     pub native: Context,
     pub admin: Context,
     pub reader: StrictNativeStreamReader,
@@ -23,6 +27,22 @@ pub struct RegistrationArchiveFixture {
 }
 impl RegistrationArchiveFixture {
     pub async fn start(records: u64) -> Self {
+        Self::start_with_users(records, |_| Vec::new()).await
+    }
+    pub async fn start_with_legacy(records: u64) -> Self {
+        Self::start_with_users(records, |config| {
+            let legacy = StreamProfile::new(config);
+            vec![(
+                NatsToken::new("legacy-writer").unwrap(),
+                serde_json::json!({"publish": legacy.publish_allowlist(RegistrationRole::Publisher), "subscribe": legacy.subscribe_allowlist(RegistrationRole::Publisher)}),
+            )]
+        })
+        .await
+    }
+    async fn start_with_users(
+        records: u64,
+        extra_users: impl FnOnce(&ProducerConfig) -> Vec<(NatsToken, serde_json::Value)>,
+    ) -> Self {
         let config = ProducerConfig::new(
             "acme",
             "project",
@@ -42,7 +62,7 @@ impl RegistrationArchiveFixture {
         let profile = RegistrationArchiveProfile::new(&archive_config).unwrap();
         let writer = NatsToken::new("archive-writer").unwrap();
         let readonly = NatsToken::new("archive-reader").unwrap();
-        let users = vec![
+        let mut users = vec![
             (
                 writer.clone(),
                 serde_json::json!({"publish": profile.publish_allowlist(RegistrationArchiveRole::Writer), "subscribe": profile.subscribe_allowlist(RegistrationArchiveRole::Writer).unwrap()}),
@@ -52,6 +72,7 @@ impl RegistrationArchiveFixture {
                 serde_json::json!({"publish": profile.publish_allowlist(RegistrationArchiveRole::Reader), "subscribe": profile.subscribe_allowlist(RegistrationArchiveRole::Reader).unwrap()}),
             ),
         ];
+        users.extend(extra_users(&config));
         let cluster = TlsJetStreamCluster::start(&users).await;
         let admin_config = cluster.config(&NatsToken::new("fixture-admin").unwrap()).unwrap();
         let admin_client = connect_once_with_inbox_prefix(
@@ -93,18 +114,24 @@ impl RegistrationArchiveFixture {
             Duration::from_secs(5),
         )
         .unwrap();
-        let archive = RegistrationArchive::connect(archive_config, writer_config)
+        let archive = RegistrationArchive::connect(archive_config.clone(), writer_config)
             .await
             .unwrap();
         Self {
             archive,
+            archive_config,
             profile,
             config,
+            admin_config,
+            reader_config: readonly_config,
             native,
             admin,
             reader,
             _cluster: cluster,
         }
+    }
+    pub fn legacy_config(&self) -> NatsConfig {
+        self._cluster.config(&NatsToken::new("legacy-writer").unwrap()).unwrap()
     }
     pub fn scope(&self) -> NativeKvScope {
         NativeKvScope::new(NatsToken::new(self.profile.bucket(RegistrationArtifactKind::OriginalApproval)).unwrap())

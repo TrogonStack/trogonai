@@ -54,8 +54,8 @@ pub enum RegistrationArchiveError {
     NativeRead(#[source] trogon_nats::jetstream::NativeStreamReadError),
     #[error("archive original KV operation metadata is malformed")]
     NativeOperation(#[source] trogon_nats::jetstream::NativeKvReadError),
-    #[error("neutral archive create is not implemented")]
-    Unsupported,
+    #[error("archive reader connections cannot create artifacts")]
+    ReadOnly,
 }
 impl std::fmt::Debug for RegistrationArchiveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

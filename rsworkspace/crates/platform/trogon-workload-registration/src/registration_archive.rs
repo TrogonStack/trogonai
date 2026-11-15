@@ -37,6 +37,7 @@ mod tests;
 pub struct RegistrationArchive {
     context: Context,
     profile: RegistrationArchiveProfile,
+    role: RegistrationArchiveRole,
     connection: RegistrationConnection,
     sources: [RegistrationArchiveSource; 2],
     #[cfg(test)]
@@ -55,6 +56,17 @@ fn require_time_remaining(deadline: Instant) -> Result<(), Error> {
 }
 impl RegistrationArchive {
     pub async fn connect(config: RegistrationArchiveConfig, nats: NatsConfig) -> Result<Arc<Self>, Error> {
+        Self::connect_with_role(config, nats, RegistrationArchiveRole::Writer).await
+    }
+    /// Reader reply permissions do not grant artifact creation through this connection.
+    pub async fn connect_reader(config: RegistrationArchiveConfig, nats: NatsConfig) -> Result<Arc<Self>, Error> {
+        Self::connect_with_role(config, nats, RegistrationArchiveRole::Reader).await
+    }
+    async fn connect_with_role(
+        config: RegistrationArchiveConfig,
+        nats: NatsConfig,
+        role: RegistrationArchiveRole,
+    ) -> Result<Arc<Self>, Error> {
         let profile = RegistrationArchiveProfile::new(&config)?;
         if !matches!(
             (&nats.auth, &nats.tls),
@@ -77,7 +89,7 @@ impl RegistrationArchive {
                 &nats,
                 nats.auth.clone(),
                 crate::constants::OPERATION_TIMEOUT,
-                &profile.inbox_prefix(RegistrationArchiveRole::Writer)?,
+                &profile.inbox_prefix(role)?,
                 crate::constants::RECONNECT_QUARANTINE,
             )
             .await
@@ -104,6 +116,7 @@ impl RegistrationArchive {
             Ok(Arc::new(Self {
                 context,
                 profile,
+                role,
                 connection,
                 sources,
                 #[cfg(test)]
@@ -231,6 +244,9 @@ impl RegistrationArchive {
         self: &Arc<Self>,
         artifact: RegistrationArtifact,
     ) -> Result<RegistrationArchiveCreate, Error> {
+        if self.role != RegistrationArchiveRole::Writer {
+            return Err(Error::ReadOnly);
+        }
         let deadline = Instant::now() + crate::constants::OPERATION_TIMEOUT;
         let kind = artifact.kind();
         if let Some((existing, revision)) = self.read(kind, artifact.digest(), None, deadline).await? {

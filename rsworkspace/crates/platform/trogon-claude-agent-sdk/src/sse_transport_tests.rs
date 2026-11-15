@@ -372,6 +372,7 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
     let handle = transport.handle();
     transport.connect().await?;
     let mut results = Vec::new();
+    let mut waiting_writes = Vec::new();
     for action in spec["actions"].as_array().into_iter().flatten() {
         let name = action[0].as_str().unwrap_or_default();
         let argument = &action[1];
@@ -396,7 +397,6 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
             }
             "writeMany" => {
                 let mut resolved = 0;
-                let mut waiting = Vec::new();
                 for n in 0..argument.as_u64().unwrap_or_default() {
                     let shared = Arc::clone(&transport.shared);
                     let line = json!({"type": "user", "n": n}).to_string();
@@ -412,7 +412,7 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
                                 result?;
                                 resolved += 1;
                             }
-                            std::task::Poll::Pending => waiting.push(write),
+                            std::task::Poll::Pending => waiting_writes.push(write),
                         }
                     }
                 }
@@ -444,6 +444,12 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
             }
             "close" => {
                 transport.close().await?;
+                for mut write in waiting_writes.drain(..) {
+                    let std::task::Poll::Ready(result) = futures_util::poll!(write.as_mut()) else {
+                        return Err("closed transport left a queued write pending".into());
+                    };
+                    result?;
+                }
                 sleep(Duration::from_millis(10)).await;
                 json!({"closed": true})
             }

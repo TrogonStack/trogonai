@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::{
-    num::{NonZeroU64, NonZeroUsize},
+    num::NonZeroUsize,
     time::{Duration, SystemTime},
 };
 
@@ -12,14 +12,12 @@ use ed25519_dalek::{Signer, SigningKey};
 use registration_archive_fixture::RegistrationArchiveFixture;
 use trogon_audit::{AuditName, AuditWriter, MemorySink, Stamper, WriterConfig, WriterId, WriterIdentity};
 use trogon_nats::jetstream::{
-    NativeKvExpectation, NativeKvKey, NativeKvScope, NativeKvUpdate, StrictNativeStreamReader,
-    conditional_native_kv_update,
+    NativeKvExpectation, NativeKvKey, NativeKvScope, NativeKvUpdate, conditional_native_kv_update,
 };
-use trogon_nats::{NatsToken, connect_once_with_inbox_prefix, test_support::TlsJetStreamCluster};
+use trogon_nats::{NatsToken, connect_once_with_inbox_prefix};
 use trogon_std::{SystemClock, UuidV7Generator};
 use trogon_workload_registration::{
-    ApprovedRegistration, ProducerConfig, RegistrationArchive, RegistrationArchiveCapacity, RegistrationArchiveConfig,
-    RegistrationArchiveCreate, RegistrationArchiveError, RegistrationArchiveProfile, RegistrationArchiveRole,
+    ApprovedRegistration, ProducerConfig, RegistrationArchive, RegistrationArchiveCreate, RegistrationArchiveError,
     RegistrationArtifact, RegistrationArtifactInput, RegistrationArtifactKind, RegistrationProducer, RegistrationRole,
     StreamProfile, approval_signing_bytes, provision_streams,
 };
@@ -90,87 +88,20 @@ fn writer() -> AuditWriter<MemorySink> {
 
 #[tokio::test]
 async fn archive_create_requires_actual_ack_after_native_original_bytes_and_rolling_head_controls() {
-    let config = ProducerConfig::new(
-        "acme",
-        "project",
-        "identity.example.org",
-        NonZeroU64::MIN,
-        SigningKey::from_bytes(&[7; 32]).verifying_key(),
-    )
-    .unwrap();
-    let archive_config = RegistrationArchiveConfig::new(
-        config.clone(),
-        RegistrationArchiveCapacity::new(RegistrationArtifactKind::OriginalApproval, 16, 4 * 1024 * 1024).unwrap(),
-        RegistrationArchiveCapacity::new(RegistrationArtifactKind::BootstrapManifest, 16, 4 * 1024 * 1024).unwrap(),
-    )
-    .unwrap();
-    let profile = RegistrationArchiveProfile::new(&archive_config).unwrap();
+    let fixture = RegistrationArchiveFixture::start_with_legacy(16).await;
+    let config = fixture.config.clone();
+    let profile = &fixture.profile;
     let legacy = StreamProfile::new(&config);
-    let archive_writer = NatsToken::new("archive-writer").unwrap();
-    let archive_reader = NatsToken::new("archive-reader").unwrap();
-    let legacy_writer = NatsToken::new("legacy-writer").unwrap();
-    let users = vec![
-        (
-            archive_writer.clone(),
-            serde_json::json!({"publish": profile.publish_allowlist(RegistrationArchiveRole::Writer), "subscribe": profile.subscribe_allowlist(RegistrationArchiveRole::Writer).unwrap()}),
-        ),
-        (
-            archive_reader.clone(),
-            serde_json::json!({"publish": profile.publish_allowlist(RegistrationArchiveRole::Reader), "subscribe": profile.subscribe_allowlist(RegistrationArchiveRole::Reader).unwrap()}),
-        ),
-        (
-            legacy_writer.clone(),
-            serde_json::json!({"publish": legacy.publish_allowlist(RegistrationRole::Publisher), "subscribe": legacy.subscribe_allowlist(RegistrationRole::Publisher)}),
-        ),
-    ];
-    let cluster = TlsJetStreamCluster::start(&users).await;
-    let admin = cluster.config(&NatsToken::new("fixture-admin").unwrap()).unwrap();
-    let admin_client = connect_once_with_inbox_prefix(
-        &admin,
-        admin.auth.clone(),
-        Duration::from_secs(5),
-        &profile.inbox_prefix(RegistrationArchiveRole::Provisioner).unwrap(),
-    )
-    .await
-    .unwrap();
-    let admin_context = async_nats::jetstream::new(admin_client);
-    for kind in RegistrationArtifactKind::ALL {
-        bounded(admin_context.create_stream(profile.stream_config(kind)))
-            .await
-            .unwrap();
-    }
-    provision_streams(&admin, &config).await.unwrap();
-    let writer_config = cluster.config(&archive_writer).unwrap();
-    let writer_client = connect_once_with_inbox_prefix(
-        &writer_config,
-        writer_config.auth.clone(),
-        Duration::from_secs(5),
-        &profile.inbox_prefix(RegistrationArchiveRole::Writer).unwrap(),
-    )
-    .await
-    .unwrap();
-    let native = async_nats::jetstream::new(writer_client);
-    let reader_config = cluster.config(&archive_reader).unwrap();
-    let reader_client = connect_once_with_inbox_prefix(
-        &reader_config,
-        reader_config.auth.clone(),
-        Duration::from_secs(5),
-        &profile.inbox_prefix(RegistrationArchiveRole::Reader).unwrap(),
-    )
-    .await
-    .unwrap();
-    let reader = StrictNativeStreamReader::new(
-        async_nats::jetstream::new(reader_client),
-        NonZeroUsize::new(RegistrationArtifactKind::OriginalApproval.maximum_bytes()).unwrap(),
-        Duration::from_secs(5),
-    )
-    .unwrap();
+    let legacy_config = fixture.legacy_config();
+    let native = &fixture.native;
+    let reader = &fixture.reader;
+    provision_streams(&fixture.admin_config, &config).await.unwrap();
     let (first, original) = approval(&config, 1);
     let scope = NativeKvScope::new(NatsToken::new(profile.bucket(RegistrationArtifactKind::OriginalApproval)).unwrap())
         .unwrap();
     let key = NativeKvKey::new(original.digest().to_hex()).unwrap();
     let acknowledged = bounded(conditional_native_kv_update(
-        &native,
+        native,
         NativeKvUpdate::new(
             &scope,
             &key,
@@ -192,13 +123,11 @@ async fn archive_create_requires_actual_ack_after_native_original_bytes_and_roll
         trogon_workload_registration::Sha256Digest::hash(&stored.payload),
         original.digest()
     );
-    let mut producer =
-        RegistrationProducer::claim(config.clone(), cluster.config(&legacy_writer).unwrap(), first, writer())
-            .await
-            .unwrap();
+    let mut producer = RegistrationProducer::claim(config.clone(), legacy_config.clone(), first, writer())
+        .await
+        .unwrap();
     let (second, requested) = approval(&config, 2);
     let rolling = producer.apply(second.clone()).await.unwrap();
-    let legacy_config = cluster.config(&legacy_writer).unwrap();
     let legacy_client = connect_once_with_inbox_prefix(
         &legacy_config,
         legacy_config.auth.clone(),
@@ -225,107 +154,34 @@ async fn archive_create_requires_actual_ack_after_native_original_bytes_and_roll
     assert_eq!(retained.payload, *original.bytes());
     assert_eq!(retained.sequence, acknowledged.get());
     assert_ne!(original.digest(), requested.digest());
-    let archive = RegistrationArchive::connect(archive_config, writer_config)
+    let archive = &fixture.archive;
+    let RegistrationArchiveCreate::Acknowledged(receipt) = archive.create_once(requested.clone()).await.unwrap() else {
+        panic!("a distinct never-created digest cannot be an existing observation")
+    };
+    assert_eq!(receipt.artifact(), &requested);
+    assert_eq!(receipt.native_revision().get(), 2);
+    let requested_key = NativeKvKey::new(requested.digest().to_hex()).unwrap();
+    let actual = bounded(reader.read_kv_sequence(&scope, &requested_key, receipt.native_revision()))
         .await
-        .expect("actual scoped immutable archive profile and connection");
-    match archive.create_once(requested.clone()).await {
-        Err(RegistrationArchiveError::Unsupported) => {
-            panic!("actual native ACK/raw-byte/rolling-head controls passed; neutral archive create is unsupported")
-        }
-        Err(_) => panic!("archive failed before the intended missing-create assertion"),
-        Ok(RegistrationArchiveCreate::Acknowledged(receipt)) => {
-            assert_eq!(receipt.artifact(), &requested);
-            assert_eq!(receipt.native_revision().get(), 2);
-            let requested_key = NativeKvKey::new(requested.digest().to_hex()).unwrap();
-            let actual = bounded(reader.read_kv_sequence(&scope, &requested_key, receipt.native_revision()))
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(actual.payload, *requested.bytes());
-            assert_eq!(actual.sequence, receipt.native_revision().get());
-        }
-        Ok(RegistrationArchiveCreate::ExistingExact(_)) => {
-            panic!("a distinct never-created digest cannot be an existing observation")
-        }
-    }
+        .unwrap()
+        .unwrap();
+    assert_eq!(actual.payload, *requested.bytes());
+    assert_eq!(actual.sequence, receipt.native_revision().get());
 }
 
 #[tokio::test]
 async fn archive_only_create_requires_native_ack_and_exact_original_byte_receipt() {
-    let config = ProducerConfig::new(
-        "acme",
-        "project",
-        "identity.example.org",
-        NonZeroU64::MIN,
-        SigningKey::from_bytes(&[7; 32]).verifying_key(),
-    )
-    .unwrap();
-    let archive_config = RegistrationArchiveConfig::new(
-        config.clone(),
-        RegistrationArchiveCapacity::new(RegistrationArtifactKind::OriginalApproval, 16, 4 * 1024 * 1024).unwrap(),
-        RegistrationArchiveCapacity::new(RegistrationArtifactKind::BootstrapManifest, 16, 4 * 1024 * 1024).unwrap(),
-    )
-    .unwrap();
-    let profile = RegistrationArchiveProfile::new(&archive_config).unwrap();
-    let writer_id = NatsToken::new("archive-writer").unwrap();
-    let reader_id = NatsToken::new("archive-reader").unwrap();
-    let users = vec![
-        (
-            writer_id.clone(),
-            serde_json::json!({"publish": profile.publish_allowlist(RegistrationArchiveRole::Writer), "subscribe": profile.subscribe_allowlist(RegistrationArchiveRole::Writer).unwrap()}),
-        ),
-        (
-            reader_id.clone(),
-            serde_json::json!({"publish": profile.publish_allowlist(RegistrationArchiveRole::Reader), "subscribe": profile.subscribe_allowlist(RegistrationArchiveRole::Reader).unwrap()}),
-        ),
-    ];
-    let cluster = TlsJetStreamCluster::start(&users).await;
-    let admin = cluster.config(&NatsToken::new("fixture-admin").unwrap()).unwrap();
-    let admin_client = connect_once_with_inbox_prefix(
-        &admin,
-        admin.auth.clone(),
-        Duration::from_secs(5),
-        &profile.inbox_prefix(RegistrationArchiveRole::Provisioner).unwrap(),
-    )
-    .await
-    .unwrap();
-    let admin_context = async_nats::jetstream::new(admin_client);
-    for kind in RegistrationArtifactKind::ALL {
-        bounded(admin_context.create_stream(profile.stream_config(kind)))
-            .await
-            .unwrap();
-    }
-    let writer_config = cluster.config(&writer_id).unwrap();
-    let writer_client = connect_once_with_inbox_prefix(
-        &writer_config,
-        writer_config.auth.clone(),
-        Duration::from_secs(5),
-        &profile.inbox_prefix(RegistrationArchiveRole::Writer).unwrap(),
-    )
-    .await
-    .unwrap();
-    let native = async_nats::jetstream::new(writer_client);
-    let reader_config = cluster.config(&reader_id).unwrap();
-    let reader_client = connect_once_with_inbox_prefix(
-        &reader_config,
-        reader_config.auth.clone(),
-        Duration::from_secs(5),
-        &profile.inbox_prefix(RegistrationArchiveRole::Reader).unwrap(),
-    )
-    .await
-    .unwrap();
-    let reader = StrictNativeStreamReader::new(
-        async_nats::jetstream::new(reader_client),
-        NonZeroUsize::new(RegistrationArtifactKind::OriginalApproval.maximum_bytes()).unwrap(),
-        Duration::from_secs(5),
-    )
-    .unwrap();
+    let fixture = RegistrationArchiveFixture::start(16).await;
+    let config = fixture.config.clone();
+    let profile = &fixture.profile;
+    let native = &fixture.native;
+    let reader = &fixture.reader;
     let (_, original) = approval(&config, 1);
     let scope = NativeKvScope::new(NatsToken::new(profile.bucket(RegistrationArtifactKind::OriginalApproval)).unwrap())
         .unwrap();
     let key = NativeKvKey::new(original.digest().to_hex()).unwrap();
     let acknowledged = bounded(conditional_native_kv_update(
-        &native,
+        native,
         NativeKvUpdate::new(
             &scope,
             &key,
@@ -349,32 +205,19 @@ async fn archive_only_create_requires_native_ack_and_exact_original_byte_receipt
     );
     let (_, requested) = approval(&config, 2);
     assert_ne!(original.digest(), requested.digest());
-    let archive = RegistrationArchive::connect(archive_config, writer_config)
+    let archive = &fixture.archive;
+    let RegistrationArchiveCreate::Acknowledged(receipt) = archive.create_once(requested.clone()).await.unwrap() else {
+        panic!("a distinct never-created digest cannot be an existing observation")
+    };
+    assert_eq!(receipt.artifact(), &requested);
+    assert_eq!(receipt.native_revision().get(), 2);
+    let requested_key = NativeKvKey::new(requested.digest().to_hex()).unwrap();
+    let actual = bounded(reader.read_kv_sequence(&scope, &requested_key, receipt.native_revision()))
         .await
-        .expect("actual scoped immutable archive profile and connection");
-    match archive.create_once(requested.clone()).await {
-        Err(RegistrationArchiveError::Unsupported) => {
-            panic!("actual archive-only native ACK/raw-byte controls passed; neutral archive create is unsupported")
-        }
-        Err(RegistrationArchiveError::NativeRead(trogon_nats::jetstream::NativeStreamReadError::InvalidBinding)) => {
-            panic!("causal archive KV current-read RED: typed NativeRead InvalidBinding after actual native controls")
-        }
-        Err(_) => panic!("archive failed before the distinct missing-create assertion"),
-        Ok(RegistrationArchiveCreate::Acknowledged(receipt)) => {
-            assert_eq!(receipt.artifact(), &requested);
-            assert_eq!(receipt.native_revision().get(), 2);
-            let requested_key = NativeKvKey::new(requested.digest().to_hex()).unwrap();
-            let actual = bounded(reader.read_kv_sequence(&scope, &requested_key, receipt.native_revision()))
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(actual.payload, *requested.bytes());
-            assert_eq!(actual.sequence, receipt.native_revision().get());
-        }
-        Ok(RegistrationArchiveCreate::ExistingExact(_)) => {
-            panic!("a distinct never-created digest cannot be an existing observation")
-        }
-    }
+        .unwrap()
+        .unwrap();
+    assert_eq!(actual.payload, *requested.bytes());
+    assert_eq!(actual.sequence, receipt.native_revision().get());
 }
 
 #[path = "support/registration_archive_fixture.rs"]
@@ -591,4 +434,70 @@ async fn neutral_archive_preserves_ack_bytes_existing_observations_integrity_cap
     let replacement_state = bounded(replacement.get_info()).await.unwrap();
     assert_eq!(replacement_state.state.messages, 0);
     assert_eq!(replacement_state.state.last_sequence, 0);
+}
+
+#[tokio::test]
+async fn reader_credentials_connect_and_revalidate_both_artifact_kinds() {
+    let fixture = RegistrationArchiveFixture::start(4).await;
+    for kind in RegistrationArtifactKind::ALL {
+        let artifact = RegistrationArtifact::try_from(RegistrationArtifactInput {
+            kind,
+            bytes: Bytes::from_static(b"original public artifact retained for a reader"),
+        })
+        .unwrap();
+        let RegistrationArchiveCreate::Acknowledged(receipt) =
+            fixture.archive.create_once(artifact.clone()).await.unwrap()
+        else {
+            panic!("fresh artifact must have its own native acknowledgement")
+        };
+        assert_eq!(receipt.artifact(), &artifact);
+    }
+    let reader = tokio::time::timeout(
+        Duration::from_secs(10),
+        RegistrationArchive::connect_reader(fixture.archive_config.clone(), fixture.reader_config.clone()),
+    )
+    .await
+    .expect("bounded archive reader connection")
+    .expect("reader credentials must connect using their allowed reply inbox");
+    let writer_attempt = tokio::time::timeout(
+        Duration::from_secs(10),
+        RegistrationArchive::connect(fixture.archive_config.clone(), fixture.reader_config.clone()),
+    )
+    .await
+    .expect("bounded writer connection attempt");
+    assert!(
+        writer_attempt.is_err(),
+        "reader credentials cannot acquire writer reply permissions"
+    );
+    for kind in RegistrationArtifactKind::ALL {
+        let artifact = RegistrationArtifact::try_from(RegistrationArtifactInput {
+            kind,
+            bytes: Bytes::from_static(b"original public artifact retained for a reader"),
+        })
+        .unwrap();
+        let observed = bounded(reader.observe_exact(kind, artifact.digest())).await.unwrap();
+        assert_eq!(observed.artifact(), &artifact);
+        bounded(observed.revalidate_original()).await.unwrap();
+        let stream = bounded(fixture.admin.get_stream(fixture.profile.stream_config(kind).name))
+            .await
+            .unwrap();
+        let before = stream.cached_info().state.clone();
+        assert!(matches!(
+            bounded(reader.create_once(artifact)).await,
+            Err(RegistrationArchiveError::ReadOnly)
+        ));
+        let absent = RegistrationArtifact::try_from(RegistrationArtifactInput {
+            kind,
+            bytes: Bytes::from_static(b"new public artifact a reader cannot create"),
+        })
+        .unwrap();
+        assert!(matches!(
+            bounded(reader.create_once(absent)).await,
+            Err(RegistrationArchiveError::ReadOnly)
+        ));
+        let after = bounded(stream.get_info()).await.unwrap().state;
+        assert_eq!(after.messages, before.messages);
+        assert_eq!(after.bytes, before.bytes);
+        assert_eq!(after.last_sequence, before.last_sequence);
+    }
 }

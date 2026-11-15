@@ -113,6 +113,10 @@ uses replicated file storage, rejects new records at capacity and retains existi
 records without expiry or eviction. Its connection requires authenticated TLS and
 preprovisioned archive streams with separate archive permissions.
 
+Use `RegistrationArchive::connect` with Writer credentials and
+`RegistrationArchive::connect_reader` with Reader credentials. Reader connections
+use their own reply namespace and reject `create_once` before any native operation.
+
 Artifact input becomes immutable original bytes and their SHA-256 digest. Its
 kind selects bounds and storage scope; it does not validate protobuf structure,
 an approval signature, a contract definition or manifest lineage.
