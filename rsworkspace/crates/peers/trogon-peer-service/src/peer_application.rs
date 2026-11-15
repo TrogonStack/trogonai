@@ -1,7 +1,6 @@
 use crate::peer_application_error::PeerApplicationError;
 use trogon_decider_runtime::{StreamAppend, StreamRead};
-use trogon_peer::{PeerId, TrustedPeerOwner};
-use trogonai_proto::peers::v1alpha1 as proto;
+use trogon_peer::PeerId;
 pub type ApplicationResult<T, S> =
     Result<T, PeerApplicationError<<S as StreamRead<PeerId>>::Error, <S as StreamAppend<PeerId>>::Error>>;
 pub struct PeerApplication<S, P, C, Content, Cache, Ids, Catalog> {
@@ -24,17 +23,5 @@ impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Ca
             ids,
             catalog,
         }
-    }
-}
-impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Cache, Ids, Catalog>
-where
-    S: StreamRead<PeerId> + StreamAppend<PeerId>,
-{
-    pub async fn roster(
-        &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::RosterRequest,
-    ) -> ApplicationResult<proto::RosterResponse, S> {
-        Err(PeerApplicationError::NotImplemented)
     }
 }
