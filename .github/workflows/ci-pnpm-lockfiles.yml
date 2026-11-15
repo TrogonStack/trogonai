@@ -1,4 +1,4 @@
-name: CI Web
+name: CI pnpm Lockfiles
 
 on:
   push:
@@ -6,22 +6,31 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
-      - 'tsworkspace/**'
-      - '.config/mise/config.toml'
-      - '.config/mise/mise.lock'
-      - '.github/workflows/ci-web.yml'
-      - '.config/mise/tasks/github/workflows/ci-web/**'
+      - 'docs/package.json'
+      - 'docs/pnpm-lock.yaml'
+      - 'docs/pnpm-workspace.yaml'
+      - 'tsworkspace/**/package.json'
+      - 'tsworkspace/pnpm-lock.yaml'
+      - 'tsworkspace/pnpm-workspace.yaml'
+      - 'tsworkspace/.npmrc'
+      - '.config/mise/tasks/github/workflows/ci-pnpm-lockfiles/**'
+      - '.github/workflows/ci-pnpm-lockfiles.yml'
 
 concurrency:
-  group: ci-web-${{ github.ref }}
+  group: ci-pnpm-lockfiles-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  verify:
+  install:
+    name: pnpm lockfile (${{ matrix.workspace }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [docs, tsworkspace]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,14 +40,14 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          package_json_file: tsworkspace/package.json
+          package_json_file: ${{ matrix.workspace }}/package.json
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 26
           cache: pnpm
-          cache-dependency-path: tsworkspace/pnpm-lock.yaml
+          cache-dependency-path: ${{ matrix.workspace }}/pnpm-lock.yaml
 
       - name: Install mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
@@ -48,19 +57,9 @@ jobs:
 
       - name: Waive the minimum release age policy
         if: contains(github.event.pull_request.labels.*.name, 'pnpm:skip:release-age')
-        run: mise run --skip-tools github:workflows:ci-web:waive-release-age
+        run: mise run --skip-tools github:workflows:ci-pnpm-lockfiles:waive-release-age
 
-      - name: Install dependencies
-        run: mise run --skip-tools github:workflows:ci-web:install
-
-      - name: Lint
-        run: mise run --skip-tools github:workflows:ci-web:lint
-
-      - name: Typecheck
-        run: mise run --skip-tools github:workflows:ci-web:typecheck
-
-      - name: Build
-        run: mise run --skip-tools github:workflows:ci-web:build
-
-      - name: Test
-        run: mise run --skip-tools github:workflows:ci-web:test
+      - name: Install from the lockfile
+        env:
+          PNPM_WORKSPACE: ${{ matrix.workspace }}
+        run: mise run --skip-tools github:workflows:ci-pnpm-lockfiles:install
