@@ -112,7 +112,8 @@ fn equality_and_clone_match_the_derived_traits() {
     let samples = samples();
     for left in &samples {
         let copy = left.clone();
-        assert_eq!(derived(&copy), derived(left).clone());
+        // NaN is unequal to itself, so the clone is compared by what it prints.
+        assert_eq!(format!("{:?}", derived(&copy)), format!("{:?}", derived(left).clone()));
         assert_eq!(python_json_dumps(&copy), python_json_dumps(left));
         for right in &samples {
             assert_eq!(left == right, derived(left) == derived(right), "{left:?} == {right:?}");

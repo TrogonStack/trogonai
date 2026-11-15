@@ -80,9 +80,12 @@ fn keys(cache: &ReCache) -> (Vec<Option<String>>, Vec<Option<String>>) {
 /// call, recorded from the real package.
 #[test]
 fn a_seeded_cache_holds_what_the_python_process_compiled_before_its_first_call() -> Result<(), String> {
+    // Some cases nest their schemas past the default recursion limit of the parser.
+    let mut deserializer =
+        serde_json::Deserializer::from_str(include_str!("../tests/fixtures/sdk_mcp/python_re_cache.json"));
+    deserializer.disable_recursion_limit();
     let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../tests/fixtures/sdk_mcp/python_re_cache.json"))
-            .map_err(|error| error.to_string())?;
+        serde::Deserialize::deserialize(&mut deserializer).map_err(|error| error.to_string())?;
     let process: Vec<Option<String>> = fixture
         .get("process")
         .and_then(serde_json::Value::as_array)

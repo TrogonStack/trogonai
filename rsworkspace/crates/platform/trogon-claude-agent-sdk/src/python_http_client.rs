@@ -218,10 +218,9 @@ pub(crate) fn getaddrinfo(
     lookup_status(code, io::Error::last_os_error)?;
     let mut addresses = Vec::new();
     let mut entry = found;
-    while !entry.is_null() {
-        // SAFETY: `entry` is a node of the list `getaddrinfo` returned, which is freed only after this loop, and
-        // `ai_addr` points at the socket address its `ai_family` names.
-        let info = unsafe { &*entry };
+    // SAFETY: `entry` is null or a node of the list `getaddrinfo` returned, which is freed only after this loop, and
+    // `ai_addr` points at the socket address its `ai_family` names.
+    while let Some(info) = unsafe { entry.as_ref() } {
         // The families asked for are `AF_INET` and `AF_UNSPEC`, which answer IPv4 and IPv6 entries only.
         if info.ai_family == libc::AF_INET {
             // SAFETY: an `AF_INET` entry carries a `sockaddr_in`.

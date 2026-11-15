@@ -139,7 +139,7 @@ pub(crate) fn parse_int(text: &str) -> Option<PythonInt> {
     let digits = String::from_utf8_lossy(&digits);
     let trimmed = digits.trim_start_matches('0');
     Some(PythonInt {
-        negative,
+        negative: negative && !trimmed.is_empty(),
         digits: if trimmed.is_empty() {
             "0".to_owned()
         } else {

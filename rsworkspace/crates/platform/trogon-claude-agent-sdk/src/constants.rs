@@ -2042,6 +2042,9 @@ pub(crate) const MAX_REDIRECTIONS: usize = 10;
 pub(crate) const INFINITE_LOOP: &str = "The HTTP server returned a redirect error that would lead to an infinite loop.\n\
                              The last 30x error message was:\n";
 
+/// The `OverflowError` `chr` raises for a code point past a C `int`, which a `\U` escape can name.
+pub(crate) const CHR_TOO_LARGE: &str = "Python int too large to convert to C int";
+
 /// The `OverflowError` a repetition bound at or past `MAXREPEAT` raises.
 pub(crate) const REPEAT_TOO_LARGE: &str = "the repetition number is too large";
 

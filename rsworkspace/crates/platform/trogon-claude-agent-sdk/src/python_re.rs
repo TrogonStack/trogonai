@@ -19,16 +19,16 @@
 use crate::constants::{
     AT_BEGINNING, AT_BEGINNING_LINE, AT_BEGINNING_STRING, AT_BOUNDARY, AT_END, AT_END_LINE, AT_END_STRING,
     AT_NON_BOUNDARY, AT_UNI_BOUNDARY, AT_UNI_NON_BOUNDARY, CATEGORY_DIGIT, CATEGORY_NOT_DIGIT, CATEGORY_NOT_SPACE,
-    CATEGORY_NOT_WORD, CATEGORY_SPACE, CATEGORY_UNICODE_OFFSET, CATEGORY_WORD, CJK_PREFIX, DIGIT_LIMIT_PREFIX,
-    FLAG_ASCII, FLAG_DOTALL, FLAG_IGNORECASE, FLAG_LOCALE, FLAG_MULTILINE, FLAG_TEMPLATE, FLAG_UNICODE, FLAG_VERBOSE,
-    FLAGS_INCOMPATIBLE, GLOBAL_FLAGS, HANGUL_BASE, HANGUL_LEADS, HANGUL_PREFIX, HANGUL_TRAILS, HANGUL_VOWELS, MAXCODE,
-    MAXGROUPS, MAXREPEAT, MAXWIDTH, OP_ANY, OP_ANY_ALL, OP_ASSERT, OP_ASSERT_NOT, OP_AT, OP_ATOMIC_GROUP,
-    OP_BIGCHARSET, OP_BRANCH, OP_CATEGORY, OP_CHARSET, OP_FAILURE, OP_GROUPREF, OP_GROUPREF_EXISTS, OP_GROUPREF_IGNORE,
-    OP_GROUPREF_UNI_IGNORE, OP_IN, OP_IN_IGNORE, OP_IN_UNI_IGNORE, OP_JUMP, OP_LITERAL, OP_LITERAL_IGNORE,
-    OP_LITERAL_UNI_IGNORE, OP_MARK, OP_MAX_UNTIL, OP_MIN_REPEAT_ONE, OP_MIN_UNTIL, OP_NEGATE, OP_NOT_LITERAL,
-    OP_NOT_LITERAL_IGNORE, OP_NOT_LITERAL_UNI_IGNORE, OP_POSSESSIVE_REPEAT, OP_POSSESSIVE_REPEAT_ONE, OP_RANGE,
-    OP_RANGE_UNI_IGNORE, OP_REPEAT, OP_REPEAT_ONE, OP_SUCCESS, PYTHON_INT_MAX_STR_DIGITS, RECURSION_ERROR,
-    REPEAT_TOO_LARGE, SPECIAL_CHARS, STACK_SIZES, TYPE_FLAGS,
+    CATEGORY_NOT_WORD, CATEGORY_SPACE, CATEGORY_UNICODE_OFFSET, CATEGORY_WORD, CHR_TOO_LARGE, CJK_PREFIX,
+    DIGIT_LIMIT_PREFIX, FLAG_ASCII, FLAG_DOTALL, FLAG_IGNORECASE, FLAG_LOCALE, FLAG_MULTILINE, FLAG_TEMPLATE,
+    FLAG_UNICODE, FLAG_VERBOSE, FLAGS_INCOMPATIBLE, GLOBAL_FLAGS, HANGUL_BASE, HANGUL_LEADS, HANGUL_PREFIX,
+    HANGUL_TRAILS, HANGUL_VOWELS, MAXCODE, MAXGROUPS, MAXREPEAT, MAXWIDTH, OP_ANY, OP_ANY_ALL, OP_ASSERT,
+    OP_ASSERT_NOT, OP_AT, OP_ATOMIC_GROUP, OP_BIGCHARSET, OP_BRANCH, OP_CATEGORY, OP_CHARSET, OP_FAILURE, OP_GROUPREF,
+    OP_GROUPREF_EXISTS, OP_GROUPREF_IGNORE, OP_GROUPREF_UNI_IGNORE, OP_IN, OP_IN_IGNORE, OP_IN_UNI_IGNORE, OP_JUMP,
+    OP_LITERAL, OP_LITERAL_IGNORE, OP_LITERAL_UNI_IGNORE, OP_MARK, OP_MAX_UNTIL, OP_MIN_REPEAT_ONE, OP_MIN_UNTIL,
+    OP_NEGATE, OP_NOT_LITERAL, OP_NOT_LITERAL_IGNORE, OP_NOT_LITERAL_UNI_IGNORE, OP_POSSESSIVE_REPEAT,
+    OP_POSSESSIVE_REPEAT_ONE, OP_RANGE, OP_RANGE_UNI_IGNORE, OP_REPEAT, OP_REPEAT_ONE, OP_SUCCESS,
+    PYTHON_INT_MAX_STR_DIGITS, RECURSION_ERROR, REPEAT_TOO_LARGE, SPECIAL_CHARS, STACK_SIZES, TYPE_FLAGS,
 };
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -847,6 +847,10 @@ impl Parser {
                 .error(format!("incomplete escape {escape}"), escape.len() as i64));
         }
         let value = hex_value(&escape[2..]);
+        if i32::try_from(value).is_err() {
+            // `chr(c)` cannot take `c` as a C `int` and raises OverflowError, which no caller catches.
+            return Err(CHR_TOO_LARGE.into());
+        }
         if value > 0x10_FFFF {
             // `chr(c)` raises ValueError, which the caller turns into a bad escape error.
             return Err(self.src.error(format!("bad escape {escape}"), escape.len() as i64));
@@ -2829,11 +2833,12 @@ pub(crate) fn search(pattern: &PythonString, text: &PythonString, budget: usize)
 }
 
 /// Whether `str(exception)` of a failed `re.compile` is an `re.error`: everything the parser and compiler raise
-/// except the `RecursionError`, the `OverflowError` of a repetition bound and the `ValueError`s.
+/// except the `RecursionError`, the `OverflowError`s of a repetition bound and of `chr`, and the `ValueError`s.
 fn is_re_error(text: &PythonString) -> bool {
     !text.as_str().is_some_and(|text| {
         text == RECURSION_ERROR
             || text == REPEAT_TOO_LARGE
+            || text == CHR_TOO_LARGE
             || text == FLAGS_INCOMPATIBLE
             || text.starts_with(DIGIT_LIMIT_PREFIX)
     })

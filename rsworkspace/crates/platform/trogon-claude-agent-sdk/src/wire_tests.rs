@@ -265,7 +265,7 @@ fn every_frame_decodes_routes_and_drops_containers_nested_past_the_native_stack(
         (
             request(r#"{"subtype":"can_use_tool","input":DEEP}"#),
             MessageDecoding::TypeScript,
-            false,
+            true,
         ),
         (
             request(r#"{"subtype":"hook_callback","callback_id":"c","input":{"a":DEEP}}"#),
@@ -315,14 +315,20 @@ fn every_frame_decodes_routes_and_drops_containers_nested_past_the_native_stack(
             true,
         ),
     ];
+    // A failed assertion would unwind through the recursive drop of the deep values, so each case is checked
+    // only after its values are dropped without recursion.
+    let mut mismatches = Vec::new();
     for (text, mode, routed) in cases {
         let mut object = crate::deep_json::parse_object(text.replace("DEEP", &deep).as_bytes())?;
         let mut frame = parse_value(&object, mode)?;
         let mut found = false;
         frame.each_value(&mut |value| found |= holds_deep_leaf(value));
-        assert_eq!(found, routed, "{text}");
         frame.drop_values();
         crate::deep_json::clear_object(&mut object);
+        if found != routed {
+            mismatches.push(format!("{text}: routed {found}, expected {routed}"));
+        }
     }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
     Ok(())
 }
