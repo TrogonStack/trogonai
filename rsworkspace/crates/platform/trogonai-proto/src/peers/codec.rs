@@ -39,6 +39,9 @@ impl EventType for v1alpha1::PeerEvent {
     }
 }
 
+#[cfg(feature = "peers-runtime")]
+impl trogon_decider_runtime::EventIdentity for v1alpha1::PeerEvent {}
+
 fn encode_peer_event_case(event: &PeerEventCase) -> Vec<u8> {
     match event {
         PeerEventCase::PeerEnrolled(inner) => inner.encode_to_vec(),
