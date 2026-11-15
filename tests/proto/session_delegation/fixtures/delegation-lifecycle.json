@@ -1,0 +1,728 @@
+{
+  "templates": {
+    "child-dispatch-command": {
+      "type": "trogonai.session.sessions.v1alpha1.DispatchDelegation",
+      "payload": {
+        "sessionId": "parent-example",
+        "operationId": "operation-example",
+        "childSessionId": "child-example",
+        "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
+        "turnId": "turn-example"
+      }
+    },
+    "child-dispatch-event": {
+      "type": "trogonai.session.sessions.v1alpha1.DelegationDispatched",
+      "payload": {
+        "sessionId": "parent-example",
+        "operationId": "operation-example",
+        "childSessionId": "child-example",
+        "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
+        "turnId": "turn-example"
+      }
+    },
+    "external-dispatch-command": {
+      "type": "trogonai.session.sessions.v1alpha1.DispatchExternalDelegation",
+      "payload": {
+        "sessionId": "parent-example",
+        "operationId": "operation-example",
+        "delegateReference": "delegate-example",
+        "authenticatedRemoteSubject": "remote-example",
+        "authorizationReference": "authorization-example",
+        "requestDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "correlationId": "correlation-example",
+        "turnId": "turn-example"
+      }
+    },
+    "external-dispatch-event": {
+      "type": "trogonai.session.sessions.v1alpha1.ExternalDelegationDispatched",
+      "payload": {
+        "sessionId": "parent-example",
+        "operationId": "operation-example",
+        "delegateReference": "delegate-example",
+        "authenticatedRemoteSubject": "remote-example",
+        "authorizationReference": "authorization-example",
+        "requestDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "correlationId": "correlation-example",
+        "turnId": "turn-example"
+      }
+    },
+    "child-create-command": {
+      "type": "trogonai.session.sessions.v1alpha1.CreateChildSession",
+      "payload": {
+        "sessionId": "child-example",
+        "executionPlan": {
+          "planBytes": "AQ==",
+          "planDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "checkoutRef": {
+          "checkoutId": "checkout-example",
+          "uri": "git+ssh://example.test/team/project",
+          "revision": "revision-example"
+        },
+        "parentSessionId": "parent-example",
+        "parentDispatchedAt": {
+          "value": "3"
+        },
+        "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
+        "operationId": "operation-example"
+      }
+    },
+    "parent-linked-event": {
+      "type": "trogonai.session.sessions.v1alpha1.ParentLinked",
+      "payload": {
+        "sessionId": "child-example",
+        "parentSessionId": "parent-example",
+        "parentDispatchedAt": {
+          "value": "3"
+        },
+        "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
+        "operationId": "operation-example"
+      }
+    },
+    "parent-link-state": {
+      "type": "trogonai.session.sessions.state.v1alpha1.ParentLink",
+      "payload": {
+        "parentSessionId": "parent-example",
+        "parentDispatchedAt": {
+          "value": "3"
+        },
+        "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
+        "operationId": "operation-example",
+        "parentTerminated": false,
+        "historyInvalidated": false
+      }
+    },
+    "child-delegation-state": {
+      "type": "trogonai.session.sessions.state.v1alpha1.Delegation",
+      "payload": {
+        "operationId": "operation-example",
+        "kind": "DELEGATION_KIND_CHILD_SESSION",
+        "childSessionId": "child-example",
+        "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
+        "dispatchedAt": {
+          "value": "3"
+        }
+      }
+    },
+    "external-delegation-state": {
+      "type": "trogonai.session.sessions.state.v1alpha1.Delegation",
+      "payload": {
+        "operationId": "operation-example",
+        "kind": "DELEGATION_KIND_EXTERNAL",
+        "delegateReference": "delegate-example",
+        "dispatchedAt": {
+          "value": "3"
+        }
+      }
+    },
+    "end-attempt-command": {
+      "type": "trogonai.session.sessions.v1alpha1.EndExecutionAttempt",
+      "payload": {
+        "sessionId": "session-example",
+        "executionAttemptId": "attempt-example",
+        "outcome": "ATTEMPT_OUTCOME_FAILED",
+        "endedAt": "2026-01-01T00:00:00Z"
+      }
+    },
+    "attempt-ended-event": {
+      "type": "trogonai.session.sessions.v1alpha1.ExecutionAttemptEnded",
+      "payload": {
+        "sessionId": "session-example",
+        "executionAttemptId": "attempt-example",
+        "outcome": "ATTEMPT_OUTCOME_FAILED",
+        "endedAt": "2026-01-01T00:00:00Z"
+      }
+    },
+    "parent-terminated-event": {
+      "type": "trogonai.session.sessions.v1alpha1.ParentTerminated",
+      "payload": {
+        "sessionId": "child-example",
+        "parentSessionId": "parent-example",
+        "cause": "PARENT_TERMINAL_CAUSE_CLOSED",
+        "triggeringEventId": "event-example"
+      }
+    },
+    "reconcile-parent-terminal-command": {
+      "type": "trogonai.session.sessions.v1alpha1.ReconcileParentTerminal",
+      "payload": {
+        "sessionId": "child-example",
+        "parentSessionId": "parent-example",
+        "cause": "PARENT_TERMINAL_CAUSE_CLOSED",
+        "triggeringEventId": "event-example"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "child-dispatch-command-requires-declared-binding",
+      "template": "child-dispatch-command",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "child-dispatch-event-requires-declared-binding",
+      "template": "child-dispatch-event",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "external-dispatch-command-requires-declared-binding",
+      "template": "external-dispatch-command",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "external-dispatch-event-requires-declared-binding",
+      "template": "external-dispatch-event",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "child-create-command-requires-declared-binding",
+      "template": "child-create-command",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "parent-linked-event-requires-declared-binding",
+      "template": "parent-linked-event",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "parent-link-state-requires-declared-binding",
+      "template": "parent-link-state",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "child-delegation-state-requires-declared-binding",
+      "template": "child-delegation-state",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "external-delegation-state-requires-declared-binding",
+      "template": "external-delegation-state",
+      "violations": [
+        "delegate_binding"
+      ]
+    },
+    {
+      "name": "child-dispatch-command-requires-retained-child-creation",
+      "template": "child-dispatch-command",
+      "violations": [
+        "child_creation"
+      ]
+    },
+    {
+      "name": "child-dispatch-event-requires-retained-child-creation",
+      "template": "child-dispatch-event",
+      "violations": [
+        "child_creation"
+      ]
+    },
+    {
+      "name": "child-delegation-state-requires-retained-child-creation",
+      "template": "child-delegation-state",
+      "violations": [
+        "child_creation"
+      ]
+    },
+    {
+      "name": "child-dispatch-command-rejects-self-child",
+      "template": "child-dispatch-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/childSessionId",
+          "value": "parent-example"
+        }
+      ],
+      "violations": [
+        "child session must differ from parent session"
+      ]
+    },
+    {
+      "name": "child-dispatch-event-rejects-self-child",
+      "template": "child-dispatch-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/childSessionId",
+          "value": "parent-example"
+        }
+      ],
+      "violations": [
+        "child session must differ from parent session"
+      ]
+    },
+    {
+      "name": "child-create-command-rejects-self-parent",
+      "template": "child-create-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/parentSessionId",
+          "value": "child-example"
+        }
+      ],
+      "violations": [
+        "parent session must differ from child session"
+      ]
+    },
+    {
+      "name": "parent-linked-event-rejects-self-parent",
+      "template": "parent-linked-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/parentSessionId",
+          "value": "child-example"
+        }
+      ],
+      "violations": [
+        "parent session must differ from child session"
+      ]
+    },
+    {
+      "name": "parent-terminated-event-rejects-self-parent",
+      "template": "parent-terminated-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/parentSessionId",
+          "value": "child-example"
+        }
+      ],
+      "violations": [
+        "parent session must differ from child session"
+      ]
+    },
+    {
+      "name": "reconcile-parent-terminal-command-rejects-self-parent",
+      "template": "reconcile-parent-terminal-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/parentSessionId",
+          "value": "child-example"
+        }
+      ],
+      "violations": [
+        "parent session must differ from child session"
+      ]
+    },
+    {
+      "name": "child-dispatch-command-rejects-unspecified-cascade",
+      "template": "child-dispatch-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "child-dispatch-command-rejects-unknown-cascade",
+      "template": "child-dispatch-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "child-dispatch-event-rejects-unspecified-cascade",
+      "template": "child-dispatch-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "child-dispatch-event-rejects-unknown-cascade",
+      "template": "child-dispatch-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "child-create-command-rejects-unspecified-cascade",
+      "template": "child-create-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "child-create-command-rejects-unknown-cascade",
+      "template": "child-create-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "parent-linked-event-rejects-unspecified-cascade",
+      "template": "parent-linked-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "parent-linked-event-rejects-unknown-cascade",
+      "template": "parent-linked-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "parent-link-state-rejects-unspecified-cascade",
+      "template": "parent-link-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "parent-link-state-rejects-unknown-cascade",
+      "template": "parent-link-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-unspecified-cascade",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-unknown-cascade",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-unspecified-kind",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/kind",
+          "value": "DELEGATION_KIND_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-unknown-kind",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/kind",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "external-delegation-state-rejects-unspecified-kind",
+      "template": "external-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/kind",
+          "value": "DELEGATION_KIND_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "external-delegation-state-rejects-unknown-kind",
+      "template": "external-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/kind",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-external-reference",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/delegateReference",
+          "value": "delegate-example"
+        }
+      ],
+      "violations": [
+        "child delegation cannot carry external delegate reference"
+      ]
+    },
+    {
+      "name": "external-delegation-state-rejects-child-id",
+      "template": "external-delegation-state",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/childSessionId",
+          "value": "child-example"
+        }
+      ],
+      "violations": [
+        "external delegation cannot carry child session fields"
+      ]
+    },
+    {
+      "name": "external-delegation-state-rejects-cascade",
+      "template": "external-delegation-state",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL"
+        }
+      ],
+      "violations": [
+        "external delegation cannot carry child session fields"
+      ]
+    },
+    {
+      "name": "end-attempt-command-accepts-failed-outcome",
+      "template": "end-attempt-command"
+    },
+    {
+      "name": "end-attempt-command-rejects-unspecified-outcome",
+      "template": "end-attempt-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": "ATTEMPT_OUTCOME_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "end-attempt-command-rejects-unknown-outcome",
+      "template": "end-attempt-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "attempt-ended-event-accepts-failed-outcome",
+      "template": "attempt-ended-event"
+    },
+    {
+      "name": "attempt-ended-event-rejects-unspecified-outcome",
+      "template": "attempt-ended-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": "ATTEMPT_OUTCOME_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "attempt-ended-event-rejects-unknown-outcome",
+      "template": "attempt-ended-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "parent-terminated-event-accepts-closed-parent",
+      "template": "parent-terminated-event"
+    },
+    {
+      "name": "parent-terminated-event-rejects-unspecified-cause",
+      "template": "parent-terminated-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": "PARENT_TERMINAL_CAUSE_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "parent-terminated-event-rejects-unknown-cause",
+      "template": "parent-terminated-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    },
+    {
+      "name": "reconcile-parent-terminal-command-accepts-closed-parent",
+      "template": "reconcile-parent-terminal-command"
+    },
+    {
+      "name": "reconcile-parent-terminal-command-rejects-unspecified-cause",
+      "template": "reconcile-parent-terminal-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": "PARENT_TERMINAL_CAUSE_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "enum.not_in"
+      ]
+    },
+    {
+      "name": "reconcile-parent-terminal-command-rejects-unknown-cause",
+      "template": "reconcile-parent-terminal-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": 99
+        }
+      ],
+      "violations": [
+        "enum.defined_only"
+      ]
+    }
+  ]
+}
