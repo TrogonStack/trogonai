@@ -24,6 +24,12 @@ impl ServiceXkey {
         self.0.public_key()
     }
 
+    /// Pins the key a stand-in service seals with.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn of(xkey: &XKey) -> Self {
+        Self(xkey.clone())
+    }
+
     pub(crate) fn key(&self) -> &XKey {
         &self.0
     }

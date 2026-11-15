@@ -10,6 +10,7 @@ use trogon_credential_domain::{
     AuditCorrelationId, CredentialId, CredentialKey, CredentialOwnerId, InjectionLocation, ReleaseHost,
     RuntimeServiceId,
 };
+use trogon_std::SecretString;
 use trogon_std::time::FixedEpochClock;
 use trogonai_proto::secrets::exchange::v1alpha1::SealedAccess;
 
@@ -65,6 +66,10 @@ pub(crate) fn request_with(tenant: TenantAccount, location: InjectionLocation) -
 
 pub(crate) fn request(tenant: &TenantAccount) -> ReleaseRequest {
     request_with(tenant.clone(), InjectionLocation::header(HEADER).unwrap())
+}
+
+pub(crate) fn secret() -> SecretString {
+    SecretString::new(VALUE).unwrap()
 }
 
 /// What the secrets service answers when `service` seals `plain` to
