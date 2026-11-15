@@ -56,21 +56,15 @@ impl InvalidationOutcome {
                 });
             }
         };
-        let Some(case) = decoded.event else {
-            return Err(InvalidationSourceError::Undecodable(
-                CredentialEventPayloadError::MissingEvent,
-            ));
-        };
+        let case = decoded.event.ok_or(InvalidationSourceError::Undecodable(
+            CredentialEventPayloadError::MissingEvent,
+        ))?;
         let Some(reason) = invalidation_reason(&case) else {
             return Ok(Self::NothingToPublish);
         };
 
         let credential = event_key(&case).map_err(InvalidationSourceError::InvalidEvent)?;
-        let own_subject =
-            credential_event_subject(&credential).map_err(|source| InvalidationSourceError::NoSubject {
-                credential: credential.clone(),
-                source,
-            })?;
+        let own_subject = credential_event_subject(&credential).map_err(InvalidationSourceError::NoSubject)?;
         if own_subject.as_str() != subject {
             return Err(InvalidationSourceError::EventFromAnotherSubject { credential, subject });
         }

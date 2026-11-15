@@ -23,12 +23,8 @@ pub enum InvalidationSourceError {
     Undecodable(#[source] CredentialEventPayloadError),
     #[error("credential event does not name a credential")]
     InvalidEvent(#[source] CredentialProtoDecodeError),
-    #[error("credential '{credential}' has no subject token for its owner")]
-    NoSubject {
-        credential: CredentialKey,
-        #[source]
-        source: CredentialEventSubjectResolverError,
-    },
+    #[error("credential owner has no subject token")]
+    NoSubject(#[source] CredentialEventSubjectResolverError),
     /// The event names a credential other than the one whose subject it was
     /// appended on, so routing a notice by either would trust the other.
     #[error("event for credential '{credential}' was appended on another credential's subject '{subject}'")]

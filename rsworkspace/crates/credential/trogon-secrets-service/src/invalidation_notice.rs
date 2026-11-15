@@ -51,10 +51,7 @@ impl InvalidationNotice {
             return Err(InvalidationSourceError::NotAppendedAfterEpoch { sequence });
         }
         let owner = credential.owner_id();
-        let token = credential_project_token(owner).map_err(|source| InvalidationSourceError::NoSubject {
-            credential: credential.clone(),
-            source,
-        })?;
+        let token = credential_project_token(owner).map_err(InvalidationSourceError::NoSubject)?;
         let payload = ReleaseInvalidated {
             credential: MessageField::some(CredentialAddress {
                 credential_id: credential.credential_id().to_string(),
