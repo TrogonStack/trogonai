@@ -44,6 +44,31 @@ async fn registry_reads_current_protobuf_record_and_uses_storage_revision() {
 }
 
 #[tokio::test]
+async fn registry_preserves_transient_backend_failure_and_recovers_on_the_next_read() {
+    let registry = NatsEndpointRegistry::new(MockJetStreamKvStore::new());
+    registry
+        .store()
+        .enqueue_entry_error(async_nats::jetstream::kv::EntryErrorKind::TimedOut);
+    let error = registry.lookup(&EndpointId::new(ENDPOINT).unwrap()).await.unwrap_err();
+    assert!(matches!(
+        error,
+        trogon_webhooks::RegistryError::Read(source)
+            if source.kind() == async_nats::jetstream::kv::EntryErrorKind::TimedOut
+    ));
+
+    registry
+        .store()
+        .enqueue_entry(Bytes::from(record().encode_to_vec()), 43, Operation::Put);
+    let recovered = registry
+        .lookup(&EndpointId::new(ENDPOINT).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(recovered.configuration_revision().get(), 43);
+    assert_eq!(recovered.registration().project_id().as_str(), "project-1");
+}
+
+#[tokio::test]
 async fn registry_does_not_reuse_deleted_or_purged_records() {
     for operation in [Operation::Delete, Operation::Purge] {
         let store = MockJetStreamKvStore::new();

@@ -20,7 +20,7 @@ use trogon_std::{NonZeroDuration, SecretString};
 use trogon_webhooks::{
     AuthenticationError, AuthenticationMode, ConfigurationRevision, EndpointId, EndpointLookup, EndpointRegistration,
     EndpointStatus, ProjectId, RegisteredEndpoint, RegistryError, SecretWebhookVerifier, TimestampTolerance,
-    WebhookBodySize, WebhookSecretLookup, router,
+    WebhookBodySize, WebhookSecretLookup, WebhookVerifier, router,
 };
 use trogonai_proto::gateway::webhooks::v1;
 
@@ -361,7 +361,13 @@ async fn delivery_identity_is_required_bounded_and_unambiguous() {
     let mut long = request(ENDPOINT, &token, b"{}");
     long.headers_mut()
         .insert("webhook-id", "a".repeat(129).parse().unwrap());
-    for input in [missing, duplicate, long] {
+    let mut empty = request(ENDPOINT, &token, b"{}");
+    empty.headers_mut().insert("webhook-id", "".parse().unwrap());
+    let mut whitespace = request(ENDPOINT, &token, b"{}");
+    whitespace
+        .headers_mut()
+        .insert("webhook-id", "contains space".parse().unwrap());
+    for input in [missing, duplicate, long, empty, whitespace] {
         assert_eq!(
             router.clone().oneshot(input).await.unwrap().status(),
             StatusCode::BAD_REQUEST
@@ -651,4 +657,275 @@ async fn body_and_content_type_have_hard_bounds_before_publication() {
         StatusCode::BAD_REQUEST
     );
     assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn malformed_bearer_credentials_are_rejected_without_publishing() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::Bearer,
+        EndpointStatus::Enabled,
+        4096,
+        1,
+    ));
+    let token = secret();
+    let publisher = MockJetStreamPublisher::new();
+    let router = app(registry, token.clone(), publisher.clone());
+    for authorization in ["Basic invalid", "Bearer ", "Bearer invalid extra", "missing-scheme"] {
+        let mut input = request(ENDPOINT, &token, b"{}");
+        input
+            .headers_mut()
+            .insert("authorization", authorization.parse().unwrap());
+        assert_eq!(
+            router.clone().oneshot(input).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[derive(Clone)]
+struct RotatingSecrets(Arc<Mutex<SecretString>>);
+
+impl RotatingSecrets {
+    fn replace(&self, value: SecretString) {
+        *self.0.lock().unwrap() = value;
+    }
+}
+
+impl WebhookSecretLookup for RotatingSecrets {
+    async fn lookup_secret(&self, _endpoint: &RegisteredEndpoint) -> Result<SecretString, AuthenticationError> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+}
+
+#[tokio::test]
+async fn verifier_observes_credential_rotation_without_being_recreated() {
+    let original = secret();
+    let replacement = secret();
+    let verifier = SecretWebhookVerifier::new(RotatingSecrets(Arc::new(Mutex::new(original.clone()))));
+    let registered = endpoint(ENDPOINT, AuthenticationMode::Bearer, EndpointStatus::Enabled, 4096, 1);
+    let old_request = request(ENDPOINT, &original, b"{}");
+    assert!(verifier.verify(&registered, old_request.headers(), b"{}").await.is_ok());
+    verifier.lookup().replace(replacement.clone());
+    assert!(matches!(
+        verifier.verify(&registered, old_request.headers(), b"{}").await,
+        Err(AuthenticationError::Unauthorized)
+    ));
+    let mut new_request = request(ENDPOINT, &replacement, b"{}");
+    new_request.headers_mut().insert(
+        "authorization",
+        format!("bearer {}", replacement.as_str()).parse().unwrap(),
+    );
+    assert!(verifier.verify(&registered, new_request.headers(), b"{}").await.is_ok());
+}
+
+#[tokio::test]
+async fn malformed_signed_timestamps_are_rejected_without_publishing() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::HmacSha256,
+        EndpointStatus::Enabled,
+        4096,
+        1,
+    ));
+    let key = uuid::Uuid::new_v4().as_bytes().repeat(2);
+    let signing_secret = SecretString::new(format!("whsec_{}", STANDARD.encode(&key))).unwrap();
+    let publisher = MockJetStreamPublisher::new();
+    let router = app(registry, signing_secret, publisher.clone());
+    for timestamp in ["", "not-a-timestamp", "+1", "18446744073709551616"] {
+        let mut input = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/{ENDPOINT}"))
+            .body(Body::from("{}"))
+            .unwrap();
+        *input.headers_mut() = sign_headers(&key, b"{}", timestamp);
+        assert_eq!(
+            router.clone().oneshot(input).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn signed_delivery_skips_unsupported_and_malformed_candidates_but_requires_a_valid_signature() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::HmacSha256,
+        EndpointStatus::Enabled,
+        4096,
+        1,
+    ));
+    let key = uuid::Uuid::new_v4().as_bytes().repeat(2);
+    let signing_secret = SecretString::new(format!("whsec_{}", STANDARD.encode(&key))).unwrap();
+    let publisher = MockJetStreamPublisher::new();
+    let router = app(registry, signing_secret, publisher.clone());
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string();
+    let mut headers = sign_headers(&key, b"{}", &timestamp);
+    let valid = headers.get("webhook-signature").unwrap().to_str().unwrap().to_owned();
+    for (signatures, expected) in [
+        ("v2,unsupported v1,%%%".to_owned(), StatusCode::UNAUTHORIZED),
+        (format!("v2,unsupported v1,%%% {valid}"), StatusCode::ACCEPTED),
+    ] {
+        headers.insert("webhook-signature", signatures.parse().unwrap());
+        let mut input = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/{ENDPOINT}"))
+            .body(Body::from("{}"))
+            .unwrap();
+        *input.headers_mut() = headers.clone();
+        assert_eq!(router.clone().oneshot(input).await.unwrap().status(), expected);
+    }
+    assert_eq!(publisher.published_messages().len(), 1);
+}
+
+#[tokio::test]
+async fn misconfigured_hmac_credentials_fail_closed_as_service_unavailable() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::HmacSha256,
+        EndpointStatus::Enabled,
+        4096,
+        1,
+    ));
+    let key = uuid::Uuid::new_v4().as_bytes().repeat(2);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string();
+    for credential in [
+        secret(),
+        SecretString::new("whsec_%%%").unwrap(),
+        SecretString::new(format!("whsec_{}", STANDARD.encode(&key[..31]))).unwrap(),
+    ] {
+        let publisher = MockJetStreamPublisher::new();
+        let router = app(registry.clone(), credential, publisher.clone());
+        let mut input = Request::builder()
+            .method("POST")
+            .uri(format!("/webhooks/{ENDPOINT}"))
+            .body(Body::from("{}"))
+            .unwrap();
+        *input.headers_mut() = sign_headers(&key, b"{}", &timestamp);
+        assert_eq!(
+            router.oneshot(input).await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(publisher.published_messages().is_empty());
+    }
+}
+
+#[derive(Clone)]
+struct WrongEndpointRegistry;
+
+impl EndpointLookup for WrongEndpointRegistry {
+    async fn lookup(&self, _endpoint_id: &EndpointId) -> Result<Option<RegisteredEndpoint>, RegistryError> {
+        Ok(Some(endpoint(
+            OTHER_ENDPOINT,
+            AuthenticationMode::Bearer,
+            EndpointStatus::Enabled,
+            4096,
+            1,
+        )))
+    }
+}
+
+#[tokio::test]
+async fn registry_cannot_redirect_a_request_to_a_different_endpoint() {
+    let token = secret();
+    let publisher = MockJetStreamPublisher::new();
+    let router = router(
+        WrongEndpointRegistry,
+        SecretWebhookVerifier::new(Secrets(token.clone())),
+        ClaimCheckPublisher::new(
+            publisher.clone(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+            MaxPayload::from_server_limit(usize::MAX),
+        ),
+        DottedNatsToken::new("webhooks").unwrap(),
+        NonZeroDuration::from_secs(5).unwrap(),
+    );
+    assert_eq!(
+        router.oneshot(request(ENDPOINT, &token, b"{}")).await.unwrap().status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn composed_subject_rejects_control_characters_before_publication() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::Bearer,
+        EndpointStatus::Enabled,
+        4096,
+        1,
+    ));
+    let token = secret();
+    let publisher = MockJetStreamPublisher::new();
+    let router = router(
+        registry,
+        SecretWebhookVerifier::new(Secrets(token.clone())),
+        ClaimCheckPublisher::new(
+            publisher.clone(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+            MaxPayload::from_server_limit(usize::MAX),
+        ),
+        DottedNatsToken::new("webhooks\0").unwrap(),
+        NonZeroDuration::from_secs(5).unwrap(),
+    );
+    assert_eq!(
+        router.oneshot(request(ENDPOINT, &token, b"{}")).await.unwrap().status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn longest_supported_subject_components_fit_and_preserve_routing() {
+    let registry = Registry::default();
+    let project = "p".repeat(64);
+    let prefix = "w".repeat(128);
+    registry.insert(RegisteredEndpoint::new(
+        EndpointRegistration::new(
+            EndpointId::new(ENDPOINT).unwrap(),
+            ProjectId::new(&project).unwrap(),
+            EndpointStatus::Enabled,
+            AuthenticationMode::Bearer,
+            WebhookBodySize::new(4096).unwrap(),
+            TimestampTolerance::new(300).unwrap(),
+        ),
+        ConfigurationRevision::new(1).unwrap(),
+    ));
+    let token = secret();
+    let publisher = MockJetStreamPublisher::new();
+    let router = router(
+        registry,
+        SecretWebhookVerifier::new(Secrets(token.clone())),
+        ClaimCheckPublisher::new(
+            publisher.clone(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+            MaxPayload::from_server_limit(usize::MAX),
+        ),
+        DottedNatsToken::new(&prefix).unwrap(),
+        NonZeroDuration::from_secs(5).unwrap(),
+    );
+    assert_eq!(
+        router.oneshot(request(ENDPOINT, &token, b"{}")).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, format!("{prefix}.{project}.{ENDPOINT}.received"));
+    assert!(messages[0].subject.len() <= trogon_nats::MAX_SUBJECT_BYTES);
 }

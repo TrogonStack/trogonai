@@ -2294,6 +2294,36 @@ async fn resolve_plaintext_rejects_a_credential_that_only_has_a_verifier() {
     ));
 }
 
+#[tokio::test]
+async fn generic_webhooks_owner_bound_resolution_cannot_release_a_stored_verifier_as_plaintext() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "test-verifier-reference").await;
+    let expected_owner = credential.owner_id().clone();
+    let projections = InMemoryRuntimeProjectionRepository::default();
+    projections
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential))
+        .await;
+    let resolver = RuntimeCredentialResolver::new(projections, VerifierOnlySecretStore);
+
+    let error = resolver
+        .resolve_plaintext_for_owner(
+            &key(),
+            CredentialKind::BotToken,
+            &expected_owner,
+            &RuntimeReleaseRequest::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeCredentialError::VerifierOnly {
+            kind: CredentialKind::BotToken,
+            ..
+        }
+    ));
+}
+
 #[test]
 fn runtime_credential_errors_say_whether_they_came_from_the_secret_store() {
     let credential = cache_credential("credential-error");

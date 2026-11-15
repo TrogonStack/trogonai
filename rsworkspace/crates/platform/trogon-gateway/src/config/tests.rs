@@ -4062,6 +4062,33 @@ fn generic_webhooks_retention_contributes_to_claim_check_lifetime() {
 }
 
 #[test]
+fn generic_webhooks_can_be_disabled_without_requiring_infrastructure() {
+    let file = write_toml("[webhooks]\nstatus = 'disabled'\n");
+    let config = load(Some(file.path())).expect("disabled webhook configuration must load");
+
+    assert!(config.webhooks.is_none());
+    assert!(!config.has_any_source());
+    assert_eq!(config.max_stream_max_age(), None);
+}
+
+#[test]
+fn generic_webhooks_reject_zero_retention_and_report_the_setting() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 0\n");
+
+    let Err(ConfigError::Validation(errors)) = load(Some(file.path())) else {
+        panic!("zero webhook retention must be a configuration error");
+    };
+    assert!(errors.iter().any(|error| error.contains("stream_max_age_secs")));
+}
+
+#[test]
+fn generic_webhooks_cannot_deduplicate_beyond_the_retained_delivery_history() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 60\nduplicate_window_secs = 61\n");
+
+    assert!(matches!(load(Some(file.path())), Err(ConfigError::Validation(_))));
+}
+
+#[test]
 fn generic_webhooks_reject_invalid_infrastructure_configuration() {
     for setting in [
         "registry_bucket = 'bad.bucket'",

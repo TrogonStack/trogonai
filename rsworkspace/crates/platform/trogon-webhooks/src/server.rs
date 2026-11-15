@@ -1,4 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use axum::body::{Body, to_bytes};
 use axum::extract::{Path, State};
@@ -25,6 +25,7 @@ struct Ingress<R, V, P, S> {
     publisher: ClaimCheckPublisher<P, S>,
     subject_prefix: DottedNatsToken,
     admission_timeout: NonZeroDuration,
+    receipt_clock: fn() -> Result<Duration, SystemTimeError>,
 }
 
 pub fn router<R, V, P, S>(
@@ -40,6 +41,34 @@ where
     P: JetStreamPublisher,
     S: ObjectStorePut,
 {
+    router_with_receipt_clock(
+        registry,
+        verifier,
+        publisher,
+        subject_prefix,
+        admission_timeout,
+        system_receipt_clock,
+    )
+}
+
+fn system_receipt_clock() -> Result<Duration, SystemTimeError> {
+    SystemTime::now().duration_since(UNIX_EPOCH)
+}
+
+fn router_with_receipt_clock<R, V, P, S>(
+    registry: R,
+    verifier: V,
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: DottedNatsToken,
+    admission_timeout: NonZeroDuration,
+    receipt_clock: fn() -> Result<Duration, SystemTimeError>,
+) -> Router
+where
+    R: EndpointLookup,
+    V: WebhookVerifier,
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+{
     Router::new()
         .route("/webhooks/{endpoint_id}", post(handle::<R, V, P, S>))
         .with_state(Ingress {
@@ -48,6 +77,7 @@ where
             publisher,
             subject_prefix,
             admission_timeout,
+            receipt_clock,
         })
 }
 
@@ -121,7 +151,7 @@ where
     if subject.len() > MAX_SUBJECT_BYTES || subject.bytes().any(|byte| byte.is_ascii_control()) {
         return StatusCode::SERVICE_UNAVAILABLE;
     }
-    let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+    let now = match (ingress.receipt_clock)() {
         Ok(now) => now,
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
     };
@@ -165,3 +195,6 @@ where
         _ => StatusCode::SERVICE_UNAVAILABLE,
     }
 }
+
+#[cfg(test)]
+mod tests;
