@@ -39,7 +39,7 @@ jobs:
     # Its key is readable from main and from pull requests opened from a
     # branch of this repository. Fork pull requests and every other run
     # declare no environment, get no token, and stay on hosted runners.
-    environment: ${{ (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) && 'github-app-baton' || '' }}
+    environment: ${{ ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'github-app-baton' || '' }}
     permissions:
       contents: read
       id-token: write
