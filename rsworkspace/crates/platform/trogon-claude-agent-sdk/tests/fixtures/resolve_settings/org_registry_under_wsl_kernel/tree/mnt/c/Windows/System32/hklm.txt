@@ -1,0 +1,1 @@
+    Settings    REG_SZ    {"wslInheritsWindowsSettings":true,"model":"registry","availableModels":["opus"],"permissions":{"deny":["WebFetch"]},"env":{"R":"1"}}

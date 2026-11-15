@@ -1,0 +1,1 @@
+{"modelPricing":{"multiplier":0,"overrides":{"a":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4},"b":{"input":10001,"output":2,"cacheRead":3,"cacheWrite":4},"constructor":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4}}}}

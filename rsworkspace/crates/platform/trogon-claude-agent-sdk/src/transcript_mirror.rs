@@ -20,6 +20,11 @@ use crate::{
 pub enum MirrorEnqueueError {
     #[error(transparent)]
     Key(#[from] SessionKeyError),
+    /// No projects directory to place the frame under: TypeScript resolves
+    /// `CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")` per frame, so a missing home fails the frame, not
+    /// the connect.
+    #[error("the session store projects directory could not be resolved: no home directory")]
+    MissingConfigDirectory,
     #[error("transcript mirror worker stopped")]
     Closed,
 }
@@ -91,10 +96,19 @@ impl MirrorFailureError {
         if let Self::Suppressed { count } = self {
             data.insert("suppressed_count".into(), count.into());
         }
+        let mut raw = JsonObject::new();
+        raw.insert("type".into(), "system".into());
+        raw.insert("subtype".into(), "mirror_error".into());
+        raw.extend(data.clone());
         Ok(Message::System(SystemMessage {
             subtype: "mirror_error".into(),
             session_id,
             data,
+            event: crate::SystemEvent::MirrorError(crate::MirrorErrorMessage {
+                key: raw.get("key").cloned(),
+                error: self.error_text(),
+            }),
+            raw,
         }))
     }
 }
@@ -110,17 +124,22 @@ enum MirrorCommand {
 
 pub struct MirrorFlush {
     receiver: oneshot::Receiver<Vec<MirrorFailureError>>,
-    deadline: tokio::time::Instant,
+    deadline: Option<tokio::time::Instant>,
     owner: Arc<WorkerOwner>,
 }
 
 impl MirrorFlush {
+    /// Waits for the flush. Without [`SessionStoreLimits::flush_timeout`] this waits as long as the appends take, as
+    /// upstream does; each append is still bounded by [`SessionStoreLimits::append_timeout`].
     pub async fn wait(self) -> Result<Vec<MirrorFailureError>, crate::SessionError> {
         let _owner = self.owner;
-        tokio::time::timeout_at(self.deadline, self.receiver)
-            .await
-            .map_err(|_| crate::SessionError::MirrorFlushTimeout)?
-            .map_err(|_| crate::SessionError::MirrorStopped)
+        let reported = match self.deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline, self.receiver)
+                .await
+                .map_err(|_| crate::SessionError::MirrorFlushTimeout)?,
+            None => self.receiver.await,
+        };
+        reported.map_err(|_| crate::SessionError::MirrorStopped)
     }
 }
 
@@ -131,9 +150,10 @@ impl MirrorFlush {
 /// drain. Frames are never rejected for size. Each drain coalesces entries per key and appends them in order.
 #[derive(Clone)]
 pub struct TranscriptMirror {
-    projects_dir: PathBuf,
+    projects_dir: Option<PathBuf>,
+    dialect: crate::SummaryDialect,
     commands: mpsc::UnboundedSender<MirrorCommand>,
-    flush_timeout: std::time::Duration,
+    flush_timeout: Option<std::time::Duration>,
     owner: Arc<WorkerOwner>,
 }
 
@@ -152,6 +172,16 @@ impl std::fmt::Debug for TranscriptMirror {
 
 impl TranscriptMirror {
     pub fn new(options: &SessionStoreOptions, projects_dir: PathBuf) -> Self {
+        Self::start(options, Some(projects_dir))
+    }
+
+    /// A mirror with no projects directory, for a TypeScript session whose home directory is unavailable: every frame
+    /// fails with [`MirrorEnqueueError::MissingConfigDirectory`] and nothing reaches the store.
+    pub fn without_projects_dir(options: &SessionStoreOptions) -> Self {
+        Self::start(options, None)
+    }
+
+    fn start(options: &SessionStoreOptions, projects_dir: Option<PathBuf>) -> Self {
         let (commands, receiver) = mpsc::unbounded_channel();
         let worker = tokio::spawn(run_worker(
             options.store.clone(),
@@ -162,18 +192,23 @@ impl TranscriptMirror {
         ));
         Self {
             projects_dir,
+            dialect: options.dialect,
             commands,
-            flush_timeout: options.limits.flush_timeout.as_duration(),
+            flush_timeout: options.limits.flush_timeout.map(crate::Timeout::as_duration),
             owner: Arc::new(WorkerOwner(worker.abort_handle())),
         }
     }
 
-    pub fn projects_dir(&self) -> &Path {
-        &self.projects_dir
+    pub fn projects_dir(&self) -> Option<&Path> {
+        self.projects_dir.as_deref()
     }
 
     pub fn enqueue(&self, file_path: &Path, entries: Vec<SessionEntry>) -> Result<(), MirrorEnqueueError> {
-        let key = SessionKey::from_transcript_path(file_path, &self.projects_dir)?;
+        let projects_dir = self
+            .projects_dir
+            .as_deref()
+            .ok_or(MirrorEnqueueError::MissingConfigDirectory)?;
+        let key = SessionKey::from_transcript_path_with(file_path, projects_dir, self.dialect)?;
         if entries.is_empty() {
             return Ok(());
         }
@@ -195,9 +230,11 @@ impl TranscriptMirror {
         self.commands
             .send(MirrorCommand::Flush(reply))
             .map_err(|_| crate::SessionError::MirrorStopped)?;
+        let now = tokio::time::Instant::now();
         Ok(MirrorFlush {
             receiver,
-            deadline: tokio::time::Instant::now() + self.flush_timeout,
+            // A timeout too long for an instant waits without a deadline.
+            deadline: self.flush_timeout.and_then(|timeout| now.checked_add(timeout)),
             owner: self.owner.clone(),
         })
     }
@@ -233,7 +270,7 @@ fn encoded_len(entries: &[SessionEntry], estimate: MirrorSizeEstimate) -> usize 
         MirrorSizeEstimate::TypeScript => serde_json::to_string(&objects).map_or(0, |text| text.encode_utf16().count()),
         MirrorSizeEstimate::Python => {
             let mut out = Vec::new();
-            let mut serializer = serde_json::Serializer::with_formatter(&mut out, PythonFormatter);
+            let mut serializer = serde_json::Serializer::with_formatter(&mut out, crate::python_json::PythonFormatter);
             match serde::Serialize::serialize(&objects, &mut serializer) {
                 Ok(()) => out.len(),
                 Err(_) => 0,
@@ -242,51 +279,16 @@ fn encoded_len(entries: &[SessionEntry], estimate: MirrorSizeEstimate) -> usize 
     }
 }
 
-/// `json.dumps` defaults: `", "` and `": "` separators with every non-ASCII character escaped as `\uXXXX`.
-struct PythonFormatter;
-
-impl serde_json::ser::Formatter for PythonFormatter {
-    fn begin_array_value<W: ?Sized + std::io::Write>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()> {
-        if first { Ok(()) } else { writer.write_all(b", ") }
-    }
-
-    fn begin_object_key<W: ?Sized + std::io::Write>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()> {
-        if first { Ok(()) } else { writer.write_all(b", ") }
-    }
-
-    fn begin_object_value<W: ?Sized + std::io::Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
-        writer.write_all(b": ")
-    }
-
-    fn write_string_fragment<W: ?Sized + std::io::Write>(
-        &mut self,
-        writer: &mut W,
-        fragment: &str,
-    ) -> std::io::Result<()> {
-        for ch in fragment.chars() {
-            if ch.is_ascii() {
-                let mut buf = [0_u8; 4];
-                writer.write_all(ch.encode_utf8(&mut buf).as_bytes())?;
-            } else {
-                let mut units = [0_u16; 2];
-                for unit in ch.encode_utf16(&mut units) {
-                    write!(writer, "\\u{unit:04x}")?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
 struct Failures {
     retained: Vec<MirrorFailureError>,
     suppressed: u64,
-    capacity: usize,
+    /// `None` keeps every failure, as upstream reports each one.
+    capacity: Option<usize>,
 }
 
 impl Failures {
     fn record(&mut self, failure: MirrorFailureError) {
-        if self.retained.len() < self.capacity {
+        if self.capacity.is_none_or(|capacity| self.retained.len() < capacity) {
             self.retained.push(failure);
         } else {
             self.suppressed = self.suppressed.saturating_add(1);
@@ -314,7 +316,7 @@ async fn run_worker(
     let mut failures = Failures {
         retained: Vec::new(),
         suppressed: 0,
-        capacity: limits.command_queue_capacity.get(),
+        capacity: limits.max_retained_failures.map(crate::QueueCapacity::get),
     };
     while let Some(command) = receiver.recv().await {
         match command {

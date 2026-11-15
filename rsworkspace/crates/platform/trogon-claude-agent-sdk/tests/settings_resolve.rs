@@ -2,9 +2,12 @@
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    ResolveSettingsOptions, ResolvedSettings, Settings, adapters::OperatingSystem, filter_escalating_default_mode,
-    resolve_settings_with,
+    PythonJsonValue, ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect, adapters::OperatingSystem,
+    filter_escalating_default_mode, js_stringify, python_json_dumps, resolve_python_settings_with,
+    resolve_settings_in_dialect_with, resolve_settings_with,
 };
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[path = "support/fake_settings_host.rs"]
 mod fake_settings_host;
@@ -192,7 +195,72 @@ fn plist_policy_is_read_with_plutil_on_macos() {
     let result = resolve(&host, json!({"settingSources": []}));
     assert_eq!(result["effective"], json!({"model": "plist-model"}));
     assert_eq!(result["provenance"]["model"]["policyOrigin"], "plist");
-    assert_eq!(host.ran()[0], format!("/usr/bin/plutil -convert json -o - -- {plist}"));
+    assert!(
+        host.ran()
+            .contains(&format!("/usr/bin/plutil -convert json -o - -- {plist}"))
+    );
+}
+
+#[test]
+fn a_plist_plutil_cannot_convert_is_linted_and_read_as_empty_when_the_lint_fails() {
+    let mut host = FakeHost::linux();
+    host.system = OperatingSystem::Darwin;
+    let plist = "/Library/Managed Preferences/fixture-user/com.anthropic.claudecode.plist";
+    let device = "/Library/Managed Preferences/com.anthropic.claudecode.plist";
+    let lint = format!("/usr/bin/plutil -lint -s -- {plist}");
+    let host = host
+        .file(plist, "bplist")
+        .file(device, "bplist")
+        .command(
+            &format!("/usr/bin/plutil -convert json -o - -- {plist}"),
+            exited(1, "invalid"),
+        )
+        .command(&lint, exited(1, "invalid"));
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(result["effective"].get("model"), None);
+    assert!(host.ran().contains(&lint));
+}
+
+/// What the pinned TypeScript resolver printed, recorded from its oracle on darwin, for a per-user managed preferences
+/// plist that does not load while the device-level one is absent: the plist cannot be read, or plutil cannot convert
+/// it but lints it clean.
+const PLIST_DID_NOT_LOAD: &str = r#"{"result":{"effective":{},"provenance":{},"sources":[],"machinePolicy":{"didNotLoad":["profile"]}},"filtered":{}}"#;
+
+/// The result and its filtered settings, printed the way the TypeScript resolver's oracle prints them.
+fn printed(host: &FakeHost, value: Value) -> String {
+    let resolved = resolve_settings_with(host, &options(value)).expect("resolve");
+    js_stringify(&json!({
+        "result": serde_json::to_value(&resolved).expect("encode"),
+        "filtered": serde_json::to_value(filter_escalating_default_mode(&resolved)).expect("encode"),
+    }))
+}
+
+#[test]
+fn a_plist_that_cannot_be_read_does_not_load_and_an_absent_one_is_skipped_without_plutil() {
+    let mut host = FakeHost::linux();
+    host.system = OperatingSystem::Darwin;
+    let plist = "/Library/Managed Preferences/fixture-user/com.anthropic.claudecode.plist";
+    host.unreadable.insert(plist.into());
+    let host = host.file(plist, "bplist");
+    assert_eq!(printed(&host, json!({"settingSources": []})), PLIST_DID_NOT_LOAD);
+    assert!(!host.ran().iter().any(|line| line.starts_with("/usr/bin/plutil")));
+}
+
+#[test]
+fn a_plist_plutil_cannot_convert_but_lints_clean_does_not_load() {
+    let mut host = FakeHost::linux();
+    host.system = OperatingSystem::Darwin;
+    let plist = "/Library/Managed Preferences/fixture-user/com.anthropic.claudecode.plist";
+    let lint = format!("/usr/bin/plutil -lint -s -- {plist}");
+    let host = host
+        .file(plist, "bplist")
+        .command(
+            &format!("/usr/bin/plutil -convert json -o - -- {plist}"),
+            exited(1, "invalid"),
+        )
+        .command(&lint, ok(""));
+    assert_eq!(printed(&host, json!({"settingSources": []})), PLIST_DID_NOT_LOAD);
+    assert!(host.ran().contains(&lint));
 }
 
 #[test]
@@ -261,6 +329,20 @@ fn wsl_with_the_inherit_flag_reads_the_windows_side_first() {
     assert_eq!(result["effective"]["model"], "windows");
 }
 
+#[test]
+fn wsl_withholds_the_linux_policy_when_the_windows_side_file_is_not_an_object() {
+    // Recorded from the pinned TypeScript resolver with the same two files.
+    let host = FakeHost::linux()
+        .variable("WSL_DISTRO_NAME", "Ubuntu")
+        .file("/mnt/c/Program Files/ClaudeCode/managed-settings.json", "[1]")
+        .file("/etc/claude-code/managed-settings.json", r#"{"model":"linux"}"#);
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(
+        js_stringify(&result),
+        r#"{"effective":{},"provenance":{},"sources":[],"machinePolicy":{"didNotLoad":["registry"]}}"#
+    );
+}
+
 fn resolved(effective: Value, sources: Value) -> ResolvedSettings {
     serde_json::from_value(json!({
         "effective": effective,
@@ -308,4 +390,189 @@ fn default_mode_set_by_a_user_source_is_kept() {
         ]),
     );
     assert_eq!(filtered(&resolved), json!({"permissions": {"defaultMode": "auto"}}));
+}
+
+fn effective_in(dialect: SettingsDialect, text: &str) -> Value {
+    let host = FakeHost::linux().file("/work/project/.claude/settings.json", text);
+    let resolved = resolve_settings_in_dialect_with(&host, &options(json!({})), dialect).expect("resolve");
+    serde_json::to_value(&resolved.effective).expect("encode")
+}
+
+fn custom_numbers(dialect: SettingsDialect) -> String {
+    let text = r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":-0,"w":1.0,"f":0.1}}"#;
+    let effective = effective_in(dialect, text);
+    match dialect {
+        SettingsDialect::TypeScript => js_stringify(&effective),
+        _ => effective.to_string(),
+    }
+}
+
+#[test]
+fn js_stringify_prints_resolved_numbers_as_the_typescript_resolver_does() {
+    let text = r#"{"custom":{"a":18446744073709551616,"b":-9223372036854775809,"c":0.0000015,"d":1e-7,"e":1e21}}"#;
+    let effective = effective_in(SettingsDialect::TypeScript, text);
+    assert_eq!(
+        js_stringify(&effective),
+        r#"{"custom":{"a":18446744073709552000,"b":-9223372036854776000,"c":0.0000015,"d":1e-7,"e":1e+21}}"#
+    );
+}
+
+#[test]
+fn the_typescript_dialect_reads_numbers_like_json_parse() {
+    assert_eq!(
+        custom_numbers(SettingsDialect::TypeScript),
+        r#"{"custom":{"n":12345678901234567000,"m":9007199254740992,"z":0,"w":1,"f":0.1}}"#
+    );
+    assert_eq!(
+        custom_numbers(SettingsDialect::default()),
+        custom_numbers(SettingsDialect::TypeScript)
+    );
+}
+
+#[test]
+fn the_python_dialect_keeps_integer_tokens_exact() {
+    assert_eq!(
+        custom_numbers(SettingsDialect::Python),
+        r#"{"custom":{"n":12345678901234567890,"m":9007199254740993,"z":0,"w":1.0,"f":0.1}}"#
+    );
+}
+
+#[test]
+fn the_python_resolve_keeps_every_number_as_json_loads_reads_it() -> TestResult {
+    let host = FakeHost::linux()
+        .file(
+            "/home/fixture/.claude/settings.json",
+            r#"{"custom":{"big":[123456789012345678901234567890,1.0]},"env":{"A":123456789012345678901234567890}}"#,
+        )
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"custom":{"big":[123456789012345678901234567890,-98765432109876543210987654321,1.0,NaN,Infinity,1e400],"w":2.0,"z":-0.0}}"#,
+        );
+    let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
+    let PythonJsonValue::Object(resolved) = resolved else {
+        return Err("the resolved settings are not an object".into());
+    };
+    assert_eq!(
+        python_json_dumps(resolved.get("effective").expect("effective")),
+        r#"{"env": {"A": "1.2345678901234568e+29"}, "custom": {"big": [123456789012345678901234567890, 1.0, -98765432109876543210987654321, NaN, Infinity], "w": 2.0, "z": -0.0}}"#
+    );
+    let approximate = effective_in(
+        SettingsDialect::Python,
+        r#"{"custom":{"big":[123456789012345678901234567890,1.0,NaN,Infinity],"w":2.0}}"#,
+    );
+    assert_eq!(
+        approximate.to_string(),
+        r#"{"custom":{"big":[1.2345678901234568e+29,1.0,null,null],"w":2.0}}"#
+    );
+    Ok(())
+}
+
+#[test]
+fn the_python_resolve_unions_arrays_by_the_number_javascript_reads() -> TestResult {
+    let host = FakeHost::linux()
+        .file("/home/fixture/.claude/settings.json", r#"{"custom":{"l":[1,0]}}"#)
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"custom":{"l":[1.0,-0.0,2,9223372036854775808.0]}}"#,
+        );
+    let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
+    let PythonJsonValue::Object(resolved) = resolved else {
+        return Err("the resolved settings are not an object".into());
+    };
+    assert_eq!(
+        python_json_dumps(resolved.get("effective").expect("effective")),
+        r#"{"custom": {"l": [1, 0, 2, 9.223372036854776e+18]}}"#
+    );
+    Ok(())
+}
+
+#[test]
+fn the_python_dialect_keeps_a_whole_float_of_two_to_the_sixty_third_finite() {
+    let effective = effective_in(SettingsDialect::Python, r#"{"custom":{"w":9223372036854775808.0}}"#);
+    assert_eq!(effective.to_string(), r#"{"custom":{"w":9.223372036854776e+18}}"#);
+}
+
+fn effective_text(host: &FakeHost) -> (String, Vec<String>) {
+    let resolved =
+        serde_json::to_value(resolve_settings_with(host, &options(json!({}))).expect("resolve")).expect("encode");
+    let sources = resolved["sources"]
+        .as_array()
+        .expect("sources")
+        .iter()
+        .map(|source| source["source"].as_str().expect("source name").to_owned())
+        .collect();
+    (js_stringify(&resolved["effective"]), sources)
+}
+
+#[test]
+fn numbers_past_the_double_range_resolve_as_infinity_does_in_the_typescript_resolver() {
+    let host = FakeHost::linux()
+        .file(
+            "/home/fixture/.claude/settings.json",
+            r#"{"custom":{"l":[null,1]},"env":{"A":5,"B":true,"C":null,"D":1.5e300,"E":1e400,"F":-1e400,"G":[1,[2,null]],"H":{},"I":1e21,"J":1e-7,"K":-0,"L":0.1,"M":123456789012345678901}}"#,
+        )
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"custom":{"l":[1e400,-1e400,1e400,null],"x":1e400},"n":-1e400}"#,
+        );
+    let (effective, sources) = effective_text(&host);
+    assert_eq!(
+        effective,
+        r#"{"env":{"A":"5","B":"true","C":"null","D":"1.5e+300","E":"Infinity","F":"-Infinity","G":"1,2,","H":"[object Object]","I":"1e+21","J":"1e-7","K":"0","L":"0.1","M":"123456789012345680000"},"custom":{"l":[null,1,null,null],"x":null},"n":null}"#
+    );
+    assert_eq!(sources, ["user", "project"]);
+}
+
+#[test]
+fn a_typed_setting_refuses_infinity_and_the_file_does_not_load() {
+    let host = FakeHost::linux()
+        .file("/home/fixture/.claude/settings.json", r#"{"model":1e400}"#)
+        .file(
+            "/work/project/.claude/settings.json",
+            r#"{"cleanupPeriodDays":1e400,"theme":"dark"}"#,
+        );
+    let (effective, sources) = effective_text(&host);
+    assert_eq!(effective, "{}");
+    assert!(sources.is_empty(), "{sources:?}");
+}
+
+#[test]
+fn an_infinite_environment_value_overrides_as_its_string() {
+    let host = FakeHost::linux()
+        .file("/home/fixture/.claude/settings.json", r#"{"env":{"A":"x"}}"#)
+        .file("/work/project/.claude/settings.json", r#"{"env":{"A":1e400,"B":"y"}}"#);
+    assert_eq!(effective_text(&host).0, r#"{"env":{"A":"Infinity","B":"y"}}"#);
+}
+
+#[test]
+fn a_managed_file_with_an_infinite_number_still_loads() {
+    let host = FakeHost::linux().file(
+        "/etc/claude-code/managed-settings.json",
+        r#"{"permissions":{"allow":["Bash"]},"n":1e400}"#,
+    );
+    let result = resolve(&host, json!({}));
+    assert_eq!(
+        js_stringify(&result["effective"]),
+        r#"{"permissions":{"allow":["Bash"]},"n":null}"#
+    );
+    assert_eq!(result["machinePolicy"]["didNotLoad"], json!(false));
+}
+
+/// `os.homedir()` throws when `HOME` is unset and the passwd database has no entry, and the throw reaches the caller.
+#[cfg(unix)]
+#[test]
+fn a_user_source_without_any_home_directory_is_an_error() {
+    let mut host = FakeHost::linux();
+    host.env.clear();
+    let error = resolve_settings_with(&host, &options(json!({}))).expect_err("no home directory");
+    assert!(matches!(
+        error,
+        trogon_claude_agent_sdk::ResolveSettingsError::HomeDirectory(_)
+    ));
+    assert!(std::error::Error::source(&error).is_some());
+    let skipped = resolve_settings_with(&host, &options(json!({"settingSources": ["project"]})));
+    assert!(skipped.is_ok());
+    host.env
+        .insert("CLAUDE_CONFIG_DIR".to_owned(), "/configured".to_owned());
+    assert!(resolve_settings_with(&host, &options(json!({}))).is_ok());
 }

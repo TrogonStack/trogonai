@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Write the published or freshly built image digest to GITHUB_OUTPUT"
+set -euo pipefail
+
+: "${DIGEST:?DIGEST is required}"
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+echo "digest=${DIGEST}" >>"$GITHUB_OUTPUT"
