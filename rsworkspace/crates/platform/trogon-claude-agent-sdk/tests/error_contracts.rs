@@ -35,14 +35,50 @@ fn control_timeout_diagnostics_identify_each_wire_operation() {
         (ControlOperation::ContextUsage, "get_context_usage"),
         (ControlOperation::McpReconnect, "mcp_reconnect"),
         (ControlOperation::McpToggle, "mcp_toggle"),
+        (ControlOperation::McpReadResource, "mcp_read_resource"),
         (ControlOperation::StopTask, "stop_task"),
         (ControlOperation::BackgroundTasks, "background_tasks"),
         (ControlOperation::McpSetServers, "mcp_set_servers"),
+        (
+            ControlOperation::SetMcpPermissionModeOverride,
+            "set_mcp_permission_mode_override",
+        ),
+        (ControlOperation::SetMaxThinkingTokens, "set_max_thinking_tokens"),
+        (ControlOperation::ApplyFlagSettings, "apply_flag_settings"),
+        (ControlOperation::UpdateSettings, "update_settings"),
+        (ControlOperation::GetUsage, "get_usage"),
+        (ControlOperation::ReadFile, "read_file"),
+        (ControlOperation::ReloadPlugins, "reload_plugins"),
+        (ControlOperation::ReloadSkills, "reload_skills"),
+        (ControlOperation::ReloadOutputStyles, "reload_output_styles"),
+        (ControlOperation::SeedReadState, "seed_read_state"),
+        (ControlOperation::RemoteControl, "remote_control"),
     ] {
         let error = Error::ControlTimeout { operation };
-        assert_eq!(error.to_string(), format!("the {name} control request timed out"));
+        assert_eq!(error.to_string(), format!("Control request timeout: {name}"));
         assert!(error.source().is_none());
     }
+}
+
+#[test]
+fn write_to_terminated_process_renders_both_upstream_texts() {
+    for exit_code in [Some(7), None] {
+        let error = Error::WriteToTerminatedProcess { exit_code };
+        assert!(!error.to_string().is_empty());
+        assert!(error.typescript_message().is_some_and(|message| !message.is_empty()));
+        assert!(error.source().is_none());
+        assert_eq!(error.exit_code(), None);
+    }
+}
+
+#[test]
+fn a_write_to_a_terminated_process_reads_the_way_each_sdk_words_it() {
+    let error = Error::WriteToTerminatedProcess { exit_code: Some(0) };
+    assert_eq!(error.to_string(), "Cannot write to terminated process (exit code: 0)");
+    assert_eq!(
+        error.typescript_message().as_deref(),
+        Some("Cannot write to terminated process")
+    );
 }
 
 #[test]
@@ -67,7 +103,7 @@ fn protocol_failures_retain_typed_sources_and_safe_context() -> TestResult {
         let typed = match &error {
             ProtocolError::Json(_) => source.is::<serde_json::Error>(),
             ProtocolError::PermissionUpdate(_) => source.is::<trogon_claude_agent_sdk::PermissionUpdateError>(),
-            ProtocolError::DuplicateControlRequest => false,
+            ProtocolError::DuplicateControlRequest | ProtocolError::InvalidMessage(_) => false,
         };
         assert!(typed);
         let outer = Error::from(error);
@@ -75,6 +111,9 @@ fn protocol_failures_retain_typed_sources_and_safe_context() -> TestResult {
     }
     let error = ProtocolError::DuplicateControlRequest;
     assert_eq!(error.to_string(), "duplicate incoming control request ID");
+    assert!(error.source().is_none());
+    let error = ProtocolError::InvalidMessage("Message missing 'type' field".to_owned());
+    assert_eq!(error.to_string(), "Message missing 'type' field");
     assert!(error.source().is_none());
     Ok(())
 }

@@ -1,0 +1,22 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+# The generated tree is checked in under src/gen, so this is an ordinary crate.
+workspace_crate(
+    name = "trogonai-proto",
+    crate_features = [
+        "audit",
+        "chrono",
+        "decider",
+        "gateway",
+        "grpc-nats-micro",
+        "model-access",
+        "policy",
+        "runtime-host",
+        "runtime-snapshot",
+        "schedules",
+    ],
+    deps = [
+        "//rsworkspace/crates/decider/trogon-decider",
+        "//rsworkspace/crates/decider/trogon-decider-runtime",
+    ],
+)

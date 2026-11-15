@@ -18,7 +18,7 @@ const OTHER: &str = "223e4567-e89b-42d3-a456-426614174001";
 const THIRD: &str = "323e4567-e89b-42d3-a456-426614174002";
 
 fn jsonl(lines: &[Value]) -> String {
-    lines.iter().map(|line| format!("{line}\n")).collect()
+    lines.iter().map(|line| line.to_string() + "\n").collect()
 }
 
 fn project(config: &Path, name: &str) -> Result<std::path::PathBuf, Box<dyn Error>> {

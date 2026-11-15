@@ -61,7 +61,7 @@ impl TierRead {
     /// `hm` upstream: parse a policy document handed over as text.
     pub(crate) fn from_hm(text: &str, user_writable: bool) -> Self {
         let parsed = (!text.is_empty())
-            .then(|| serde_json::from_str::<Value>(text).ok())
+            .then(|| crate::settings_parse::parse_json(text).ok())
             .flatten();
         let Some(Value::Object(mut document)) = parsed else {
             let mut tier = Self::did_not_load(false);

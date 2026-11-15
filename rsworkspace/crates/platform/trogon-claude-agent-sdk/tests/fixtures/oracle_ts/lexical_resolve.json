@@ -1,0 +1,54 @@
+[
+  {
+    "input": "/",
+    "output": "/"
+  },
+  {
+    "input": "/a/b",
+    "output": "/a/b"
+  },
+  {
+    "input": "/a/b/",
+    "output": "/a/b"
+  },
+  {
+    "input": "//a//b//",
+    "output": "/a/b"
+  },
+  {
+    "input": "/a/./b/../c",
+    "output": "/a/c"
+  },
+  {
+    "input": "/../..",
+    "output": "/"
+  },
+  {
+    "input": "/a/b/..",
+    "output": "/a"
+  },
+  {
+    "input": "/a/b/.",
+    "output": "/a/b"
+  },
+  {
+    "input": "/a/..../b",
+    "output": "/a/..../b"
+  },
+  {
+    "input": "/a/.b/c.",
+    "output": "/a/.b/c."
+  },
+  {
+    "input": "/a/b/../../../c",
+    "output": "/c"
+  },
+  {
+    "input": "/a/b c/d",
+    "output": "/a/b c/d"
+  },
+  {
+    "input": "/café/x",
+    "output": "/café/x"
+  }
+]
