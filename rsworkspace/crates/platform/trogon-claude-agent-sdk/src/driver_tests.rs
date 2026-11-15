@@ -288,7 +288,7 @@ fn closed_before_a_write(delay: Option<Duration>) -> Result<DriverFixture, Box<d
 fn prompt_command(text: &str) -> (Command, oneshot::Receiver<Result<(), Error>>) {
     let (response, receiver) = oneshot::channel();
     let command = Command::Prompt {
-        input: crate::Prompt::from(text).into(),
+        input: Box::new(crate::Prompt::from(text).into()),
         response,
     };
     (command, receiver)
