@@ -28,7 +28,7 @@ jobs:
   format:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.proto == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,7 +47,7 @@ jobs:
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.proto == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +66,7 @@ jobs:
   build:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.proto == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,7 +85,7 @@ jobs:
   breaking:
     needs: changes
     if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.proto == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,7 +117,7 @@ jobs:
   contract-validation:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.proto == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,7 +136,7 @@ jobs:
   generate:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.proto == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     env:
       # protoc-gen-buffa and protoc-gen-buffa-packaging are source-built mise
       # tools (cargo backend) and fetch crates from crates.io during install;
@@ -188,7 +188,7 @@ jobs:
     name: Proto result
     needs: [changes, format, lint, build, breaking, contract-validation, generate]
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

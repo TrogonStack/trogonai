@@ -44,7 +44,7 @@ jobs:
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners).lint }}
+    runs-on: sunny-go-trogonstack-linux-x64
     permissions:
       actions: write
       contents: read
@@ -99,7 +99,7 @@ jobs:
   test:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners).test }}
+    runs-on: sunny-go-trogonstack-linux-x64
     permissions:
       actions: write
       contents: write
@@ -184,7 +184,7 @@ jobs:
   build:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners).build }}
+    runs-on: sunny-go-trogonstack-linux-x64
     permissions:
       actions: write
       contents: read
@@ -215,7 +215,7 @@ jobs:
   wasm-decider:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ${{ fromJSON(needs.changes.outputs.runners).wasm-decider }}
+    runs-on: sunny-go-trogonstack-linux-x64
     permissions:
       actions: write
       contents: read
@@ -271,7 +271,7 @@ jobs:
     name: Rust result
     needs: [changes, lint, test, build, wasm-decider]
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: sunny-go-trogonstack-linux-x64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
