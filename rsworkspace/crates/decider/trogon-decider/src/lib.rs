@@ -134,7 +134,7 @@ pub trait Evolve<Event>: Sized {
 }
 
 /// Replay error selected by a decider's state type.
-pub type EvolveErrorOf<C> = <<C as Decider>::State as Evolve<<C as Decider>::Event>>::Error;
+pub type EvolveError<C> = <<C as Decider>::State as Evolve<<C as Decider>::Event>>::Error;
 
 /// Decision-making for a typed command.
 ///

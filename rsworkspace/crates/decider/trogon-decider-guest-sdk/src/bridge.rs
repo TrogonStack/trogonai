@@ -1,7 +1,7 @@
 use std::error::Error as _;
 
 use trogon_decider::{
-    Decider, DecisionError, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, EvolveErrorOf,
+    Decider, DecisionError, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, EvolveError,
     evaluate_decision,
 };
 
@@ -192,7 +192,7 @@ where
 pub fn evolve_one<C, E, A>(state: C::State, envelope: A) -> Result<C::State, E>
 where
     C: Decider,
-    EvolveErrorOf<C>: 'static,
+    EvolveError<C>: 'static,
     C::Event: EventDecode,
     A: AnyEnvelopeView,
     E: From<DomainErrorParts>,
@@ -216,10 +216,10 @@ where
 /// Project a [`DecisionError`] into a [`BridgeError`], mirroring the native runtime's
 /// handling of the same failure type (see `trogon-decider-runtime`'s `append_decision` and
 /// `trogon_decider::testing`'s `decide_events`).
-fn map_decision_failure<C>(failure: DecisionError<C::DecideError, EvolveErrorOf<C>>) -> BridgeError
+fn map_decision_failure<C>(failure: DecisionError<C::DecideError, EvolveError<C>>) -> BridgeError
 where
     C: Decider<DecideError: 'static>,
-    EvolveErrorOf<C>: 'static,
+    EvolveError<C>: 'static,
 {
     match failure {
         DecisionError::Decide(source) => BridgeError::Rejected {
@@ -241,7 +241,7 @@ where
 pub fn decide_command<C, D, A>(command: &C, state: &C::State) -> Result<Vec<A>, D>
 where
     C: Decider<DecideError: 'static, State: Clone>,
-    EvolveErrorOf<C>: 'static,
+    EvolveError<C>: 'static,
     C::Event: EventEncode + EventType,
     A: From<AnyEnvelopeParts>,
     D: DecideErrorView,

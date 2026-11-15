@@ -22,7 +22,7 @@ use crate::stream::{
 };
 use crate::{
     ConflictRetryLimit, Decider, Event, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity,
-    EventType, Events, Evolve, EvolveErrorOf, Headers, ReplayBounds, ReplayChunkSize, ReplayCursor, ReplayLimit,
+    EventType, Events, Evolve, EvolveError, Headers, ReplayBounds, ReplayChunkSize, ReplayCursor, ReplayLimit,
     SnapshotCadence, StreamEvent, WritePrecondition,
 };
 use trogon_decider::{DecisionError, evaluate_decision};
@@ -434,7 +434,7 @@ pub type CommandResult<C, ReadSnapshotError, ReadStreamError, AppendStreamError>
     ExecutionResult<<C as Decider>::State, <C as Decider>::Event>,
     CommandError<
         <C as Decider>::DecideError,
-        EvolveErrorOf<C>,
+        EvolveError<C>,
         ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
@@ -1545,7 +1545,7 @@ impl<E, C, S, G, A, Auth> CommandExecution<'_, E, C, S, G, A, Auth> {
         (AppendStreamResponse, Events<C::Event>, C::State),
         AppendDecisionError<
             C::DecideError,
-            EvolveErrorOf<C>,
+            EvolveError<C>,
             CommandAppendStreamError<E, C>,
             CommandEventTypeError<C>,
             CommandEventPayloadEncodeError<C>,
@@ -1968,7 +1968,7 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
 fn evolve_state_from_stream_events<C>(
     mut state: C::State,
     stream_events: &[StreamEvent],
-) -> Result<C::State, ReplayStreamError<EvolveErrorOf<C>, CommandEventDecodeError<C>>>
+) -> Result<C::State, ReplayStreamError<EvolveError<C>, CommandEventDecodeError<C>>>
 where
     C: Decider,
     C::Event: EventDecode,

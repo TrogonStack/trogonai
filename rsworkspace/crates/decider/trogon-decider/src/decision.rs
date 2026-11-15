@@ -1,4 +1,4 @@
-use super::{Act, ActBuilder, Decider, Events, Evolve, EvolveErrorOf};
+use super::{Act, ActBuilder, Decider, Events, Evolve, EvolveError};
 
 /// Outcome of [`Decider::decide`].
 ///
@@ -29,7 +29,7 @@ pub enum DecisionError<DecideError, EvolveError> {
 #[doc(hidden)]
 pub type DecisionResult<C> = Result<
     (<C as Decider>::State, Events<<C as Decider>::Event>),
-    DecisionError<<C as Decider>::DecideError, EvolveErrorOf<C>>,
+    DecisionError<<C as Decider>::DecideError, EvolveError<C>>,
 >;
 
 #[doc(hidden)]

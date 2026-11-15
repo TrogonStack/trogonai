@@ -3,6 +3,7 @@ use std::ops::Deref;
 use trogon_decider::{Evolve, StateSnapshot};
 use trogonai_proto::scheduler::schedules::{ScheduleEventCase, ScheduleStatusKind, state_v1, v1};
 
+#[repr(transparent)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScheduleState(state_v1::State);
 
@@ -41,15 +42,27 @@ impl From<state_v1::State> for ScheduleState {
     }
 }
 
+impl From<ScheduleState> for state_v1::State {
+    fn from(value: ScheduleState) -> Self {
+        value.0
+    }
+}
+
+impl AsRef<state_v1::State> for ScheduleState {
+    fn as_ref(&self) -> &state_v1::State {
+        &self.0
+    }
+}
+
 impl StateSnapshot for ScheduleState {
     type Payload = state_v1::State;
 
     fn from_snapshot_payload(payload: Self::Payload) -> Self {
-        Self(payload)
+        payload.into()
     }
 
     fn snapshot_payload(&self) -> &Self::Payload {
-        &self.0
+        self.as_ref()
     }
 }
 

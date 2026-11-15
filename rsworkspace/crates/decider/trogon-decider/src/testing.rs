@@ -132,7 +132,7 @@
 
 use std::{fmt::Debug, marker::PhantomData};
 
-use crate::{Decider, DecisionError, Events, Evolve, EvolveErrorOf, evaluate_decision};
+use crate::{Decider, DecisionError, Events, Evolve, EvolveError, evaluate_decision};
 
 /// Prior events used to rebuild decider state in tests.
 ///
@@ -380,7 +380,7 @@ pub enum DecisionEvaluationFailure<DecideError, EvolveError> {
 #[doc(hidden)]
 pub type DecisionEvaluation<C> = Result<
     (Events<<C as Decider>::Event>, <C as Decider>::State),
-    DecisionEvaluationFailure<<C as Decider>::DecideError, EvolveErrorOf<C>>,
+    DecisionEvaluationFailure<<C as Decider>::DecideError, EvolveError<C>>,
 >;
 
 impl<Event, Error> ThenError<Event, Error> {
@@ -556,7 +556,7 @@ impl<C> TestCase<C, NoHistory>
 where
     C: Decider,
     C::Event: Clone + Debug,
-    EvolveErrorOf<C>: Debug,
+    EvolveError<C>: Debug,
 {
     /// Provides the command under test.
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
@@ -578,7 +578,7 @@ impl<C> TestCase<C, Given<C::Event>>
 where
     C: Decider,
     C::Event: Clone + Debug,
-    EvolveErrorOf<C>: Debug,
+    EvolveError<C>: Debug,
 {
     /// Replays given events and provides the command under test.
     ///
@@ -622,7 +622,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    EvolveErrorOf<C>: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
 {
     /// Asserts the state rebuilt from the given history before the command is decided.
@@ -719,7 +719,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    EvolveErrorOf<C>: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
     E: Into<C::Event>,
 {
@@ -740,7 +740,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    EvolveErrorOf<C>: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
 {
     type Output = ThenEvents<C::Event, C::State>;
@@ -759,7 +759,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    EvolveErrorOf<C>: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
     E: Into<C::Event>,
 {
@@ -789,7 +789,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    EvolveErrorOf<C>: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
 {
     match actual {
