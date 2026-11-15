@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::{SettingsMap, merge_unbounded, set_path};
+use super::{SettingsMap, merge_unbounded, set_path, union_arrays};
 use crate::{
     constants::SETTINGS_SCHEMA_JSON, js_array::settle, node_merge::NodeMerge, settings_json::js_stringify,
     settings_strings::array_mark,
@@ -55,4 +55,12 @@ fn setting_at_an_empty_path_leaves_the_settings_alone() {
     set_path(&mut settings, &[], Some(&Value::Bool(true)));
     set_path(&mut settings, &[], None);
     assert_eq!(settings, before);
+}
+
+#[test]
+fn a_union_keeps_one_of_each_primitive_by_same_value_zero_and_every_object() {
+    let left: Vec<Value> = serde_json::from_str(r#"[1,{"a":1},"x"]"#).unwrap();
+    let right: Vec<Value> = serde_json::from_str(r#"[1.0,{"a":1},-0.0,0,"x",[2],[2]]"#).unwrap();
+    let expected: Vec<Value> = serde_json::from_str(r#"[1,{"a":1},"x",{"a":1},-0.0,[2],[2]]"#).unwrap();
+    assert_eq!(union_arrays(&left, &right), expected);
 }

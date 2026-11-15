@@ -1,11 +1,17 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::borrow::Cow;
+
 use serde_json::{Value, json};
 
 use super::{
-    SurrogateStandIns, approximate_strings, exact_string, js_length, python_string, reserve_text, take_strings,
+    SurrogateStandIns, approximate_strings, exact_string, js_length, python_string, reserve_text, stand_in_escapes,
+    take_strings,
 };
-use crate::{python_code_point::PythonCodePoint, python_json_value::PythonJsonValue, python_string::PythonString};
+use crate::{
+    constants::SETTINGS_SURROGATE_STAND_IN_RANGES, python_code_point::PythonCodePoint,
+    python_json_value::PythonJsonValue, python_string::PythonString,
+};
 
 /// A `str` of `units`, each a UTF-16 code unit on its own, so a surrogate stays lone.
 fn units(units: &[u16]) -> PythonString {
@@ -66,4 +72,32 @@ fn a_stand_in_past_the_basic_multilingual_plane_counts_as_one_utf16_unit() {
     assert_eq!((js_length(&stand_in), stand_in.encode_utf16().count()), (2, 3));
     assert_eq!(js_length("a\u{f0000}"), if stand_in == "a\u{f0000}" { 2 } else { 3 });
     assert_eq!(js_length(&private_use), 6400);
+}
+
+#[test]
+fn a_text_ending_in_a_backslash_still_reserves_what_it_holds() {
+    let _strings = SurrogateStandIns::start();
+    reserve_text("\u{e000}\\");
+    assert_eq!(stand_in_escapes(r#""\ud800""#), r#""\ue800""#);
+}
+
+#[test]
+fn an_escape_without_four_hex_digits_is_copied_as_written() {
+    let _strings = SurrogateStandIns::start();
+    assert_eq!(
+        stand_in_escapes(r#"["\u12zz","\u+123","\ud800"]"#),
+        r#"["\u12zz","\u+123","\ue000"]"#
+    );
+}
+
+#[test]
+fn a_lone_surrogate_escape_stays_when_every_private_use_code_point_is_taken() {
+    let _strings = SurrogateStandIns::start();
+    let private_use: String = SETTINGS_SURROGATE_STAND_IN_RANGES
+        .iter()
+        .flat_map(|&(first, last)| (first..=last).filter_map(char::from_u32))
+        .collect();
+    reserve_text(&private_use);
+    let text = r#""\ud800""#;
+    assert!(matches!(stand_in_escapes(text), Cow::Borrowed(kept) if kept == text));
 }

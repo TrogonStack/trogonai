@@ -6,7 +6,7 @@
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    DeepJsonValue, ResolveSettingsOptions, ResolverState, js_stringify, resolve_settings_json_with_state,
+    DeepJsonValue, ResolveSettingsOptions, ResolverState, js_stringify, resolve_settings_json_with,
     resolve_settings_with_state,
 };
 
@@ -71,7 +71,7 @@ fn the_typescript_dialect_reads_settings_files_as_resolve_settings_does_on_node(
 }
 
 /// Each `files` entry of the goldens also holds the whole object the pinned `resolveSettings` returns, printed by
-/// `JSON.stringify` with every lone surrogate escaped, which `resolve_settings_json_with_state` prints byte for byte.
+/// `JSON.stringify` with every lone surrogate escaped, which `resolve_settings_json_with` prints byte for byte.
 #[test]
 fn the_typescript_dialect_prints_the_resolved_object_with_its_lone_surrogates_as_json_stringify_does() -> TestResult {
     let goldens: Value = serde_json::from_str(GOLDENS)?;
@@ -83,7 +83,7 @@ fn the_typescript_dialect_prints_the_resolved_object_with_its_lone_surrogates_as
     for entry in entries {
         let name = entry["name"].as_str().ok_or("a case has no name")?;
         let options: ResolveSettingsOptions = serde_json::from_value(json!({}))?;
-        let text = resolve_settings_json_with_state(&host(entry)?, &options, &ResolverState::new())?;
+        let text = resolve_settings_json_with(&host(entry)?, &options)?;
         expected.push((name.to_owned(), entry["result"].as_str().map(str::to_owned)));
         actual.push((name.to_owned(), Some(text)));
     }

@@ -36,6 +36,9 @@ pub(crate) struct ManagedReader<'p> {
     decoder: Decoder,
     /// The stack of this Node process, which the TypeScript dialect reads and merges on.
     node: NodeStack,
+    /// The evaluation of the managed settings the TypeScript dialect reads and merges in. The Python dialect evaluates
+    /// the managed settings once, on no stack, and never looks at it.
+    pass: ManagedPass,
     parsed: &'p ParsedFiles,
     /// What the merges of the resolve left V8 having run, which the merges of the sources go on from.
     warmth: &'p Cell<MergeWarmth>,
@@ -47,8 +50,8 @@ enum Decoder {
     /// The Python dialect: the bytes as UTF-8 with replacement characters, parsed by `serde_json`.
     Lossy,
     /// The TypeScript dialect: the bytes as Node decodes them, read and merged on the stack of this Node process in
-    /// one evaluation of the managed settings.
-    Node(ManagedPass),
+    /// the reader's evaluation of the managed settings.
+    Node,
 }
 
 impl<'p> ManagedReader<'p> {
@@ -62,11 +65,12 @@ impl<'p> ManagedReader<'p> {
     ) -> Self {
         let decoder = match dialect {
             SettingsDialect::Python => Decoder::Lossy,
-            SettingsDialect::TypeScript => Decoder::Node(ManagedPass::Sources),
+            SettingsDialect::TypeScript => Decoder::Node,
         };
         Self {
             decoder,
             node,
+            pass: ManagedPass::Sources,
             parsed,
             warmth,
         }
@@ -74,16 +78,12 @@ impl<'p> ManagedReader<'p> {
 
     /// The same reader in the evaluation `pass`, sharing what the others parsed.
     pub(crate) fn in_pass(self, pass: ManagedPass) -> Self {
-        let decoder = match self.decoder {
-            Decoder::Lossy => Decoder::Lossy,
-            Decoder::Node(_) => Decoder::Node(pass),
-        };
-        Self { decoder, ..self }
+        Self { pass, ..self }
     }
 
     /// Whether the reader runs on a Node stack, where each evaluation of the managed settings has its own room.
     pub(crate) fn has_stack(self) -> bool {
-        matches!(self.decoder, Decoder::Node(..))
+        matches!(self.decoder, Decoder::Node)
     }
 
     /// The managed settings document at `path`, from `read` the first time the TypeScript dialect reads it and from
@@ -115,12 +115,12 @@ impl<'p> ManagedReader<'p> {
                     _ => PolicyParse::NotObject,
                 }
             }
-            Decoder::Node(pass) => {
+            Decoder::Node => {
                 let text = read_node_text(bytes);
                 if js_trim(&text).is_empty() {
                     return loaded(SettingsMap::new());
                 }
-                match parse_policy_text(&text, self.node, pass) {
+                match parse_policy_text(&text, self.node, self.pass) {
                     PolicyParse::Object(mut document) => {
                         for entry in document.values_mut() {
                             normalize_numbers(entry, SettingsDialect::TypeScript);
@@ -147,7 +147,7 @@ impl<'p> ManagedReader<'p> {
     pub(crate) fn copy_overflows(self, settings: &SettingsMap) -> bool {
         match self.decoder {
             Decoder::Lossy => false,
-            Decoder::Node(pass) => self.node.policy_copy_overflows(pass, settings),
+            Decoder::Node => self.node.policy_copy_overflows(self.pass, settings),
         }
     }
 
@@ -170,7 +170,7 @@ impl<'p> ManagedReader<'p> {
     ) -> NodeMerge {
         match self.decoder {
             Decoder::Lossy => merge_unbounded(destination, source),
-            Decoder::Node(pass) => merge_within(self.node, call(pass), self.warmth, destination, source),
+            Decoder::Node => merge_within(self.node, call(self.pass), self.warmth, destination, source),
         }
     }
 }
@@ -191,3 +191,7 @@ fn not_loaded(unreadable: bool) -> TierRead {
         ..TierRead::did_not_load(unreadable)
     }
 }
+
+#[cfg(test)]
+#[path = "settings_managed_reader_tests.rs"]
+mod tests;

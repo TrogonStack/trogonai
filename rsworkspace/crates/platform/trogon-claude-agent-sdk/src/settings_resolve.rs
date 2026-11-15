@@ -149,9 +149,7 @@ pub fn resolve_settings_json_with_state<H: SettingsHost>(
         let mut result = resolve_core(host, options, SettingsDialect::TypeScript, state)?;
         infinities_to_null(&mut result);
         let text = escape_stand_ins(js_stringify(&result));
-        if text.encode_utf16().count() as u64 > V8_MAX_STRING_LENGTH {
-            return Err(ResolveSettingsError::InvalidStringLength);
-        }
+        v8_string_length(text.encode_utf16().count() as u64)?;
         decode(result)?;
         Ok(text)
     })
@@ -253,6 +251,14 @@ pub fn resolve_python_settings_with<H: SettingsHost>(
 /// The resolved settings with their numbers turned into the nearest `serde_json` numbers, checked against the
 /// declared types. Infinities turn into `null` first: a kept whole float of 2^63 approximates to the double that
 /// marks `Infinity`, and must not print as `null`.
+/// The `RangeError` V8 throws building a string of `units` UTF-16 code units, more than a string holds.
+fn v8_string_length(units: u64) -> Result<(), ResolveSettingsError> {
+    if units > V8_MAX_STRING_LENGTH {
+        return Err(ResolveSettingsError::InvalidStringLength);
+    }
+    Ok(())
+}
+
 fn decode(mut result: Value) -> Result<ResolvedSettings, ResolveSettingsError> {
     infinities_to_null(&mut result);
     approximate_numbers(&mut result);
@@ -547,3 +553,7 @@ pub fn filter_escalating_default_mode(resolved: &ResolvedSettings) -> Settings {
     }
     unchanged()
 }
+
+#[cfg(test)]
+#[path = "settings_resolve_tests.rs"]
+mod tests;

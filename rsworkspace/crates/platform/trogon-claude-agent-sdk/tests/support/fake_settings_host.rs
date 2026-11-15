@@ -29,6 +29,9 @@ pub struct FakeHost {
     pub files: BTreeMap<PathBuf, Vec<u8>>,
     pub directories: BTreeMap<PathBuf, Vec<DirectoryEntry>>,
     pub unreadable: BTreeSet<PathBuf>,
+    /// Folders whose listing fails as unreadable for as many more listings as each counts, shared with the copies a
+    /// background read takes.
+    pub unlistable: Arc<Mutex<BTreeMap<PathBuf, usize>>>,
     pub links: BTreeMap<PathBuf, PathBuf>,
     pub commands: BTreeMap<String, ExecuteFileOutcome>,
     /// Every command line run, shared with the copies a background read takes.
@@ -54,6 +57,7 @@ impl Clone for FakeHost {
             files: self.files.clone(),
             directories: self.directories.clone(),
             unreadable: self.unreadable.clone(),
+            unlistable: Arc::clone(&self.unlistable),
             links: self.links.clone(),
             commands: self.commands.clone(),
             runs: Arc::clone(&self.runs),
@@ -74,6 +78,7 @@ impl FakeHost {
             files: BTreeMap::new(),
             directories: BTreeMap::new(),
             unreadable: BTreeSet::new(),
+            unlistable: Arc::new(Mutex::new(BTreeMap::new())),
             links: BTreeMap::new(),
             commands: BTreeMap::new(),
             runs: Arc::new(Mutex::new(Vec::new())),
@@ -119,6 +124,15 @@ impl FakeHost {
                 })
                 .collect(),
         );
+        self
+    }
+
+    /// Makes the listing of the folder at `path` fail as unreadable for the next `listings` listings.
+    pub fn unlistable(self, path: &str, listings: usize) -> Self {
+        self.unlistable
+            .lock()
+            .expect("unlistable")
+            .insert(PathBuf::from(path), listings);
         self
     }
 
@@ -213,6 +227,12 @@ impl ReadDirectory for FakeHost {
     type Error = io::Error;
 
     fn read_directory(&self, path: &Path) -> Result<Vec<DirectoryEntry>, io::Error> {
+        if let Some(left) = self.unlistable.lock().expect("unlistable").get_mut(path)
+            && *left > 0
+        {
+            *left -= 1;
+            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+        }
         self.directories.get(path).cloned().ok_or_else(not_found)
     }
 }

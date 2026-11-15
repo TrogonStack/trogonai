@@ -49,10 +49,7 @@ pub(crate) fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
 /// from the extracted schema description.
 pub(crate) fn merge_unbounded(destination: &mut SettingsMap, source: &SettingsMap) -> NodeMerge {
     let node = NodeStack::for_build_target();
-    match schema() {
-        Some(schema) => node.merge_unbounded(schema.merge_spec(), destination, source),
-        None => node.merge_unbounded(&MergeSpec::default(), destination, source),
-    }
+    with_merge_spec(|spec| node.merge_unbounded(spec, destination, source))
 }
 
 /// [`merge_unbounded`] of `source` into `destination` as lodash `mergeWith` runs it on the `node` stack in the
@@ -64,10 +61,17 @@ pub(crate) fn merge_within(
     destination: &mut SettingsMap,
     source: &SettingsMap,
 ) -> NodeMerge {
-    match schema() {
-        Some(schema) => node.merge_within(call, schema.merge_spec(), destination, source, warmth),
-        None => node.merge_within(call, &MergeSpec::default(), destination, source, warmth),
-    }
+    with_merge_spec(|spec| node.merge_within(call, spec, destination, source, warmth))
+}
+
+/// Runs `merge` with the keys the customizer treats specially, from the extracted schema description, or with none
+/// when the description failed to load.
+fn with_merge_spec(merge: impl FnOnce(&MergeSpec) -> NodeMerge) -> NodeMerge {
+    merge(
+        schema()
+            .map(SettingsSchema::merge_spec)
+            .unwrap_or(&MergeSpec::default()),
+    )
 }
 
 pub(crate) fn get_path<'a>(settings: &'a SettingsMap, path: &[&str]) -> Option<&'a Value> {

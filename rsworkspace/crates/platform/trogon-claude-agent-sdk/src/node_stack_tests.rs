@@ -196,16 +196,10 @@ fn a_managed_settings_document_reads_and_copies_within_the_budgets_of_each_evalu
             (ManagedPass::Origin, 2220, 3271, 1943, 3454),
             (ManagedPass::MachinePolicy, 2222, 3274, 1945, 3457),
         ] {
-            assert!(stack.reads_policy(pass, &Value::Object(nested(objects, 0))), "{pass:?}");
-            assert!(
-                !stack.reads_policy(pass, &Value::Object(nested(objects + 1, 0))),
-                "{pass:?}"
-            );
-            assert!(stack.reads_policy(pass, &Value::Object(nested(1, arrays))), "{pass:?}");
-            assert!(
-                !stack.reads_policy(pass, &Value::Object(nested(1, arrays + 1))),
-                "{pass:?}"
-            );
+            assert!(stack.reads_policy(pass, &nested(objects, 0)), "{pass:?}");
+            assert!(!stack.reads_policy(pass, &nested(objects + 1, 0)), "{pass:?}");
+            assert!(stack.reads_policy(pass, &nested(1, arrays)), "{pass:?}");
+            assert!(!stack.reads_policy(pass, &nested(1, arrays + 1)), "{pass:?}");
             assert!(!stack.policy_copy_overflows(pass, &nested(1, copied)), "{pass:?}");
             assert!(stack.policy_copy_overflows(pass, &nested(1, copied + 1)), "{pass:?}");
             assert_eq!(stack.policy_max_depth(pass), deepest, "{pass:?}");

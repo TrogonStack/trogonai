@@ -481,14 +481,25 @@ impl NodeStack {
     /// The profile for the platform the crate is built for: [`NodeStack::NODE_24_LINUX_ARM64`] on Linux arm64,
     /// [`NodeStack::NODE_24_LINUX_X64`] on Linux x86-64 and [`NodeStack::NODE_24_DARWIN_ARM64`] everywhere else.
     #[must_use]
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     pub const fn for_build_target() -> Self {
-        if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-            Self::NODE_24_LINUX_ARM64
-        } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            Self::NODE_24_LINUX_X64
-        } else {
-            Self::NODE_24_DARWIN_ARM64
-        }
+        Self::NODE_24_LINUX_ARM64
+    }
+
+    /// The profile for the platform the crate is built for: [`NodeStack::NODE_24_LINUX_ARM64`] on Linux arm64,
+    /// [`NodeStack::NODE_24_LINUX_X64`] on Linux x86-64 and [`NodeStack::NODE_24_DARWIN_ARM64`] everywhere else.
+    #[must_use]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    pub const fn for_build_target() -> Self {
+        Self::NODE_24_LINUX_X64
+    }
+
+    /// The profile for the platform the crate is built for: [`NodeStack::NODE_24_LINUX_ARM64`] on Linux arm64,
+    /// [`NodeStack::NODE_24_LINUX_X64`] on Linux x86-64 and [`NodeStack::NODE_24_DARWIN_ARM64`] everywhere else.
+    #[must_use]
+    #[cfg(not(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))))]
+    pub const fn for_build_target() -> Self {
+        Self::NODE_24_DARWIN_ARM64
     }
 
     /// The same stack for a process whose command line and environment fill `bytes` when it starts: each argument
@@ -531,10 +542,10 @@ impl NodeStack {
     }
 
     /// Whether the managed settings reader walks and copies `document` in `pass` without running out of stack.
-    pub(crate) fn reads_policy(self, pass: ManagedPass, document: &Value) -> bool {
+    pub(crate) fn reads_policy(self, pass: ManagedPass, document: &Map<String, Value>) -> bool {
         let budgets = self.policy.of(pass);
-        self.walk.fits(self.available(budgets.walk), document)
-            && self.clone.fits(self.available(budgets.clone), document)
+        self.walk.fits_object(self.available(budgets.walk), document)
+            && self.clone.fits_object(self.available(budgets.clone), document)
     }
 
     /// Whether the file cache runs out of stack copying `settings`, which the reader kept from a settings file.

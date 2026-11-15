@@ -40,14 +40,16 @@ pub(crate) fn parse_policy_text(text: &str, node: NodeStack, pass: ManagedPass) 
             Err(_) => return PolicyParse::NotObject,
         }
     };
-    if !parsed.is_object() {
+    let Value::Object(document) = parsed else {
         return PolicyParse::NotObject;
-    }
-    if !node.reads_policy(pass, &parsed) {
-        return PolicyParse::Overflow;
-    }
-    match parsed {
-        Value::Object(document) => PolicyParse::Object(document),
-        _ => PolicyParse::NotObject,
+    };
+    if node.reads_policy(pass, &document) {
+        PolicyParse::Object(document)
+    } else {
+        PolicyParse::Overflow
     }
 }
+
+#[cfg(test)]
+#[path = "settings_policy_parse_tests.rs"]
+mod tests;
