@@ -1,0 +1,197 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/issuer_lifecycle.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/recipient_lifecycle.proto";
+import "trogonai/platform/workload_federation/v1alpha1/signing_lifecycle.proto";
+
+// The query owner authenticates the reader and authorizes this exact scope.
+// Cursors are opaque authenticated continuation tokens bound to caller, scope,
+// query kind, snapshot revision and independent recovery fence. Reusing them
+// after scope/authority/fence changes rejects; cursor bytes grant no permission.
+message OutboundConfigurationPageCursor {
+  bytes value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 4096
+    }
+  ];
+}
+
+enum OutboundConfigurationQueryFailureKind {
+  OUTBOUND_CONFIGURATION_QUERY_FAILURE_KIND_UNSPECIFIED = 0;
+  OUTBOUND_CONFIGURATION_QUERY_FAILURE_KIND_NOT_FOUND = 1;
+  OUTBOUND_CONFIGURATION_QUERY_FAILURE_KIND_DENIED = 2;
+  OUTBOUND_CONFIGURATION_QUERY_FAILURE_KIND_INVALID_CURSOR = 3;
+  OUTBOUND_CONFIGURATION_QUERY_FAILURE_KIND_STALE_SNAPSHOT = 4;
+  OUTBOUND_CONFIGURATION_QUERY_FAILURE_KIND_UNAVAILABLE = 5;
+  OUTBOUND_CONFIGURATION_QUERY_FAILURE_KIND_UNSUPPORTED_CONTRACT = 6;
+}
+
+message OutboundConfigurationQueryFailure {
+  OutboundConfigurationQueryFailureKind kind = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// Reads current safe configuration metadata by immutable owner identity. The
+// service validates the resource scope and applies owner-only read admission.
+message GetRecipientBindingRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  OutboundConfigurationId configuration_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetRecipientBindingResponse {
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    RecipientBindingState record = 1;
+    OutboundConfigurationQueryFailure failure = 2;
+  }
+}
+
+message ListRecipientBindingRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 100
+    }
+  ];
+  OutboundConfigurationPageCursor cursor = 3;
+}
+
+message RecipientBindingPage {
+  option (buf.validate.message).cel = {
+    id: "recipientbinding_page.scope"
+    message: "every returned configuration must belong to the requested scope"
+    expression: "this.records.all(record, record.configuration.recipient_binding_ref.scope == this.scope)"
+  };
+  option (buf.validate.message).cel = {
+    id: "recipientbinding_page.unique"
+    message: "a configuration page cannot repeat an owner identity"
+    expression: "this.records.map(record, record.configuration.recipient_binding_ref.version.id).unique()"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated RecipientBindingState records = 2 [(buf.validate.field).repeated.max_items = 100];
+  OutboundConfigurationPageCursor next_cursor = 3;
+}
+
+message ListRecipientBindingResponse {
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    RecipientBindingPage page = 1;
+    OutboundConfigurationQueryFailure failure = 2;
+  }
+}
+
+// Reads current safe configuration metadata by immutable owner identity. The
+// service validates the resource scope and applies owner-only read admission.
+message GetIssuerProfileRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  OutboundConfigurationId configuration_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetIssuerProfileResponse {
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    IssuerProfileState record = 1;
+    OutboundConfigurationQueryFailure failure = 2;
+  }
+}
+
+message ListIssuerProfileRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 100
+    }
+  ];
+  OutboundConfigurationPageCursor cursor = 3;
+}
+
+message IssuerProfilePage {
+  option (buf.validate.message).cel = {
+    id: "issuerprofile_page.scope"
+    message: "every returned configuration must belong to the requested scope"
+    expression: "this.records.all(record, record.configuration.issuer_profile_ref.scope == this.scope)"
+  };
+  option (buf.validate.message).cel = {
+    id: "issuerprofile_page.unique"
+    message: "a configuration page cannot repeat an owner identity"
+    expression: "this.records.map(record, record.configuration.issuer_profile_ref.version.id).unique()"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated IssuerProfileState records = 2 [(buf.validate.field).repeated.max_items = 100];
+  OutboundConfigurationPageCursor next_cursor = 3;
+}
+
+message ListIssuerProfileResponse {
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    IssuerProfilePage page = 1;
+    OutboundConfigurationQueryFailure failure = 2;
+  }
+}
+
+// Reads current safe configuration metadata by immutable owner identity. The
+// service validates the resource scope and applies owner-only read admission.
+message GetSigningProfileRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  OutboundConfigurationId configuration_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetSigningProfileResponse {
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    SigningProfileState record = 1;
+    OutboundConfigurationQueryFailure failure = 2;
+  }
+}
+
+message ListSigningProfileRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 100
+    }
+  ];
+  OutboundConfigurationPageCursor cursor = 3;
+}
+
+message SigningProfilePage {
+  option (buf.validate.message).cel = {
+    id: "signingprofile_page.scope"
+    message: "every returned configuration must belong to the requested scope"
+    expression: "this.records.all(record, record.configuration.signing_profile_ref.scope == this.scope)"
+  };
+  option (buf.validate.message).cel = {
+    id: "signingprofile_page.unique"
+    message: "a configuration page cannot repeat an owner identity"
+    expression: "this.records.map(record, record.configuration.signing_profile_ref.version.id).unique()"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated SigningProfileState records = 2 [(buf.validate.field).repeated.max_items = 100];
+  OutboundConfigurationPageCursor next_cursor = 3;
+}
+
+message ListSigningProfileResponse {
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    SigningProfilePage page = 1;
+    OutboundConfigurationQueryFailure failure = 2;
+  }
+}

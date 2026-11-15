@@ -1,11 +1,25 @@
 load("@rules_go//go:def.bzl", "go_test")
+load("//.config/bazel:go.bzl", "gofmt_test")
 
 go_test(
     name = "spirepolicy_test",
     srcs = ["policy_test.go"],
     data = ["testdata/deployment.json"],
+    race = "on",
     deps = [
         "@com_github_google_cel_go//cel:go_default_library",
         "@com_github_google_cel_go//common/types:go_default_library",
     ],
+)
+
+gofmt_test(
+    name = "gofmt_test",
+    srcs = glob(["*.go"]),
+)
+
+# //devops/kubernetes/spire checks that this reviewed copy still matches what
+# the deployment renders.
+exports_files(
+    ["testdata/deployment.json"],
+    visibility = ["//devops/kubernetes/spire:__pkg__"],
 )

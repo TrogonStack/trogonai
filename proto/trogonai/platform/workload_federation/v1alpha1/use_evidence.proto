@@ -1,0 +1,89 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/workload_federation/v1alpha1/exchange_evidence.proto";
+import "trogonai/platform/workload_federation/v1alpha1/provider_identity.proto";
+
+// These references identify broker-held material and its admitted source, not
+// a transferable credential. The executor resolves the actual immutable exchange
+// record, enforces the current recipient/operation and rechecks authority after
+// waits and immediately before dispatch. A stored allow is not a use permit.
+message FederationUseAdmission {
+  option (buf.validate.message).cel = {
+    id: "federation_use_admission.interval"
+    message: "resource use admission must remain inside original and provider validity"
+    expression: "this.checked_at >= this.authority.admitted_at && this.checked_at < this.permitted_local_use_until && this.permitted_local_use_until <= this.authority.original_authority_expires_at && this.permitted_local_use_until <= this.provider_expires_at"
+  };
+  FederationAuthorityEvidence authority = 1 [features.field_presence = LEGACY_REQUIRED];
+  FederationExchangeId exchange_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  RecipientOperationId operation_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp checked_at = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp permitted_local_use_until = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  BrokerUseHandleId use_handle_id = 7 [features.field_presence = LEGACY_REQUIRED];
+  bytes holder_public_key_sha256 = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+  google.protobuf.Timestamp provider_expires_at = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}
+
+// No provider payload/response, credential, proof, nonce or request digest is
+// retained. A completed remote effect may settle after a local deadline; this
+// record preserves that fact without pretending withdrawal can undo the effect.
+message FederationUseCompleted {
+  option (buf.validate.message).cel = {
+    id: "federation_use_completed.dispatch_evidence"
+    message: "completed use cannot claim that no request was dispatched"
+    expression: "!has(this.provider_request.absence) || this.provider_request.absence != 3"
+  };
+  FederationUseAdmission admission = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp finished_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  ProviderRequestEvidence provider_request = 3 [features.field_presence = LEGACY_REQUIRED];
+  option (buf.validate.message).cel = {
+    id: "federation_use_completed.interval"
+    message: "resource completion cannot precede use admission"
+    expression: "this.finished_at >= this.admission.checked_at"
+  };
+}
+
+message FederationUseDenied {
+  FederationAuthorityEvidence authority = 1 [features.field_presence = LEGACY_REQUIRED];
+  RecipientOperationId operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  FederationExchangeFailure failure = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message FederationUseUncertain {
+  option (buf.validate.message).cel = {
+    id: "federation_use_uncertain.dispatch_evidence"
+    message: "uncertain use cannot claim that no request was dispatched"
+    expression: "!has(this.provider_request.absence) || this.provider_request.absence != 3"
+  };
+  FederationUseAdmission admission = 1 [features.field_presence = LEGACY_REQUIRED];
+  FederationUncertainEffect effect = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProviderRequestEvidence provider_request = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message FederationUseRecord {
+  FederationUseId use_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    FederationUseCompleted completed = 2;
+    FederationUseDenied denied = 3;
+    FederationUseUncertain uncertain = 4;
+  }
+}
