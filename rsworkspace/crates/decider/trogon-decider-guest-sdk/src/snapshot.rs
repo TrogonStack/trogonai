@@ -51,9 +51,8 @@ pub enum SnapshotDecodeError {
     clippy::panic,
     reason = "guest session constructor cannot return an error; trap so the host observes a failed snapshot load instead of silently running on empty state"
 )]
-pub fn load_or_initial<C, S>(snapshot: Option<Vec<u8>>, schema_version: &str) -> C::State
+pub fn load_or_initial<S>(snapshot: Option<Vec<u8>>, schema_version: &str) -> S
 where
-    C: trogon_decider::Decider<State = S>,
     S: Default + trogon_decider::StateSnapshot,
     S::Payload: buffa::Message,
 {
@@ -62,7 +61,7 @@ where
             Ok(payload) => S::from_snapshot_payload(payload),
             Err(error) => panic!("failed to load decider snapshot: {error}"),
         },
-        None => C::State::default(),
+        None => S::default(),
     }
 }
 

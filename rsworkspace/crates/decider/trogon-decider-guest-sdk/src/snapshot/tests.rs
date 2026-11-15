@@ -1,55 +1,6 @@
 use super::*;
-use std::convert::Infallible;
 use std::error::Error as _;
-use trogon_decider::{Decider, Decision, Evolve, StateSnapshot, WritePrecondition};
 use trogonai_proto::scheduler::schedules::state_v1::State;
-
-struct SnapshotDecider;
-
-#[derive(Clone, Debug, PartialEq)]
-struct SnapshotState(State);
-
-impl Default for SnapshotState {
-    fn default() -> Self {
-        Self(State::default().with_last_occurrence_sequence(7))
-    }
-}
-
-impl Evolve<State> for SnapshotState {
-    type Error = Infallible;
-
-    fn evolve(self, event: &State) -> Result<Self, Self::Error> {
-        Ok(Self(event.clone()))
-    }
-}
-
-impl StateSnapshot for SnapshotState {
-    type Payload = State;
-
-    fn from_snapshot_payload(payload: State) -> Self {
-        Self(payload)
-    }
-
-    fn snapshot_payload(&self) -> &State {
-        &self.0
-    }
-}
-
-impl Decider for SnapshotDecider {
-    type StreamId = str;
-    type State = SnapshotState;
-    type Event = State;
-    type DecideError = Infallible;
-    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
-
-    fn stream_id(&self) -> &str {
-        "snapshot-fixture"
-    }
-
-    fn decide(state: &SnapshotState, _command: &Self) -> Result<Decision<Self>, Infallible> {
-        Ok(Decision::event(state.0.clone()))
-    }
-}
 
 #[test]
 fn snapshot_encoding_matches_versioned_protobuf_frame() {
@@ -57,7 +8,7 @@ fn snapshot_encoding_matches_versioned_protobuf_frame() {
     let expected = b"\x0a\x02v1\x12\x03\x18\x96\x01";
     assert_eq!(encode_snapshot(&state, "v1"), expected);
     assert_eq!(encode_current(&state, "v1"), expected);
-    assert_eq!(encode_current_state(&SnapshotState(state.clone()), "v1"), expected);
+    assert_eq!(encode_current_state(&state, "v1"), expected);
     assert_eq!(decode_snapshot::<State>(expected, "v1").unwrap(), state);
 }
 
@@ -74,19 +25,18 @@ fn snapshot_round_trip_preserves_presence_and_multibyte_schema_length() {
 
 #[test]
 fn absent_snapshot_uses_state_default_and_present_snapshot_restores_state() {
-    let initial = load_or_initial::<SnapshotDecider, SnapshotState>(None, "v1");
-    assert_eq!(initial.0.last_occurrence_sequence, Some(7));
+    let initial = load_or_initial::<State>(None, "v1");
+    assert_eq!(initial, State::default());
 
     let saved = State::default().with_last_occurrence_sequence(150).with_completed(true);
-    let restored = load_or_initial::<SnapshotDecider, SnapshotState>(Some(encode_current(&saved, "v1")), "v1");
-    assert_eq!(restored.0, saved);
+    let restored = load_or_initial::<State>(Some(encode_current(&saved, "v1")), "v1");
+    assert_eq!(restored, saved);
 }
 
 #[test]
 fn present_empty_state_does_not_fall_back_to_state_default() {
-    let restored = load_or_initial::<SnapshotDecider, SnapshotState>(Some(b"\x0a\x02v1\x12\x00".to_vec()), "v1");
-    assert_eq!(restored.0, State::default());
-    assert_ne!(restored, SnapshotState::default());
+    let restored = load_or_initial::<State>(Some(b"\x0a\x02v1\x12\x00".to_vec()), "v1");
+    assert_eq!(restored, State::default());
 }
 
 #[test]
@@ -96,9 +46,7 @@ fn corrupt_or_incompatible_snapshot_traps_instead_of_resetting_state() {
         b"\x0a\x02v2\x12\x00".to_vec(),
         b"\x0a\x02v1\x12\x01\x18".to_vec(),
     ] {
-        assert!(
-            std::panic::catch_unwind(|| load_or_initial::<SnapshotDecider, SnapshotState>(Some(frame), "v1")).is_err()
-        );
+        assert!(std::panic::catch_unwind(|| load_or_initial::<State>(Some(frame), "v1")).is_err());
     }
 }
 
