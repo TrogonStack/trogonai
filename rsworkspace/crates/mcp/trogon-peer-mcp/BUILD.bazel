@@ -1,0 +1,9 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = 'trogon-peer-mcp',
+    deps = ['//rsworkspace/crates/peers/trogon-peer',
+     '//rsworkspace/crates/peers/trogon-peer-context',
+     '//rsworkspace/crates/platform/trogonai-proto'],
+    integration_tests = {'error_contract': {}, 'prompt_hook': {}},
+)
