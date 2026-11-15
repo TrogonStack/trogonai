@@ -24,6 +24,7 @@ inputs:
       - proto/trogonai/policy
       - proto/trogonai/projects
       - proto/trogonai/secrets/credentials
+      - proto/trogonai/secrets/sources
       - proto/trogonai/secrets/v1alpha1
       - proto/trogonai/session
       - proto/trogonai/usage
