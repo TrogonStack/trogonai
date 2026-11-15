@@ -5,5 +5,8 @@ workspace_crate(
     deps = ['//rsworkspace/crates/peers/trogon-peer',
      '//rsworkspace/crates/peers/trogon-peer-context',
      '//rsworkspace/crates/platform/trogonai-proto'],
-    integration_tests = {'error_contract': {}, 'model_tools': {}, 'prompt_hook': {}},
+    integration_tests = {'error_contract': {},
+     'model_tools': {},
+     'prompt_hook': {'compile_data': ['//plugins/claude/peer:hooks/hooks.json']}},
+    compile_data = ['//plugins/claude/peer:hooks'],
 )
