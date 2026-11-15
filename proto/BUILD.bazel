@@ -1,3 +1,4 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 # Every file of the Buf module. A BUILD file below proto/ starts a package that
@@ -98,5 +99,39 @@ sh_test(
         "@mise//tools/protoc-gen-buffa-packaging",
         "@mise_rust//:bin/rustfmt",
         "@mise_rust//:rustc_lib",
+    ],
+)
+
+py_binary(
+    name = "run_contract_validator",
+    srcs = ["run_contract_validator.py"],
+)
+
+# Checks every fixture under tests/proto against the protovalidate rules the
+# way `mise run proto:validate` does. The validator reads the pinned Buf
+# version from the mise config and refuses any other.
+sh_test(
+    name = "contracts_test",
+    # Every fixture is a separate buf convert, which takes minutes.
+    size = "large",
+    srcs = ["buf_test.sh"],
+    args = [
+        "$(rootpath //.config/bazel:buf)",
+        "$(rootpath :buf_cache)",
+        "contracts",
+        "$(rootpath :run_contract_validator)",
+        "--",
+        "$(rootpaths //.config/mise:config.toml)",
+        "$(rootpaths //:buf.lock)",
+        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths :sources)",
+        "$(rootpaths //tests/proto:contracts)",
+    ],
+    data = _WORKSPACE + [
+        ":buf_cache",
+        ":run_contract_validator",
+        "//.config/mise:config.toml",
+        "//.config/bazel:buf",
+        "//tests/proto:contracts",
     ],
 )

@@ -80,6 +80,11 @@ rust)
 
   assert_generated "$out" "$ws/$out" "mise run proto:generate"
   ;;
+contracts)
+  # CHECK_ARGS: RUNNER
+  runner="$PWD/${check_args[0]}"
+  exec "$runner" "$ws/tests/proto/validate.py" --buf "$buf"
+  ;;
 typescript)
   # CHECK_ARGS: PACKAGE_DIR PROTOC_GEN_ES
   package="${check_args[0]}"
