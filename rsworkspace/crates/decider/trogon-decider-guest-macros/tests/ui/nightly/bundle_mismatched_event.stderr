@@ -58,6 +58,10 @@ note: expected this to be `ScheduleEvent`
 60 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
    = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: add `#![feature(trivial_bounds)]` to the crate attributes to enable
+   |
+ 1 + #![feature(trivial_bounds)]
+   |
 
 error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
   --> tests/ui/nightly/bundle_mismatched_event.rs:81:5

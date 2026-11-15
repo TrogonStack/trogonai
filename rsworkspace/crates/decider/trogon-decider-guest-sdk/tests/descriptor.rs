@@ -74,12 +74,16 @@ impl Evolve<PausedEvent> for DeclaredState {
 
 impl StateSnapshot for DeclaredState {
     type Payload = v1::SchedulePaused;
+}
 
-    fn from_snapshot_payload(payload: Self::Payload) -> Self {
+impl From<v1::SchedulePaused> for DeclaredState {
+    fn from(payload: v1::SchedulePaused) -> Self {
         Self(payload)
     }
+}
 
-    fn snapshot_payload(&self) -> &Self::Payload {
+impl AsRef<v1::SchedulePaused> for DeclaredState {
+    fn as_ref(&self) -> &v1::SchedulePaused {
         &self.0
     }
 }

@@ -10,7 +10,8 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use tracing::{error, info, warn};
 use trogon_decider_runtime::{
-    EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite, StreamAppend, StreamEvent, StreamRead,
+    EventDecodeOutcome, Evolve, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite, StreamAppend, StreamEvent,
+    StreamRead,
 };
 use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStreamInfo,
@@ -34,7 +35,7 @@ use crate::credential::commands::proto::{
     decode_rotation_requested, decode_write_failed, decode_write_requested,
 };
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
-use crate::credential::{CredentialEvolveError, CredentialState, evolve, initial_state};
+use crate::credential::{CredentialEvolveError, CredentialState};
 use crate::secret_store::{SecretStoreError, SecretStoreMetadata};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -277,8 +278,8 @@ pub(crate) async fn run<EventStream, EventStore, Secrets, Checkpoints>(
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -379,8 +380,8 @@ where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -409,8 +410,8 @@ where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -490,8 +491,8 @@ async fn recover_pending_credential_activations_from_events<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -635,7 +636,7 @@ where
         .map_err(|source| CredentialRecoveryReplayError::ReadCredential {
             source: Box::new(source),
         })?;
-    let mut state = initial_state();
+    let mut state = CredentialState::default();
     let mut destroyed_version = None;
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
@@ -651,9 +652,11 @@ where
                     .version(),
             );
         }
-        state = evolve(state, &event).map_err(|source| CredentialRecoveryReplayError::ReplayCredential { source })?;
+        state = state
+            .evolve(&event)
+            .map_err(|source| CredentialRecoveryReplayError::ReplayCredential { source })?;
     }
-    Ok((state, destroyed_version))
+    Ok((state.into(), destroyed_version))
 }
 
 fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, CredentialProtoDecodeError> {

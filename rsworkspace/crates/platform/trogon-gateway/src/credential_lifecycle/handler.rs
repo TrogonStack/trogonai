@@ -7,8 +7,8 @@ use std::sync::OnceLock;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use trogon_decider_runtime::{
-    CommandError, CommandExecution, EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite,
-    StreamAppend, StreamPosition, StreamRead, TokioSnapshotTaskScheduler,
+    CommandError, CommandExecution, EventDecodeOutcome, Evolve, ReadFrom, ReadStreamRequest, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamPosition, StreamRead, TokioSnapshotTaskScheduler,
 };
 use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
@@ -28,7 +28,7 @@ use crate::credential::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, CredentialDecideError,
     CredentialEvolveError, CredentialFailureReason, CredentialState, RecordCredentialDestroyFailure,
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
-    RequestCredentialWrite, RevokeCredential, evolve, initial_state,
+    RequestCredentialWrite, RevokeCredential,
 };
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
 use crate::secret_store::{
@@ -46,7 +46,7 @@ type ExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
     CredentialEventPayloadError,
     CredentialEventPayloadError,
 >;
-type SnapshotReadError<EventStore> = <EventStore as SnapshotRead<CredentialState, str>>::Error;
+type SnapshotReadError<EventStore> = <EventStore as SnapshotRead<state_v1::CredentialStateSnapshot, str>>::Error;
 type ReadError<EventStore> = <EventStore as StreamRead<str>>::Error;
 type AppendError<EventStore> = <EventStore as StreamAppend<str>>::Error;
 type HandlerResult<EventStore, SecretError> = Result<
@@ -360,8 +360,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStorePut + SecretStoreMetadata<Error = <Secrets as SecretStorePut>::Error>,
@@ -384,8 +384,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
@@ -408,8 +408,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -445,8 +445,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRevoke,
@@ -469,8 +469,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreDestroy,
@@ -531,8 +531,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -618,8 +618,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStorePut + SecretStoreMetadata<Error = <Secrets as SecretStorePut>::Error>,
@@ -722,8 +722,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
@@ -844,8 +844,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRevoke,
@@ -910,8 +910,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreDestroy,
@@ -1195,8 +1195,8 @@ async fn load_state<EventStore, SecretError>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     SecretError: Error + Send + Sync + 'static,
@@ -1209,7 +1209,7 @@ where
         .await
         .map_err(|source| CredentialHandlerError::ReadState { source })?;
     let current_position = stream.current_position;
-    let mut state = initial_state();
+    let mut state = CredentialState::default();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
             .decode::<v1::CredentialEvent>()
@@ -1217,9 +1217,11 @@ where
         else {
             continue;
         };
-        state = evolve(state, &event).map_err(|source| CredentialHandlerError::ReplayState { source })?;
+        state = state
+            .evolve(&event)
+            .map_err(|source| CredentialHandlerError::ReplayState { source })?;
     }
-    Ok((state, current_position))
+    Ok((state.into(), current_position))
 }
 
 fn failure_reason(source: &impl fmt::Display) -> CredentialFailureReason {

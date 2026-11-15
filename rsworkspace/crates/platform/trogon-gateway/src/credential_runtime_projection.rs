@@ -14,7 +14,7 @@ use opentelemetry::metrics::{Counter, Histogram};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use trogon_decider_runtime::{
-    EventDecodeOutcome, InvalidStreamPositionError, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition,
+    EventDecodeOutcome, Evolve, InvalidStreamPositionError, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition,
     StreamRead,
 };
 use trogon_nats::jetstream::{JetStreamGetRawMessage, JetStreamGetStreamInfo};
@@ -39,7 +39,7 @@ use crate::credential::commands::proto::{
 use crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::stream::{CredentialKey, CredentialSubject};
-use crate::credential::{CredentialEvolveError, evolve, initial_state};
+use crate::credential::{CredentialEvolveError, CredentialState};
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -930,7 +930,7 @@ pub async fn refresh_runtime_projections_from_credential_events(
         let state = stream_events
             .into_iter()
             .map(|(_, event)| event)
-            .try_fold(initial_state(), |state, event| evolve(state, &event))
+            .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
             .map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
 
         let Some(projection) = RuntimeIntegrationProjection::from_credential_state(&state, version)
@@ -1113,7 +1113,7 @@ where
             credential_id: credential_id.clone(),
             source: Box::new(source),
         })?;
-    let mut state = initial_state();
+    let mut state = CredentialState::default();
     let mut last_position = stream.current_position;
     for event in stream.events {
         last_position = last_position.max(Some(event.stream_position));
@@ -1123,9 +1123,11 @@ where
         else {
             continue;
         };
-        state = evolve(state, &event).map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
+        state = state
+            .evolve(&event)
+            .map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
     }
-    Ok((state, last_position))
+    Ok((state.into(), last_position))
 }
 
 async fn invalidate_all(cache: &RuntimeCredentialCache, credentials: &[CredentialRef]) {

@@ -1,13 +1,13 @@
 use std::time::Duration;
 
-use trogon_decider_runtime::StreamPosition;
+use trogon_decider_runtime::{Evolve, StreamPosition};
 use trogon_std::SecretString;
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::*;
+use crate::credential::CredentialState;
 use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
 use crate::credential::commands::proto::{activated_to_proto, write_requested_to_proto};
-use crate::credential::{evolve, initial_state};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut};
 use trogonai_proto::gateway::credentials::v1;
@@ -48,7 +48,7 @@ async fn runtime_bot_token_resolves_from_source_scoped_projection() {
         },
     ]
     .into_iter()
-    .try_fold(initial_state(), |state, event| evolve(state, &event))
+    .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
     .unwrap();
     let registry = RuntimeCredentialRegistry::default();
     registry.apply_state(&state, position(2)).await.unwrap();

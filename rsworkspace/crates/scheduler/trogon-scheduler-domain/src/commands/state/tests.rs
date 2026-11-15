@@ -115,7 +115,7 @@ fn occurrence_at() -> chrono::DateTime<chrono::Utc> {
 #[test]
 fn initial_state_is_missing() {
     assert_eq!(
-        (&*ScheduleState::default())
+        ScheduleState::default()
             .state
             .as_ref()
             .and_then(|value| value.as_known()),

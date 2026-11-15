@@ -25,7 +25,7 @@ use crate::{
     EventType, Events, Evolve, EvolveError, Headers, ReplayBounds, ReplayChunkSize, ReplayCursor, ReplayLimit,
     SnapshotCadence, StreamEvent, WritePrecondition,
 };
-use trogon_decider::{DecisionError, evaluate_decision};
+use trogon_decider::{DecisionError, StateSnapshot, evaluate_decision};
 use trogon_semconv::{attribute, metric, span};
 use trogon_std::{NowV7, UuidV7Generator};
 
@@ -141,7 +141,8 @@ type CommandEventPayloadEncodeError<C> = <<C as Decider>::Event as EventEncode>:
 type CommandEventDecodeError<C> = <<C as Decider>::Event as EventDecode>::Error;
 type CommandReadStreamError<E, C> = <E as StreamRead<<C as Decider>::StreamId>>::Error;
 type CommandAppendStreamError<E, C> = <E as StreamAppend<<C as Decider>::StreamId>>::Error;
-type CommandReadSnapshotError<S, C> = <S as SnapshotRead<<C as Decider>::State, <C as Decider>::StreamId>>::Error;
+type CommandSnapshotPayload<C> = <<C as Decider>::State as StateSnapshot>::Payload;
+type CommandReadSnapshotError<S, C> = <S as SnapshotRead<CommandSnapshotPayload<C>, <C as Decider>::StreamId>>::Error;
 
 /// Schedules best-effort snapshot writes without erasing the task future type.
 ///
@@ -337,7 +338,8 @@ pub trait SnapshotPolicy<C: Decider> {
 /// repeating the policy at every call site.
 pub trait CommandSnapshotPolicy: Decider
 where
-    Self::State: SnapshotType,
+    Self::State: StateSnapshot,
+    <Self::State as StateSnapshot>::Payload: SnapshotType,
 {
     /// The snapshot policy this decider's command executions use.
     type SnapshotPolicy: SnapshotPolicy<Self>;
@@ -863,8 +865,8 @@ impl<
 /// authorization step) is a change in one place rather than one per configuration.
 ///
 /// It stays a trait rather than an `Option` because the two configurations do not accept the same
-/// deciders. Snapshotting needs `C::State` to be clonable, sendable, and nameable as a snapshot
-/// type; a decider that never snapshots owes none of that. Those bounds therefore live on the
+/// deciders. Snapshotting needs a sendable state with a clonable, named snapshot payload;
+/// a decider that never snapshots owes none of that. Those bounds therefore live on the
 /// [`Snapshots`] implementation, and the skeleton inherits whichever set applies.
 pub trait ExecutionSnapshots<C>: sealed::Sealed
 where
@@ -999,10 +1001,14 @@ impl<S, P, Spawn, F> sealed::Sealed for Snapshots<'_, S, P, Spawn, F> {}
 impl<C, S, P, Spawn, F> ExecutionSnapshots<C> for Snapshots<'_, S, P, Spawn, F>
 where
     C: Decider + Sync,
-    C::State: Clone + SnapshotType + Send + 'static,
+    C::State: StateSnapshot + Send + 'static,
+    <C::State as StateSnapshot>::Payload: Clone + SnapshotType + Send + 'static,
     C::StreamId: std::fmt::Display + Sync + ToOwned,
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
-    S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
+    S: Clone
+        + SnapshotRead<<C::State as StateSnapshot>::Payload, C::StreamId>
+        + SnapshotWrite<<C::State as StateSnapshot>::Payload, C::StreamId>
+        + 'static,
     P: SnapshotPolicy<C> + Sync,
     Spawn: SnapshotTaskScheduler + Send + Sync,
     F: SnapshotFailurePolicy<C, CommandReadSnapshotError<S, C>> + Sync,
@@ -1041,7 +1047,7 @@ where
                     attribute::SnapshotOutcome::Miss
                 };
                 let state = snapshot
-                    .map(|snapshot| snapshot.payload)
+                    .map(|snapshot| C::State::from(snapshot.payload))
                     .unwrap_or_else(C::State::default);
                 (snapshot_position, state, outcome)
             }
@@ -1135,7 +1141,7 @@ where
                 &self.schedule_snapshot_task,
                 self.snapshot_store,
                 stream_id,
-                Snapshot::new(context.stream_position, context.state.clone()),
+                Snapshot::new(context.stream_position, context.state.as_ref().clone()),
             );
         } else {
             maybe_take_snapshot(self, stream_id, context);
@@ -1186,7 +1192,8 @@ where
 impl<'a, C, S> IntoSnapshots<'a, C> for &'a S
 where
     C: CommandSnapshotPolicy,
-    C::State: SnapshotType,
+    C::State: StateSnapshot,
+    <C::State as StateSnapshot>::Payload: SnapshotType,
 {
     type Store = S;
     type Policy = C::SnapshotPolicy;
@@ -1898,10 +1905,11 @@ fn maybe_take_snapshot<S, C, P, Spawn, F>(
     context: DecideSnapshot<'_, C>,
 ) where
     C: Decider,
-    C::State: Clone + SnapshotType + Send + 'static,
+    C::State: StateSnapshot + Send + 'static,
+    <C::State as StateSnapshot>::Payload: Clone + SnapshotType + Send + 'static,
     C::StreamId: std::fmt::Display + ToOwned,
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
-    S: Clone + SnapshotWrite<C::State, C::StreamId> + 'static,
+    S: Clone + SnapshotWrite<<C::State as StateSnapshot>::Payload, C::StreamId> + 'static,
     S::Error: std::fmt::Display + Send + 'static,
     P: SnapshotPolicy<C>,
     Spawn: SnapshotTaskScheduler + Send + Sync,
@@ -1915,20 +1923,20 @@ fn maybe_take_snapshot<S, C, P, Spawn, F>(
             &snapshots.schedule_snapshot_task,
             snapshots.snapshot_store,
             stream_id,
-            Snapshot::new(stream_position, state.clone()),
+            Snapshot::new(stream_position, state.as_ref().clone()),
         );
     }
 }
 
-fn schedule_snapshot_write<S, State, StreamId, Spawn>(
+fn schedule_snapshot_write<S, Payload, StreamId, Spawn>(
     schedule_snapshot_task: &Spawn,
     snapshot_store: &S,
     stream_id: &StreamId,
-    snapshot: Snapshot<State>,
+    snapshot: Snapshot<Payload>,
 ) where
-    S: SnapshotWrite<State, StreamId> + Clone + Send + Sync + 'static,
+    S: SnapshotWrite<Payload, StreamId> + Clone + Send + Sync + 'static,
     S::Error: std::fmt::Display + Send + 'static,
-    State: SnapshotType + Send + 'static,
+    Payload: SnapshotType + Send + 'static,
     StreamId: std::fmt::Display + ToOwned + ?Sized,
     StreamId::Owned: Borrow<StreamId> + Send + 'static,
     Spawn: SnapshotTaskScheduler + Send + Sync,

@@ -19,8 +19,9 @@ use crate::{
 
 const CREATED_EVENT_TYPE: &str = "test.command-execution.created.v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum CreateState {
+    #[default]
     Missing,
     Created,
 }
@@ -710,12 +711,6 @@ async fn a_resolver_inside_its_declared_scope_is_left_alone() {
         .expect("a subject inside the declared scope is written normally");
 
     assert_eq!(result.state, CreateState::Created);
-}
-
-impl Default for CreateState {
-    fn default() -> Self {
-        CreateState::Missing
-    }
 }
 
 impl trogon_decider_runtime::Evolve<CreatedEvent> for CreateState {

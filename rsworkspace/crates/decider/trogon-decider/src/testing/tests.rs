@@ -3,10 +3,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use super::*;
 use crate::{Decision, WritePrecondition};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 enum TestState {
+    #[default]
     Missing,
-    Present { enabled: bool },
+    Present {
+        enabled: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -633,12 +636,6 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
         return (*message).to_string();
     }
     String::new()
-}
-
-impl Default for TestState {
-    fn default() -> Self {
-        TestState::Missing
-    }
 }
 
 impl crate::Evolve<TestEvent> for TestState {

@@ -73,12 +73,13 @@ fn destroy_requested() -> v1::CredentialEvent {
 fn state_after(events: impl IntoIterator<Item = v1::CredentialEvent>) -> state_v1::CredentialStateSnapshot {
     events
         .into_iter()
-        .try_fold(initial_state(), |state, event| evolve(state, &event))
+        .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
         .unwrap()
+        .into()
 }
 
 fn rejected_by(state: state_v1::CredentialStateSnapshot, event: v1::CredentialEvent, expected: CredentialEvolveError) {
-    assert_eq!(evolve(state, &event), Err(expected));
+    assert_eq!(CredentialState::from(state).evolve(&event), Err(expected));
 }
 
 fn other_id() -> CredentialId {
@@ -125,17 +126,17 @@ fn events_that_need_a_precondition_are_rejected_without_it() {
     let reason = CredentialFailureReason::new("openbao failed").unwrap();
     let cases = [
         (
-            initial_state(),
+            CredentialState::default().into(),
             event(write_failed_to_proto(&credential_id(), &reason)),
             CredentialEvolveError::WriteFailedWithoutPendingWrite,
         ),
         (
-            initial_state(),
+            CredentialState::default().into(),
             activated(),
             CredentialEvolveError::ActivatedWithoutPendingWrite,
         ),
         (
-            initial_state(),
+            CredentialState::default().into(),
             rotation_requested(),
             CredentialEvolveError::RotationRequestedWithoutActiveCredential,
         ),
@@ -145,7 +146,7 @@ fn events_that_need_a_precondition_are_rejected_without_it() {
             CredentialEvolveError::RotationFailedWithoutPendingRotation,
         ),
         (
-            initial_state(),
+            CredentialState::default().into(),
             event(rotated_to_proto(
                 &credential_ref(1),
                 &metadata_with(CredentialStatus::Active, 2),
@@ -153,7 +154,7 @@ fn events_that_need_a_precondition_are_rejected_without_it() {
             CredentialEvolveError::RotatedWithoutPendingRotation,
         ),
         (
-            initial_state(),
+            CredentialState::default().into(),
             revoked(),
             CredentialEvolveError::RevokedWithoutActiveCredential,
         ),
@@ -163,12 +164,12 @@ fn events_that_need_a_precondition_are_rejected_without_it() {
             CredentialEvolveError::DestroyRequestedWithoutRevokedOrCleanupFailedCredential,
         ),
         (
-            initial_state(),
+            CredentialState::default().into(),
             event(destroyed_to_proto(&credential_ref(1))),
             CredentialEvolveError::DestroyedWithoutDestroyRequestedCredential,
         ),
         (
-            initial_state(),
+            CredentialState::default().into(),
             event(destroy_failed_to_proto(&credential_ref(1), &reason)),
             CredentialEvolveError::DestroyFailedWithoutDestroyRequestedCredential,
         ),
@@ -265,7 +266,7 @@ fn missing_message_fields_surface_as_proto_errors() {
     };
 
     assert_eq!(
-        evolve(state_after([write_requested()]), &activation_without_metadata),
+        CredentialState::from(state_after([write_requested()])).evolve(&activation_without_metadata),
         Err(CredentialEvolveError::InvalidProto(
             CredentialProtoDecodeError::MissingField {
                 field: "metadata".into()

@@ -66,12 +66,10 @@ pub struct PlanState {
 
 impl StateSnapshot for PlanState {
     type Payload = Self;
+}
 
-    fn from_snapshot_payload(payload: Self::Payload) -> Self {
-        payload
-    }
-
-    fn snapshot_payload(&self) -> &Self::Payload {
+impl AsRef<Self> for PlanState {
+    fn as_ref(&self) -> &Self {
         self
     }
 }

@@ -140,6 +140,6 @@ pub use trogon_decider::testing;
 #[cfg(feature = "test-support")]
 pub use trogon_decider::testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
 pub use trogon_decider::{
-    Act, ActBuilder, Decider, Decision, Events, Evolve, EvolveError, SnapshotCadence, WritePrecondition,
+    Act, ActBuilder, Decider, Decision, Events, Evolve, EvolveError, SnapshotCadence, StateSnapshot, WritePrecondition,
 };
 pub use trogon_decider::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};

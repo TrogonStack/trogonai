@@ -24,12 +24,10 @@ pub type ScheduleEventPayloadError = EventPayloadError<buffa::DecodeError>;
 
 impl StateSnapshot for state_v1::State {
     type Payload = Self;
+}
 
-    fn from_snapshot_payload(payload: Self::Payload) -> Self {
-        payload
-    }
-
-    fn snapshot_payload(&self) -> &Self::Payload {
+impl AsRef<Self> for state_v1::State {
+    fn as_ref(&self) -> &Self {
         self
     }
 }

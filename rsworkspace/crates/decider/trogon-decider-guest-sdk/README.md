@@ -31,8 +31,9 @@ pub trait Decider: Sized {
 ```
 
 State owns the no-history value through `Default` and event replay through `Evolve<Event>`.
-For guest snapshots it also implements `StateSnapshot`, which maps the state to its protobuf
-payload without changing the persisted snapshot frame.
+For snapshots it also implements `StateSnapshot` to name its protobuf `Payload` type.
+The standard `From<Payload>` and `AsRef<Payload>` implementations restore the state and borrow
+the payload for encoding. Native stores keep using the protobuf payload type.
 
 `decide` returns a `Decision<Self>`, which is either a flat batch of events
 (`Decision::Events`) or an `Act` plan: a chain of steps, each re-evaluating `decide` against the

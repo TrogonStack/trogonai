@@ -81,10 +81,23 @@ enum TestAction {
     EmitUnencodable,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 enum TestState {
+    #[default]
     Missing,
-    Present { enabled: bool },
+    Present {
+        enabled: bool,
+    },
+}
+
+impl StateSnapshot for TestState {
+    type Payload = Self;
+}
+
+impl AsRef<Self> for TestState {
+    fn as_ref(&self) -> &Self {
+        self
+    }
 }
 
 impl SnapshotType for TestState {
@@ -3184,12 +3197,6 @@ fn a_chunked_replay_resumes_from_a_snapshot_and_still_walks_the_rest() {
         &[ReadFrom::Position(position(3)), ReadFrom::Position(position(5))],
         "the walk starts after the snapshot and keeps chunking from there"
     );
-}
-
-impl Default for TestState {
-    fn default() -> Self {
-        TestState::Missing
-    }
 }
 
 impl crate::Evolve<TestEvent> for TestState {

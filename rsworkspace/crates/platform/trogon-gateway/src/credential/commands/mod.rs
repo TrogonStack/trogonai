@@ -28,4 +28,4 @@ pub use request_credential_destroy::RequestCredentialDestroy;
 pub use request_credential_rotation::RequestCredentialRotation;
 pub use request_credential_write::RequestCredentialWrite;
 pub use revoke_credential::RevokeCredential;
-pub(crate) use state::{CredentialDecideError, CredentialEvolveError, CredentialState, evolve, initial_state};
+pub(crate) use state::{CredentialDecideError, CredentialEvolveError, CredentialState};

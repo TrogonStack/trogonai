@@ -41,7 +41,7 @@ struct HandlerTestStreamStoreError;
 #[derive(Clone, Default)]
 struct HandlerTestStreamStore {
     events: Arc<Mutex<Vec<StreamEvent>>>,
-    snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialState>>>>,
+    snapshots: Arc<Mutex<BTreeMap<String, Snapshot<state_v1::CredentialStateSnapshot>>>>,
     write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
     fail_append_at: Arc<Mutex<Option<usize>>>,
 }
@@ -132,25 +132,25 @@ impl StreamAppend<str> for HandlerTestStreamStore {
     }
 }
 
-impl SnapshotRead<CredentialState, str> for HandlerTestStreamStore {
+impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for HandlerTestStreamStore {
     type Error = HandlerTestStreamStoreError;
 
     async fn read_snapshot(
         &self,
         request: ReadSnapshotRequest<'_, str>,
-    ) -> Result<ReadSnapshotResponse<CredentialState>, Self::Error> {
+    ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
         Ok(ReadSnapshotResponse {
             snapshot: self.snapshots.lock().unwrap().get(request.snapshot_id).cloned(),
         })
     }
 }
 
-impl SnapshotWrite<CredentialState, str> for HandlerTestStreamStore {
+impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for HandlerTestStreamStore {
     type Error = HandlerTestStreamStoreError;
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, CredentialState, str>,
+        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, str>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         self.snapshots
             .lock()
@@ -394,7 +394,7 @@ impl OpenBaoServer {
 
 #[test]
 fn recovery_plan_builds_write_activation_command_for_pending_write() {
-    let state = evolve(initial_state(), &write_requested_event()).unwrap();
+    let state = CredentialState::default().evolve(&write_requested_event()).unwrap();
 
     let command = activation_recovery_command(&credential_id(), &state, None).unwrap();
 
@@ -430,7 +430,7 @@ fn recovery_plan_builds_write_activation_from_the_pending_scope_for_any_backend(
 
 #[test]
 fn recovery_plan_rejects_a_pending_write_from_another_stream() {
-    let state = evolve(initial_state(), &write_requested_event()).unwrap();
+    let state = CredentialState::default().evolve(&write_requested_event()).unwrap();
     let stream_id = source_scoped_credential_id();
 
     let error = activation_recovery_command(&stream_id, &state, None).unwrap_err();
@@ -456,7 +456,7 @@ fn recovery_plan_builds_rotation_activation_command_for_pending_rotation() {
         rotation_requested_event(1),
     ]
     .into_iter()
-    .try_fold(initial_state(), |state, event| evolve(state, &event))
+    .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
     .unwrap();
 
     let command = activation_recovery_command(&credential_id(), &state, None).unwrap();
@@ -479,7 +479,7 @@ fn recovery_plan_skips_completed_state() {
     );
     let state = [write_requested_event(), activated_event(active)]
         .into_iter()
-        .try_fold(initial_state(), |state, event| evolve(state, &event))
+        .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
         .unwrap();
 
     let command = activation_recovery_command(&credential_id(), &state, None).unwrap();

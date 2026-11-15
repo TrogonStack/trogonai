@@ -50,3 +50,8 @@ required-features = ["test-support"]
 name = "replay_events_metric"
 path = "tests/replay_events_metric.rs"
 required-features = ["test-support"]
+
+[[test]]
+name = "snapshot_payload"
+path = "tests/snapshot_payload.rs"
+required-features = ["test-support"]

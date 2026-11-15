@@ -58,7 +58,7 @@ where
 {
     match snapshot {
         Some(bytes) => match decode_snapshot::<S::Payload>(&bytes, schema_version) {
-            Ok(payload) => S::from_snapshot_payload(payload),
+            Ok(payload) => S::from(payload),
             Err(error) => panic!("failed to load decider snapshot: {error}"),
         },
         None => S::default(),
@@ -71,7 +71,7 @@ where
     S: trogon_decider::StateSnapshot,
     S::Payload: buffa::Message,
 {
-    encode_snapshot(state.snapshot_payload(), schema_version)
+    encode_snapshot(state.as_ref(), schema_version)
 }
 
 /// Encode the current guest state into a versioned snapshot frame.

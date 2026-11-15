@@ -202,8 +202,9 @@ fn destroy_failed(credential: &CredentialRef) -> v1::CredentialEvent {
 fn build_state(events: impl IntoIterator<Item = v1::CredentialEvent>) -> state_v1::CredentialStateSnapshot {
     events
         .into_iter()
-        .try_fold(initial_state(), |state, event| evolve(state, &event))
+        .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
         .unwrap()
+        .into()
 }
 
 #[tokio::test]
@@ -241,7 +242,7 @@ async fn active_projection_can_be_refreshed_from_replayed_state() {
         },
     ]
     .into_iter()
-    .try_fold(initial_state(), |state, event| evolve(state, &event))
+    .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
     .unwrap();
     let projection = RuntimeIntegrationProjection::from_credential_state(&state, 2)
         .unwrap()
@@ -685,13 +686,11 @@ async fn registry_applies_revoked_state_incrementally_and_invalidates_cache() {
     );
 
     store.revoke(&credential).await.unwrap();
-    let revoked_state = evolve(
-        active_state,
-        &v1::CredentialEvent {
+    let revoked_state = CredentialState::from(active_state)
+        .evolve(&v1::CredentialEvent {
             event: Some(revoked_to_proto(&credential).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry.apply_state(&revoked_state, position(3)).await.unwrap();
 
     assert!(matches!(
@@ -722,7 +721,9 @@ async fn a_stale_active_state_does_not_republish_a_revoked_credential() {
             event: Some(activated_to_proto(&metadata).into()),
         },
     ]);
-    let revoked_state = evolve(active_state.clone(), &revoked(&credential)).unwrap();
+    let revoked_state = CredentialState::from(active_state.clone())
+        .evolve(&revoked(&credential))
+        .unwrap();
 
     registry.apply_state(&revoked_state, position(3)).await.unwrap();
     registry.apply_state(&active_state, position(2)).await.unwrap();
@@ -741,13 +742,11 @@ async fn a_stale_pending_write_state_does_not_evict_a_live_credential() {
     let registry = RuntimeCredentialRegistry::default();
     let resolver = registry.resolver(store.clone());
     let pending_state = build_state([write_requested(&credential)]);
-    let active_state = evolve(
-        pending_state.clone(),
-        &v1::CredentialEvent {
+    let active_state = CredentialState::from(pending_state.clone())
+        .evolve(&v1::CredentialEvent {
             event: Some(activated_to_proto(&metadata).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     registry.apply_state(&active_state, position(2)).await.unwrap();
     registry.apply_state(&pending_state, position(1)).await.unwrap();
@@ -821,20 +820,16 @@ async fn applying_a_rotated_state_invalidates_the_replaced_credential() {
         .rotate(&previous, SecretString::new("Bot new-token").unwrap())
         .await
         .unwrap();
-    let pending_state = evolve(
-        active_state,
-        &v1::CredentialEvent {
+    let pending_state = CredentialState::from(active_state)
+        .evolve(&v1::CredentialEvent {
             event: Some(rotation_requested_to_proto(&previous).into()),
-        },
-    )
-    .unwrap();
-    let rotated_state = evolve(
-        pending_state,
-        &v1::CredentialEvent {
+        })
+        .unwrap();
+    let rotated_state = pending_state
+        .evolve(&v1::CredentialEvent {
             event: Some(rotated_to_proto(&previous, &store.metadata(&rotated).await.unwrap()).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry.apply_state(&rotated_state, position(3)).await.unwrap();
 
     assert!(registry.cache().get(&previous).await.is_none());
@@ -864,37 +859,31 @@ async fn registry_applies_destroyed_state_incrementally_and_invalidates_cache() 
     );
 
     store.revoke(&credential).await.unwrap();
-    let revoked_state = evolve(
-        active_state,
-        &v1::CredentialEvent {
+    let revoked_state = CredentialState::from(active_state)
+        .evolve(&v1::CredentialEvent {
             event: Some(revoked_to_proto(&credential).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry.apply_state(&revoked_state, position(3)).await.unwrap();
 
     let reason = SecretDestroyReason::new("credential lifecycle cleanup").unwrap();
     let destroy_reason = CredentialDestroyReason::new(reason.as_str()).unwrap();
-    let destroy_requested_state = evolve(
-        revoked_state,
-        &v1::CredentialEvent {
+    let destroy_requested_state = revoked_state
+        .evolve(&v1::CredentialEvent {
             event: Some(destroy_requested_to_proto(&credential, &destroy_reason).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry
         .apply_state(&destroy_requested_state, position(4))
         .await
         .unwrap();
 
     store.destroy(&credential, &reason).await.unwrap();
-    let destroyed_state = evolve(
-        destroy_requested_state,
-        &v1::CredentialEvent {
+    let destroyed_state = destroy_requested_state
+        .evolve(&v1::CredentialEvent {
             event: Some(destroyed_to_proto(&credential).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry.apply_state(&destroyed_state, position(5)).await.unwrap();
 
     assert!(matches!(
@@ -2488,7 +2477,10 @@ async fn incremental_refresh_reports_a_credential_history_that_cannot_be_read() 
 async fn applying_a_state_with_nothing_to_publish_changes_nothing() {
     let registry = RuntimeCredentialRegistry::default();
 
-    registry.apply_state(&initial_state(), position(1)).await.unwrap();
+    registry
+        .apply_state(&CredentialState::default(), position(1))
+        .await
+        .unwrap();
 
     assert!(registry.projections.get(&key()).await.is_none());
 }

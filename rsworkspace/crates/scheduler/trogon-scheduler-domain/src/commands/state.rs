@@ -56,41 +56,6 @@ impl AsRef<state_v1::State> for ScheduleState {
 
 impl StateSnapshot for ScheduleState {
     type Payload = state_v1::State;
-
-    fn from_snapshot_payload(payload: Self::Payload) -> Self {
-        payload.into()
-    }
-
-    fn snapshot_payload(&self) -> &Self::Payload {
-        self.as_ref()
-    }
-}
-
-#[cfg(feature = "runtime-snapshot")]
-impl trogon_decider_runtime::snapshot::SnapshotType for ScheduleState {
-    type Error = <state_v1::State as trogon_decider_runtime::snapshot::SnapshotType>::Error;
-
-    fn snapshot_type() -> Result<trogon_decider_runtime::snapshot::SnapshotTypeName, Self::Error> {
-        <state_v1::State as trogon_decider_runtime::snapshot::SnapshotType>::snapshot_type()
-    }
-}
-
-#[cfg(feature = "runtime-snapshot")]
-impl trogon_decider_runtime::snapshot::SnapshotPayloadEncode for ScheduleState {
-    type Error = <state_v1::State as trogon_decider_runtime::snapshot::SnapshotPayloadEncode>::Error;
-
-    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
-        trogon_decider_runtime::snapshot::SnapshotPayloadEncode::encode(&self.0)
-    }
-}
-
-#[cfg(feature = "runtime-snapshot")]
-impl trogon_decider_runtime::snapshot::SnapshotPayloadDecode for ScheduleState {
-    type Error = <state_v1::State as trogon_decider_runtime::snapshot::SnapshotPayloadDecode>::Error;
-
-    fn decode(payload: trogon_decider_runtime::snapshot::SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
-        <state_v1::State as trogon_decider_runtime::snapshot::SnapshotPayloadDecode>::decode(payload).map(Self)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

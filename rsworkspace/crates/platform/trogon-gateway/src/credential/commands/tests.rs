@@ -7,8 +7,8 @@ use trogon_decider::testing::TestCase;
 use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, CommandSnapshotPolicy, EventData,
     EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, ReadFrom, ReadStreamRequest, ReadStreamResponse,
-    SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType, StreamAppend, StreamEvent,
-    StreamPosition, StreamRead, StreamWritePrecondition,
+    SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, StreamAppend, StreamEvent, StreamPosition,
+    StreamRead, StreamWritePrecondition,
 };
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1 as proto};
 
@@ -25,7 +25,7 @@ use super::proto::{
     rotation_requested_to_proto, write_failed_to_proto, write_requested_to_proto,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
-use super::state::{CredentialDecideError, CredentialEvolveError, CredentialState, evolve, initial_state};
+use super::state::{CredentialDecideError, CredentialEvolveError, CredentialState};
 use super::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, RecordCredentialDestroyFailure,
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
@@ -248,8 +248,9 @@ fn rebuild_state_from_events(
 ) -> state_v1::CredentialStateSnapshot {
     events
         .into_iter()
-        .try_fold(initial_state(), |state, event| evolve(state, &event))
+        .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
         .unwrap()
+        .into()
 }
 
 #[test]
@@ -300,19 +301,28 @@ fn snapshot_policy_uses_scheduler_frequency_pattern() {
 #[test]
 fn state_owned_evolution_preserves_snapshot_encoding() {
     let state = CredentialState::default().evolve(&write_requested()).unwrap();
-    let proto_state: state_v1::CredentialStateSnapshot = state.clone().into();
+    let expected = state_v1::CredentialStateSnapshot {
+        state: Some(
+            state_v1::PendingCredentialWriteState {
+                credential_id: credential_id().as_str().to_string(),
+                owner_id: owner_id().as_str().to_string(),
+                source: Some(proto::CredentialSource::CREDENTIAL_SOURCE_GITHUB.into()),
+                kind: Some(proto::CredentialKind::CREDENTIAL_KIND_WEBHOOK_SECRET.into()),
+                scope_key: "github/primary".to_string(),
+            }
+            .into(),
+        ),
+    };
 
-    assert_eq!(proto_state, evolve(initial_state(), &write_requested()).unwrap());
-    assert_eq!(
-        CredentialState::snapshot_type().unwrap(),
-        state_v1::CredentialStateSnapshot::snapshot_type().unwrap()
-    );
-    let encoded = SnapshotPayloadEncode::encode(&proto_state).unwrap();
-    assert_eq!(state.encode().unwrap(), encoded);
-    assert_eq!(
-        CredentialState::decode(SnapshotPayloadData::new(&encoded)).unwrap(),
-        state
-    );
+    assert_eq!(state.as_ref(), &expected);
+    let encoded = SnapshotPayloadEncode::encode(state.as_ref()).unwrap();
+    assert_eq!(encoded, expected.encode_to_vec());
+    let decoded =
+        <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded))
+            .unwrap();
+    assert_eq!(CredentialState::from(decoded), state);
+    let proto_state: state_v1::CredentialStateSnapshot = state.into();
+    assert_eq!(proto_state, expected);
 }
 
 #[test]
@@ -772,7 +782,7 @@ fn given_when_then_rejects_rotation_failure_without_a_pending_rotation() {
 fn rebuild_state_from_events_active_rotated_state() {
     let state = [write_requested(), activated(1), rotation_requested(1), rotated(1, 2)]
         .into_iter()
-        .try_fold(initial_state(), |state, event| evolve(state, &event))
+        .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
         .unwrap();
 
     let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
@@ -840,7 +850,7 @@ fn evolve_rejects_restart_after_destroy_for_a_different_credential() {
     };
 
     assert_eq!(
-        evolve(destroyed_state, &restart).unwrap_err(),
+        CredentialState::from(destroyed_state).evolve(&restart).unwrap_err(),
         CredentialEvolveError::CredentialRefMismatch {
             expected: credential_id(),
             actual: other_id,
@@ -890,7 +900,7 @@ fn evolve_rejects_activation_for_a_different_scope() {
     };
 
     assert_eq!(
-        evolve(pending, &activation).unwrap_err(),
+        CredentialState::from(pending).evolve(&activation).unwrap_err(),
         CredentialEvolveError::CredentialRefMismatch {
             expected: credential_id(),
             actual: credential_id(),
@@ -912,7 +922,7 @@ fn evolve_rejects_rotation_into_a_different_scope() {
     };
 
     assert_eq!(
-        evolve(requested, &rotation).unwrap_err(),
+        CredentialState::from(requested).evolve(&rotation).unwrap_err(),
         CredentialEvolveError::CredentialRefMismatch {
             expected: credential_id(),
             actual: credential_id(),
@@ -937,7 +947,7 @@ fn evolve_rejects_write_retry_for_a_different_credential() {
     };
 
     assert_eq!(
-        evolve(failed, &retry).unwrap_err(),
+        CredentialState::from(failed).evolve(&retry).unwrap_err(),
         CredentialEvolveError::CredentialRefMismatch {
             expected: credential_id(),
             actual: other_id,
@@ -1021,7 +1031,7 @@ fn event_codec_rejects_invalid_persisted_fields() {
     .into_decoded()
     .unwrap();
 
-    let error = evolve(initial_state(), &decoded).unwrap_err();
+    let error = CredentialState::default().evolve(&decoded).unwrap_err();
 
     assert!(matches!(
         error,
@@ -1052,7 +1062,7 @@ fn event_codec_rejects_a_write_request_without_a_scope() {
     .unwrap();
 
     assert_eq!(
-        evolve(initial_state(), &decoded).unwrap_err(),
+        CredentialState::default().evolve(&decoded).unwrap_err(),
         CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
             field: "scope_key".into(),
             reason: CredentialFieldInvalidError::EmptyScopeKey,
@@ -1083,7 +1093,7 @@ fn event_codec_rejects_scope_key_that_does_not_match_source() {
     .unwrap();
 
     let state = rebuild_state_from_events([write_requested(), activated(1)]);
-    let error = evolve(state, &decoded).unwrap_err();
+    let error = CredentialState::from(state).evolve(&decoded).unwrap_err();
 
     assert!(matches!(
         error,
@@ -1121,7 +1131,7 @@ fn event_codec_rejects_activation_for_a_credential_id_with_an_unknown_storage_pr
     .unwrap();
 
     let state = rebuild_state_from_events([write_requested()]);
-    let error = evolve(state, &decoded).unwrap_err();
+    let error = CredentialState::from(state).evolve(&decoded).unwrap_err();
 
     assert!(matches!(
         error,

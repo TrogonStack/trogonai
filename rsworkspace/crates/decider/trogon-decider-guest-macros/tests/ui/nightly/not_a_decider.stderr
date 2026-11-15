@@ -168,6 +168,46 @@ help: the trait `From<CreateSchedule>` is not implemented for `NotADecider`
    = note: required for `NotADecider` to implement `TryFrom<CreateSchedule>`
    = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied
+ --> tests/ui/nightly/not_a_decider.rs:6:17
+  |
+6 | export_decider!(NotADecider {
+  |                 ^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `Decider` is not implemented for `NotADecider`
+ --> tests/ui/nightly/not_a_decider.rs:4:1
+  |
+4 | struct NotADecider;
+  | ^^^^^^^^^^^^^^^^^^
+note: required by a bound in `evolve_one`
+ --> $WORKSPACE/crates/decider/trogon-decider-guest-sdk/src/bridge.rs
+  |
+  | pub fn evolve_one<C, E, A>(state: C::State, envelope: A) -> Result<C::State, E>
+  |        ---------- required by a bound in this function
+  | where
+  |     C: Decider,
+  |        ^^^^^^^ required by this bound in `evolve_one`
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied
+ --> tests/ui/nightly/not_a_decider.rs:6:17
+  |
+6 | export_decider!(NotADecider {
+  |                 ^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `Decider` is not implemented for `NotADecider`
+ --> tests/ui/nightly/not_a_decider.rs:4:1
+  |
+4 | struct NotADecider;
+  | ^^^^^^^^^^^^^^^^^^
+note: required by a bound in `decide_command`
+ --> $WORKSPACE/crates/decider/trogon-decider-guest-sdk/src/bridge.rs
+  |
+  | pub fn decide_command<C, D, A>(command: &C, state: &C::State) -> Result<Vec<A>, D>
+  |        -------------- required by a bound in this function
+  | where
+  |     C: Decider<DecideError: 'static, State: Clone>,
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `decide_command`
+
 error[E0277]: the trait bound `Ref<'_, _>: StateSnapshot` is not satisfied
   --> tests/ui/nightly/not_a_decider.rs:6:1
    |

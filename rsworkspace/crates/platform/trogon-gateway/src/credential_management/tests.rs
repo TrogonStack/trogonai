@@ -31,7 +31,7 @@ use trogonai_proto::gateway::credentials::v1;
 #[derive(Clone, Default)]
 struct ManagementTestStreamStore {
     events: Arc<Mutex<Vec<StreamEvent>>>,
-    snapshots: Arc<Mutex<BTreeMap<String, Snapshot<crate::credential::CredentialState>>>>,
+    snapshots: Arc<Mutex<BTreeMap<String, Snapshot<state_v1::CredentialStateSnapshot>>>>,
     unavailable: Arc<AtomicBool>,
 }
 
@@ -114,13 +114,13 @@ impl StreamAppend<str> for ManagementTestStreamStore {
     }
 }
 
-impl SnapshotRead<crate::credential::CredentialState, str> for ManagementTestStreamStore {
+impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn read_snapshot(
         &self,
         request: ReadSnapshotRequest<'_, str>,
-    ) -> Result<ReadSnapshotResponse<crate::credential::CredentialState>, Self::Error> {
+    ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
         self.ensure_available()?;
         let snapshots = self.snapshots.lock().await;
         Ok(ReadSnapshotResponse {
@@ -129,12 +129,12 @@ impl SnapshotRead<crate::credential::CredentialState, str> for ManagementTestStr
     }
 }
 
-impl SnapshotWrite<crate::credential::CredentialState, str> for ManagementTestStreamStore {
+impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, crate::credential::CredentialState, str>,
+        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, str>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         let mut snapshots = self.snapshots.lock().await;
         snapshots.insert(request.snapshot_id.to_string(), request.snapshot);

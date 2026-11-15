@@ -6,6 +6,7 @@ workspace_crate(
     integration_tests = {
         "execute_command_span": {},
         "replay_events_metric": {},
+        "snapshot_payload": {},
     },
     deps = [
         "//rsworkspace/crates/decider/trogon-decider",

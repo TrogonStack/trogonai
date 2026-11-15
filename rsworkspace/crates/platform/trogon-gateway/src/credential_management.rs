@@ -82,8 +82,8 @@ pub(crate) fn router<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -289,8 +289,8 @@ fn test_router<EventStore, Secrets>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -347,8 +347,8 @@ async fn put_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -370,8 +370,8 @@ async fn put_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -393,8 +393,8 @@ async fn put_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -416,8 +416,8 @@ async fn put_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -439,8 +439,8 @@ async fn put_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -462,8 +462,8 @@ async fn put_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -485,8 +485,8 @@ async fn put_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -508,8 +508,8 @@ async fn put_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -531,8 +531,8 @@ async fn put_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -554,8 +554,8 @@ async fn put_plaid_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -577,8 +577,8 @@ async fn put_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -600,8 +600,8 @@ async fn put_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -624,8 +624,8 @@ async fn put_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -648,8 +648,8 @@ async fn put_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -673,8 +673,8 @@ async fn put_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -741,8 +741,8 @@ async fn rotate_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -764,8 +764,8 @@ async fn rotate_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -787,8 +787,8 @@ async fn rotate_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -810,8 +810,8 @@ async fn rotate_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -833,8 +833,8 @@ async fn rotate_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -856,8 +856,8 @@ async fn rotate_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -879,8 +879,8 @@ async fn rotate_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -902,8 +902,8 @@ async fn rotate_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -925,8 +925,8 @@ async fn rotate_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -948,8 +948,8 @@ async fn rotate_plaid_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -971,8 +971,8 @@ async fn rotate_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -994,8 +994,8 @@ async fn rotate_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1018,8 +1018,8 @@ async fn rotate_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1042,8 +1042,8 @@ async fn rotate_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1068,8 +1068,8 @@ async fn rotate_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1137,8 +1137,8 @@ async fn destroy_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1160,8 +1160,8 @@ async fn destroy_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1183,8 +1183,8 @@ async fn destroy_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1206,8 +1206,8 @@ async fn destroy_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1229,8 +1229,8 @@ async fn destroy_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1252,8 +1252,8 @@ async fn destroy_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1275,8 +1275,8 @@ async fn destroy_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1298,8 +1298,8 @@ async fn destroy_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1321,8 +1321,8 @@ async fn destroy_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1344,8 +1344,8 @@ async fn destroy_plaid_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1367,8 +1367,8 @@ async fn destroy_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1390,8 +1390,8 @@ async fn destroy_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1414,8 +1414,8 @@ async fn destroy_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1438,8 +1438,8 @@ async fn destroy_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1464,8 +1464,8 @@ async fn destroy_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1533,8 +1533,8 @@ async fn revoke_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1556,8 +1556,8 @@ async fn revoke_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1579,8 +1579,8 @@ async fn revoke_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1602,8 +1602,8 @@ async fn revoke_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1625,8 +1625,8 @@ async fn revoke_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1648,8 +1648,8 @@ async fn revoke_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1671,8 +1671,8 @@ async fn revoke_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1694,8 +1694,8 @@ async fn revoke_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1717,8 +1717,8 @@ async fn revoke_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1740,8 +1740,8 @@ async fn revoke_plaid_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1763,8 +1763,8 @@ async fn revoke_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1786,8 +1786,8 @@ async fn revoke_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1810,8 +1810,8 @@ async fn revoke_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1834,8 +1834,8 @@ async fn revoke_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1859,8 +1859,8 @@ async fn revoke_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<crate::credential::CredentialState, str>
-        + SnapshotWrite<crate::credential::CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync

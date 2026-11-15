@@ -854,7 +854,7 @@ async fn persisted_command_snapshot_round_trips_and_survives_reopening() {
         .event_store
         .write_snapshot(WriteSnapshotRequest {
             snapshot_id: &id,
-            snapshot: Snapshot::new(result.stream_position, result.state.clone()),
+            snapshot: Snapshot::new(result.stream_position, result.state.as_ref().clone()),
         })
         .await
         .unwrap();

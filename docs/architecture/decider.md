@@ -38,6 +38,15 @@ state and returns a `Decision`, never mutating anything itself. When a rejection
 WASM boundary, the bridge surfaces it with the constant `"rejected"` code on the WIT
 `domain-error` and carries the typed error's causal chain in its `details` pairs.
 
+A generated protobuf message's `Default` may differ from the state before any events are
+applied. For example, `CredentialStateSnapshot::default()` has `state: None`, while credential
+replay starts with `CredentialMissingState`. A local `#[repr(transparent)]` wrapper can supply
+that semantic `Default` and implement `Evolve` in the domain crate, as permitted by
+[ADR#0045](../adr/0045-event-sourced-service-module-layout.md). It contains only the generated
+message. `StateSnapshot::Payload` names that message for snapshot storage, with `From` and
+`AsRef` providing the consuming and borrowed conversions. Loading an existing snapshot
+preserves its fields; only replay without a snapshot starts from `Default`.
+
 `WRITE_PRECONDITION` (`crates/decider/trogon-decider/src/write_precondition.rs`) is the
 concurrency guard applied when the decided events are appended. It is a total enum with no
 `Option` wrapper and no "unspecified" variant, so every decider states its intent:

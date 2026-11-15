@@ -1,17 +1,30 @@
 use std::ops::Deref;
 
-use trogon_decider_runtime::{
-    Evolve,
-    snapshot::{SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType, SnapshotTypeName},
-};
+use trogon_decider_runtime::{Evolve, StateSnapshot};
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1};
 
+use super::domain::{
+    CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
+};
+use super::proto::{
+    CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, cleanup_failed_to_proto_state,
+    decode_active_state, decode_cleanup_failed_state, decode_credential_metadata, decode_destroy_failed,
+    decode_destroy_requested, decode_destroy_requested_state, decode_destroyed, decode_destroyed_state,
+    decode_message_field, decode_pending_write_state, decode_revoked, decode_revoked_state, decode_rotated,
+    decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_failed_state,
+    decode_write_requested, destroy_requested_to_proto_state, destroyed_to_proto_state, pending_write_to_proto_state,
+    revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
+};
+
+#[repr(transparent)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct CredentialState(state_v1::CredentialStateSnapshot);
 
 impl Default for CredentialState {
     fn default() -> Self {
-        Self(initial_state())
+        Self(state_v1::CredentialStateSnapshot {
+            state: Some(state_v1::CredentialMissingState {}.into()),
+        })
     }
 }
 
@@ -19,7 +32,155 @@ impl Evolve<v1::CredentialEvent> for CredentialState {
     type Error = CredentialEvolveError;
 
     fn evolve(self, event: &v1::CredentialEvent) -> Result<Self, Self::Error> {
-        evolve(self.0, event).map(Self)
+        let event = event.event.as_ref().ok_or(CredentialEvolveError::MissingEvent)?;
+        let current = self.0.state.as_ref().ok_or(CredentialEvolveError::MissingState)?;
+
+        let next = match event {
+            CredentialEventCase::WriteRequested(inner) => match current {
+                CredentialStateSnapshotCase::Missing(_) => {
+                    let (credential_id, scope, kind) = decode_write_requested(inner)?;
+                    pending_write_to_proto_state(&credential_id, &scope, kind).into()
+                }
+                CredentialStateSnapshotCase::WriteFailed(failed) => {
+                    let (failed_id, _) = decode_write_failed_state(failed)?;
+                    let (credential_id, scope, kind) = decode_write_requested(inner)?;
+                    if failed_id != credential_id {
+                        return Err(CredentialEvolveError::CredentialRefMismatch {
+                            expected: failed_id,
+                            actual: credential_id,
+                        });
+                    }
+                    pending_write_to_proto_state(&credential_id, &scope, kind).into()
+                }
+                CredentialStateSnapshotCase::Destroyed(destroyed) => {
+                    let destroyed_ref = decode_destroyed_state(destroyed)?;
+                    let (credential_id, scope, kind) = decode_write_requested(inner)?;
+                    if destroyed_ref.id() != &credential_id {
+                        return Err(CredentialEvolveError::CredentialRefMismatch {
+                            expected: destroyed_ref.id().clone(),
+                            actual: credential_id,
+                        });
+                    }
+                    pending_write_to_proto_state(&credential_id, &scope, kind).into()
+                }
+                _ => return Err(CredentialEvolveError::WriteRequestedAfterStart),
+            },
+            CredentialEventCase::WriteFailed(inner) => match current {
+                CredentialStateSnapshotCase::PendingWrite(pending) => {
+                    let (pending_id, _, _) = decode_pending_write_state(pending)?;
+                    let (event_id, reason) = decode_write_failed(inner)?;
+                    if pending_id != event_id {
+                        return Err(CredentialEvolveError::CredentialRefMismatch {
+                            expected: pending_id,
+                            actual: event_id,
+                        });
+                    }
+                    write_failed_to_proto_state(&event_id, &reason).into()
+                }
+                _ => return Err(CredentialEvolveError::WriteFailedWithoutPendingWrite),
+            },
+            CredentialEventCase::Activated(inner) => match current {
+                CredentialStateSnapshotCase::PendingWrite(pending) => {
+                    let (pending_id, pending_scope, pending_kind) = decode_pending_write_state(pending)?;
+                    let metadata =
+                        decode_credential_metadata("metadata", decode_message_field("metadata", &inner.metadata)?)?;
+                    validate_activation_metadata_for_evolve(&metadata)?;
+                    validate_ref_matches_pending_for_evolve(
+                        metadata.reference(),
+                        &pending_id,
+                        &pending_scope,
+                        pending_kind,
+                    )?;
+                    active_state_to_proto(&metadata, &[]).into()
+                }
+                _ => return Err(CredentialEvolveError::ActivatedWithoutPendingWrite),
+            },
+            CredentialEventCase::RotationRequested(inner) => match current {
+                CredentialStateSnapshotCase::Active(active) => {
+                    let current_ref = active_credential_ref(active)?;
+                    let event_ref = decode_rotation_requested(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                    rotation_pending_to_proto_state((**active).clone()).into()
+                }
+                _ => return Err(CredentialEvolveError::RotationRequestedWithoutActiveCredential),
+            },
+            CredentialEventCase::RotationFailed(inner) => match current {
+                CredentialStateSnapshotCase::RotationPending(rotation) => {
+                    let active = decode_message_field("rotation_pending.active", &rotation.active)?;
+                    let current_ref = active_credential_ref(active)?;
+                    let (event_ref, _reason) = decode_rotation_failed(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                    active.clone().into()
+                }
+                _ => return Err(CredentialEvolveError::RotationFailedWithoutPendingRotation),
+            },
+            CredentialEventCase::Rotated(inner) => match current {
+                CredentialStateSnapshotCase::RotationPending(rotation) => {
+                    let active = decode_message_field("rotation_pending.active", &rotation.active)?;
+                    let current_ref = active_credential_ref(active)?;
+                    let (_, mut previous_versions) = decode_active_state("rotation_pending.active", active)?;
+                    let (previous_ref, metadata) = decode_rotated(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &previous_ref)?;
+                    validate_activation_metadata_for_evolve(&metadata)?;
+                    validate_same_logical_ref_for_evolve(&previous_ref, metadata.reference())?;
+                    validate_newer_version_for_evolve(&previous_ref, metadata.reference())?;
+                    previous_versions.push(previous_ref);
+                    active_state_to_proto(&metadata, &previous_versions).into()
+                }
+                _ => return Err(CredentialEvolveError::RotatedWithoutPendingRotation),
+            },
+            CredentialEventCase::Revoked(inner) => match current {
+                CredentialStateSnapshotCase::Active(active) => {
+                    let current_ref = active_credential_ref(active)?;
+                    let event_ref = decode_revoked(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                    revoked_to_proto_state(&event_ref).into()
+                }
+                CredentialStateSnapshotCase::RotationPending(rotation) => {
+                    let active = decode_message_field("rotation_pending.active", &rotation.active)?;
+                    let current_ref = active_credential_ref(active)?;
+                    let event_ref = decode_revoked(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                    revoked_to_proto_state(&event_ref).into()
+                }
+                _ => return Err(CredentialEvolveError::RevokedWithoutActiveCredential),
+            },
+            CredentialEventCase::DestroyRequested(inner) => match current {
+                CredentialStateSnapshotCase::Revoked(revoked) => {
+                    let current_ref = decode_revoked_state(revoked)?;
+                    let (event_ref, reason) = decode_destroy_requested(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                    destroy_requested_to_proto_state(&event_ref, &reason).into()
+                }
+                CredentialStateSnapshotCase::CleanupFailed(cleanup_failed) => {
+                    let (current_ref, _) = decode_cleanup_failed_state(cleanup_failed)?;
+                    let (event_ref, reason) = decode_destroy_requested(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                    destroy_requested_to_proto_state(&event_ref, &reason).into()
+                }
+                _ => return Err(CredentialEvolveError::DestroyRequestedWithoutRevokedOrCleanupFailedCredential),
+            },
+            CredentialEventCase::Destroyed(inner) => match current {
+                CredentialStateSnapshotCase::DestroyRequested(pending) => {
+                    let (current_ref, _) = decode_destroy_requested_state(pending)?;
+                    let event_ref = decode_destroyed(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                    destroyed_to_proto_state(&event_ref).into()
+                }
+                _ => return Err(CredentialEvolveError::DestroyedWithoutDestroyRequestedCredential),
+            },
+            CredentialEventCase::DestroyFailed(inner) => match current {
+                CredentialStateSnapshotCase::DestroyRequested(pending) => {
+                    let (current_ref, _) = decode_destroy_requested_state(pending)?;
+                    let (event_ref, reason) = decode_destroy_failed(inner)?;
+                    validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                    cleanup_failed_to_proto_state(&event_ref, &reason).into()
+                }
+                _ => return Err(CredentialEvolveError::DestroyFailedWithoutDestroyRequestedCredential),
+            },
+        };
+
+        Ok(Self(state_v1::CredentialStateSnapshot { state: Some(next) }))
     }
 }
 
@@ -43,46 +204,13 @@ impl From<CredentialState> for state_v1::CredentialStateSnapshot {
     }
 }
 
-impl SnapshotType for CredentialState {
-    type Error = <state_v1::CredentialStateSnapshot as SnapshotType>::Error;
-
-    fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
-        <state_v1::CredentialStateSnapshot as SnapshotType>::snapshot_type()
-    }
+impl StateSnapshot for CredentialState {
+    type Payload = state_v1::CredentialStateSnapshot;
 }
 
-impl SnapshotPayloadEncode for CredentialState {
-    type Error = <state_v1::CredentialStateSnapshot as SnapshotPayloadEncode>::Error;
-
-    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
-        self.0.encode()
-    }
-}
-
-impl SnapshotPayloadDecode for CredentialState {
-    type Error = <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::Error;
-
-    fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
-        <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::decode(payload).map(Self)
-    }
-}
-
-use super::domain::{
-    CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
-};
-use super::proto::{
-    CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, cleanup_failed_to_proto_state,
-    decode_active_state, decode_cleanup_failed_state, decode_credential_metadata, decode_destroy_failed,
-    decode_destroy_requested, decode_destroy_requested_state, decode_destroyed, decode_destroyed_state,
-    decode_message_field, decode_pending_write_state, decode_revoked, decode_revoked_state, decode_rotated,
-    decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_failed_state,
-    decode_write_requested, destroy_requested_to_proto_state, destroyed_to_proto_state, pending_write_to_proto_state,
-    revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
-};
-
-pub fn initial_state() -> state_v1::CredentialStateSnapshot {
-    state_v1::CredentialStateSnapshot {
-        state: Some(state_v1::CredentialMissingState {}.into()),
+impl AsRef<state_v1::CredentialStateSnapshot> for CredentialState {
+    fn as_ref(&self) -> &state_v1::CredentialStateSnapshot {
+        &self.0
     }
 }
 
@@ -162,161 +290,6 @@ pub enum CredentialEvolveError {
     RotationVersionNotNewer,
     #[error("persisted credential state is invalid: {0}")]
     InvalidProto(#[from] CredentialProtoDecodeError),
-}
-
-pub fn evolve(
-    state: state_v1::CredentialStateSnapshot,
-    event: &v1::CredentialEvent,
-) -> Result<state_v1::CredentialStateSnapshot, CredentialEvolveError> {
-    let event = event.event.as_ref().ok_or(CredentialEvolveError::MissingEvent)?;
-    let current = state.state.as_ref().ok_or(CredentialEvolveError::MissingState)?;
-
-    let next = match event {
-        CredentialEventCase::WriteRequested(inner) => match current {
-            CredentialStateSnapshotCase::Missing(_) => {
-                let (credential_id, scope, kind) = decode_write_requested(inner)?;
-                pending_write_to_proto_state(&credential_id, &scope, kind).into()
-            }
-            CredentialStateSnapshotCase::WriteFailed(failed) => {
-                let (failed_id, _) = decode_write_failed_state(failed)?;
-                let (credential_id, scope, kind) = decode_write_requested(inner)?;
-                if failed_id != credential_id {
-                    return Err(CredentialEvolveError::CredentialRefMismatch {
-                        expected: failed_id,
-                        actual: credential_id,
-                    });
-                }
-                pending_write_to_proto_state(&credential_id, &scope, kind).into()
-            }
-            CredentialStateSnapshotCase::Destroyed(destroyed) => {
-                let destroyed_ref = decode_destroyed_state(destroyed)?;
-                let (credential_id, scope, kind) = decode_write_requested(inner)?;
-                if destroyed_ref.id() != &credential_id {
-                    return Err(CredentialEvolveError::CredentialRefMismatch {
-                        expected: destroyed_ref.id().clone(),
-                        actual: credential_id,
-                    });
-                }
-                pending_write_to_proto_state(&credential_id, &scope, kind).into()
-            }
-            _ => return Err(CredentialEvolveError::WriteRequestedAfterStart),
-        },
-        CredentialEventCase::WriteFailed(inner) => match current {
-            CredentialStateSnapshotCase::PendingWrite(pending) => {
-                let (pending_id, _, _) = decode_pending_write_state(pending)?;
-                let (event_id, reason) = decode_write_failed(inner)?;
-                if pending_id != event_id {
-                    return Err(CredentialEvolveError::CredentialRefMismatch {
-                        expected: pending_id,
-                        actual: event_id,
-                    });
-                }
-                write_failed_to_proto_state(&event_id, &reason).into()
-            }
-            _ => return Err(CredentialEvolveError::WriteFailedWithoutPendingWrite),
-        },
-        CredentialEventCase::Activated(inner) => match current {
-            CredentialStateSnapshotCase::PendingWrite(pending) => {
-                let (pending_id, pending_scope, pending_kind) = decode_pending_write_state(pending)?;
-                let metadata =
-                    decode_credential_metadata("metadata", decode_message_field("metadata", &inner.metadata)?)?;
-                validate_activation_metadata_for_evolve(&metadata)?;
-                validate_ref_matches_pending_for_evolve(
-                    metadata.reference(),
-                    &pending_id,
-                    &pending_scope,
-                    pending_kind,
-                )?;
-                active_state_to_proto(&metadata, &[]).into()
-            }
-            _ => return Err(CredentialEvolveError::ActivatedWithoutPendingWrite),
-        },
-        CredentialEventCase::RotationRequested(inner) => match current {
-            CredentialStateSnapshotCase::Active(active) => {
-                let current_ref = active_credential_ref(active)?;
-                let event_ref = decode_rotation_requested(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
-                rotation_pending_to_proto_state((**active).clone()).into()
-            }
-            _ => return Err(CredentialEvolveError::RotationRequestedWithoutActiveCredential),
-        },
-        CredentialEventCase::RotationFailed(inner) => match current {
-            CredentialStateSnapshotCase::RotationPending(rotation) => {
-                let active = decode_message_field("rotation_pending.active", &rotation.active)?;
-                let current_ref = active_credential_ref(active)?;
-                let (event_ref, _reason) = decode_rotation_failed(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
-                active.clone().into()
-            }
-            _ => return Err(CredentialEvolveError::RotationFailedWithoutPendingRotation),
-        },
-        CredentialEventCase::Rotated(inner) => match current {
-            CredentialStateSnapshotCase::RotationPending(rotation) => {
-                let active = decode_message_field("rotation_pending.active", &rotation.active)?;
-                let current_ref = active_credential_ref(active)?;
-                let (_, mut previous_versions) = decode_active_state("rotation_pending.active", active)?;
-                let (previous_ref, metadata) = decode_rotated(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &previous_ref)?;
-                validate_activation_metadata_for_evolve(&metadata)?;
-                validate_same_logical_ref_for_evolve(&previous_ref, metadata.reference())?;
-                validate_newer_version_for_evolve(&previous_ref, metadata.reference())?;
-                previous_versions.push(previous_ref);
-                active_state_to_proto(&metadata, &previous_versions).into()
-            }
-            _ => return Err(CredentialEvolveError::RotatedWithoutPendingRotation),
-        },
-        CredentialEventCase::Revoked(inner) => match current {
-            CredentialStateSnapshotCase::Active(active) => {
-                let current_ref = active_credential_ref(active)?;
-                let event_ref = decode_revoked(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
-                revoked_to_proto_state(&event_ref).into()
-            }
-            CredentialStateSnapshotCase::RotationPending(rotation) => {
-                let active = decode_message_field("rotation_pending.active", &rotation.active)?;
-                let current_ref = active_credential_ref(active)?;
-                let event_ref = decode_revoked(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
-                revoked_to_proto_state(&event_ref).into()
-            }
-            _ => return Err(CredentialEvolveError::RevokedWithoutActiveCredential),
-        },
-        CredentialEventCase::DestroyRequested(inner) => match current {
-            CredentialStateSnapshotCase::Revoked(revoked) => {
-                let current_ref = decode_revoked_state(revoked)?;
-                let (event_ref, reason) = decode_destroy_requested(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
-                destroy_requested_to_proto_state(&event_ref, &reason).into()
-            }
-            CredentialStateSnapshotCase::CleanupFailed(cleanup_failed) => {
-                let (current_ref, _) = decode_cleanup_failed_state(cleanup_failed)?;
-                let (event_ref, reason) = decode_destroy_requested(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
-                destroy_requested_to_proto_state(&event_ref, &reason).into()
-            }
-            _ => return Err(CredentialEvolveError::DestroyRequestedWithoutRevokedOrCleanupFailedCredential),
-        },
-        CredentialEventCase::Destroyed(inner) => match current {
-            CredentialStateSnapshotCase::DestroyRequested(pending) => {
-                let (current_ref, _) = decode_destroy_requested_state(pending)?;
-                let event_ref = decode_destroyed(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
-                destroyed_to_proto_state(&event_ref).into()
-            }
-            _ => return Err(CredentialEvolveError::DestroyedWithoutDestroyRequestedCredential),
-        },
-        CredentialEventCase::DestroyFailed(inner) => match current {
-            CredentialStateSnapshotCase::DestroyRequested(pending) => {
-                let (current_ref, _) = decode_destroy_requested_state(pending)?;
-                let (event_ref, reason) = decode_destroy_failed(inner)?;
-                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
-                cleanup_failed_to_proto_state(&event_ref, &reason).into()
-            }
-            _ => return Err(CredentialEvolveError::DestroyFailedWithoutDestroyRequestedCredential),
-        },
-    };
-
-    Ok(state_v1::CredentialStateSnapshot { state: Some(next) })
 }
 
 pub(crate) fn validate_activation_metadata(metadata: &CredentialMetadata) -> Result<(), CredentialDecideError> {
