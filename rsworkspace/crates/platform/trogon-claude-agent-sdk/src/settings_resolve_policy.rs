@@ -20,6 +20,7 @@ use crate::{
     node_merge::NodeMerge,
     node_text_file::read_node_text,
     settings_managed_reader::ManagedReader,
+    settings_policy_content::{has_authored_value, has_policy_content},
     settings_resolve_admin::build_admin,
     settings_resolve_error::ResolveSettingsError,
     settings_resolve_parent::{AdminFacts, drop_open_gates, mcp_servers_managed_only, parent_slice},
@@ -30,7 +31,7 @@ use crate::{
     settings_resolve_restrict::{js_equal, restrict_policy_document},
     settings_resolve_state::ResolverState,
     settings_resolve_tier::{LoadState, TierRead},
-    settings_resolve_values::{SettingsMap, has_authored_value, has_policy_content, in_schema_order, omit, pick},
+    settings_resolve_values::{SettingsMap, in_schema_order, omit, pick},
     settings_resolve_writable_document::{DocumentProbe, user_can_write},
     settings_strings::reserve_text,
 };

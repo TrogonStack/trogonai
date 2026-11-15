@@ -15,7 +15,7 @@ use std::{
 use serde_json::{Map, Value};
 
 use super::{Check, Mode, Node, SettingsSchema, all_pass};
-use crate::{constants::POLICY_META_KEYS, settings_resolve_values::has_policy_content};
+use crate::{constants::POLICY_META_KEYS, settings_policy_content::has_policy_content};
 
 /// One block whose grants are withheld when one of its restrictions cannot be read (`J5e`).
 struct Block {

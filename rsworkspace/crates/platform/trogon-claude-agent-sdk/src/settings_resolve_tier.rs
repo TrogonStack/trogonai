@@ -2,7 +2,8 @@ use serde_json::Value;
 
 use crate::{
     constants::MANAGED_ONLY_KEYS,
-    settings_resolve_values::{SettingsMap, has_policy_content},
+    settings_policy_content::{has_authored_value, has_policy_content},
+    settings_resolve_values::SettingsMap,
 };
 
 /// Whether a policy source was read (`loadState` upstream).
@@ -98,9 +99,7 @@ impl TierRead {
 
     /// Whether the tier holds a value that is not an empty object tree (`Nu` upstream).
     pub(crate) fn is_authored(&self) -> bool {
-        self.settings
-            .as_ref()
-            .is_some_and(crate::settings_resolve_values::has_authored_value)
+        self.settings.as_ref().is_some_and(has_authored_value)
     }
 }
 
