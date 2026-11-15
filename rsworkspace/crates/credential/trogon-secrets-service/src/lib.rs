@@ -41,10 +41,13 @@
 //! [`ReleaseSources`] reads what the configuration points at once, at startup:
 //! the tenant owners, the release policies, the sealing key, and the AppRole.
 //! [`SecretsService`] wires them to NATS, the credential stream, OpenBao, and
-//! the audit stream, and serves releases until it is told to stop. It refuses
-//! to start, with a [`SecretsServiceError`], when it cannot reach NATS or the
-//! credential stream, and retries an OpenBao login that is refused with
-//! backoff, out of the release queue group, until OpenBao accepts it.
+//! the audit stream, and serves releases beside an [`InvalidationPublisher`]
+//! until it is told to stop, or until either stops on its own, which stops
+//! the other. It refuses to start, with a [`SecretsServiceError`], when it
+//! cannot reach NATS or the credential stream, or when [`INVALIDATION_STREAM`]
+//! is missing or fails [`InvalidationStream`]'s check, since it checks that
+//! stream and never creates it. It retries an OpenBao login that is refused
+//! with backoff, out of the release queue group, until OpenBao accepts it.
 //! [`error_chain`] is the one line the binary logs when the service stops on
 //! an error: the error and every cause under it.
 //!
