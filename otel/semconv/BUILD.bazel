@@ -1,0 +1,18 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Validates the registry and enforces the naming policies, so a convention that
+# breaks them fails the build instead of the generated bindings.
+sh_test(
+    name = "check_test",
+    srcs = ["check_test.sh"],
+    args = [
+        "$(rootpath @mise//tools/weaver)",
+        package_name(),
+    ],
+    data = [
+        "@mise//tools/weaver",
+    ] + glob([
+        "policies/**/*.rego",
+        "registry/**/*.yaml",
+    ]),
+)
