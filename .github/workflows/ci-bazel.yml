@@ -27,7 +27,7 @@ jobs:
       - name: Install build tools via mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
-          install_args: bazel buf go node rust cargo:wasm-tools
+          install_args: bazel buf go kubeconform node rust cargo:wasm-tools
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Restore Bazel cache
