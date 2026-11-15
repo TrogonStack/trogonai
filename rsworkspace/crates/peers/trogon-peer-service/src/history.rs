@@ -3,7 +3,7 @@ use crate::history_error::HistoryError;
 use trogon_decider_runtime::{
     ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamPosition, StreamRead, read_stream_for_execution,
 };
-use trogon_peer::{PeerId, commands::state};
+use trogon_peer::{PeerHistory, PeerId};
 use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1::PeerEvent};
 
 pub(crate) async fn load<Store: StreamRead<PeerId>>(
@@ -18,6 +18,14 @@ pub(crate) async fn load_with_position<Store: StreamRead<PeerId>>(
     store: &Store,
     peer: &PeerId,
 ) -> Result<(PeerState, Option<StreamPosition>), HistoryError<Store::Error>> {
+    let (history, position) = load_peer_history_with_position(store, peer).await?;
+    Ok((history.into_state(), position))
+}
+
+pub(crate) async fn load_peer_history_with_position<Store: StreamRead<PeerId>>(
+    store: &Store,
+    peer: &PeerId,
+) -> Result<(PeerHistory, Option<StreamPosition>), HistoryError<Store::Error>> {
     let read = read_stream_for_execution(
         store,
         ReadStreamRequest {
@@ -32,7 +40,7 @@ pub(crate) async fn load_with_position<Store: StreamRead<PeerId>>(
     Ok((history, read.current_position))
 }
 
-pub(crate) fn validate<ReadError>(read: &ReadStreamResponse) -> Result<PeerState, HistoryError<ReadError>> {
+pub(crate) fn validate<ReadError>(read: &ReadStreamResponse) -> Result<PeerHistory, HistoryError<ReadError>> {
     if read.events.len() as u64 > MAX_HISTORY_EVENTS {
         return Err(HistoryError::Limit);
     }
@@ -40,14 +48,14 @@ pub(crate) fn validate<ReadError>(read: &ReadStreamResponse) -> Result<PeerState
     if validated_position != read.current_position {
         return Err(HistoryError::Incomplete);
     }
-    let mut result = state::initial_state();
+    let mut result = PeerHistory::initial();
     for event in &read.events {
         let decoded = event
             .decode::<PeerEvent>()
             .map_err(HistoryError::Decode)?
             .into_decoded()
             .ok_or(HistoryError::UnknownEvent)?;
-        result = state::evolve(result, &decoded).map_err(HistoryError::Evolve)?;
+        result = result.evolve(&decoded).map_err(HistoryError::Evolve)?;
     }
     Ok(result)
 }
