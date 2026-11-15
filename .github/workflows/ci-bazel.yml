@@ -26,8 +26,12 @@ jobs:
 
       - name: Install build tools via mise
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        env:
+          # The protoc plugins build from crates.io, which drops connections often
+          # enough on hosted runners to fail the install without retries.
+          CARGO_NET_RETRY: '10'
         with:
-          install_args: bazel buf go kubeconform node rust cargo:wasm-tools ubi:open-telemetry/weaver github:rhysd/actionlint
+          install_args: bazel buf go kubeconform node rust cargo:wasm-tools ubi:open-telemetry/weaver github:rhysd/actionlint cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Restore Bazel cache
