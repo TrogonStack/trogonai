@@ -1,13 +1,8 @@
-#[path = "support/fixed_batch_id.rs"]
-mod fixed_batch_id;
-
-#[path = "support/advancing_seal.rs"]
-mod advancing_seal;
-
 use chrono::Duration;
 use chrono::TimeZone;
 use chrono::Timelike;
 use std::sync::atomic::Ordering;
+use trogon_decider_runtime::CommandAuthorizer as _;
 use trogon_decider_runtime::CommandError;
 use trogon_decider_runtime::CommandExecution;
 use trogon_decider_runtime::CommandPrincipal;
@@ -4116,24 +4111,6 @@ async fn malformed_accepted_content_history_fails_before_status_or_reconciliatio
     Ok(())
 }
 
-impl Fixture {
-    pub fn prepare(&self) -> proto::PrepareBatchRequest {
-        proto::PrepareBatchRequest {
-            attachment_ref: self.b.clone().into(),
-            prompt_id: Some("prompt".into()),
-        }
-    }
-    pub async fn intake(&self, key: &str, text: &str) -> TestResult<proto::SendResponse> {
-        let sent = self.app().send(&self.alice, self.send(key, text)).await?;
-        let id = MessageId::new(sent.message.message_id.clone().ok_or(PeerPortError::Integrity)?)?;
-        let sender = PeerId::parse(self.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
-        self.app()
-            .reconcile(&self.alice, &sender, &[id], WorkLimit::new(1)?)
-            .await?;
-        Ok(sent)
-    }
-}
-
 #[tokio::test]
 async fn an_empty_inbox_returns_available_without_allocating_or_persisting_a_presentation() -> TestResult {
     let f = Fixture::new().await?;
@@ -4283,27 +4260,6 @@ async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_co
             .is_empty()
     );
     Ok(())
-}
-
-impl Fixture {
-    pub async fn history(&self, peer: &PeerId) -> TestResult<trogonai_proto::peers::state_v1alpha1::PeerState> {
-        let read = self
-            .store
-            .read_stream(ReadStreamRequest {
-                stream_id: peer,
-                from: ReadFrom::Beginning,
-            })
-            .await?;
-        let mut state = trogon_peer::commands::state::initial_state();
-        for event in read.events {
-            let event = event
-                .decode::<proto::PeerEvent>()?
-                .into_decoded()
-                .ok_or(PeerPortError::Integrity)?;
-            state = trogon_peer::commands::state::evolve(state, &event)?;
-        }
-        Ok(state)
-    }
 }
 
 #[derive(Clone)]
@@ -4891,82 +4847,6 @@ async fn roster_rechecks_store_tenant_after_catalog_await_before_loading_a_membe
     assert_eq!(store.member_reads.load(Ordering::SeqCst), 1);
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
     Ok(())
-}
-
-use trogon_decider_runtime::{AuthorizationDeniedError, CommandAuthorizer};
-use trogon_peer::{Attach, CallerId, Enroll, TrustedPeerOwner};
-
-impl Fixture {
-    pub async fn add_peer(&self, name: &str) -> TestResult<(TrustedPeerOwner, proto::AttachmentRef)> {
-        let owner = TrustedPeerOwner::new(self.alice.tenant().clone(), CallerId::new(name)?);
-        let service = PeerService::new(self.store.clone(), self.policy.clone(), self.clock.clone());
-        let reference = service
-            .enroll(&owner, Self::enrollment(name))
-            .await?
-            .attachment
-            .attachment_ref
-            .clone()
-            .into_option()
-            .ok_or(PeerPortError::Integrity)?;
-        let id = PeerId::parse(reference.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
-        self.policy
-            .grants
-            .lock()
-            .map_err(|_| PeerPortError::Unavailable)?
-            .insert(id.to_string(), owner.clone());
-        self.catalog
-            .peers
-            .lock()
-            .map_err(|_| PeerPortError::Unavailable)?
-            .push(id);
-        Ok((owner, reference))
-    }
-    pub async fn advance_and_resume(&mut self, elapsed: chrono::Duration) -> TestResult {
-        *self.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? += elapsed;
-        let service = PeerService::new(self.store.clone(), self.policy.clone(), self.clock.clone());
-        self.a = service
-            .enroll(&self.alice, Self::enrollment("alice"))
-            .await?
-            .attachment
-            .attachment_ref
-            .clone()
-            .into_option()
-            .ok_or(PeerPortError::Integrity)?;
-        self.b = service
-            .enroll(&self.bob, Self::enrollment("bob"))
-            .await?
-            .attachment
-            .attachment_ref
-            .clone()
-            .into_option()
-            .ok_or(PeerPortError::Integrity)?;
-        Ok(())
-    }
-}
-pub struct IsolatedEnrollmentFixture(pub TrustedPeerOwner);
-impl CommandAuthorizer<Enroll> for IsolatedEnrollmentFixture {
-    fn authorize(&self, p: &CommandPrincipal, c: &Enroll) -> Result<(), AuthorizationDeniedError> {
-        if c.identity().owner() != &self.0
-            || c.collaboration().as_str() != "isolated"
-            || p.kind() != PrincipalKind::Agent
-            || p.id().as_str() != self.0.caller().as_str()
-        {
-            return Err(AuthorizationDeniedError::new("outside isolated enrollment"));
-        }
-        Ok(())
-    }
-}
-impl CommandAuthorizer<Attach> for IsolatedEnrollmentFixture {
-    fn authorize(&self, p: &CommandPrincipal, c: &Attach) -> Result<(), AuthorizationDeniedError> {
-        if c.identity().owner() != &self.0
-            || c.collaboration().as_str() != "isolated"
-            || p.kind() != PrincipalKind::Agent
-            || p.id().as_str() != self.0.caller().as_str()
-        {
-            return Err(AuthorizationDeniedError::new("outside isolated resume"));
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone)]
