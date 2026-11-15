@@ -15,6 +15,22 @@ pub trait SubscribeClient: Send + Sync + Clone + 'static {
     ) -> impl Future<Output = Result<Self::Subscription, Self::SubscribeError>> + Send;
 }
 
+/// Subscribes as one member of a queue group, so each message on the subject
+/// reaches one member of the group rather than every subscriber.
+///
+/// The associated types are named apart from [`SubscribeClient`]'s so a client
+/// bound by both traits keeps each one unambiguous.
+pub trait QueueSubscribeClient: Send + Sync + Clone + 'static {
+    type QueueSubscribeError: Error + Send + Sync;
+    type QueueSubscription: Stream<Item = Message> + Unpin + Send + 'static;
+
+    fn queue_subscribe<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        queue_group: String,
+    ) -> impl Future<Output = Result<Self::QueueSubscription, Self::QueueSubscribeError>> + Send;
+}
+
 pub trait RequestClient: Send + Sync + Clone + 'static {
     type RequestError: Error + Send + Sync;
 
@@ -52,6 +68,19 @@ impl SubscribeClient for NatsAsyncClient {
     }
 }
 
+impl QueueSubscribeClient for NatsAsyncClient {
+    type QueueSubscribeError = async_nats::client::SubscribeError;
+    type QueueSubscription = async_nats::Subscriber;
+
+    async fn queue_subscribe<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        queue_group: String,
+    ) -> Result<Self::QueueSubscription, Self::QueueSubscribeError> {
+        self.queue_subscribe(subject, queue_group).await
+    }
+}
+
 impl RequestClient for NatsAsyncClient {
     type RequestError = async_nats::client::RequestError;
 
@@ -85,3 +114,6 @@ impl FlushClient for NatsAsyncClient {
         self.flush().await
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -40,7 +40,7 @@ pub use discovery_metadata_input::DiscoveryMetadataInput;
 pub use endpoint_subject::{EndpointSubject, EndpointSubjectError};
 pub use method_name::{MethodName, MethodNameError};
 pub use method_name_input::MethodNameInput;
-pub use server::{EndpointHandler, ServeError, serve};
+pub use server::{EndpointHandler, ServeError, answer, serve};
 pub use service_error_code::{ServiceErrorCode, ServiceErrorCodeError};
 pub use service_error_code_input::ServiceErrorCodeInput;
 pub use service_fault::ServiceFault;
