@@ -625,7 +625,7 @@
     },
     {
       "id": "s18-user-input-blocks",
-      "concept": "User input content validation",
+      "concept": "User input content and message fields",
       "python": {
         "file": "src/claude_agent_sdk/client.py",
         "line_start": 288,
@@ -643,16 +643,22 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "User input is written verbatim; the CLI and API validate content."
+        "behavior": "User input is written verbatim; the CLI and API validate content. A streamed message keeps its key order, unknown keys and every SDKUserMessage field. A string query() prompt is one text block in sdk.mjs and a string in Python."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
-        "value_contracts::s18_structured_input_blocks_pass_through_unvalidated"
+        "value_contracts::s18_structured_input_blocks_pass_through_unvalidated",
+        "user_input_writes::a_string_prompt_is_written_as_each_sdk_writes_it",
+        "user_input_writes::a_streamed_message_is_written_as_given",
+        "user_input_writes::a_one_shot_message_prompt_is_written_as_given",
+        "user_input::structured_input_carries_blocks_and_every_field_in_declaration_order",
+        "user_input::a_message_object_is_written_as_given_with_typed_fields_overlaid"
       ],
       "rust": [
-        "src/user_input.rs"
+        "src/user_input.rs",
+        "src/user_input_priority.rs"
       ]
     },
     {
@@ -3042,7 +3048,8 @@
         "kind": "upstream"
       },
       "contracts": [
-        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects"
+        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects",
+        "user_input_writes::a_streamed_message_is_written_as_given"
       ],
       "rust": [
         "src/driver.rs",
@@ -4505,7 +4512,10 @@
         "client_lifecycle_connect::query_writes_in_the_default_session",
         "client_lifecycle_connect::query_in_session_writes_in_that_session",
         "client_lifecycle_connect::query_stream_fills_the_default_session",
-        "client_lifecycle_connect::query_stream_in_session_keeps_named_sessions"
+        "client_lifecycle_connect::query_stream_in_session_keeps_named_sessions",
+        "user_input_writes::python_client_query_writes_the_session_last",
+        "user_input_writes::typescript_client_query_writes_the_sdk_mjs_string_prompt",
+        "user_input_writes::python_client_query_stream_fills_only_an_unnamed_session"
       ],
       "rust": [
         "src/client.rs",

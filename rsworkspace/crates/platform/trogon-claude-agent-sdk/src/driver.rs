@@ -40,7 +40,7 @@ pub(crate) enum Command {
         response: ControlSender,
     },
     Prompt {
-        input: crate::UserInput,
+        input: Box<crate::UserInput>,
         response: oneshot::Sender<Result<(), Error>>,
     },
     Control {
@@ -1693,10 +1693,15 @@ where
                 {
                     object.insert("client_composed".into(), true.into());
                 }
+                // A message object written as given carries its own uuid, so read it from the frame.
+                let uuid = frame
+                    .get("uuid")
+                    .and_then(serde_json::Value::as_str)
+                    .map(crate::MessageId::from);
                 self.write(frame).await?;
                 self.state = State::Running;
                 self.run_end.prompt_written();
-                self.run_state.pending_inputs.push_back(input.uuid.clone());
+                self.run_state.pending_inputs.push_back(uuid);
                 let _ = response.send(Ok(()));
             }
             Command::Control {

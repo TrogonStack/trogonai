@@ -982,7 +982,13 @@ impl ClientHandle {
             }
             // `writeBehindPromptHold`: queued now, written once initialize is confirmed.
             let (response, receiver) = oneshot::channel();
-            match self.enqueue(Command::Prompt { input, response }).await {
+            match self
+                .enqueue(Command::Prompt {
+                    input: Box::new(input),
+                    response,
+                })
+                .await
+            {
                 Ok(()) => held.push(receiver),
                 // The run stopped before the write was queued: the hold resolves `false`.
                 Err(_) => return Ok(()),
@@ -1040,7 +1046,11 @@ impl ClientHandle {
     /// Writes one user input. The CLI queues it when a turn is already running.
     pub async fn send_input(&self, input: crate::UserInput) -> Result<(), Error> {
         let (response, receiver) = oneshot::channel();
-        self.enqueue(Command::Prompt { input, response }).await?;
+        self.enqueue(Command::Prompt {
+            input: Box::new(input),
+            response,
+        })
+        .await?;
         receiver.await.map_err(|_| self.stopped_error())?
     }
 
@@ -1479,7 +1489,11 @@ impl ClientHandle {
     /// Queues a prompt without waiting for the driver to write it.
     async fn queue_input(&self, input: crate::UserInput) -> Result<(), Error> {
         let (response, _receiver) = oneshot::channel();
-        self.enqueue(Command::Prompt { input, response }).await
+        self.enqueue(Command::Prompt {
+            input: Box::new(input),
+            response,
+        })
+        .await
     }
 
     /// Queues the end of the input without waiting for the driver to apply it.
@@ -1808,7 +1822,7 @@ pub async fn query_turn_with_transport<T: crate::Transport>(
 }
 
 /// Whose `query()` a one-shot prompt comes from, which decides how a text prompt is written under the TypeScript
-/// style.
+/// style: `sdk.mjs` wraps it in a text block, Python writes it as a string.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum PromptShape {
     /// `query()` and `WarmQuery.query()` in `sdk.mjs`, which wrap a string prompt in a single text block.
@@ -1834,19 +1848,17 @@ pub(crate) async fn start_query(
         // `sdk.mjs` writes the prompt and ends the input without waiting for the initialize response, which a
         // blocking hook or managed settings can delay. Both are queued, so they follow the initialize request.
         crate::ArgvStyle::TypeScript => {
-            let prompt = match shape {
-                PromptShape::SdkMjs => prompt.into_sdk_mjs_prompt(),
-                PromptShape::Python => prompt,
-            };
+            let prompt = prompt.into_query_prompt(matches!(shape, PromptShape::SdkMjs));
             async {
                 client.runtime.handle.queue_input(prompt).await?;
                 client.runtime.handle.queue_finish(settle).await
             }
             .await
         }
+        // Python `query(prompt=str)` writes the text as a string, with `session_id` ahead of `message`.
         crate::ArgvStyle::Python => {
             async {
-                client.send_input(prompt).await?;
+                client.send_input(prompt.into_query_prompt(false)).await?;
                 client.runtime.handle.finish_with(settle).await
             }
             .await

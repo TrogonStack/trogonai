@@ -394,6 +394,14 @@ workspace_crate(
         },
         "usd_budget": {},
         "user_input": {},
+        "user_input_writes": {
+            "compile_data": glob([
+                "tests/fixtures/user_input.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "user_message": {},
         "value_contracts": {},
         "websocket_remote_store": {},

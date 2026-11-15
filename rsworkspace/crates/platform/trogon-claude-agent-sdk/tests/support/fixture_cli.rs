@@ -167,7 +167,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         match field(&value, "type")? {
             "user" => {
                 assert_eq!(value["message"]["role"], "user");
-                assert_eq!(value["session_id"], "");
+                // A one-shot prompt names the empty session; a streamed message names none.
+                assert!(
+                    value
+                        .get("session_id")
+                        .is_none_or(|session| session.as_str() == Some(""))
+                );
                 assert_eq!(value["parent_tool_use_id"], Value::Null);
                 input_count += 1;
                 if mode == "structured" {
