@@ -1,0 +1,65 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/execution_profile_control.proto";
+
+message ExecutionProfileId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+// Get/list authenticate read authority and return metadata only. A read is not
+// activation or use permission. Explicit historical versions remain immutable.
+message GetExecutionProfileRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ExecutionProfileId execution_profile_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 revision = 3 [(buf.validate.field).uint64.gt = 0];
+}
+
+message GetExecutionProfileResponse {
+  ExecutionProfileState profile = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Page tokens are opaque, integrity-protected and bound to the caller, exact
+// scope, query and registry snapshot. Invalid/stale tokens fail, never restart
+// a list under another scope. No count is an authorization or health signal.
+message ListExecutionProfilesRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 100
+    }
+  ];
+  bytes page_token = 3 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message ListExecutionProfilesResponse {
+  option (buf.validate.message).cel = {
+    id: "execution_profile_list.scope"
+    message: "listed execution profiles must belong to the response scope"
+    expression: "this.profiles.all(p, p.profile.execution_profile_ref.scope == this.scope)"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ExecutionProfileState profiles = 2 [(buf.validate.field).repeated.max_items = 100];
+  bytes next_page_token = 3 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 4096
+  }];
+  uint64 registry_revision = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
