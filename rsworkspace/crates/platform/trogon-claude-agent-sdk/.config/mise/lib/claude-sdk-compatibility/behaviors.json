@@ -3424,7 +3424,17 @@
         "kind": "rust-adaptation",
         "reason": "src/python_urlopen_sysconf.rs leaves a value of the wrong type out, as if it were absent, because a crashed process has no answer to match. src/python_urlopen_registry.rs zeroes the buffer, so a short integer and the rest of a shorter answer read as zero bytes. Reg2Py and the Windows error classes are checked against expectations worked by hand from Python/winreg.c, PC/errmap.h and Objects/exceptions.c, because the recording host has no winreg; getproxies_registry and proxy_bypass_registry are recorded from CPython over a fake winreg."
       },
-      "contracts": [],
+      "contracts": [
+        "src/python_urlopen_sysconf_tests.rs::reads_the_system_configuration_as_scproxy_and_urllib_read_it",
+        "src/python_urlopen_sysconf_tests.rs::a_string_is_cut_at_its_first_nul_and_a_lone_surrogate_does_not_convert",
+        "src/python_urlopen_registry_tests.rs::reads_the_registry_as_getproxies_registry_and_proxy_bypass_registry_read_it",
+        "src/python_urlopen_registry_tests.rs::an_integer_is_read_little_endian_and_zero_without_data",
+        "src/python_urlopen_registry_tests.rs::a_string_is_cut_at_its_first_nul_and_keeps_a_lone_surrogate",
+        "src/python_urlopen_registry_tests.rs::a_multi_string_drops_one_final_nul_and_splits_at_each_other",
+        "src/python_urlopen_registry_tests.rs::any_other_type_is_its_bytes_or_none_without_data",
+        "src/python_urlopen_registry_tests.rs::a_windows_error_is_the_oserror_python_raises_for_its_code",
+        "src/python_urlopen_registry_tests.rs::a_windows_error_code_maps_to_the_class_of_its_errno"
+      ],
       "rust": [
         "src/python_urlopen_registry.rs",
         "src/python_urlopen_registry_windows.rs",
