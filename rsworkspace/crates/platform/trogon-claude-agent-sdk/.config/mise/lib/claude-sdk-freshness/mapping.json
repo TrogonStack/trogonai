@@ -2480,6 +2480,10 @@
         },
         {
           "path": "src/sdk_mcp_dialect_tests.rs",
+          "name": "python_dialect_meets_the_recursion_limit_of_nested_patterns_like_jsonschema_in_the_python_package"
+        },
+        {
+          "path": "src/sdk_mcp_dialect_tests.rs",
           "name": "python_dialect_shares_the_re_caches_of_the_python_process_across_calls"
         },
         {
@@ -2509,6 +2513,14 @@
         {
           "path": "src/python_jsonschema_tests.rs",
           "name": "every_recursion_boundary_falls_where_python_raises_warm_and_cold"
+        },
+        {
+          "path": "src/python_jsonschema_tests.rs",
+          "name": "every_regex_recursion_boundary_falls_where_python_raises_warm_and_cold"
+        },
+        {
+          "path": "src/python_jsonschema_tests.rs",
+          "name": "every_recursion_boundary_under_a_raised_limit_falls_where_python_raises_warm_and_cold"
         },
         {
           "path": "src/python_jsonschema_tests.rs",

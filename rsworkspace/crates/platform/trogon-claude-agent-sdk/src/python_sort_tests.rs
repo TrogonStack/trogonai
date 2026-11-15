@@ -409,6 +409,27 @@ fn values_nested_past_the_native_stack_convert_compare_and_drop() -> TestResult 
     Ok(())
 }
 
+/// `[0, [0, ... [0, leaf]]]`, `depth` lists deep, so two of them first differ at index 1 on every level.
+fn chain(depth: usize, leaf: PyValue) -> PyValue {
+    (0..depth).fold(leaf, |inner, _| list(vec![int(0), inner]))
+}
+
+#[test]
+fn deep_lists_order_once_their_first_unequal_members_are_known() {
+    let keys = [chain(3, int(1)), chain(3, int(2))];
+    assert_eq!(sorted_within(&keys, 3), Ok(vec![0, 1]));
+    assert_eq!(sorted_within(&keys, 2), Err(SortError::Recursion));
+    let keys = [chain(3, int(2)), chain(3, int(1))];
+    assert_eq!(sorted_within(&keys, 3), Ok(vec![1, 0]));
+    let depth = crate::constants::C_RECURSION_LIMIT;
+    let keys = [chain(depth, int(2)), chain(depth, int(1))];
+    assert_eq!(sorted_within(&keys, depth), Ok(vec![1, 0]));
+    assert_eq!(sorted_within(&keys, depth - 1), Err(SortError::Recursion));
+    let keys = [nest(depth, int(1)), nest(depth, int(2))];
+    assert_eq!(sorted_within(&keys, depth), Ok(vec![0, 1]));
+    assert_eq!(sorted_within(&keys, depth - 1), Err(SortError::Recursion));
+}
+
 /// Each answer below is CPython 3.12's for the same operands.
 #[test]
 fn ints_outside_i128_compare_and_sort_as_python_ints() -> TestResult {

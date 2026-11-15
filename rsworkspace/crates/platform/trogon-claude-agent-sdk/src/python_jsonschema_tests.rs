@@ -598,16 +598,30 @@ fn replay_recursion(text: &str) -> Result<usize, String> {
     Err(format!("{} mismatches:\n{}", failures.len(), failures.join("\n")))
 }
 
+/// [`replay_recursion`] on a thread whose stack holds the fixture; returns how many calls it checked.
+fn replay_recursion_deep(text: &'static str) -> Result<usize, Box<dyn std::error::Error>> {
+    Ok(std::thread::Builder::new()
+        .stack_size(DEEP_REPLAY_STACK)
+        .spawn(move || replay_recursion(text))?
+        .join()
+        .map_err(|_| "the replay thread panicked")??)
+}
+
 #[test]
 fn every_recursion_boundary_falls_where_python_raises_warm_and_cold() -> TestResult {
-    for (text, cases) in [(RECURSION, 444), (RECURSION_REGEX, 76), (RECURSION_LIMITS, 40)] {
-        let checked = std::thread::Builder::new()
-            .stack_size(DEEP_REPLAY_STACK)
-            .spawn(move || replay_recursion(text))?
-            .join()
-            .map_err(|_| "the replay thread panicked")??;
-        assert_eq!(checked, 2 * cases);
-    }
+    assert_eq!(replay_recursion_deep(RECURSION)?, 2 * 444);
+    Ok(())
+}
+
+#[test]
+fn every_regex_recursion_boundary_falls_where_python_raises_warm_and_cold() -> TestResult {
+    assert_eq!(replay_recursion_deep(RECURSION_REGEX)?, 2 * 76);
+    Ok(())
+}
+
+#[test]
+fn every_recursion_boundary_under_a_raised_limit_falls_where_python_raises_warm_and_cold() -> TestResult {
+    assert_eq!(replay_recursion_deep(RECURSION_LIMITS)?, 2 * 40);
     Ok(())
 }
 

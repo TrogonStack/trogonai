@@ -1112,6 +1112,7 @@ async fn replay_python_tool_calls(text: &str) -> Result<(usize, usize), Box<dyn 
             {"name": "t", "handler": "ok", "schema": field(case, "schema")?}
         ]});
         let session = initialized(&server(&spec, McpServerDialect::Python)?).await?;
+        let schema = field(case, "schema")?;
         let arguments = field(case, "arguments")?.as_array().ok_or("arguments is not a list")?;
         let answers = field(case, "answers")?.as_array().ok_or("answers is not a list")?;
         assert_eq!(arguments.len(), answers.len());
@@ -1124,11 +1125,12 @@ async fn replay_python_tool_calls(text: &str) -> Result<(usize, usize), Box<dyn 
                 .await?
                 .ok_or("missing tools/call response")?;
             let expected = expected.as_str().ok_or("an answer is not text")?;
-            let context = format!("case {index}: schema {} arguments {arguments}", field(case, "schema")?);
+            // Printed only on a mismatch: a schema nested thousands of levels deep prints long.
+            let context = || format!("case {index}: schema {schema} arguments {arguments}");
             answered += 1;
             if let Some(error) = expected.strip_prefix("RPCERR ") {
                 let error: Value = serde_json::from_str(error)?;
-                assert_eq!(response.get("error"), Some(&error), "{context}");
+                assert_eq!(response.get("error"), Some(&error), "{}", context());
                 continue;
             }
             let result = response.get("result").ok_or("tools/call without a result")?;
@@ -1141,7 +1143,7 @@ async fn replay_python_tool_calls(text: &str) -> Result<(usize, usize), Box<dyn 
             } else {
                 "OK".to_owned()
             };
-            assert_eq!(actual, expected, "{context}");
+            assert_eq!(actual, expected, "{}", context());
         }
     }
     Ok((cases.len(), answered))
@@ -1402,8 +1404,13 @@ async fn python_dialect_follows_the_set_orders_of_the_python_process_hash_seed()
 /// request with a JSON-RPC error, and arguments, defaults and unknown keywords nested 3000 levels deep pass through.
 #[test]
 fn python_dialect_meets_the_recursion_limit_like_jsonschema_in_the_python_package() -> TestResult {
-    for (text, cases) in [(RECURSION, 444), (RECURSION_REGEX, 76)] {
-        assert_eq!(replay_deep_python_tool_calls(text)?, (cases, cases));
-    }
+    assert_eq!(replay_deep_python_tool_calls(RECURSION)?, (444, 444));
+    Ok(())
+}
+
+/// The same for patterns whose groups nest until `re` passes the recursion limit.
+#[test]
+fn python_dialect_meets_the_recursion_limit_of_nested_patterns_like_jsonschema_in_the_python_package() -> TestResult {
+    assert_eq!(replay_deep_python_tool_calls(RECURSION_REGEX)?, (76, 76));
     Ok(())
 }

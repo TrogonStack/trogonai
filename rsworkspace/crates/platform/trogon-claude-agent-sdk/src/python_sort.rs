@@ -34,6 +34,7 @@
 
 use crate::constants::MIN_GALLOP;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use crate::{
     python_arith::{PyNumber, big_cmp_float, int_cmp, number},
@@ -391,6 +392,18 @@ enum Pending<'a> {
 struct Compare<'a> {
     room: usize,
     pending: Vec<Pending<'a>>,
+    /// The index at which each list comparison under `==` that finished found its first unequal members, so a
+    /// `<` of the same lists at the same depth goes straight to them: CPython repeats those `==` comparisons with
+    /// the same answers, and repeating them here walks two deep lists once per level.
+    unequal: HashMap<ListPair, usize>,
+}
+
+/// Two lists compared at a depth, by where their items live.
+type ListPair = (*const PyValue, usize, *const PyValue, usize, usize);
+
+/// The [`ListPair`] of `a` and `b` compared at `depth`.
+fn list_pair(a: &[PyValue], b: &[PyValue], depth: usize) -> ListPair {
+    (a.as_ptr(), a.len(), b.as_ptr(), b.len(), depth)
 }
 
 /// A step of a [`Compare`]: the answer of the comparison it ran, or `None` once it opened a container comparison.
@@ -465,11 +478,19 @@ impl<'a> Compare<'a> {
                     if !equal {
                         self.pending.pop();
                         return match op {
-                            Rich::Eq => Some(Ok(false)),
+                            Rich::Eq => {
+                                self.unequal.insert(list_pair(a, b, depth), index);
+                                Some(Ok(false))
+                            }
                             Rich::Lt => self.rich(&a[index], &b[index], Rich::Lt, depth),
                         };
                     }
                     index += 1;
+                } else if op == Rich::Lt
+                    && let Some(&at) = self.unequal.get(&list_pair(a, b, depth))
+                {
+                    self.pending.pop();
+                    return self.rich(&a[at], &b[at], Rich::Lt, depth);
                 }
                 while let (Some(v), Some(w)) = (a.get(index), b.get(index)) {
                     if !identical(v, w) {
@@ -645,6 +666,7 @@ impl Cmp<'_> {
         let compare = Compare {
             room,
             pending: Vec::new(),
+            unequal: HashMap::new(),
         };
         compare.lt(v, w, checked).map_err(|error| {
             self.recursed = error == SortError::Recursion;
