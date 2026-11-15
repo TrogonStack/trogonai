@@ -102,3 +102,10 @@ The tests exercise atomic replay after reopening, stale and concurrent writers,
 tenant separation, full-store rejection, and refusal of an existing evicting
 stream. They do not establish broker authorization, sealed content storage, or
 native-host delivery.
+
+The application exchange uses disposable content, presentation, catalog and policy
+ports. Lost-reply replay covers same-process registration replacement with shared
+disposable ports. Replacement waits for the old registration transport's closed
+event and attributes replay to the new registration. Cache loss preserves the
+durable winning batch and returns `RETRY_UNAVAILABLE`; durable presentation
+recovery is outside this proof.
