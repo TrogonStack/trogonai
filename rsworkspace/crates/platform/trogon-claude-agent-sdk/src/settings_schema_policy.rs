@@ -16,7 +16,10 @@ use std::{
 
 use serde_json::{Map, Value};
 
-use super::{Check, Mode, Node, SettingsSchema, all_pass, policy_lists};
+use super::{
+    Check, Mode, Node, SettingsSchema, all_pass,
+    policy_lists::{self, ListKind},
+};
 use crate::{
     constants::{POLICY_META_KEYS, POLICY_NEVER_SUBSTITUTED, POLICY_SKELETON_EXCLUDED, POLICY_UNSYNTHESIZED_BLOCKS},
     settings_policy_content::{has_policy_content, is_empty_tree},
@@ -332,14 +335,13 @@ impl SettingsSchema {
             }
             "policyHelpers" => as_written(read_policy_helpers(field, value)),
             "managedMcpServers" => as_written(read_managed_mcp_servers(field, value)),
-            "strictKnownMarketplaces" | "blockedMarketplaces" => {
-                as_written(policy_lists::marketplaces(field, key == "blockedMarketplaces", value))
-            }
-            "allowedMcpServers" | "deniedMcpServers" => {
-                as_written(policy_lists::server_list(field, key == "allowedMcpServers", value))
-            }
+            "strictKnownMarketplaces" => as_written(policy_lists::marketplaces(field, ListKind::Allow, value)),
+            "blockedMarketplaces" => as_written(policy_lists::marketplaces(field, ListKind::Block, value)),
+            "allowedMcpServers" => as_written(policy_lists::server_list(field, ListKind::Allow, value)),
+            "deniedMcpServers" => as_written(policy_lists::server_list(field, ListKind::Block, value)),
             "enabledPlugins" => as_written(policy_lists::enabled_plugins(value)),
-            "availableModels" | "deniedModels" => as_written(policy_lists::models(key == "availableModels", value)),
+            "availableModels" => as_written(policy_lists::models(ListKind::Allow, value)),
+            "deniedModels" => as_written(policy_lists::models(ListKind::Block, value)),
             "allowedHttpHookUrls" | "httpHookAllowedEnvVars" | "allowedChannelPlugins" | "allowedProviders" => {
                 Some((policy_lists::allowlist(key, value), false))
             }

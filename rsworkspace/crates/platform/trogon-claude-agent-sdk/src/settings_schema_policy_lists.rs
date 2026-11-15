@@ -12,6 +12,13 @@ use crate::{
     settings_schema_ports::is_provider_name,
 };
 
+/// Whether a managed list says what may be used or what may not, which decides how a value that is not a list reads.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ListKind {
+    Allow,
+    Block,
+}
+
 fn empty_list() -> Value {
     Value::Array(Vec::new())
 }
@@ -24,22 +31,22 @@ fn entry(field: &Node, item: &Value) -> Option<Value> {
 
 /// `B3`: `strictKnownMarketplaces` and `blockedMarketplaces`. An entry that can never be enforced leaves the
 /// allowlist and stays in the blocklist.
-pub(super) fn marketplaces(field: &Node, blocked: bool, value: &Value) -> Option<Value> {
+pub(super) fn marketplaces(field: &Node, kind: ListKind, value: &Value) -> Option<Value> {
     let Value::Array(items) = value else {
-        return (!blocked && !value.is_null()).then(empty_list);
+        return (kind == ListKind::Allow && !value.is_null()).then(empty_list);
     };
     let kept = items
         .iter()
         .filter_map(|item| entry(field, item))
-        .filter(|data| blocked || !unenforceable(data))
+        .filter(|data| kind == ListKind::Block || !unenforceable(data))
         .collect();
     Some(Value::Array(kept))
 }
 
 /// `j3`: `allowedMcpServers` and `deniedMcpServers`.
-pub(super) fn server_list(field: &Node, allowed: bool, value: &Value) -> Option<Value> {
+pub(super) fn server_list(field: &Node, kind: ListKind, value: &Value) -> Option<Value> {
     let Value::Array(items) = value else {
-        return allowed.then(empty_list);
+        return (kind == ListKind::Allow).then(empty_list);
     };
     Some(Value::Array(
         items.iter().filter_map(|item| entry(field, item)).collect(),
@@ -70,10 +77,10 @@ fn strings(items: &[Value]) -> Value {
 }
 
 /// `availableModels` (an allowlist) and `deniedModels` (a grant of nothing when unreadable).
-pub(super) fn models(available: bool, value: &Value) -> Option<Value> {
+pub(super) fn models(kind: ListKind, value: &Value) -> Option<Value> {
     match value {
         Value::Array(items) => Some(strings(items)),
-        _ => available.then(empty_list),
+        _ => (kind == ListKind::Allow).then(empty_list),
     }
 }
 
