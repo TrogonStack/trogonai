@@ -5,7 +5,7 @@ execution machinery built on top of the domain crate; this crate owns the storag
 contracts a backend adapter implements (`StreamRead`, `StreamAppend`, `SnapshotRead`,
 `SnapshotWrite`) and the runtime boundary that drives one command through them:
 `CommandExecution`. `CommandExecution` reads a snapshot (if configured) and stream history,
-folds it through `Decider::evolve`, calls `Decider::decide`, and appends the resulting events,
+folds it through the state's `Evolve<Event>` implementation, calls `Decider::decide`, and appends the resulting events,
 normalizing every phase's failure into one `CommandError`. It also owns snapshotting policy
 (`SnapshotPolicy`, `SnapshotFailurePolicy`), event headers (`Headers`, distinct from event
 payloads), and stream position semantics (`StreamPosition`, `ReadFrom`).

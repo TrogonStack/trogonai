@@ -41,7 +41,7 @@ struct HandlerTestStreamStoreError;
 #[derive(Clone, Default)]
 struct HandlerTestStreamStore {
     events: Arc<Mutex<Vec<StreamEvent>>>,
-    snapshots: Arc<Mutex<BTreeMap<String, Snapshot<state_v1::CredentialStateSnapshot>>>>,
+    snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialState>>>>,
     write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
     fail_append_at: Arc<Mutex<Option<usize>>>,
 }
@@ -132,25 +132,25 @@ impl StreamAppend<str> for HandlerTestStreamStore {
     }
 }
 
-impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for HandlerTestStreamStore {
+impl SnapshotRead<CredentialState, str> for HandlerTestStreamStore {
     type Error = HandlerTestStreamStoreError;
 
     async fn read_snapshot(
         &self,
         request: ReadSnapshotRequest<'_, str>,
-    ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
+    ) -> Result<ReadSnapshotResponse<CredentialState>, Self::Error> {
         Ok(ReadSnapshotResponse {
             snapshot: self.snapshots.lock().unwrap().get(request.snapshot_id).cloned(),
         })
     }
 }
 
-impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for HandlerTestStreamStore {
+impl SnapshotWrite<CredentialState, str> for HandlerTestStreamStore {
     type Error = HandlerTestStreamStoreError;
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, str>,
+        request: WriteSnapshotRequest<'_, CredentialState, str>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         self.snapshots
             .lock()

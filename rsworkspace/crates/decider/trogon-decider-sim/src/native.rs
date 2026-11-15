@@ -7,7 +7,7 @@
 //! [`trogon_decider_guest_sdk::decide_command`]): the same code runs on both the wasm and the
 //! native side, not a hand-mirrored copy of its logic.
 
-use trogon_decider::{Decider, EventDecode, EventEncode, EventType};
+use trogon_decider::{Decider, EventDecode, EventEncode, EventType, EvolveErrorOf};
 use trogon_decider_guest_sdk::{
     AnyEnvelopeParts, AnyEnvelopeView, CommandEnvelopeView, DecideErrorView, DomainErrorParts, decide_command,
     decode_command, evolve_one,
@@ -121,7 +121,8 @@ where
 /// replay.
 pub fn native_evolve_one<C>(state: C::State, envelope: &WireEnvelope) -> Result<C::State, NativeDomainError>
 where
-    C: Decider<EvolveError: std::error::Error + 'static>,
+    C: Decider,
+    EvolveErrorOf<C>: 'static,
     C::Event: EventDecode,
 {
     evolve_one::<C, NativeDomainError, WireEnvelope>(state, envelope.clone())
@@ -134,7 +135,8 @@ where
 /// resulting event is encoded through `EventEncode`/`EventType`.
 pub fn native_decide<C>(command: &C, state: &C::State) -> Result<Vec<WireEnvelope>, NativeDecideError>
 where
-    C: Decider<DecideError: std::error::Error + 'static, EvolveError: std::error::Error + 'static, State: Clone>,
+    C: Decider<State: Clone, DecideError: 'static>,
+    EvolveErrorOf<C>: 'static,
     C::Event: EventEncode + EventType,
 {
     decide_command::<C, NativeDecideError, WireEnvelope>(command, state)

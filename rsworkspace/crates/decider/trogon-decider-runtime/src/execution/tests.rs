@@ -256,21 +256,12 @@ impl Decider for TestCommand {
     type State = TestState;
     type Event = TestEvent;
     type DecideError = TestDecisionError;
-    type EvolveError = TestCommandError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
         &self.id
-    }
-
-    fn initial_state() -> Self::State {
-        initial_test_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        evolve_test_state(state, event)
     }
 
     fn decide(state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -336,21 +327,12 @@ impl Decider for RequiredRegisterCommand {
     type State = TestState;
     type Event = TestEvent;
     type DecideError = TestDecisionError;
-    type EvolveError = TestCommandError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
         &self.id
-    }
-
-    fn initial_state() -> Self::State {
-        initial_test_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        evolve_test_state(state, event)
     }
 
     fn decide(state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -372,20 +354,11 @@ impl Decider for ExistingOnlyCommand {
     type State = TestState;
     type Event = TestEvent;
     type DecideError = TestDecisionError;
-    type EvolveError = TestCommandError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamExists;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.id
-    }
-
-    fn initial_state() -> Self::State {
-        initial_test_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        evolve_test_state(state, event)
     }
 
     fn decide(_state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -3225,4 +3198,18 @@ fn a_chunked_replay_resumes_from_a_snapshot_and_still_walks_the_rest() {
         &[ReadFrom::Position(position(3)), ReadFrom::Position(position(5))],
         "the walk starts after the snapshot and keeps chunking from there"
     );
+}
+
+impl Default for TestState {
+    fn default() -> Self {
+        initial_test_state()
+    }
+}
+
+impl crate::Evolve<TestEvent> for TestState {
+    type Error = TestCommandError;
+
+    fn evolve(self, event: &TestEvent) -> Result<Self, Self::Error> {
+        evolve_test_state(self, event)
+    }
 }

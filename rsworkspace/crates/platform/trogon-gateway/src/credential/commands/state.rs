@@ -1,4 +1,71 @@
+use std::ops::Deref;
+
+use trogon_decider_runtime::{
+    Evolve,
+    snapshot::{SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType, SnapshotTypeName},
+};
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1};
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CredentialState(state_v1::CredentialStateSnapshot);
+
+impl Default for CredentialState {
+    fn default() -> Self {
+        Self(initial_state())
+    }
+}
+
+impl Evolve<v1::CredentialEvent> for CredentialState {
+    type Error = CredentialEvolveError;
+
+    fn evolve(self, event: &v1::CredentialEvent) -> Result<Self, Self::Error> {
+        evolve(self.0, event).map(Self)
+    }
+}
+
+impl Deref for CredentialState {
+    type Target = state_v1::CredentialStateSnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<state_v1::CredentialStateSnapshot> for CredentialState {
+    fn from(value: state_v1::CredentialStateSnapshot) -> Self {
+        Self(value)
+    }
+}
+
+impl From<CredentialState> for state_v1::CredentialStateSnapshot {
+    fn from(value: CredentialState) -> Self {
+        value.0
+    }
+}
+
+impl SnapshotType for CredentialState {
+    type Error = <state_v1::CredentialStateSnapshot as SnapshotType>::Error;
+
+    fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
+        <state_v1::CredentialStateSnapshot as SnapshotType>::snapshot_type()
+    }
+}
+
+impl SnapshotPayloadEncode for CredentialState {
+    type Error = <state_v1::CredentialStateSnapshot as SnapshotPayloadEncode>::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        self.0.encode()
+    }
+}
+
+impl SnapshotPayloadDecode for CredentialState {
+    type Error = <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::Error;
+
+    fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
+        <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::decode(payload).map(Self)
+    }
+}
 
 use super::domain::{
     CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,

@@ -53,11 +53,26 @@ impl EventDecode for FixtureEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum FixtureState {
+    #[default]
     New,
     Opened,
-    Funded { amount: u32 },
+    Funded {
+        amount: u32,
+    },
+}
+
+impl Evolve<FixtureEvent> for FixtureState {
+    type Error = FixtureEvolveError;
+
+    fn evolve(self, event: &FixtureEvent) -> Result<Self, Self::Error> {
+        match (self, event) {
+            (Self::New, FixtureEvent::Opened { .. }) => Ok(Self::Opened),
+            (Self::Opened, FixtureEvent::Funded { amount }) => Ok(Self::Funded { amount: *amount }),
+            _ => Err(FixtureEvolveError),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -84,23 +99,10 @@ impl Decider for OpenAndFund {
     type State = FixtureState;
     type Event = FixtureEvent;
     type DecideError = FixtureDecideError;
-    type EvolveError = FixtureEvolveError;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &str {
         &self.id
-    }
-
-    fn initial_state() -> FixtureState {
-        FixtureState::New
-    }
-
-    fn evolve(state: FixtureState, event: &FixtureEvent) -> Result<FixtureState, FixtureEvolveError> {
-        match (state, event) {
-            (FixtureState::New, FixtureEvent::Opened { .. }) => Ok(FixtureState::Opened),
-            (FixtureState::Opened, FixtureEvent::Funded { amount }) => Ok(FixtureState::Funded { amount: *amount }),
-            _ => Err(FixtureEvolveError),
-        }
     }
 
     fn decide(_state: &FixtureState, _command: &Self) -> Result<Decision<Self>, FixtureDecideError> {

@@ -88,19 +88,10 @@ impl Decider for CreateCommand {
     type State = CreateState;
     type Event = CreatedEvent;
     type DecideError = AlreadyExistsError;
-    type EvolveError = Infallible;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.stream_id
-    }
-
-    fn initial_state() -> Self::State {
-        CreateState::Missing
-    }
-
-    fn evolve(_state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Ok(CreateState::Created)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -176,22 +167,13 @@ impl AppendCommand {
 
 impl Decider for AppendCommand {
     type StreamId = str;
-    type State = u32;
+    type State = AppendState;
     type Event = AppendedEvent;
     type DecideError = Infallible;
-    type EvolveError = Infallible;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.stream_id
-    }
-
-    fn initial_state() -> Self::State {
-        0
-    }
-
-    fn evolve(state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Ok(state + 1)
     }
 
     fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -220,22 +202,13 @@ impl ExistingAppendCommand {
 
 impl Decider for ExistingAppendCommand {
     type StreamId = str;
-    type State = u32;
+    type State = AppendState;
     type Event = AppendedEvent;
     type DecideError = Infallible;
-    type EvolveError = Infallible;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamExists;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.stream_id
-    }
-
-    fn initial_state() -> Self::State {
-        0
-    }
-
-    fn evolve(state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Ok(state + 1)
     }
 
     fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -262,10 +235,9 @@ impl UnguardedAppendCommand {
 
 impl Decider for UnguardedAppendCommand {
     type StreamId = str;
-    type State = u32;
+    type State = AppendState;
     type Event = AppendedEvent;
     type DecideError = Infallible;
-    type EvolveError = Infallible;
     #[cfg_attr(
         dylint_lib = "trogon_dylint_lints",
         allow(
@@ -277,14 +249,6 @@ impl Decider for UnguardedAppendCommand {
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.stream_id
-    }
-
-    fn initial_state() -> Self::State {
-        0
-    }
-
-    fn evolve(state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Ok(state + 1)
     }
 
     fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -493,7 +457,7 @@ async fn a_stream_exists_command_accepts_an_already_created_stream() {
         .await
         .expect("StreamExists should accept a stream with a prior event");
 
-    assert_eq!(result.state, 2);
+    assert_eq!(result.state, AppendState(2));
 }
 
 #[tokio::test]
@@ -513,7 +477,7 @@ async fn an_expected_revision_matching_the_current_position_is_accepted() {
         .await
         .expect("an expected revision matching the current position should succeed");
 
-    assert_eq!(result.state, 2);
+    assert_eq!(result.state, AppendState(2));
 }
 
 #[tokio::test]
@@ -746,4 +710,29 @@ async fn a_resolver_inside_its_declared_scope_is_left_alone() {
         .expect("a subject inside the declared scope is written normally");
 
     assert_eq!(result.state, CreateState::Created);
+}
+
+impl Default for CreateState {
+    fn default() -> Self {
+        CreateState::Missing
+    }
+}
+
+impl trogon_decider_runtime::Evolve<CreatedEvent> for CreateState {
+    type Error = Infallible;
+
+    fn evolve(self, _event: &CreatedEvent) -> Result<Self, Self::Error> {
+        Ok(CreateState::Created)
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AppendState(u32);
+
+impl trogon_decider_runtime::Evolve<AppendedEvent> for AppendState {
+    type Error = Infallible;
+
+    fn evolve(self, _event: &AppendedEvent) -> Result<Self, Self::Error> {
+        Ok(Self(self.0 + 1))
+    }
 }

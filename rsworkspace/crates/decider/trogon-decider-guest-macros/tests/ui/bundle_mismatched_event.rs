@@ -1,21 +1,102 @@
-use trogon_decider::{Decider, Decision, WritePrecondition};
+use std::convert::Infallible;
+use trogon_decider::{
+    Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, StateSnapshot,
+    WritePrecondition,
+};
 use trogon_decider_guest_sdk::export_decider;
-use trogon_scheduler_domain::CreateSchedule;
 use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, SCHEDULES_STATE_SCHEMA_VERSION, state_v1, v1};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WrongEvent;
+#[derive(Clone, Default)]
+struct SharedState(state_v1::State);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl StateSnapshot for SharedState {
+    type Payload = state_v1::State;
+
+    fn from_snapshot_payload(payload: Self::Payload) -> Self {
+        Self(payload)
+    }
+
+    fn snapshot_payload(&self) -> &Self::Payload {
+        &self.0
+    }
+}
+
+impl Evolve<v1::ScheduleEvent> for SharedState {
+    type Error = Infallible;
+
+    fn evolve(self, _event: &v1::ScheduleEvent) -> Result<Self, Self::Error> {
+        Ok(self)
+    }
+}
+
+struct CanonicalCommand;
+
+impl TryFrom<v1::CreateSchedule> for CanonicalCommand {
+    type Error = Infallible;
+
+    fn try_from(_value: v1::CreateSchedule) -> Result<Self, Self::Error> {
+        Ok(Self)
+    }
+}
+
+impl Decider for CanonicalCommand {
+    type StreamId = str;
+    type State = SharedState;
+    type Event = v1::ScheduleEvent;
+    type DecideError = Infallible;
+    const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
+
+    fn stream_id(&self) -> &str {
+        "canonical"
+    }
+
+    fn decide(_state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+        Ok(Decision::event(v1::ScheduleEvent::default()))
+    }
+}
+
+struct WrongEvent(v1::ScheduleEvent);
+
+impl Evolve<WrongEvent> for SharedState {
+    type Error = Infallible;
+
+    fn evolve(self, _event: &WrongEvent) -> Result<Self, Self::Error> {
+        Ok(self)
+    }
+}
+
+impl EventEncode for WrongEvent {
+    type Error = <v1::ScheduleEvent as EventEncode>::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        self.0.encode()
+    }
+}
+
+impl EventType for WrongEvent {
+    type Error = <v1::ScheduleEvent as EventType>::Error;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error> {
+        self.0.event_type()
+    }
+}
+
+impl EventDecode for WrongEvent {
+    type Error = <v1::ScheduleEvent as EventDecode>::Error;
+
+    fn decode(event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error> {
+        Ok(match v1::ScheduleEvent::decode(event)? {
+            EventDecodeOutcome::Decoded(event) => EventDecodeOutcome::Decoded(Self(event)),
+            EventDecodeOutcome::Skipped => EventDecodeOutcome::Skipped,
+        })
+    }
+}
+
 struct WrongEventCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("rejected")]
 struct WrongEventDecideError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("evolve failed")]
-struct WrongEventEvolveError;
 
 impl TryFrom<v1::CreateSchedule> for WrongEventCommand {
     type Error = WrongEventDecideError;
@@ -27,22 +108,13 @@ impl TryFrom<v1::CreateSchedule> for WrongEventCommand {
 
 impl Decider for WrongEventCommand {
     type StreamId = str;
-    type State = state_v1::State;
+    type State = SharedState;
     type Event = WrongEvent;
     type DecideError = WrongEventDecideError;
-    type EvolveError = WrongEventEvolveError;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "wrong"
-    }
-
-    fn initial_state() -> Self::State {
-        state_v1::State::default()
-    }
-
-    fn evolve(_state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Err(WrongEventEvolveError)
     }
 
     fn decide(_state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -51,7 +123,7 @@ impl Decider for WrongEventCommand {
 }
 
 export_decider!(
-    CreateSchedule {
+    CanonicalCommand {
         type_url = CREATE_SCHEDULE_TYPE_URL,
         proto = v1::CreateSchedule,
         module = "scheduler.schedules",

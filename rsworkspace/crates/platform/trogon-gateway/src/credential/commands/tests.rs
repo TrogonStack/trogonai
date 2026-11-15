@@ -6,9 +6,9 @@ use chrono::Utc;
 use trogon_decider::testing::TestCase;
 use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, CommandSnapshotPolicy, EventData,
-    EventDecode, EventDecodeOutcome, EventEncode, EventType, ReadFrom, ReadStreamRequest, ReadStreamResponse,
-    SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, StreamAppend, StreamEvent, StreamPosition,
-    StreamRead, StreamWritePrecondition,
+    EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, ReadFrom, ReadStreamRequest, ReadStreamResponse,
+    SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType, StreamAppend, StreamEvent,
+    StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1 as proto};
 
@@ -25,7 +25,7 @@ use super::proto::{
     rotation_requested_to_proto, write_failed_to_proto, write_requested_to_proto,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
-use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
+use super::state::{CredentialDecideError, CredentialEvolveError, CredentialState, evolve, initial_state};
 use super::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, RecordCredentialDestroyFailure,
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
@@ -298,6 +298,24 @@ fn snapshot_policy_uses_scheduler_frequency_pattern() {
 }
 
 #[test]
+fn state_owned_evolution_preserves_snapshot_encoding() {
+    let state = CredentialState::default().evolve(&write_requested()).unwrap();
+    let proto_state: state_v1::CredentialStateSnapshot = state.clone().into();
+
+    assert_eq!(proto_state, evolve(initial_state(), &write_requested()).unwrap());
+    assert_eq!(
+        CredentialState::snapshot_type().unwrap(),
+        state_v1::CredentialStateSnapshot::snapshot_type().unwrap()
+    );
+    let encoded = SnapshotPayloadEncode::encode(&proto_state).unwrap();
+    assert_eq!(state.encode().unwrap(), encoded);
+    assert_eq!(
+        CredentialState::decode(SnapshotPayloadData::new(&encoded)).unwrap(),
+        state
+    );
+}
+
+#[test]
 fn state_snapshot_round_trips_active_state() {
     let state = rebuild_state_from_events([write_requested(), activated(1), rotation_requested(1), rotated(1, 2)]);
 
@@ -476,7 +494,7 @@ fn activation_rejects_a_pending_write_persisted_without_a_scope() {
     };
 
     TestCase::<ActivateCredentialWrite>::new()
-        .given_state(state)
+        .given_state(state.into())
         .when(ActivateCredentialWrite::new(metadata(1)))
         .then_error(CredentialDecideError::InvalidProto(
             CredentialProtoDecodeError::InvalidField {

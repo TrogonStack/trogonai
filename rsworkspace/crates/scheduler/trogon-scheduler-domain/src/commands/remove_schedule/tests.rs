@@ -131,38 +131,47 @@ fn errors_display_user_facing_messages() {
 #[test]
 fn decide_rejects_invalid_state_values() {
     TestCase::<RemoveSchedule>::new()
-        .given_state(state_v1::State {
-            completed: None,
-            state: None,
-            last_occurrence_at: MessageField::default(),
-            last_occurrence_sequence: None,
-            schedule: MessageField::default(),
-            pending_occurrence_at: MessageField::default(),
-        })
+        .given_state(
+            state_v1::State {
+                completed: None,
+                state: None,
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            }
+            .into(),
+        )
         .when(remove_job_command("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(RemoveScheduleError::MissingStateValue);
 
     TestCase::<RemoveSchedule>::new()
-        .given_state(state_v1::State {
-            completed: None,
-            state: Some(EnumValue::from(123)),
-            last_occurrence_at: MessageField::default(),
-            last_occurrence_sequence: None,
-            schedule: MessageField::default(),
-            pending_occurrence_at: MessageField::default(),
-        })
+        .given_state(
+            state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(123)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            }
+            .into(),
+        )
         .when(remove_job_command("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(RemoveScheduleError::UnknownStateValue { value: 123 });
 
     TestCase::<RemoveSchedule>::new()
-        .given_state(state_v1::State {
-            completed: None,
-            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-            last_occurrence_at: MessageField::default(),
-            last_occurrence_sequence: None,
-            schedule: MessageField::default(),
-            pending_occurrence_at: MessageField::default(),
-        })
+        .given_state(
+            state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            }
+            .into(),
+        )
         .when(remove_job_command("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(RemoveScheduleError::UnknownStateValue { value: 0 });
 }
@@ -173,7 +182,11 @@ fn decider_trait_methods_delegate_to_schedule_state() {
 
     assert_eq!(command.stream_id(), &command.id);
     assert_eq!(
-        RemoveSchedule::initial_state().state.unwrap().as_known(),
+        super::super::state::ScheduleState::default()
+            .state
+            .as_ref()
+            .unwrap()
+            .as_known(),
         Some(state_v1::StateValue::STATE_VALUE_MISSING)
     );
 }

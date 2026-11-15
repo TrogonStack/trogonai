@@ -873,7 +873,7 @@ async fn persisted_command_snapshot_round_trips_and_survives_reopening() {
         .unwrap();
     let snapshot = snapshot.snapshot.unwrap();
     assert_eq!(snapshot.position, result.stream_position);
-    assert_eq!(snapshot.payload, result.state);
+    assert_eq!(&snapshot.payload, &*result.state);
 
     js.delete_key_value(trogon_scheduler::constants::COMMAND_SNAPSHOT_BUCKET)
         .await

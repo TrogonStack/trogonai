@@ -7,7 +7,7 @@ shared testing/observability tooling so both paths stay provably in sync. This i
 to read first; it links out to the ADRs and per-crate READMEs for anything it only
 summarizes.
 
-## The `decide`/`evolve`/`initial_state` cycle
+## State replay and command decisions
 
 Every decider is a plain Rust type implementing `trogon_decider::Decider`
 (`crates/decider/trogon-decider/src/lib.rs`):
@@ -15,21 +15,24 @@ Every decider is a plain Rust type implementing `trogon_decider::Decider`
 ```rust
 pub trait Decider: Sized {
     type StreamId: ?Sized;
-    type State;
+    type State: Default + Evolve<Self::Event>;
     type Event;
     type DecideError: std::error::Error;
-    type EvolveError: std::error::Error;
 
-    const WRITE_PRECONDITION: Option<WritePrecondition> = None;
+    const WRITE_PRECONDITION: WritePrecondition;
+    const SNAPSHOT_CADENCE: SnapshotCadence = SnapshotCadence::Never;
 
     fn stream_id(&self) -> &Self::StreamId;
-    fn initial_state() -> Self::State;
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError>;
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError>;
+}
+
+pub trait Evolve<Event>: Sized {
+    type Error: std::error::Error;
+    fn evolve(self, event: &Event) -> Result<Self, Self::Error>;
 }
 ```
 
-`initial_state` seeds state with no events applied. `evolve` folds one stored event into
+The state's `Default` seeds state with no events applied. Its `Evolve<Event>` folds one stored event into
 state and is the only place state changes. `decide` evaluates a command against the current
 state and returns a `Decision`, never mutating anything itself. When a rejection crosses the
 WASM boundary, the bridge surfaces it with the constant `"rejected"` code on the WIT
@@ -41,15 +44,15 @@ concurrency guard applied when the decided events are appended. It is a total en
 
 ```rust
 pub enum WritePrecondition {
-    StreamUnchanged,  // the default: append only if the stream is still as replay observed it
+    StreamUnchanged,  // append only if the stream is still as replay observed it
     NoStream,         // append only if the stream is empty (first writer wins)
     StreamExists,     // append only if the stream already has events
     Any,              // append regardless of current stream state
 }
 ```
 
-`StreamUnchanged` is the `Decider` trait's default associated const, which is why real
-optimistic concurrency ships without anyone opting in. It names an intent rather than a
+`StreamUnchanged` is the common optimistic-concurrency choice that commands declare explicitly.
+It names an intent rather than a
 revision because a compile-time `const` cannot carry one: the storage layer's
 `StreamWritePrecondition`
 (`crates/decider/trogon-decider-runtime/src/stream/append_stream.rs`) has a fourth variant
@@ -148,7 +151,7 @@ public because it appears in `execute`'s signature, but it is sealed, so the two
 states are the only implementations. The phases are:
 
 - **Load.** If the effective write precondition is `NoStream`, neither the snapshot store nor
-  the stream is read and the command is decided straight against `C::initial_state()`: any
+  the stream is read and the command is decided straight against `C::State::default()`: any
   history at all would already violate the guard the append is about to use. Otherwise
   `WithoutSnapshots` reads the stream from the beginning (`ReadFrom::Beginning`), while
   `Snapshots` reads a snapshot first and then reads only the stream events *after* the

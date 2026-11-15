@@ -379,7 +379,7 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
             }
 
             fn snapshot(&self) -> Option<Vec<u8>> {
-                Some(::trogon_decider_guest_sdk::encode_current::<
+                Some(::trogon_decider_guest_sdk::encode_current_state::<
                     <#canonical_ty as ::trogon_decider::Decider>::State,
                 >(&self.state.borrow(), #state_schema_version))
             }

@@ -1,5 +1,77 @@
 use buffa::{EnumValue, MessageField};
+use std::ops::Deref;
+use trogon_decider::{Evolve, StateSnapshot};
 use trogonai_proto::scheduler::schedules::{ScheduleEventCase, ScheduleStatusKind, state_v1, v1};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScheduleState(state_v1::State);
+
+impl Default for ScheduleState {
+    fn default() -> Self {
+        Self(initial_state())
+    }
+}
+
+impl Evolve<v1::ScheduleEvent> for ScheduleState {
+    type Error = EvolveError;
+
+    fn evolve(self, event: &v1::ScheduleEvent) -> Result<Self, Self::Error> {
+        evolve(self.0, event).map(Self)
+    }
+}
+
+impl Deref for ScheduleState {
+    type Target = state_v1::State;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<state_v1::State> for ScheduleState {
+    fn from(value: state_v1::State) -> Self {
+        Self(value)
+    }
+}
+
+impl StateSnapshot for ScheduleState {
+    type Payload = state_v1::State;
+
+    fn from_snapshot_payload(payload: Self::Payload) -> Self {
+        Self(payload)
+    }
+
+    fn snapshot_payload(&self) -> &Self::Payload {
+        &self.0
+    }
+}
+
+#[cfg(feature = "runtime-snapshot")]
+impl trogon_decider_runtime::snapshot::SnapshotType for ScheduleState {
+    type Error = <state_v1::State as trogon_decider_runtime::snapshot::SnapshotType>::Error;
+
+    fn snapshot_type() -> Result<trogon_decider_runtime::snapshot::SnapshotTypeName, Self::Error> {
+        <state_v1::State as trogon_decider_runtime::snapshot::SnapshotType>::snapshot_type()
+    }
+}
+
+#[cfg(feature = "runtime-snapshot")]
+impl trogon_decider_runtime::snapshot::SnapshotPayloadEncode for ScheduleState {
+    type Error = <state_v1::State as trogon_decider_runtime::snapshot::SnapshotPayloadEncode>::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        trogon_decider_runtime::snapshot::SnapshotPayloadEncode::encode(&self.0)
+    }
+}
+
+#[cfg(feature = "runtime-snapshot")]
+impl trogon_decider_runtime::snapshot::SnapshotPayloadDecode for ScheduleState {
+    type Error = <state_v1::State as trogon_decider_runtime::snapshot::SnapshotPayloadDecode>::Error;
+
+    fn decode(payload: trogon_decider_runtime::snapshot::SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
+        <state_v1::State as trogon_decider_runtime::snapshot::SnapshotPayloadDecode>::decode(payload).map(Self)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EvolveError {

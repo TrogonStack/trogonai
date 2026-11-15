@@ -34,7 +34,7 @@ use crate::credential::commands::proto::{
     decode_rotation_requested, decode_write_failed, decode_write_requested,
 };
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
-use crate::credential::{CredentialEvolveError, evolve, initial_state};
+use crate::credential::{CredentialEvolveError, CredentialState, evolve, initial_state};
 use crate::secret_store::{SecretStoreError, SecretStoreMetadata};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -277,8 +277,8 @@ pub(crate) async fn run<EventStream, EventStore, Secrets, Checkpoints>(
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -379,8 +379,8 @@ where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -409,8 +409,8 @@ where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,
@@ -490,8 +490,8 @@ async fn recover_pending_credential_activations_from_events<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata<Error = SecretStoreError>,

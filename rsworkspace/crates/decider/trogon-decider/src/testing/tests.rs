@@ -107,32 +107,10 @@ impl Decider for TestCommand {
     type State = TestState;
     type Event = TestEvent;
     type DecideError = TestCommandError;
-    type EvolveError = TestDomainError;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.id
-    }
-
-    fn initial_state() -> Self::State {
-        TestState::Missing
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        match (state, event) {
-            (TestState::Missing, TestEvent::Registered { .. }) => Ok(TestState::Present { enabled: true }),
-            (TestState::Missing, TestEvent::Disabled { id }) => {
-                Err(TestDomainError::MissingJobForDisable { id: id.clone() })
-            }
-            (TestState::Missing, TestEvent::Removed { id }) => {
-                Err(TestDomainError::MissingJobForRemoval { id: id.clone() })
-            }
-            (TestState::Present { .. }, TestEvent::Registered { id }) => {
-                Err(TestDomainError::MissingJobForDisable { id: id.clone() })
-            }
-            (TestState::Present { .. }, TestEvent::Disabled { .. }) => Ok(TestState::Present { enabled: false }),
-            (TestState::Present { .. }, TestEvent::Removed { .. }) => Ok(TestState::Missing),
-        }
     }
 
     fn decide(state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -655,4 +633,31 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
         return (*message).to_string();
     }
     String::new()
+}
+
+impl Default for TestState {
+    fn default() -> Self {
+        TestState::Missing
+    }
+}
+
+impl crate::Evolve<TestEvent> for TestState {
+    type Error = TestDomainError;
+
+    fn evolve(self, event: &TestEvent) -> Result<Self, Self::Error> {
+        match (self, event) {
+            (TestState::Missing, TestEvent::Registered { .. }) => Ok(TestState::Present { enabled: true }),
+            (TestState::Missing, TestEvent::Disabled { id }) => {
+                Err(TestDomainError::MissingJobForDisable { id: id.clone() })
+            }
+            (TestState::Missing, TestEvent::Removed { id }) => {
+                Err(TestDomainError::MissingJobForRemoval { id: id.clone() })
+            }
+            (TestState::Present { .. }, TestEvent::Registered { id }) => {
+                Err(TestDomainError::MissingJobForDisable { id: id.clone() })
+            }
+            (TestState::Present { .. }, TestEvent::Disabled { .. }) => Ok(TestState::Present { enabled: false }),
+            (TestState::Present { .. }, TestEvent::Removed { .. }) => Ok(TestState::Missing),
+        }
+    }
 }

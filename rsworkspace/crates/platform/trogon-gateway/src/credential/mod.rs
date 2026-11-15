@@ -12,4 +12,4 @@ pub use commands::{
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
     RequestCredentialWrite, RevokeCredential,
 };
-pub(crate) use commands::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
+pub(crate) use commands::{CredentialDecideError, CredentialEvolveError, CredentialState, evolve, initial_state};

@@ -22,8 +22,8 @@ use crate::stream::{
 };
 use crate::{
     ConflictRetryLimit, Decider, Event, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity,
-    EventType, Events, Headers, ReplayBounds, ReplayChunkSize, ReplayCursor, ReplayLimit, SnapshotCadence, StreamEvent,
-    WritePrecondition,
+    EventType, Events, Evolve, EvolveErrorOf, Headers, ReplayBounds, ReplayChunkSize, ReplayCursor, ReplayLimit,
+    SnapshotCadence, StreamEvent, WritePrecondition,
 };
 use trogon_decider::{DecisionError, evaluate_decision};
 use trogon_semconv::{attribute, metric, span};
@@ -434,7 +434,7 @@ pub type CommandResult<C, ReadSnapshotError, ReadStreamError, AppendStreamError>
     ExecutionResult<<C as Decider>::State, <C as Decider>::Event>,
     CommandError<
         <C as Decider>::DecideError,
-        <C as Decider>::EvolveError,
+        EvolveErrorOf<C>,
         ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
@@ -933,7 +933,7 @@ where
         .map_err(LoadReplayError::ReadStream)?;
 
         Ok(ReplayContext {
-            state: C::initial_state(),
+            state: C::State::default(),
             snapshot_position: None,
             current_position: stream_read.current_position,
             stream_events: stream_read.events,
@@ -1042,7 +1042,7 @@ where
                 };
                 let state = snapshot
                     .map(|snapshot| snapshot.payload)
-                    .unwrap_or_else(C::initial_state);
+                    .unwrap_or_else(C::State::default);
                 (snapshot_position, state, outcome)
             }
             Err(error) => {
@@ -1059,7 +1059,7 @@ where
                         discarded_snapshot = true;
                         (
                             None,
-                            C::initial_state(),
+                            C::State::default(),
                             attribute::SnapshotOutcome::DiscardedReadFailure,
                         )
                     }
@@ -1093,7 +1093,7 @@ where
                 SnapshotFailureDecision::DiscardAndReplay => {
                     discarded_snapshot = true;
                     snapshot_position = None;
-                    state = C::initial_state();
+                    state = C::State::default();
                     snapshot_outcome = attribute::SnapshotOutcome::DiscardedAheadOfStream;
 
                     let replay = read_stream_for_execution(
@@ -1545,7 +1545,7 @@ impl<E, C, S, G, A, Auth> CommandExecution<'_, E, C, S, G, A, Auth> {
         (AppendStreamResponse, Events<C::Event>, C::State),
         AppendDecisionError<
             C::DecideError,
-            C::EvolveError,
+            EvolveErrorOf<C>,
             CommandAppendStreamError<E, C>,
             CommandEventTypeError<C>,
             CommandEventPayloadEncodeError<C>,
@@ -1773,7 +1773,7 @@ where
             discarded_snapshot,
         } = if C::WRITE_PRECONDITION == WritePrecondition::NoStream {
             ReplayContext {
-                state: C::initial_state(),
+                state: C::State::default(),
                 snapshot_position: None,
                 stream_events: Vec::new(),
                 current_position: None,
@@ -1968,7 +1968,7 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
 fn evolve_state_from_stream_events<C>(
     mut state: C::State,
     stream_events: &[StreamEvent],
-) -> Result<C::State, ReplayStreamError<C::EvolveError, CommandEventDecodeError<C>>>
+) -> Result<C::State, ReplayStreamError<EvolveErrorOf<C>, CommandEventDecodeError<C>>>
 where
     C: Decider,
     C::Event: EventDecode,
@@ -1980,7 +1980,7 @@ where
             .map_err(ReplayStreamError::DecodeEvent)?
         {
             EventDecodeOutcome::Decoded(event) => {
-                state = C::evolve(state, &event).map_err(ReplayStreamError::Evolve)?;
+                state = state.evolve(&event).map_err(ReplayStreamError::Evolve)?;
             }
             // Shared or migrated streams may contain envelopes outside this
             // decider's event set; those still count toward stream position,

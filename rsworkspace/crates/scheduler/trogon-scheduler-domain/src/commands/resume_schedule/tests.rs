@@ -177,38 +177,47 @@ fn errors_display_user_facing_messages() {
 #[test]
 fn decide_rejects_invalid_state_values() {
     TestCase::<ResumeSchedule>::new()
-        .given_state(state_v1::State {
-            completed: None,
-            state: None,
-            last_occurrence_at: MessageField::default(),
-            last_occurrence_sequence: None,
-            schedule: MessageField::default(),
-            pending_occurrence_at: MessageField::default(),
-        })
+        .given_state(
+            state_v1::State {
+                completed: None,
+                state: None,
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            }
+            .into(),
+        )
         .when(resume_job_command("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(ResumeScheduleError::MissingStateValue);
 
     TestCase::<ResumeSchedule>::new()
-        .given_state(state_v1::State {
-            completed: None,
-            state: Some(EnumValue::from(123)),
-            last_occurrence_at: MessageField::default(),
-            last_occurrence_sequence: None,
-            schedule: MessageField::default(),
-            pending_occurrence_at: MessageField::default(),
-        })
+        .given_state(
+            state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(123)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            }
+            .into(),
+        )
         .when(resume_job_command("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(ResumeScheduleError::UnknownStateValue { value: 123 });
 
     TestCase::<ResumeSchedule>::new()
-        .given_state(state_v1::State {
-            completed: None,
-            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-            last_occurrence_at: MessageField::default(),
-            last_occurrence_sequence: None,
-            schedule: MessageField::default(),
-            pending_occurrence_at: MessageField::default(),
-        })
+        .given_state(
+            state_v1::State {
+                completed: None,
+                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                last_occurrence_at: MessageField::default(),
+                last_occurrence_sequence: None,
+                schedule: MessageField::default(),
+                pending_occurrence_at: MessageField::default(),
+            }
+            .into(),
+        )
         .when(resume_job_command("0198fa2f6d0a7b1a8cf9f762e73a1c45"))
         .then_error(ResumeScheduleError::UnknownStateValue { value: 0 });
 }

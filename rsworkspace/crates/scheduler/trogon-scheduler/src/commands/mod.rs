@@ -2,6 +2,7 @@ pub mod domain;
 mod record_schedule_occurrence;
 mod schedule_next_occurrence;
 mod snapshot;
+#[cfg(test)]
 mod state;
 
 pub use trogon_scheduler_domain::{

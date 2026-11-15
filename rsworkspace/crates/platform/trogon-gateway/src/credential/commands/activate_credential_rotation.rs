@@ -1,11 +1,10 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
-use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, v1};
 
 use super::domain::CredentialMetadata;
 use super::proto::{active_credential_ref, decode_message_field, rotated_to_proto};
 use super::state::{
-    CredentialDecideError, CredentialEvolveError, validate_activation_metadata, validate_newer_version,
-    validate_same_logical_ref,
+    CredentialDecideError, validate_activation_metadata, validate_newer_version, validate_same_logical_ref,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,23 +20,14 @@ impl ActivateCredentialRotation {
 
 impl Decider for ActivateCredentialRotation {
     type StreamId = str;
-    type State = state_v1::CredentialStateSnapshot;
+    type State = super::state::CredentialState;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
-    type EvolveError = CredentialEvolveError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.metadata.reference().id().as_str()
-    }
-
-    fn initial_state() -> Self::State {
-        super::state::initial_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
