@@ -4,16 +4,27 @@ package trogonai.workflows.runs.v1alpha1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
+import "trogonai/platform/workload_federation/v1alpha1/execution_profile.proto";
+import "trogonai/platform/workload_federation/v1alpha1/source_identity.proto";
 import "trogonai/session/sessions/v1alpha1/artifact.proto";
 import "trogonai/session/sessions/v1alpha1/checkout.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 import "trogonai/workflows/definitions/v1alpha1/digest.proto";
 import "trogonai/workflows/definitions/v1alpha1/value.proto";
 import "trogonai/workflows/definitions/v1alpha1/workflow_definition.proto";
+import "trogonai/workflows/definitions/v1alpha1/workload_identity.proto";
+import "trogonai/workflows/runs/v1alpha1/workload_identity.proto";
 
 // Readers verify the exact bytes before decoding WorkflowDefinition. A saved
 // definition is provenance; ad hoc plans require no registry identity.
 message RunPlan {
+  // Absence identifies historical version 1 only. Ingress and replay decode the
+  // exact plan bytes and prove this version and requirement match their content.
+  option (buf.validate.message).cel = {
+    id: "run_plan.identity_contract"
+    message: "identity-aware plan version 2 requires the exact workload identity requirement"
+    expression: "has(this.identity_requirement) == (has(this.definition_contract_version) && this.definition_contract_version == 2u)"
+  };
   option (buf.validate.message).cel = {
     id: "run_plan.saved_digest"
     message: "saved definition and plan digests must agree"
@@ -36,6 +47,13 @@ message RunPlan {
   trogonai.workflows.definitions.v1alpha1.Digest digest = 3 [features.field_presence = LEGACY_REQUIRED];
   trogonai.workflows.definitions.v1alpha1.WorkflowDefinitionRef saved_definition = 4;
   string previous_plan_revision_id = 5 [(buf.validate.field).string.min_len = 1];
+  uint32 definition_contract_version = 6 [(buf.validate.field).uint32 = {
+    in: [
+      1,
+      2
+    ]
+  }];
+  trogonai.workflows.definitions.v1alpha1.WorkflowIdentityRequirement identity_requirement = 7;
 }
 
 message ActorRef {
@@ -88,6 +106,72 @@ message RunAuthority {
   ];
 }
 
+// A trusted admission snapshot for the workflow executor, not the future
+// Session worker or its Connection confirmation key. The protected owner joins
+// authority, exact plan/profile artifacts, live registration and audit receipts
+// before dispatch and after every wait. This record is not a bearer permit.
+// Renewals preserve original_authority_expires_at and require fresh independent
+// admission; no new certificate or restored record extends that original grant.
+message RunIdentityAdmission {
+  option (buf.validate.message).cel = {
+    id: "run_identity_admission.interval"
+    message: "identity admission must fit its original authority and selected finite lease"
+    expression: "this.valid_until > this.admitted_at && this.valid_until <= this.original_authority_expires_at && this.valid_until <= this.admitted_at + this.execution_profile.definition.max_admission_lease"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_identity_admission.selected_source"
+    message: "admitted identity must be an exact source allowed by the execution profile"
+    expression: "this.execution_profile.definition.allowed_sources.exists(s, s == this.source)"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_identity_admission.evidence_kind"
+    message: "admitted local or external source must have matching authenticated evidence"
+    expression: "has(this.source.local_workload) ? (has(this.local_workload) && this.local_workload.activation.binding == this.source.local_workload) : (has(this.external_workload) && this.external_workload.admission.subject_binding_ref == this.source.subject_binding_ref && has(this.execution_profile.definition.external) && this.external_workload.admission.trust_registration_ref == this.execution_profile.definition.external.trust_registration_ref)"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_identity_admission.source_interval"
+    message: "identity admission must fit the original credential and registration validity"
+    expression: "has(this.local_workload) ? (this.admitted_at >= this.local_workload.currentness.observed_at && this.admitted_at >= this.local_workload.registration_issued_at && this.admitted_at >= this.local_workload.activation.not_before && this.valid_until <= this.local_workload.registration_expires_at && this.valid_until <= this.local_workload.activation.expires_at && this.admitted_at >= this.execution_profile.definition.attested.issuer.qualified_at && this.valid_until <= this.execution_profile.definition.attested.issuer.valid_until) : (this.external_workload.admission.admitted_at <= this.admitted_at && this.valid_until <= this.external_workload.admission.expires_at)"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_identity_admission.saved_definition"
+    message: "saved workflow provenance must match the admitted definition digest"
+    expression: "!has(this.saved_definition_ref) || this.saved_definition_ref.digest == this.definition_digest"
+  };
+  string admission_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  WorkflowRunId run_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  RunPlanRevisionId plan_revision_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.workflows.definitions.v1alpha1.Digest definition_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  RunAuthority authority = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.workload_federation.v1alpha1.ExecutionProfile execution_profile = 6 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.workload_federation.v1alpha1.SourceIdentityRequirement source = 7 [features.field_presence = LEGACY_REQUIRED];
+  oneof evidence {
+    option (buf.validate.oneof).required = true;
+    LocalWorkloadAdmissionEvidence local_workload = 8;
+    ExternalWorkloadAdmissionEvidence external_workload = 9;
+  }
+  google.protobuf.Timestamp admitted_at = 10 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp valid_until = 11 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp original_authority_expires_at = 12 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  trogonai.workflows.definitions.v1alpha1.WorkflowDefinitionRef saved_definition_ref = 13;
+  WorkloadAuditRecordId admission_audit_record_id = 14 [features.field_presence = LEGACY_REQUIRED];
+}
+
 message RunLimits {
   option (buf.validate.message).cel = {
     id: "run_limits.concurrency"
@@ -116,6 +200,16 @@ message RunLimits {
 
 message RunConfiguration {
   option (buf.validate.message).cel = {
+    id: "run_configuration.identity_contract"
+    message: "identity-aware run plans require matching workload admission"
+    expression: "has(this.plan.identity_requirement) == has(this.identity_admission)"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_configuration.identity_binding"
+    message: "workload admission must preserve the exact run plan authority profile and deadline"
+    expression: "!has(this.identity_admission) || (this.identity_admission.run_id.value == this.run_id && this.identity_admission.plan_revision_id.value == this.plan.plan_revision_id && this.identity_admission.definition_digest == this.plan.digest && this.identity_admission.authority == this.authority && this.identity_admission.execution_profile.execution_profile_ref == this.plan.identity_requirement.execution_profile_ref && this.identity_admission.valid_until <= this.limits.deadline && has(this.identity_admission.saved_definition_ref) == has(this.plan.saved_definition) && (!has(this.plan.saved_definition) || this.identity_admission.saved_definition_ref == this.plan.saved_definition))"
+  };
+  option (buf.validate.message).cel = {
     id: "run_configuration.initial_plan"
     message: "the initial plan has no predecessor"
     expression: "!has(this.plan.previous_plan_revision_id)"
@@ -140,6 +234,7 @@ message RunConfiguration {
   RunLimits limits = 7 [features.field_presence = LEGACY_REQUIRED];
   RunAuthority authority = 8 [features.field_presence = LEGACY_REQUIRED];
   string display_name = 9 [(buf.validate.field).string.min_len = 1];
+  RunIdentityAdmission identity_admission = 10;
 }
 
 message InvocationOutputSource {
