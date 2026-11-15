@@ -3,7 +3,7 @@ use trogon_nats::test_support::JetStreamTestServer;
 use trogon_peer::PeerId;
 use trogon_peer_nats::{
     PeerTenant,
-    peer::{PeerJetStreamStore, PeerStorageBudget, PeerStoreConfig, open_store},
+    peer::{PeerJetStreamStore, PeerStorageBudget, PeerStoreConfig},
 };
 use trogon_peer_service::{PeerService, ScopedPeerStore, test_support::Fixture};
 
@@ -13,7 +13,7 @@ async fn cloned_store_composes_a_service_and_shares_durable_history()
     let broker = JetStreamTestServer::start_with_atomic_batches().await;
     let fixture = Fixture::new().await?;
     let config = PeerStoreConfig::new(PeerTenant::new("tenant")?, PeerStorageBudget::new(1_048_576)?);
-    let store = PeerJetStreamStore::new(open_store(broker.jetstream().await, &config).await?)?;
+    let store = PeerJetStreamStore::open(broker.jetstream().await, &config).await?;
     let service_store = store.clone();
     assert_eq!(service_store.tenant(), store.tenant());
     let service = PeerService::new(service_store, fixture.policy.clone(), fixture.clock.clone());
