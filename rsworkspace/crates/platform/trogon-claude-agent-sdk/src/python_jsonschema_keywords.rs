@@ -227,12 +227,13 @@ impl<'s> Engine<'s> {
         if identical(one, two) {
             return Ok(true);
         }
-        if matches!(one, PyValue::Str(_)) || matches!(two, PyValue::Str(_)) {
+        let (one_type, two_type) = (py_type_name(one), py_type_name(two));
+        if one_type == "str" || two_type == "str" {
             return Ok(py_eq(one, two));
         }
-        self.abc(py_type_name(one), Abc::Sequence)?;
+        self.abc(one_type, Abc::Sequence)?;
         if let PyValue::List(left) = one {
-            self.abc(py_type_name(two), Abc::Sequence)?;
+            self.abc(two_type, Abc::Sequence)?;
             if let PyValue::List(right) = two {
                 let _sequence_equal = self.enter(1)?;
                 if left.len() != right.len() {
@@ -249,9 +250,9 @@ impl<'s> Engine<'s> {
                 return Ok(true);
             }
         }
-        self.abc(py_type_name(one), Abc::Mapping)?;
+        self.abc(one_type, Abc::Mapping)?;
         if let PyValue::Dict(left) = one {
-            self.abc(py_type_name(two), Abc::Mapping)?;
+            self.abc(two_type, Abc::Mapping)?;
             if let PyValue::Dict(right) = two {
                 let _mapping_equal = self.enter(1)?;
                 if left.len() != right.len() {

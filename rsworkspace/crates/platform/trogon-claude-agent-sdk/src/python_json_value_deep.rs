@@ -181,18 +181,22 @@ impl fmt::Write for Indented<'_, '_> {
     }
 }
 
-/// A value without members, printed as the derived `Debug` prints it.
-struct Leaf<'v>(&'v PythonJsonValue);
+/// A value without members, printed as the derived `Debug` prints its variant: the name and the one field.
+struct Leaf<'n, 'v>(&'n str, &'v dyn fmt::Debug);
 
-impl fmt::Debug for Leaf<'_> {
+impl fmt::Debug for Leaf<'_, '_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            PythonJsonValue::Null => formatter.write_str("Null"),
-            PythonJsonValue::Bool(flag) => formatter.debug_tuple("Bool").field(flag).finish(),
-            PythonJsonValue::Number(number) => formatter.debug_tuple("Number").field(number).finish(),
-            PythonJsonValue::String(text) => formatter.debug_tuple("String").field(text).finish(),
-            PythonJsonValue::Array(_) | PythonJsonValue::Object(_) => Err(fmt::Error),
-        }
+        formatter.debug_tuple(self.0).field(self.1).finish()
+    }
+}
+
+/// Writes the leaf variant `name(field)`, compact or with `{:#?}`.
+fn leaf(out: &mut Indented<'_, '_>, pretty: bool, name: &str, field: &dyn fmt::Debug) -> fmt::Result {
+    let leaf = Leaf(name, field);
+    if pretty {
+        write!(out, "{leaf:#?}")
+    } else {
+        write!(out, "{leaf:?}")
     }
 }
 
@@ -240,8 +244,10 @@ fn push_value<'v>(
             "}",
             members.iter().rev().map(|(key, member)| (Some(key), member)).collect(),
         ),
-        leaf if pretty => return write!(out, "{:#?}", Leaf(leaf)),
-        leaf => return write!(out, "{:?}", Leaf(leaf)),
+        PythonJsonValue::Null => return out.write_str("Null"),
+        PythonJsonValue::Bool(flag) => return leaf(out, pretty, "Bool", flag),
+        PythonJsonValue::Number(number) => return leaf(out, pretty, "Number", number),
+        PythonJsonValue::String(text) => return leaf(out, pretty, "String", text),
     };
     out.write_str(name)?;
     if pretty {

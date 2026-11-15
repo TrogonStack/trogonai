@@ -7,13 +7,13 @@ use crate::constants::{PARSE_STACK, PYTHON_INT_MAX_STR_DIGITS, PYTHON_READER_DEP
 use serde::Deserialize;
 use serde_json::Value;
 
-/// `serde_json::from_slice` without the recursion limit.
-fn parse_unbounded(bytes: &[u8]) -> Result<JsonObject, serde_json::Error> {
+/// The error `serde_json::from_slice` gives for `bytes` without the recursion limit, `None` when they read.
+fn unbounded_error(bytes: &[u8]) -> Option<serde_json::Error> {
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
     deserializer.disable_recursion_limit();
-    let object = JsonObject::deserialize(&mut deserializer)?;
-    deserializer.end()?;
-    Ok(object)
+    JsonObject::deserialize(&mut deserializer)
+        .and_then(|_| deserializer.end())
+        .err()
 }
 
 /// A JSON object read from `bytes` at any nesting, as `serde_json::from_slice` reads it but without recursion, so
@@ -34,7 +34,7 @@ fn parse_object_on(stack_sizes: &[usize], bytes: &[u8]) -> Result<JsonObject, se
     };
     let unbounded = || {
         let failed = (SHALLOW..=PYTHON_READER_DEPTH).contains(&depth);
-        failed.then(|| crate::large_stack::on_large_stack(stack_sizes, || parse_unbounded(bytes).err(), || None, None))
+        failed.then(|| crate::large_stack::on_large_stack(stack_sizes, || unbounded_error(bytes), || None, None))
     };
     let error = unbounded()
         .flatten()

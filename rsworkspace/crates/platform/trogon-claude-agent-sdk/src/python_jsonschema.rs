@@ -341,7 +341,9 @@ fn run(
 ) -> Flow {
     let uri = referencing::id_of(schema, draft)?.unwrap_or_default();
     let documents = referencing::Documents::default();
+    let specifications = referencing::SPECIFICATIONS.as_ref().map_err(Clone::clone)?;
     let registry = Registry::new(
+        specifications,
         uri.clone(),
         Resource {
             contents: schema,
@@ -350,7 +352,7 @@ fn run(
         retriever,
         &documents,
         budget.secret,
-    )?;
+    );
     let engine = Engine {
         registry,
         depth: Cell::new(budget.model.first_frame()),

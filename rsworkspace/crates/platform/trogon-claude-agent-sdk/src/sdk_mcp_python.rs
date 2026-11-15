@@ -44,10 +44,8 @@ impl Answer {
     /// The response as Python holds it, with the raised text as it is.
     fn into_python(self) -> PythonJsonObject {
         let mut response = python_object(self.response);
-        if let Some(text) = self.raised
-            && let Some(slot) = raised_text(&mut response)
-        {
-            *slot = PythonJsonValue::String(text);
+        if let Some(text) = self.raised {
+            response.insert(PythonString::from("result"), python_tool_error(text));
         }
         response
     }
@@ -59,18 +57,22 @@ impl From<JsonObject> for Answer {
     }
 }
 
-/// `result.content[0].text`, where [`tool_error`] puts the text.
-fn raised_text(response: &mut PythonJsonObject) -> Option<&mut PythonJsonValue> {
-    let PythonJsonValue::Object(result) = response.get_mut(&PythonString::from("result"))? else {
-        return None;
-    };
-    let PythonJsonValue::Array(content) = result.get_mut(&PythonString::from("content"))? else {
-        return None;
-    };
-    let PythonJsonValue::Object(block) = content.first_mut()? else {
-        return None;
-    };
-    block.get_mut(&PythonString::from("text"))
+/// The result [`tool_error`] builds, with its keys sorted, as Python holds it: the text as it is.
+fn python_tool_error(text: PythonString) -> PythonJsonValue {
+    let block = PythonJsonObject::from_iter([
+        (PythonString::from("text"), PythonJsonValue::String(text)),
+        (
+            PythonString::from("type"),
+            PythonJsonValue::String(PythonString::from("text")),
+        ),
+    ]);
+    PythonJsonValue::Object(PythonJsonObject::from_iter([
+        (
+            PythonString::from("content"),
+            PythonJsonValue::Array(vec![PythonJsonValue::Object(block)]),
+        ),
+        (PythonString::from("isError"), PythonJsonValue::Bool(true)),
+    ]))
 }
 
 pub(crate) async fn request(

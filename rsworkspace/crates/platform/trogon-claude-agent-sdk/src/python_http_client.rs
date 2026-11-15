@@ -216,12 +216,25 @@ pub(crate) fn getaddrinfo(
         )
     };
     lookup_status(code, io::Error::last_os_error)?;
+    // SAFETY: `found` is the list `getaddrinfo` returned, which is freed only below.
+    let addresses = unsafe { socket_addresses(found) };
+    // SAFETY: `found` is the list `getaddrinfo` allocated, freed once.
+    unsafe { libc::freeaddrinfo(found) };
+    Ok(addresses)
+}
+
+/// The IPv4 and IPv6 addresses of the `addrinfo` list that starts at `entry`, in order, skipping the entries of any
+/// other family.
+///
+/// # Safety
+///
+/// `entry` is null or the head of a list whose nodes live through the call and whose `ai_addr` points at the socket
+/// address its `ai_family` names.
+#[cfg(unix)]
+unsafe fn socket_addresses(mut entry: *const libc::addrinfo) -> Vec<SocketAddr> {
     let mut addresses = Vec::new();
-    let mut entry = found;
-    // SAFETY: `entry` is null or a node of the list `getaddrinfo` returned, which is freed only after this loop, and
-    // `ai_addr` points at the socket address its `ai_family` names.
+    // SAFETY: `entry` is null or a node of the list the caller lends, which lives through the call.
     while let Some(info) = unsafe { entry.as_ref() } {
-        // The families asked for are `AF_INET` and `AF_UNSPEC`, which answer IPv4 and IPv6 entries only.
         if info.ai_family == libc::AF_INET {
             // SAFETY: a non-null `ai_addr` of an `AF_INET` entry points at a `sockaddr_in`.
             if let Some(address) = unsafe { info.ai_addr.cast::<libc::sockaddr_in>().as_ref() } {
@@ -241,11 +254,9 @@ pub(crate) fn getaddrinfo(
                 )));
             }
         }
-        entry = info.ai_next;
+        entry = info.ai_next.cast_const();
     }
-    // SAFETY: `found` is the list `getaddrinfo` allocated, freed once.
-    unsafe { libc::freeaddrinfo(found) };
-    Ok(addresses)
+    addresses
 }
 
 /// What CPython's `set_gaierror` raises for a `getaddrinfo` return code: nothing for success, the `OSError` of

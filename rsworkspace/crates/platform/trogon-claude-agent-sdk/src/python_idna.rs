@@ -24,11 +24,9 @@ pub(crate) fn encode(text: &PythonString) -> Result<Vec<u8>, String> {
         if ascii.is_empty() {
             return Ok(Vec::new());
         }
-        let labels: Vec<&str> = ascii.split('.').collect();
-        let Some((last, rest)) = labels.split_last() else {
-            return Ok(Vec::new());
-        };
-        if rest.iter().any(|label| label.is_empty() || label.len() >= 64) {
+        let mut labels = ascii.split('.');
+        let last = labels.next_back().unwrap_or_default();
+        if labels.any(|label| label.is_empty() || label.len() >= 64) {
             return Err(EMPTY_OR_TOO_LONG.to_owned());
         }
         if last.len() >= 64 {

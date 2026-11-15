@@ -475,22 +475,22 @@ fn read_mime_files(files: &[&str]) -> Result<(), RemoteSchemaError> {
 /// off, then for those bytes alone at the end. An `OSError` is the `URLError` `open_local_file` wraps it in.
 fn read_mime_file(path: &str) -> Result<(), RemoteSchemaError> {
     let mut file = std::fs::File::open(path).map_err(|error| url_error(&os_error_text(&error, Some(path))))?;
-    let mut chunk = vec![0; TEXT_CHUNK];
+    let limit = u64::try_from(TEXT_CHUNK).unwrap_or(u64::MAX);
+    let mut chunk = Vec::with_capacity(TEXT_CHUNK);
     let mut held = Vec::new();
     loop {
-        let count = loop {
-            match file.read(&mut chunk) {
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-                read => break read.map_err(|error| url_error(&os_error_text(&error, None)))?,
-            }
-        };
-        let Some(new) = chunk.get(..count).filter(|new| !new.is_empty()) else {
+        chunk.clear();
+        (&mut file)
+            .take(limit)
+            .read_to_end(&mut chunk)
+            .map_err(|error| url_error(&os_error_text(&error, None)))?;
+        if chunk.is_empty() {
             if held.is_empty() {
                 return Ok(());
             }
             return Err(failure("UnicodeDecodeError", truncated_text(&held)));
-        };
-        held.extend_from_slice(new);
+        }
+        held.extend_from_slice(&chunk);
         let kept = python_decode(&held).map_err(|text| failure("UnicodeDecodeError", text))?;
         held.drain(..held.len() - kept);
     }

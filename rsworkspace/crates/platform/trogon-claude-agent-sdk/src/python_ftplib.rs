@@ -48,7 +48,7 @@ fn value_error(text: impl Into<PythonString>) -> FtpError {
 }
 
 /// `recv`, retried when a signal interrupts it.
-fn recv(mut stream: &TcpStream, buffer: &mut [u8]) -> io::Result<usize> {
+fn recv(mut stream: impl Read, buffer: &mut [u8]) -> io::Result<usize> {
     loop {
         let result = stream.read(buffer);
         if !result

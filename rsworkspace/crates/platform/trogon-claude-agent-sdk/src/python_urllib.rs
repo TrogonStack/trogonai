@@ -486,12 +486,11 @@ fn join(base: &[u8], url: &[u8]) -> Result<Vec<u8>, Vec<u8>> {
     if parsed.scheme != base_parsed.scheme || !listed(USES_RELATIVE, &parsed.scheme) {
         return Ok(url.to_vec());
     }
-    if listed(USES_NETLOC, &parsed.scheme) {
-        if !parsed.netloc.is_empty() {
-            return Ok(unparse(&parsed, &parsed.fragment));
-        }
-        parsed.netloc = base_parsed.netloc.clone();
+    // CPython checks `scheme in uses_netloc` here, which every scheme in `uses_relative` passes.
+    if !parsed.netloc.is_empty() {
+        return Ok(unparse(&parsed, &parsed.fragment));
     }
+    parsed.netloc = base_parsed.netloc.clone();
     if parsed.path.is_empty() && parsed.params.is_empty() {
         parsed.path = base_parsed.path.clone();
         parsed.params = base_parsed.params.clone();

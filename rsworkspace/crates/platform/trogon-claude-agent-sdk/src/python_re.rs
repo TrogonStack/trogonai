@@ -564,12 +564,9 @@ impl Tok {
         (!self.escape).then_some(self.ch)
     }
 
-    fn text(self) -> String {
-        if self.escape {
-            format!("\\{}", self.ch)
-        } else {
-            self.ch.to_string()
-        }
+    /// The source text of an escape token, which `_escape` and `_class_escape` start from.
+    fn escape_text(self) -> String {
+        format!("\\{}", self.ch)
     }
 }
 
@@ -896,7 +893,7 @@ impl Parser {
         if let Some(category) = category_base(c) {
             return Ok(SetItem::Category(category));
         }
-        let mut escape = token.text();
+        let mut escape = token.escape_text();
         if let Some(value) = self.escape_value(&mut escape, c)? {
             return Ok(SetItem::Literal(value));
         }
@@ -920,7 +917,7 @@ impl Parser {
         if let Some(value) = simple_escape(c) {
             return Ok(Node::Literal(value));
         }
-        let mut escape = token.text();
+        let mut escape = token.escape_text();
         if let Some(value) = self.escape_value(&mut escape, c)? {
             return Ok(Node::Literal(value));
         }
@@ -1796,27 +1793,26 @@ fn optimize_charset(charset: &[SetItem], fold: Fold) -> (Vec<SetItem>, bool) {
     }
 
     // Compress the character map into at most two runs.
-    let mut runs: Option<Vec<(usize, usize)>> = Some(Vec::new());
+    let mut found: Vec<(usize, usize)> = Vec::new();
     let mut q = 0;
-    while let Some(p) = charmap[q..].iter().position(|&set| set).map(|offset| offset + q) {
-        let Some(found) = runs.as_mut() else {
-            break;
+    let runs = loop {
+        let Some(p) = charmap[q..].iter().position(|&set| set).map(|offset| offset + q) else {
+            break Some(found);
         };
         if found.len() >= 2 {
-            runs = None;
-            break;
+            break None;
         }
         match charmap[p..].iter().position(|&set| !set) {
             None => {
                 found.push((p, charmap.len()));
-                break;
+                break Some(found);
             }
             Some(offset) => {
                 q = p + offset;
                 found.push((p, q));
             }
         }
-    }
+    };
     if let Some(runs) = runs {
         for (p, q) in runs {
             out.push(if q - p == 1 {
@@ -2178,7 +2174,9 @@ impl<'a> Matcher<'a> {
             AT_END => (end - ptr == 1 && text[ptr] == 10) || ptr == end,
             AT_END_LINE => ptr == end || text[ptr] == 10,
             AT_END_STRING => ptr == end,
-            AT_BOUNDARY | AT_NON_BOUNDARY | AT_UNI_BOUNDARY | AT_UNI_NON_BOUNDARY => {
+            // `AT_BOUNDARY`, `AT_NON_BOUNDARY` and their `AT_UNI_` forms, the only other codes a `str` pattern
+            // compiles to: the `AT_LOC_` ones need `LOCALE`, which a `str` pattern refuses.
+            _ => {
                 if end == 0 {
                     return false;
                 }
@@ -2195,7 +2193,6 @@ impl<'a> Matcher<'a> {
                     this == that
                 }
             }
-            _ => false,
         }
     }
 
@@ -2207,7 +2204,6 @@ impl<'a> Matcher<'a> {
             let op = code[pc];
             pc += 1;
             match op {
-                OP_FAILURE => return !ok,
                 OP_LITERAL => {
                     if ch == code[pc] {
                         return ok;
@@ -2260,8 +2256,8 @@ impl<'a> Matcher<'a> {
                     }
                     pc += count * 8;
                 }
-                // The compiler emits no other set operator.
-                _ => return false,
+                // `FAILURE`, which ends every set: the compiler emits no other set operator.
+                _ => return !ok,
             }
         }
     }
@@ -2401,13 +2397,6 @@ impl<'a> Matcher<'a> {
                         return false;
                     }
                     pc += 1;
-                }
-                OP_CATEGORY => {
-                    if ptr >= end || !category(code[pc], text[ptr]) {
-                        return false;
-                    }
-                    pc += 1;
-                    ptr += 1;
                 }
                 OP_ANY => {
                     if ptr >= end || text[ptr] == 10 {

@@ -224,9 +224,8 @@ fn python_mcp_frame(frame: serde_json::Value, mcp_response: crate::PythonJsonVal
     let mut frame = crate::PythonJsonValue::from(frame);
     let slot = ["response", "response", "mcp_response"]
         .into_iter()
-        .try_fold(&mut frame, |value, key| match value {
-            crate::PythonJsonValue::Object(members) => members.get_mut(&crate::PythonString::from(key)),
-            _ => None,
+        .try_fold(&mut frame, |value, key| {
+            value.as_object_mut()?.get_mut(&crate::PythonString::from(key))
         });
     if let Some(slot) = slot {
         *slot = mcp_response;

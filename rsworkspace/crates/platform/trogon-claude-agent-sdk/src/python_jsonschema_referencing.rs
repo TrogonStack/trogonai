@@ -477,17 +477,19 @@ pub(super) struct Registry<'s> {
 }
 
 impl<'s> Registry<'s> {
-    /// `registry.resolver_with_root(resource)`'s registry, with the root under its id or `""`, retrieving through
-    /// `retriever` into `documents`, in a Python process whose hash secret is `secret`.
+    /// `registry.resolver_with_root(resource)`'s registry over the crawled `specifications`, with the root under
+    /// its id or `""`, retrieving through `retriever` into `documents`, in a Python process whose hash secret is
+    /// `secret`.
     pub(super) fn new(
+        specifications: &'static Crawled<'static>,
         root_uri: PythonString,
         root: Resource<'s>,
         retriever: &'s dyn RemoteSchemaRetriever,
         documents: &'s Documents,
         secret: HashSecret,
-    ) -> Result<Self, PythonString> {
-        Ok(Self {
-            specifications: SPECIFICATIONS.as_ref().map_err(Clone::clone)?,
+    ) -> Self {
+        Self {
+            specifications,
             root_uri,
             root,
             crawled: OnceCell::new(),
@@ -495,7 +497,7 @@ impl<'s> Registry<'s> {
             documents,
             retrieved: RefCell::default(),
             secret,
-        })
+        }
     }
 
     fn retrieved(&self, node: usize) -> Option<Rc<Retrieved<'s>>> {

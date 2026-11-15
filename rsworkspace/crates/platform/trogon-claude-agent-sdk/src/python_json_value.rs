@@ -223,6 +223,13 @@ impl PythonJsonValue {
         }
     }
 
+    pub fn as_object_mut(&mut self) -> Option<&mut PythonJsonObject> {
+        match self {
+            Self::Object(members) => Some(members),
+            _ => None,
+        }
+    }
+
     pub fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }
