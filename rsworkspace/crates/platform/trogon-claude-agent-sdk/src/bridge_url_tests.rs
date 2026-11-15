@@ -85,15 +85,36 @@ fn reads_hosts_out_of_addresses() {
 
 #[test]
 fn splits_hosts_around_brackets_and_ports() {
-    assert_eq!(split_host("git@[::1]:x/y", ':').as_deref(), Some("[::1]"));
-    assert_eq!(split_host("[::1]:22/x", '/').as_deref(), Some("[::1]"));
-    assert_eq!(split_host("u@[::1]:22/x", '/').as_deref(), Some("[::1]"));
-    assert_eq!(split_host("u@[::1]:x/y", ':').as_deref(), Some("[::1]"));
-    assert_eq!(split_host("u@[::1]:99999/y", '/').as_deref(), Some("[::1]"));
-    assert_eq!(split_host("h.com:22/x", '/').as_deref(), Some("h.com"));
-    assert_eq!(split_host("h.com:ab/x", '/').as_deref(), Some("h.com:ab"));
-    assert_eq!(split_host("/x:y", ':'), None);
-    assert_eq!(split_host("@/x", '/'), None);
+    assert_eq!(
+        split_address("git@[::1]:x/y", ':'),
+        Some(("[::1]".to_owned(), "x/y".to_owned()))
+    );
+    assert_eq!(
+        split_address("[::1]:22/x", '/'),
+        Some(("[::1]".to_owned(), "/x".to_owned()))
+    );
+    assert_eq!(
+        split_address("u@[::1]:22/x", '/'),
+        Some(("[::1]".to_owned(), "/x".to_owned()))
+    );
+    assert_eq!(
+        split_address("u@[::1]:x/y", ':'),
+        Some(("[::1]".to_owned(), "x/y".to_owned()))
+    );
+    assert_eq!(
+        split_address("u@[::1]:99999/y", '/'),
+        Some(("[::1]".to_owned(), "/y".to_owned()))
+    );
+    assert_eq!(
+        split_address("h.com:22/x", '/'),
+        Some(("h.com".to_owned(), "/x".to_owned()))
+    );
+    assert_eq!(
+        split_address("h.com:ab/x", '/'),
+        Some(("h.com:ab".to_owned(), "/x".to_owned()))
+    );
+    assert_eq!(split_address("/x:y", ':'), None);
+    assert_eq!(split_address("@/x", '/'), None);
 }
 
 #[test]
