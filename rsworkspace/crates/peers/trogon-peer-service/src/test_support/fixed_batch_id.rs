@@ -1,5 +1,5 @@
+use crate::{BatchIdGenerator, PeerPortError};
 use trogon_peer::BatchId;
-use trogon_peer_service::{BatchIdGenerator, PeerPortError};
 
 #[derive(Clone)]
 pub struct FixedBatchId(pub BatchId);

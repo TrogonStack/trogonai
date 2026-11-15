@@ -7,7 +7,7 @@ workspace_crate(
      '//rsworkspace/crates/platform/grpc-nats-micro',
      '//rsworkspace/crates/platform/trogon-nats',
      '//rsworkspace/crates/platform/trogonai-proto'],
-    dev_deps = ['//rsworkspace/crates/decider/trogon-decider-runtime'],
+    dev_deps = ['//rsworkspace/crates/decider/trogon-decider-runtime', '//rsworkspace/crates/peers/trogon-peer-service'],
     integration_tests = {'requester_bounds_tests': {},
      'requester_headers_tests': {},
      'routing_contract': {},
