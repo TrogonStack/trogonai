@@ -29,16 +29,28 @@ export GIT_CONFIG_VALUE_0
 git -C "${storage}" init --quiet
 git -C "${storage}" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
-if git -C "${storage}" fetch --quiet --no-tags --depth=1 origin "refs/heads/${COVERAGE_STORAGE}" 2>/dev/null; then
-  if git -C "${storage}" cat-file -e "FETCH_HEAD:${baseline}" 2>/dev/null; then
-    echo "${COVERAGE_STORAGE} has ${baseline}"
-    echo "ready=true" >>"${GITHUB_OUTPUT}"
-    exit 0
-  fi
-  git -C "${storage}" checkout --quiet -B "${COVERAGE_STORAGE}" FETCH_HEAD
-else
-  git -C "${storage}" checkout --quiet --orphan "${COVERAGE_STORAGE}"
-fi
+# Only a confirmed missing branch means no baseline. A transport or auth error
+# must fail here, or the gate would silently fall back to the threshold alone.
+branch_status=0
+git -C "${storage}" ls-remote --exit-code --heads origin "refs/heads/${COVERAGE_STORAGE}" >/dev/null || branch_status=$?
+case "${branch_status}" in
+  0)
+    git -C "${storage}" fetch --quiet --no-tags --depth=1 origin "refs/heads/${COVERAGE_STORAGE}"
+    if git -C "${storage}" cat-file -e "FETCH_HEAD:${baseline}" 2>/dev/null; then
+      echo "${COVERAGE_STORAGE} has ${baseline}"
+      echo "ready=true" >>"${GITHUB_OUTPUT}"
+      exit 0
+    fi
+    git -C "${storage}" checkout --quiet -B "${COVERAGE_STORAGE}" FETCH_HEAD
+    ;;
+  2)
+    git -C "${storage}" checkout --quiet --orphan "${COVERAGE_STORAGE}"
+    ;;
+  *)
+    echo "Could not query ${COVERAGE_STORAGE} (git ls-remote exited ${branch_status})" >&2
+    exit "${branch_status}"
+    ;;
+esac
 
 if [[ "${GITHUB_EVENT_NAME:-}" != "push" || "${GITHUB_REF:-}" != "refs/heads/main" ]]; then
   echo "${COVERAGE_STORAGE} has no ${baseline} yet; checking only the threshold until main stores one"

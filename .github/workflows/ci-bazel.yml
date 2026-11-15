@@ -95,6 +95,10 @@ jobs:
       pull-requests: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # A fork pull request gets a read-only token whatever the job asks for, so
+      # it can neither read and write the storage branch nor comment. It checks
+      # only the threshold.
+      COVERAGE_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
     steps:
       # The action reads the measured sources and the baseline's from history.
       - name: Checkout
@@ -128,6 +132,7 @@ jobs:
       # against its own measurements while both run.
       - name: Check coverage baseline
         id: baseline
+        if: ${{ env.COVERAGE_FORK != 'true' }}
         run: mise run --skip-tools github:workflows:ci-bazel:coverage-baseline
         env:
           COVERAGE_STORAGE: _xml_coverage_reports_bazel
@@ -142,8 +147,8 @@ jobs:
           source-root: rsworkspace
           threshold: 95
           fail: true
-          publish: true
-          diff: ${{ steps.baseline.outputs.ready }}
+          publish: ${{ env.COVERAGE_FORK != 'true' }}
+          diff: ${{ steps.baseline.outputs.ready == 'true' }}
           skip-diff-storage: ${{ steps.baseline.outputs.ready != 'true' }}
           diff-branch: main
           diff-storage: _xml_coverage_reports_bazel
