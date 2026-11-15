@@ -124,11 +124,10 @@ fn settings_holding_a_member_nested_9997_levels_encode_it_byte_for_byte_on_a_2_m
         assert_eq!(serde_json::to_string(&settings)?, text);
         assert_eq!(settings.to_json()?, text);
         assert!(DeepJsonValue::encode(&settings)? == settings_value());
-        assert!(
-            settings
-                .to_value()
-                .is_ok_and(|value| DeepJsonValue::from(value) == settings_value())
-        );
+        assert!(settings.to_value().is_ok_and(|value| {
+            let deep = DeepJsonValue::from(value);
+            deep == settings_value()
+        }));
         drop((copy, settings));
         Ok(())
     })

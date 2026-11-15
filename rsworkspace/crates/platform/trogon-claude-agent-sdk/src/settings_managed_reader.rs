@@ -34,6 +34,8 @@ pub(crate) struct ParsedFiles(RefCell<HashMap<PathBuf, (TierRead, bool)>>);
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ManagedReader<'p> {
     decoder: Decoder,
+    /// The stack of this Node process, which the TypeScript dialect reads and merges on.
+    node: NodeStack,
     parsed: &'p ParsedFiles,
     /// What the merges of the resolve left V8 having run, which the merges of the sources go on from.
     warmth: &'p Cell<MergeWarmth>,
@@ -46,7 +48,7 @@ enum Decoder {
     Lossy,
     /// The TypeScript dialect: the bytes as Node decodes them, read and merged on the stack of this Node process in
     /// one evaluation of the managed settings.
-    Node(NodeStack, ManagedPass),
+    Node(ManagedPass),
 }
 
 impl<'p> ManagedReader<'p> {
@@ -60,10 +62,11 @@ impl<'p> ManagedReader<'p> {
     ) -> Self {
         let decoder = match dialect {
             SettingsDialect::Python => Decoder::Lossy,
-            SettingsDialect::TypeScript => Decoder::Node(node, ManagedPass::Sources),
+            SettingsDialect::TypeScript => Decoder::Node(ManagedPass::Sources),
         };
         Self {
             decoder,
+            node,
             parsed,
             warmth,
         }
@@ -73,7 +76,7 @@ impl<'p> ManagedReader<'p> {
     pub(crate) fn in_pass(self, pass: ManagedPass) -> Self {
         let decoder = match self.decoder {
             Decoder::Lossy => Decoder::Lossy,
-            Decoder::Node(node, _) => Decoder::Node(node, pass),
+            Decoder::Node(_) => Decoder::Node(pass),
         };
         Self { decoder, ..self }
     }
@@ -112,12 +115,12 @@ impl<'p> ManagedReader<'p> {
                     _ => PolicyParse::NotObject,
                 }
             }
-            Decoder::Node(node, pass) => {
+            Decoder::Node(pass) => {
                 let text = read_node_text(bytes);
                 if js_trim(&text).is_empty() {
                     return loaded(SettingsMap::new());
                 }
-                match parse_policy_text(&text, node, pass) {
+                match parse_policy_text(&text, self.node, pass) {
                     PolicyParse::Object(mut document) => {
                         for entry in document.values_mut() {
                             normalize_numbers(entry, SettingsDialect::TypeScript);
@@ -144,7 +147,7 @@ impl<'p> ManagedReader<'p> {
     pub(crate) fn copy_overflows(self, settings: &SettingsMap) -> bool {
         match self.decoder {
             Decoder::Lossy => false,
-            Decoder::Node(node, pass) => node.policy_copy_overflows(pass, settings),
+            Decoder::Node(pass) => self.node.policy_copy_overflows(pass, settings),
         }
     }
 
@@ -167,7 +170,7 @@ impl<'p> ManagedReader<'p> {
     ) -> NodeMerge {
         match self.decoder {
             Decoder::Lossy => merge_unbounded(destination, source),
-            Decoder::Node(node, pass) => merge_within(node, call(pass), self.warmth, destination, source),
+            Decoder::Node(pass) => merge_within(self.node, call(pass), self.warmth, destination, source),
         }
     }
 }

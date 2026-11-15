@@ -722,8 +722,10 @@ fn equal_matches_value_equality_and_ignores_key_order() {
     assert!(!equal(&json!([]), &json!({})));
     assert!(!equal(&json!(1), &json!(1.0)));
     assert!(equal(&json!(1.0), &json!(1.0)));
-    assert!(DeepJsonValue::from(left.clone()) == DeepJsonValue::from(reordered));
-    assert!(DeepJsonValue::from(left.clone()) == left);
+    let deep = DeepJsonValue::from(left.clone());
+    let deep_reordered = DeepJsonValue::from(reordered);
+    assert!(deep == deep_reordered);
+    assert!(deep == left);
 }
 
 #[test]
