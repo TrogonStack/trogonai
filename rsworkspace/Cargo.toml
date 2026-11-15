@@ -71,6 +71,7 @@ channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
 trogon-credential-aggregate = { path = "crates/credential/trogon-credential-aggregate" }
 trogon-credential-domain = { path = "crates/credential/trogon-credential-domain" }
 trogon-secret-store = { path = "crates/credential/trogon-secret-store" }
+trogon-secrets-service = { path = "crates/credential/trogon-secrets-service" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }
