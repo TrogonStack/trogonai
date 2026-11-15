@@ -92,6 +92,7 @@ struct Seen {
 struct Server {
     origin: String,
     seen: Arc<Mutex<Seen>>,
+    post_received: Arc<Notify>,
 }
 
 impl Server {
@@ -101,6 +102,12 @@ impl Server {
 
     fn posts(&self) -> usize {
         locked(&self.seen).posts.len()
+    }
+
+    async fn first_post(&self) {
+        while self.posts() == 0 {
+            self.post_received.notified().await;
+        }
     }
 }
 
@@ -112,12 +119,24 @@ async fn serve(gets: Value, posts: Value) -> Result<Server, Box<dyn StdError>> {
     let origin = format!("http://{}", listener.local_addr()?);
     let seen = Arc::new(Mutex::new(Seen::default()));
     let shared = Arc::clone(&seen);
+    let post_received = Arc::new(Notify::new());
+    let receipt = Arc::clone(&post_received);
     tokio::spawn(async move {
         while let Ok((socket, _)) = listener.accept().await {
-            tokio::spawn(connection(socket, gets.clone(), posts.clone(), Arc::clone(&shared)));
+            tokio::spawn(connection(
+                socket,
+                gets.clone(),
+                posts.clone(),
+                Arc::clone(&shared),
+                Arc::clone(&receipt),
+            ));
         }
     });
-    Ok(Server { origin, seen })
+    Ok(Server {
+        origin,
+        seen,
+        post_received,
+    })
 }
 
 struct Request {
@@ -163,7 +182,13 @@ async fn read_request(socket: &mut TcpStream, buffer: &mut Vec<u8>) -> Option<Re
     Some(Request { method, headers, body })
 }
 
-async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<Mutex<Seen>>) {
+async fn connection(
+    mut socket: TcpStream,
+    gets: Value,
+    posts: Value,
+    seen: Arc<Mutex<Seen>>,
+    post_received: Arc<Notify>,
+) {
     let mut buffer = Vec::new();
     while let Some(request) = read_request(&mut socket, &mut buffer).await {
         let is_post = request.method == "POST";
@@ -186,6 +211,9 @@ async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<
             list.push(entry);
             list.len() - 1
         };
+        if is_post {
+            post_received.notify_one();
+        }
         let script = if is_post {
             posts.get(index).cloned().unwrap_or_else(|| json!({"status": 200}))
         } else {
@@ -367,19 +395,28 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
                 }
             }
             "writeMany" => {
-                let resolved = Arc::new(AtomicUsize::new(0));
+                let mut resolved = 0;
+                let mut waiting = Vec::new();
                 for n in 0..argument.as_u64().unwrap_or_default() {
                     let shared = Arc::clone(&transport.shared);
-                    let resolved = Arc::clone(&resolved);
                     let line = json!({"type": "user", "n": n}).to_string();
-                    tokio::spawn(async move {
-                        if shared.write(&line).await.is_ok() {
-                            resolved.fetch_add(1, Ordering::SeqCst);
+                    // A cooperative yield is not queue backpressure.
+                    let mut write = Box::pin(tokio::task::unconstrained(async move { shared.write(&line).await }));
+                    if n == 0 {
+                        write.as_mut().await?;
+                        timeout(Duration::from_secs(3), server.first_post()).await?;
+                        resolved += 1;
+                    } else {
+                        match futures_util::poll!(write.as_mut()) {
+                            std::task::Poll::Ready(result) => {
+                                result?;
+                                resolved += 1;
+                            }
+                            std::task::Poll::Pending => waiting.push(write),
                         }
-                    });
+                    }
                 }
-                sleep(Duration::from_millis(300)).await;
-                json!({"resolved": resolved.load(Ordering::SeqCst)})
+                json!({"resolved": resolved})
             }
             "waitGets" => {
                 let wanted = usize::try_from(argument.as_u64().unwrap_or_default())?;

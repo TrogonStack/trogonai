@@ -85,12 +85,11 @@ vite_bin.vite(
 vitest_bin.vitest_test(
     name = "test",
     timeout = "long",
-    # Bazel runs this beside Rust compiles, which slowed its DOM tests past the
-    # 20s vite.config.ts timeout and the whole suite past the default 300s. An
-    # execution tag such as cpu:N would change its copy actions and conflict with
-    # the other targets that copy src/, so the timeouts are raised instead.
+    # Match Bazel's one-CPU test budget instead of letting Vitest occupy every
+    # host CPU alongside the other test and compile actions.
     args = [
         "run",
+        "--maxWorkers=1",
         "--testTimeout=60000",
     ],
     chdir = package_name(),
