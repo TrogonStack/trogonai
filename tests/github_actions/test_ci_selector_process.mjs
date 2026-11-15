@@ -77,7 +77,7 @@ test('push compares real before/head commits and keeps the canary fix selective'
   const after = f.commit();
   const result = f.run('push', { before, after });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.values, { rust: 'false', proto: 'true', changes: '["proto"]' });
+  assert.deepEqual(result.values, { rust: 'false', go: 'false', proto: 'true', changes: '["proto"]' });
   assert.deepEqual(result.calls, []);
 });
 
@@ -86,7 +86,7 @@ test('initial pushes select every check without comparing a nonexistent commit',
   for (const before of [undefined, null, '', '0'.repeat(40)]) {
     const result = f.run('push', { before, after });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.values, { rust: 'true', proto: 'true', changes: '["rust","proto"]' });
+    assert.deepEqual(result.values, { rust: 'true', go: 'true', proto: 'true', changes: '["rust","go","proto"]' });
     assert.deepEqual(result.calls, []);
     const codeql = f.run('push', { before, after }, [], { CI_FILTERS: '.github/filters/codeql.yml' });
     assert.equal(codeql.status, 0, codeql.stderr);
@@ -98,7 +98,7 @@ test('manual dispatch selects every check without consulting the API', (t) => {
   const f = fixture(t);
   const result = f.run('workflow_dispatch', {});
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.values, { rust: 'true', proto: 'true', changes: '["rust","proto"]' });
+  assert.deepEqual(result.values, { rust: 'true', go: 'true', proto: 'true', changes: '["rust","go","proto"]' });
   assert.deepEqual(result.calls, []);
   failed(f.run('schedule', {}));
 });
@@ -108,19 +108,19 @@ test('push uses NUL paths and recognizes deleted ownership after a real rename',
   f.write('notes/moved.txt', '');
   fs.unlinkSync(path.join(f.directory, 'notes/moved.txt'));
   f.git('mv', 'rsworkspace/src/lib.rs', 'notes/moved.txt');
-  f.write('rsworkspace/name\nwith-newline.rs', 'change');
+  f.write('goworkspace/name\nwith-newline.go', 'change');
   const after = f.commit();
   const result = f.run('push', { before, after });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.values.rust, 'true');
+  assert.equal(result.values.rust, 'true'); assert.equal(result.values.go, 'true');
 });
 
 test('PR pagination includes previous names and binds metadata around collection', (t) => {
   const f = fixture(t);
-  const pages = [[{ filename: 'notes/moved.txt', previous_filename: 'rsworkspace/src/lib.rs', status: 'renamed' }], [row('proto/new.proto')]];
+  const pages = [[{ filename: 'notes/moved.txt', previous_filename: 'rsworkspace/src/lib.rs', status: 'renamed' }], [row('goworkspace/new.go')]];
   const result = f.run('pull_request', event(), [metadata(2), pages, metadata(2)]);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.values.rust, 'true'); assert.equal(result.values.proto, 'true');
+  assert.equal(result.values.rust, 'true'); assert.equal(result.values.go, 'true');
   assert.deepEqual(result.calls, [
     ['api', 'repos/example/project/pulls/7'],
     ['api', '--paginate', '--slurp', 'repos/example/project/pulls/7/files?per_page=100'],

@@ -7,7 +7,7 @@ def _runfile_path(file):
 
 def _gofmt_test_impl(ctx):
     sdk = ctx.toolchains["@rules_go//go:toolchain"].sdk
-    gofmt = [tool for tool in sdk.tools if tool.basename in ("gofmt", "gofmt.exe")]
+    gofmt = [tool for tool in sdk.tools.to_list() if tool.basename in ("gofmt", "gofmt.exe")]
     if len(gofmt) != 1:
         fail("The Go SDK provides no gofmt")
 
