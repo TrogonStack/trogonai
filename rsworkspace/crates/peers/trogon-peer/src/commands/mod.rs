@@ -33,3 +33,6 @@ pub use intake_message::IntakeMessage;
 
 mod dispose_message;
 pub use dispose_message::DisposeMessage;
+
+mod prepare_batch;
+pub use prepare_batch::PrepareBatch;
