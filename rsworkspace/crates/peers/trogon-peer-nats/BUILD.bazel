@@ -6,5 +6,5 @@ workspace_crate(
      '//rsworkspace/crates/peers/trogon-peer',
      '//rsworkspace/crates/platform/trogon-nats'],
     dev_deps = ['//rsworkspace/crates/decider/trogon-decider-runtime', '//rsworkspace/crates/platform/trogonai-proto'],
-    integration_tests = {'routing_contract': {}, 'store_admission_tests': {}},
+    integration_tests = {'requester_bounds_tests': {}, 'routing_contract': {}, 'store_admission_tests': {}},
 )
