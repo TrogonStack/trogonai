@@ -38,10 +38,9 @@ pub fn gateway_tier2_cel_enabled<E: ReadEnv>(env: &E) -> bool {
 /// haven't provisioned.
 ///
 /// ADR#0086 Decision 4 makes it on and not switchable off whenever a layer
-/// enforces, but the gateway can only run with the `spicedb` feature today
-/// (without it `run_with_config` serves nothing), so there is no build in which
-/// the default could be tested as on. The flip waits for a gateway that runs
-/// without SpiceDB.
+/// enforces. The default build already serves and enforces policy (only the
+/// SpiceDB tier needs the `spicedb` feature), so the build no longer blocks
+/// that flip; it remains a separate change.
 pub fn gateway_audit_publish_enabled<E: ReadEnv>(env: &E) -> bool {
     parse_bool_flag(env, ENV_GATEWAY_AUDIT_PUBLISH)
 }
