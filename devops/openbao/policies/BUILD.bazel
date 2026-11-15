@@ -1,0 +1,9 @@
+# The secret store's OpenBao test harness loads these policies at compile time.
+filegroup(
+    name = "secrets_service_policies",
+    srcs = [
+        "secrets-service-login.hcl",
+        "secrets-service-release-read.hcl",
+    ],
+    visibility = ["//visibility:public"],
+)
