@@ -11,6 +11,7 @@ workspace_crate(
         "enrollment": {},
         "enrollment_timestamp": {},
         "heartbeat": {},
+        "inbox_projection": {},
         "intake": {},
         "peer_history": {},
         "preparation": {},
