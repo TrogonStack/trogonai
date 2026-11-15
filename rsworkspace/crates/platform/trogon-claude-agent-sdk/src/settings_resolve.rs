@@ -32,10 +32,7 @@ use crate::{
     settings_strings::{
         SurrogateStandIns, approximate_strings, array_mark, escape_stand_ins, reserve_text, reserve_value,
     },
-    upstream::{
-        settings::Settings,
-        settings_resolution::{ResolveSettingsOptions, ResolvedSettings},
-    },
+    upstream::settings_resolution::{ResolveSettingsOptions, ResolvedSettings},
 };
 
 fn source_label(source: &str) -> &'static str {
@@ -65,13 +62,6 @@ fn allowed_sources(options: &ResolveSettingsOptions) -> Vec<String> {
             _ => name,
         })
         .collect()
-}
-
-fn to_map(settings: &Settings) -> Option<SettingsMap> {
-    match crate::deep_json::encode(settings).ok()? {
-        Value::Object(map) => Some(map),
-        _ => None,
-    }
 }
 
 fn entry(
@@ -277,11 +267,17 @@ fn resolve_core<H: SettingsHost>(
     let stack = state.python_c_stack();
     let node = state.node_stack();
     let allowed = allowed_sources(options);
-    let parent = options.managed_settings.as_ref().and_then(to_map).map(|mut parent| {
+    // Upstream takes both as the raw objects the caller passes and reads them key by key below, so a value its
+    // declared `Settings` type would refuse, such as a number for `model`, still reaches that read.
+    let parent = options.managed_settings.clone().map(|parent| {
+        let mut parent = parent.into_object();
         parent.shift_remove("organizationFreeFormSettings");
         parent
     });
-    let remote = options.server_managed_settings.as_ref().and_then(to_map);
+    let remote = options
+        .server_managed_settings
+        .clone()
+        .map(crate::DeepJsonObject::into_object);
     let kind = state.platform(host);
     let reading = state.policy_reading(host);
     let evaluation = reading.evaluation.in_effect(asks_organization(host));

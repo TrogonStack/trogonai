@@ -168,6 +168,22 @@ class GenerateTypesTests(unittest.TestCase):
         self.assertIn("pub enum All {", output)
         self.assertNotIn("pub enum Result", output)
 
+    def test_untyped_members_hold_any_object_and_must_name_an_optional_property(self):
+        result = self.generate_from(DECLARATIONS, ["Sample"], untyped_members={"Sample": ["open"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pub open: Option<crate::DeepJsonObject>,", result.output)
+        self.assertIn('serialize_with = "super::support::optional_shallow_object"', result.output)
+        self.assertNotIn("pub struct SampleOpen", result.output)
+        for members, message in (
+            ({"Sample": ["name"]}, "Sample.name, which is not an optional, non-nullable property"),
+            ({"Sample": ["tri"]}, "Sample.tri, which is not an optional, non-nullable property"),
+            ({"Sample": ["missing"]}, "Sample.missing, which is not a property emitted"),
+            ({"Absent": ["open"]}, "Absent, which is not declared"),
+        ):
+            failed = self.generate_from(DECLARATIONS, ["Sample"], untyped_members=members)
+            self.assertEqual(failed.returncode, 2, members)
+            self.assertIn(message, failed.stderr)
+
     def generate_from(self, declarations: str, roots: list[str], **extra) -> subprocess.CompletedProcess:
         out = tempfile.TemporaryDirectory()
         self.addCleanup(out.cleanup)
