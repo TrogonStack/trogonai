@@ -2702,6 +2702,51 @@ async fn lost_send_append_reply_retries_the_original_durable_obligation() -> Tes
     Ok(())
 }
 
+#[tokio::test]
+async fn lifetime_commands_refuse_a_store_scoped_to_a_different_tenant_before_io() -> TestResult {
+    let f = Fixture::new().await?;
+    let mut wrong_store = f.store.clone();
+    wrong_store.tenant = trogon_peer::TenantId::new("other")?;
+    let service = trogon_peer_service::PeerService::new(wrong_store, f.policy.clone(), f.clock.clone());
+    let before = (
+        f.store.reads.load(Ordering::SeqCst),
+        f.store.appends.load(Ordering::SeqCst),
+    );
+    assert!(service.enroll(&f.alice, Fixture::enrollment("alice")).await.is_err());
+    assert!(
+        service
+            .heartbeat(
+                &f.alice,
+                proto::HeartbeatRequest {
+                    attachment_ref: f.a.clone().into(),
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        service
+            .detach(
+                &f.alice,
+                proto::DetachRequest {
+                    attachment_ref: f.a.clone().into()
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        before,
+        (
+            f.store.reads.load(Ordering::SeqCst),
+            f.store.appends.load(Ordering::SeqCst)
+        )
+    );
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum MalformedHistoryField {
     MissingCollaboration,
