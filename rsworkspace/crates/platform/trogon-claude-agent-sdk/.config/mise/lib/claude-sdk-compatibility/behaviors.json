@@ -987,7 +987,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default dialect and hands every field to the callback as sent, keeping broken suggestions as PermissionUpdate::Unknown; ArgvStyle::Python reproduces claude_agent_sdk's from_dict errors and the order it raises them in."
+        "reason": "TypeScript is the default dialect and hands every field to the callback as sent, keeping broken suggestions as PermissionUpdate::Unknown and the request in ToolPermissionRequest::raw_request, and PermissionDecision::Raw returns them to the CLI unchanged; ArgvStyle::Python reproduces claude_agent_sdk from_dict errors and the order it raises them in."
       },
       "contracts": [
         "golden_inbound_control::permission_suggestions_reach_each_dialect_like_its_sdk",
@@ -1865,10 +1865,12 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript dialect redacts with the same eighteen patterns in the same order, run on a matcher with JavaScript semantics; ArgvStyle::Python keeps its tail unredacted."
+        "reason": "The TypeScript dialect redacts with the same eighteen patterns in the same order, run on a matcher with JavaScript semantics; ArgvStyle::Python puts no stderr in its errors under Limits::python(), as claude_agent_sdk does, and leaves a tail opted into through Limits::stderr_tail unredacted."
       },
       "contracts": [
         "subprocess::process_failure_message_redacts_secrets_from_the_stderr_tail",
+        "subprocess::python_keeps_the_stderr_tail_it_opts_into_unredacted",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
         "shutdown_errors::t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory"
       ],
       "rust": [
@@ -2647,6 +2649,7 @@
       },
       "contracts": [
         "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory",
+        "bundled_cli_discovery::only_a_named_bundled_root_is_searched_before_path",
         "subprocess::connect_spawns_the_bundled_cli_under_the_configured_root"
       ],
       "rust": [
@@ -2743,7 +2746,8 @@
       "contracts": [
         "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
         "bundled_cli::a_bundled_cli_without_a_record_counts_as_too_old",
-        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label"
+        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label",
+        "golden_argv_env::s34_only_the_python_derivation_labels_the_bundled_cli"
       ],
       "rust": [
         "src/bundled_cli.rs"
@@ -3552,12 +3556,14 @@
         "behavior": "Python passes a str or Path mcp_servers value to --mcp-config as given, instead of the generated config. TypeScript has no such form."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "The form exists only in Python. ClaudeAgentOptions::mcp_config carries the str or Path value verbatim as its own --mcp-config value, text or path alike."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and builds --mcp-config from the server map, ClaudeAgentOptions::mcp_servers. ClaudeAgentOptions::mcp_config is carried verbatim as its own --mcp-config value under either dialect, text or path alike, and stands in for the str or Path form only Python has."
       },
       "contracts": [
+        "golden_argv_env::typescript_mcp_config_matches_upstream_bytes",
         "golden_argv_env::python_mcp_config_path_is_passed_verbatim",
-        "golden_argv_env::python_mcp_config_json_text_is_passed_verbatim"
+        "golden_argv_env::python_mcp_config_json_text_is_passed_verbatim",
+        "golden_argv_env::typescript_mcp_config_path_is_passed_verbatim"
       ],
       "rust": [
         "src/argv.rs"
@@ -3587,7 +3593,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript shape is the default; ArgvStyle::Python writes the Python shape byte for byte."
+        "reason": "The TypeScript shape is the default, and PermissionDecision::Raw writes a result no typed variant expresses as returned, with the request toolUseID spread over it; ArgvStyle::Python writes the Python shape byte for byte and answers a raw result with the TypeError Python raises for a dict."
       },
       "contracts": [
         "golden_inbound_control::permission_decisions_are_written_byte_for_byte",
@@ -3896,13 +3902,15 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg."
+        "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg. Rust reads it from an image-load initializer, and loading the image that holds the crate is the moment its code enters the process, as importing the module is upstream, so a library loaded later captures it at that load just as a dynamic import does."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Rust runs nothing at load time: capture_launch_directory reads the directory once into a OnceLock the first time the settings resolver needs it, and a binary that calls it at the top of main gets the upstream import-time reading."
+        "kind": "upstream"
       },
-      "contracts": [],
+      "contracts": [
+        "launch_directory::the_launch_directory_is_read_when_the_binary_loads",
+        "settings_resolve_connector::the_launch_directory_and_node_dialect_can_be_given"
+      ],
       "rust": [
         "src/adapters/environment.rs",
         "src/settings_resolve_state.rs",
