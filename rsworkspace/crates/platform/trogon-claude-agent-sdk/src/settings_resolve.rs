@@ -1,15 +1,20 @@
-use std::{io, path::PathBuf};
+use std::{io, path::PathBuf, sync::LazyLock};
 
 use serde_json::{Map, Value};
 
 use crate::{
     adapters::{NativeHost, SettingsHost},
     constants::{DEFAULT_SETTING_SOURCES, ESCALATING_DEFAULT_MODES, SOURCE_ORDER, STRICT_ESCALATING_DEFAULT_MODES},
-    settings_resolve_platform::{evaluate_policy, read_policy},
-    settings_resolve_policy::{PolicyResolution, resolve_policy},
+    python_json_value::PythonJsonValue,
+    settings_dialect::SettingsDialect,
+    settings_numbers::{PythonNumbers, approximate_numbers, exact_numbers, infinities_to_null, normalize_numbers},
+    settings_resolve_connector::skips_repository_settings,
+    settings_resolve_platform::asks_organization,
+    settings_resolve_policy::{PolicyKeyOrder, PolicyResolution, resolve_policy},
     settings_resolve_sources::{
         local_settings_path, project_settings_path, read_settings_file, resolve_cwd, user_settings_path,
     },
+    settings_resolve_state::ResolverState,
     settings_resolve_values::{SettingsMap, in_schema_order, merge_with_union},
     upstream::{
         settings::Settings,
@@ -26,6 +31,8 @@ pub enum ResolveSettingsError {
     Decode(#[source] serde_json::Error),
     #[error("the settings reader task did not finish")]
     Join(#[source] tokio::task::JoinError),
+    #[error("the user settings directory needs a home directory")]
+    HomeDirectory(#[source] crate::HomeDirectoryError),
 }
 
 fn source_label(source: &str) -> &'static str {
@@ -108,11 +115,83 @@ fn did_not_load(read_outcome_lost: Option<bool>, mdm_did_not_load: bool, file_di
     }
 }
 
-/// `resolveSettings` upstream, against any host.
+/// `resolveSettings` upstream, against any host, with the module state of a process that starts now.
 pub fn resolve_settings_with<H: SettingsHost>(
     host: &H,
     options: &ResolveSettingsOptions,
 ) -> Result<ResolvedSettings, ResolveSettingsError> {
+    resolve_settings_in_dialect_with_state(host, options, SettingsDialect::TypeScript, &ResolverState::new())
+}
+
+/// `resolveSettings` upstream, against any host, carrying the state upstream keeps between calls.
+pub fn resolve_settings_with_state<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    state: &ResolverState,
+) -> Result<ResolvedSettings, ResolveSettingsError> {
+    resolve_settings_in_dialect_with_state(host, options, SettingsDialect::TypeScript, state)
+}
+
+/// [`resolve_settings_with`] reading numbers like the chosen SDK's JSON parser.
+pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+) -> Result<ResolvedSettings, ResolveSettingsError> {
+    resolve_settings_in_dialect_with_state(host, options, dialect, &ResolverState::new())
+}
+
+/// [`resolve_settings_with_state`] reading numbers like the chosen SDK's JSON parser. In the Python dialect an
+/// integer past 64 bits holds its nearest double; [`resolve_python_settings_with_state`] keeps it exact.
+pub fn resolve_settings_in_dialect_with_state<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+    state: &ResolverState,
+) -> Result<ResolvedSettings, ResolveSettingsError> {
+    let _numbers = (dialect == SettingsDialect::Python).then(PythonNumbers::start);
+    decode(resolve_core(host, options, dialect, state)?)
+}
+
+/// [`resolve_settings_with_state`] in the Python dialect, with every number as `json.loads` read it from a
+/// settings file: integers exact at any size, whole floats as floats, and `NaN`, `Infinity` and `-Infinity` kept.
+/// The value has the shape of [`ResolvedSettings`]; [`python_json_dumps`](crate::python_json_dumps) prints it as
+/// `json.dumps` would. Managed policy documents read like `JSON.parse` in either dialect.
+pub fn resolve_python_settings_with_state<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    state: &ResolverState,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    let _numbers = PythonNumbers::start();
+    let result = resolve_core(host, options, SettingsDialect::Python, state)?;
+    let exact = exact_numbers(&result);
+    decode(result)?;
+    Ok(exact)
+}
+
+/// [`resolve_python_settings_with_state`] with the module state of a process that starts now.
+pub fn resolve_python_settings_with<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    resolve_python_settings_with_state(host, options, &ResolverState::new())
+}
+
+/// The resolved settings with their numbers turned into the nearest `serde_json` numbers, checked against the
+/// declared types. Infinities turn into `null` first: a kept whole float of 2^63 approximates to the double that
+/// marks `Infinity`, and must not print as `null`.
+fn decode(mut result: Value) -> Result<ResolvedSettings, ResolveSettingsError> {
+    infinities_to_null(&mut result);
+    approximate_numbers(&mut result);
+    serde_json::from_value(result).map_err(ResolveSettingsError::Decode)
+}
+
+fn resolve_core<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+    state: &ResolverState,
+) -> Result<Value, ResolveSettingsError> {
     let cwd = resolve_cwd(host, options.cwd.as_deref()).map_err(ResolveSettingsError::CurrentDirectory)?;
     let allowed = allowed_sources(options);
     let parent = options.managed_settings.as_ref().and_then(to_map).map(|mut parent| {
@@ -120,16 +199,23 @@ pub fn resolve_settings_with<H: SettingsHost>(
         parent
     });
     let remote = options.server_managed_settings.as_ref().and_then(to_map);
-    let mdm_read = read_policy(host);
-    let evaluation = evaluate_policy(host, &mdm_read);
-    let outcome_lost = mdm_read.hklm_outcome.as_ref().map(|outcome| outcome.lost_the_answer());
+    let kind = state.platform(host);
+    let reading = state.policy_reading(host);
+    let evaluation = reading.evaluation.in_effect(asks_organization(host));
+    let outcome_lost = reading.hklm.as_ref().map(|outcome| outcome.lost_the_answer());
     let PolicyResolution {
         settings: policy_settings,
         origin,
+        key_order,
         mdm_did_not_load,
         file_did_not_load,
-        ..
-    } = resolve_policy(host, parent.as_ref(), remote.as_ref(), &evaluation);
+    } = resolve_policy(host, state, kind, parent.as_ref(), remote.as_ref(), evaluation);
+    let policy_settings = policy_settings.map(|mut settings| {
+        for entry in settings.values_mut() {
+            normalize_numbers(entry, dialect);
+        }
+        settings
+    });
     let origin = origin.map(|origin| origin.as_str());
 
     let mut per_source: Vec<(&str, Option<PathBuf>, Option<SettingsMap>)> = Vec::new();
@@ -141,24 +227,32 @@ pub fn resolve_settings_with<H: SettingsHost>(
         }
         let (path, settings) = match name {
             "userSettings" => {
-                let path = user_settings_path(host);
-                let settings = read_settings_file(host, &path);
+                let path = user_settings_path(host).map_err(ResolveSettingsError::HomeDirectory)?;
+                let settings = read_settings_file(host, &path, dialect);
                 (Some(path), settings)
             }
             "projectSettings" => {
-                let path = project_settings_path(&cwd);
-                let settings = read_settings_file(host, &path);
-                (Some(path), settings)
+                if skips_repository_settings(host, state, &cwd) {
+                    (None, None)
+                } else {
+                    let path = project_settings_path(&cwd);
+                    let settings = read_settings_file(host, &path, dialect);
+                    (Some(path), settings)
+                }
             }
             "localSettings" => {
-                let path = local_settings_path(&cwd);
-                let settings = read_settings_file(host, &path);
-                (Some(path), settings)
+                if skips_repository_settings(host, state, &cwd) {
+                    (None, None)
+                } else {
+                    let path = local_settings_path(&cwd);
+                    let settings = read_settings_file(host, &path, dialect);
+                    (Some(path), settings)
+                }
             }
             "policySettings" => (None, policy_settings.clone()),
             _ => (None, None),
         };
-        let parsed_by_schema = name != "policySettings" || origin != Some("parent");
+        let parsed_by_schema = name != "policySettings" || key_order == PolicyKeyOrder::Schema;
         let settings = settings.map(|settings| {
             if parsed_by_schema {
                 in_schema_order(&settings)
@@ -220,17 +314,48 @@ pub fn resolve_settings_with<H: SettingsHost>(
         did_not_load(outcome_lost, mdm_did_not_load, file_did_not_load),
     );
     let mut result = Map::new();
-    result.insert("effective".to_owned(), Value::Object(effective));
-    result.insert("provenance".to_owned(), Value::Object(provenance));
-    result.insert("sources".to_owned(), Value::Array(sources));
+    result.insert(
+        "effective".to_owned(),
+        crate::settings_read::js_property_order(Value::Object(effective)),
+    );
+    result.insert(
+        "provenance".to_owned(),
+        crate::settings_read::js_property_order(Value::Object(provenance)),
+    );
+    result.insert(
+        "sources".to_owned(),
+        crate::settings_read::js_property_order(Value::Array(sources)),
+    );
     result.insert("machinePolicy".to_owned(), Value::Object(machine_policy));
-    serde_json::from_value(Value::Object(result)).map_err(ResolveSettingsError::Decode)
+    Ok(Value::Object(result))
 }
+
+static PROCESS_STATE: LazyLock<ResolverState> = LazyLock::new(ResolverState::for_process);
 
 /// `resolveSettings` upstream: reads the real host once and merges every enabled source.
 pub async fn resolve_settings(options: &ResolveSettingsOptions) -> Result<ResolvedSettings, ResolveSettingsError> {
+    resolve_settings_in_dialect(options, SettingsDialect::TypeScript).await
+}
+
+/// [`resolve_settings`] reading numbers like the chosen SDK's JSON parser.
+pub async fn resolve_settings_in_dialect(
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+) -> Result<ResolvedSettings, ResolveSettingsError> {
     let options = options.clone();
-    tokio::task::spawn_blocking(move || resolve_settings_with(&NativeHost, &options))
+    tokio::task::spawn_blocking(move || {
+        resolve_settings_in_dialect_with_state(&NativeHost, &options, dialect, &PROCESS_STATE)
+    })
+    .await
+    .map_err(ResolveSettingsError::Join)?
+}
+
+/// [`resolve_settings`] in the Python dialect with exact numbers; see [`resolve_python_settings_with_state`].
+pub async fn resolve_python_settings(
+    options: &ResolveSettingsOptions,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    let options = options.clone();
+    tokio::task::spawn_blocking(move || resolve_python_settings_with_state(&NativeHost, &options, &PROCESS_STATE))
         .await
         .map_err(ResolveSettingsError::Join)?
 }

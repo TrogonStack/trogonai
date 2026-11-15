@@ -4,6 +4,12 @@ Browse the [documentation home](./index.md) for the full project navigation.
 Documents distinguish proposed architecture, normative contract reference and
 runtime acceptance evidence.
 
+## Development verification
+
+[Verify scheduler decisions with Hydro](./how-to/verify-scheduler-with-hydro.md)
+explores client command orderings and exercises the production scheduler domain
+deciders for each order. Its scope is separate from broker and processor recovery.
+
 ## Workload identity
 
 The proposed [workload identity profile](./reference/workload-identity.md)
