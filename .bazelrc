@@ -17,4 +17,17 @@ common:ci --ui_event_filters=-info
 build:ci --show_result=0
 test:ci --test_summary=terse
 
+# The GitHub Actions cache has a 10 GB quota per repository, shared with the
+# Cargo, pnpm and mise caches, and a restored disk cache only ever grew. Bazel
+# trims it only after the server has been idle for the delay, so CI waits for
+# that before saving the cache (github:workflows:ci-bazel:trim-disk-cache).
+common:ci --experimental_disk_cache_gc_max_size=4G
+common:ci --experimental_disk_cache_gc_idle_delay=0s
+
+# Lint aspects (rustfmt, clippy) attach here, so that `bazel build
+# --config=lint //...` checks the same targets CI builds. Empty until those
+# aspects land; --keep_going only defines the config and reports every
+# finding instead of the first.
+build:lint --keep_going
+
 try-import %workspace%/.bazelrc.local
