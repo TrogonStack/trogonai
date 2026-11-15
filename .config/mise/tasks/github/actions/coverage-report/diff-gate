@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Enforce the complete coverage comparison policy"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 if [[ "$COVERAGE_DIFF_ENABLED" == "true" && "$COVERAGE_SKIP_STORAGE" != "true" ]]; then

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Export the retained coverage summary"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 report=.coverage-output.final

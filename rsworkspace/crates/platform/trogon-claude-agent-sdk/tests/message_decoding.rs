@@ -1,4 +1,5 @@
 #![cfg(all(unix, feature = "test-support"))]
+#![allow(clippy::panic)]
 #![cfg_attr(
     dylint_lib = "trogon_dylint_lints",
     allow(
@@ -180,9 +181,7 @@ async fn python_decoding_yields_what_the_pinned_python_query_yields() -> TestRes
                 assert_eq!(Value::from(error.message()), expected["message"], "{name}");
                 assert_eq!(error.data(), message.as_object(), "{name}");
             }
-            (error, expected) => {
-                return Err(io::Error::other(format!("{name}: error {error:?}, expected {expected:?}")).into());
-            }
+            (error, expected) => panic!("{name}: error {error:?}, expected {expected:?}"),
         }
         let expected_messages = golden["yielded"]
             .as_array()

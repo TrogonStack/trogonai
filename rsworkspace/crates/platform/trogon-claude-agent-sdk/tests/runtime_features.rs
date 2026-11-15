@@ -2,7 +2,6 @@
 
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
     error::Error as StdError,
     sync::{
         Arc,
@@ -15,11 +14,11 @@ use trogon_claude_agent_sdk::{
     AgentDefinition, AgentName, CancellationToken, ClaudeAgentOptions, ClaudeSdkClient, DialogKind, EffortLevel,
     ElicitationMode, ElicitationRequest, ElicitationResponse, Error, FeatureSupport, FileCheckpointing, HookEvent,
     HookFailureMode, HookOutput, HookPermissionDecision, HookRegistration, HookRequest, HookSpecificOutput, InputBlock,
-    InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, LocalPlugin, McpEnabled, McpServerName, McpServerOptions,
-    McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, McpUrl, Message, MessageId, OutputSchema,
-    PermissionDecision, PermissionMode, PluginDelivery, Prompt, QueueCapacity, RewindMode, SdkTool, SdkToolOptions,
-    SyncHookOutput, TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget, UserDialogRequest,
-    UserDialogResponse, UserInput,
+    InterruptReceipt, LocalMcpServer, LocalMcpServerOptions, LocalPlugin, McpEnabled, McpRemoteServerOptions,
+    McpServerDialect, McpServerName, McpServerOptions, McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest,
+    Message, MessageId, OutputSchema, PermissionDecision, PermissionMode, PluginDelivery, Prompt, QueueCapacity,
+    RewindMode, SdkTool, SdkToolOptions, SyncHookOutput, TaskId, Timeout, ToolPermissionRequest, ToolUseId, UsdBudget,
+    UserDialogRequest, UserDialogResponse, UserInput,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -67,17 +66,31 @@ async fn typed_controls_preserve_receipts_and_use_exact_wire_operations() -> Tes
     handle.set_permission_mode(PermissionMode::Plan).await?;
     let rewind = handle
         .rewind_files(MessageId::from("user-message"), RewindMode::DryRun)
-        .await?;
+        .await?
+        .decode()?;
     assert!(rewind.can_rewind);
     assert_eq!(rewind.files_changed, Some(vec!["README.md".to_owned()]));
-    assert_eq!(handle.mcp_status().await?.mcp_servers[0]["name"], "local");
-    assert_eq!(handle.context_usage().await?.total_tokens, 3);
+    assert_eq!(handle.mcp_status().await?.decode()?.mcp_servers[0].name, "local");
+    assert_eq!(
+        handle
+            .context_usage(None)
+            .await?
+            .as_json()
+            .map(|usage| &usage["totalTokens"]),
+        Some(&json!(3))
+    );
     handle.reconnect_mcp_server(McpServerName::from("local")).await?;
     handle
         .toggle_mcp_server(McpServerName::from("local"), McpEnabled::Disabled)
         .await?;
     handle.stop_task(TaskId::from("task-one")).await?;
-    assert!(handle.background_tasks(Some(ToolUseId::from("tool-one"))).await?);
+    assert_eq!(
+        handle
+            .background_tasks(Some(ToolUseId::from("tool-one")))
+            .await?
+            .as_bool(),
+        Some(true)
+    );
     let requests = timeout(Duration::from_secs(3), async {
         let mut requests = Vec::new();
         while requests.len() < 11 {
@@ -94,6 +107,81 @@ async fn typed_controls_preserve_receipts_and_use_exact_wire_operations() -> Tes
     assert!(requests.contains(&json!({"subtype":"rewind_files","user_message_id":"user-message","dry_run":true})));
     assert!(requests.contains(&json!({"subtype":"mcp_toggle","serverName":"local","enabled":false})));
     assert!(requests.contains(&json!({"subtype":"stop_task","task_id":"task-one"})));
+    client.disconnect().await?;
+    Ok(())
+}
+
+/// TypeScript `readMcpResource` sends `{subtype, serverName, uri}` and resolves with the response as sent.
+#[tokio::test]
+async fn read_mcp_resource_sends_the_typescript_request_and_returns_the_response() -> TestResult {
+    let mut client = ClaudeSdkClient::connect(options("controls")?).await?;
+    let response = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "ui://local/app")
+        .await?
+        .ok_or("the reply carries a response")?;
+    assert_eq!(
+        serde_json::to_string(response.as_json())?,
+        r#"{"contents":[{"uri":"ui://local/app","mimeType":"text/html;profile=mcp-app","text":"<p>app</p>","_meta":{"ui":{"csp":{}}}}],"extra":true}"#
+    );
+    let request = timeout(Duration::from_secs(3), async {
+        loop {
+            if let Some(Message::System(message)) = client.next_message().await?
+                && message.subtype == "control_observed"
+            {
+                return Ok::<_, trogon_claude_agent_sdk::Error>(message.data["request"].clone());
+            }
+        }
+    })
+    .await??;
+    assert_eq!(
+        serde_json::to_string(&request)?,
+        r#"{"subtype":"mcp_read_resource","serverName":"local","uri":"ui://local/app"}"#
+    );
+    client.disconnect().await?;
+    Ok(())
+}
+
+/// `readMcpResource` returns the reply's `response` field as sent: `undefined` when it is missing, and `null` or
+/// any other value unchanged.
+#[tokio::test]
+async fn read_mcp_resource_returns_none_for_a_reply_without_a_response() -> TestResult {
+    let client = ClaudeSdkClient::connect(options("controls")?).await?;
+    let missing = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "ui://local/none")
+        .await?;
+    assert_eq!(missing, None);
+    let null = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "ui://local/null")
+        .await?
+        .ok_or("a null response is still a response")?;
+    assert_eq!(null.as_json(), &Value::Null);
+    let text = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "ui://local/text")
+        .await?
+        .ok_or("a text response is still a response")?;
+    assert_eq!(serde_json::to_string(text.as_json())?, r#""as sent""#);
+    assert_eq!(text.contents(), None);
+    client.disconnect().await?;
+    Ok(())
+}
+
+/// A `readMcpResource` reply with an error subtype rejects the call, as TypeScript rejects its promise.
+#[tokio::test]
+async fn read_mcp_resource_rejects_when_claude_code_answers_with_an_error() -> TestResult {
+    let client = ClaudeSdkClient::connect(options("controls")?).await?;
+    let rejected = client
+        .handle()
+        .read_mcp_resource(McpServerName::from("local"), "https://local/app")
+        .await;
+    let Err(Error::ControlRejected { operation, rejection }) = &rejected else {
+        return Err(format!("expected a rejection, got {rejected:?}").into());
+    };
+    assert_eq!(*operation, trogon_claude_agent_sdk::ControlOperation::McpReadResource);
+    assert_eq!(rejection.message(), "fixture reads ui:// resources only");
     client.disconnect().await?;
     Ok(())
 }
@@ -140,9 +228,12 @@ async fn blocking_hook_is_registered_and_answered_through_the_public_client() ->
 async fn blocking_hook_refuses_a_cli_without_failure_capability() -> TestResult {
     let mut options = options("hook-unsupported")?;
     options.hooks = vec![blocking_hook()];
+    // TypeScript hands the client out before initialize is answered, so the refusal rejects the initialization
+    // result.
+    let client = ClaudeSdkClient::connect(options).await?;
     assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::BlockingHooksUnsupported)
+        client.handle().initialization_result().await,
+        Err(Error::InitializationFailed(inner)) if matches!(*inner, Error::BlockingHooksUnsupported)
     ));
     Ok(())
 }
@@ -168,11 +259,17 @@ async fn embedded_mcp_server_keeps_its_session_across_rpc_calls() -> TestResult 
                 ))
             }
         }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     });
     let server = LocalMcpServer::from(LocalMcpServerOptions {
         name: McpServerName::from("local"),
-        version: "1".into(),
-        tools: tool.into(),
+        version: Some("1".into()),
+        tools: Some(tool.into()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     });
     options
         .sdk_mcp_servers
@@ -200,10 +297,7 @@ async fn structured_input_and_declarative_configuration_reach_the_cli() -> TestR
     );
     options.mcp_servers.insert(
         McpServerName::from("external"),
-        McpServerOptions::Http {
-            url: McpUrl::new("https://example.com/mcp")?,
-            headers: BTreeMap::new(),
-        },
+        McpServerOptions::Http(McpRemoteServerOptions::new("https://example.com/mcp")),
     );
     let mut client = ClaudeSdkClient::connect(options).await?;
     let Some(Message::System(init)) = client.next_message().await? else {
@@ -318,6 +412,7 @@ async fn permission_context_and_updates_round_trip_through_the_callback() -> Tes
             PermissionDecision::Allow {
                 updated_input: None,
                 updated_permissions: Some(request.suggestions),
+                decision_classification: None,
             }
         }));
         let mut client = ClaudeSdkClient::connect(options).await?;
@@ -375,9 +470,10 @@ async fn cancelled_permission_exposes_its_signal_to_the_host() -> TestResult {
 async fn blocking_hook_refuses_a_session_that_did_not_apply_it() -> TestResult {
     let mut options = options("hook-not-applied")?;
     options.hooks = vec![blocking_hook()];
+    let client = ClaudeSdkClient::connect(options).await?;
     assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::HooksNotApplied)
+        client.handle().initialization_result().await,
+        Err(Error::InitializationFailed(inner)) if matches!(*inner, Error::HooksNotApplied)
     ));
     Ok(())
 }
@@ -387,7 +483,7 @@ async fn elicitation_callback_returns_a_typed_form_response() -> TestResult {
     let mut options = options("elicitation")?;
     options.elicitation_handler = Some(Arc::new(|request: ElicitationRequest| async move {
         assert_eq!(request.server_name.as_str(), "local");
-        assert_eq!(request.mode, ElicitationMode::Form);
+        assert_eq!(request.mode, Some(ElicitationMode::Form));
         assert!(request.requested_schema.is_some());
         assert!(!request.signal.is_cancelled());
         let mut content = trogon_claude_agent_sdk::JsonObject::new();
@@ -425,36 +521,43 @@ async fn declared_user_dialog_calls_the_handler() -> TestResult {
 }
 
 #[tokio::test]
-async fn undeclared_dialog_does_not_invoke_or_settle_a_handler() -> TestResult {
+async fn an_undeclared_dialog_kind_still_reaches_the_handler_like_the_typescript_sdk() -> TestResult {
     let mut options = options("dialog-undeclared")?;
     options.supported_dialog_kinds = vec![DialogKind::from("different-kind")];
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&calls);
-    options.user_dialog_handler = Some(Arc::new(move |_: UserDialogRequest| {
+    options.user_dialog_handler = Some(Arc::new(move |request: UserDialogRequest| {
         observed.fetch_add(1, Ordering::SeqCst);
-        async { Ok(UserDialogResponse::Cancelled) }
+        async move {
+            assert_eq!(request.dialog_kind.as_str(), "undeclared");
+            assert_eq!(request.request_id.as_str(), "dialog-1");
+            Ok(UserDialogResponse::Cancelled)
+        }
     }));
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("dialog")).await?;
-    assert_eq!(result(&mut client).await?, "undeclared");
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let response: Value = serde_json::from_str(&result(&mut client).await?)?;
+    assert_eq!(response, json!({"behavior":"cancelled"}));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     client.disconnect().await?;
     Ok(())
 }
 
-async fn undeclared_dialog_with_pending_callback(mode: &str) -> TestResult {
+async fn unanswered_dialog_with_pending_callback(mode: &str, handler: bool) -> TestResult {
     let mut options = options(mode)?;
     options.limits.max_incoming_callbacks = Some(QueueCapacity::new(1)?);
     options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| {
         std::future::pending::<PermissionDecision>()
     }));
-    options.supported_dialog_kinds = vec![DialogKind::from("different-kind")];
     let calls = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::clone(&calls);
-    options.user_dialog_handler = Some(Arc::new(move |_: UserDialogRequest| {
-        observed.fetch_add(1, Ordering::SeqCst);
-        async { Ok(UserDialogResponse::Cancelled) }
-    }));
+    if handler {
+        options.supported_dialog_kinds = vec![DialogKind::from("different-kind")];
+        let observed = Arc::clone(&calls);
+        options.user_dialog_handler = Some(Arc::new(move |_: UserDialogRequest| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            async { Ok(UserDialogResponse::Cancelled) }
+        }));
+    }
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("dialog")).await?;
     assert_eq!(result(&mut client).await?, "undeclared");
@@ -465,13 +568,13 @@ async fn undeclared_dialog_with_pending_callback(mode: &str) -> TestResult {
 }
 
 #[tokio::test]
-async fn saturated_callbacks_do_not_settle_undeclared_dialog() -> TestResult {
-    undeclared_dialog_with_pending_callback("dialog-undeclared-saturated").await
+async fn saturated_callbacks_leave_a_dialog_without_a_handler_unanswered() -> TestResult {
+    unanswered_dialog_with_pending_callback("dialog-undeclared-saturated", false).await
 }
 
 #[tokio::test]
-async fn duplicate_id_does_not_settle_undeclared_dialog() -> TestResult {
-    undeclared_dialog_with_pending_callback("dialog-undeclared-duplicate").await
+async fn a_dialog_reusing_an_in_flight_id_is_skipped() -> TestResult {
+    unanswered_dialog_with_pending_callback("dialog-undeclared-duplicate", true).await
 }
 
 #[tokio::test]

@@ -3,7 +3,8 @@
 //! Python resolves `<package>/_bundled/claude[.exe]` before any other discovery (`_find_bundled_cli`).
 //! TypeScript resolves the native binary from one of the `@anthropic-ai/claude-agent-sdk-<platform>-<arch>`
 //! optional dependency packages through Node module resolution (`vJ`). This crate ships no binary and has no
-//! Node runtime, so both lookups take the roots from the caller and nothing here runs during `connect`.
+//! Node runtime, so both lookups take the roots from the caller. `connect` runs the Python lookup only when
+//! `ClaudeAgentOptions::bundled_cli_root` names one, because TypeScript has no bundled directory.
 
 use std::{
     ffi::OsString,
@@ -125,9 +126,8 @@ impl NativePackageTarget {
         }
     }
 
-    /// The platform this crate was compiled for. Upstream decides musl at run time from the Node process report
-    /// (`glibcVersionRuntime` absent on Linux); a Rust process has no such report, so the compile target's libc
-    /// stands in for it.
+    /// The platform this process runs on, with musl preferred on Linux unless the process runs against glibc, as
+    /// upstream decides from the Node process report.
     pub fn host() -> Self {
         let platform = match std::env::consts::OS {
             "macos" => "darwin",
@@ -142,7 +142,7 @@ impl NativePackageTarget {
             "loongarch64" => "loong64",
             other => other,
         };
-        Self::new(platform, arch, cfg!(all(target_os = "linux", target_env = "musl")))
+        Self::new(platform, arch, cfg!(target_os = "linux") && !reports_glibc_runtime())
     }
 
     pub fn platform(&self) -> &str {
@@ -175,6 +175,21 @@ impl NativePackageTarget {
             .map(|package| format!("{package}/claude{extension}"))
             .collect()
     }
+}
+
+/// Node's process report carries `glibcVersionRuntime`, read with `gnu_get_libc_version()` at run time, only when
+/// the process runs against glibc; upstream prefers musl on Linux whenever the field is absent. This asks the same
+/// function of this process.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn reports_glibc_runtime() -> bool {
+    // SAFETY: `gnu_get_libc_version` takes no arguments and returns a pointer to a static string.
+    !unsafe { libc::gnu_get_libc_version() }.is_null()
+}
+
+/// A process that is not linked against glibc has no `gnu_get_libc_version`, like a Node built without glibc.
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn reports_glibc_runtime() -> bool {
+    false
 }
 
 /// Resolves a module specifier to a file path the way Node's `require.resolve` does for the calling module.

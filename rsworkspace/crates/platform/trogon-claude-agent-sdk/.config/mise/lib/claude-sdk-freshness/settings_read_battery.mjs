@@ -279,6 +279,40 @@ export const KEYED = [
   { modelPricing: { multiplier: 1 }, modelPicker: { options: [] }, allowedMcpServers: [], deniedMcpServers: [], remoteControl: {}, model: 'm' },
 ];
 
+// Documents only the policy read path treats differently: a deny or ask list with nothing readable stays as
+// written, an unrecognized crossSessionInbound becomes the most restrictive value, and remoteControl is replaced
+// or completed instead of deleted.
+export const POLICY_KEYED = [
+  { permissions: { deny: ['bad rule'], allow: ['Read'] } },
+  { permissions: { deny: ['bad rule', 5], ask: ['(x', null], allow: ['bad('] } },
+  { permissions: { deny: ['Bash', 'bad rule'], ask: ['Read', 5] } },
+  { permissions: { deny: [], ask: [], allow: [] } },
+  { permissions: { deny: 'Bash', ask: { a: 1 }, allow: 5 } },
+  { permissions: { ask: ['bad('], defaultMode: 'plan', additionalDirectories: ['/a'] } },
+  { permissions: { deny: ['bad('], allow: ['Read'], defaultMode: 'acceptEdits' }, model: 'm' },
+  { permissions: { allow: ['Bash', 5, 'Read'], deny: ['Bash(:*)', 'x'], ask: [7] } },
+  { crossSessionInbound: 'bogus', model: 'm' },
+  { model: 'm', crossSessionInbound: 5 },
+  { crossSessionInbound: null },
+  { crossSessionInbound: ['hold'], 1: 'a', zed: 1 },
+  { crossSessionInbound: 'refuse' },
+  { crossSessionInbound: 'accept' },
+  { remoteControl: 5, model: 'm' },
+  { remoteControl: null },
+  { remoteControl: [] },
+  { remoteControl: 'on', zed: 1 },
+  { remoteControl: { other: 1 } },
+  { remoteControl: { other: 1, shareHostProfile: 'full' } },
+  { remoteControl: { shareHostProfile: 'full', other: 1 } },
+  { remoteControl: { shareHostProfile: 'bogus' } },
+  { remoteControl: { shareHostProfile: 5, other: 1 } },
+  { remoteControl: { shareHostProfile: null } },
+  { remoteControl: { shareHostProfile: 'basic' } },
+  { remoteControl: {} },
+  { remoteControl: { 7: 1, a: 2 }, model: 'm' },
+  { additionalMarketplaces: { a: github, b: 5 }, hooks: { Stop: [matcher([command, 5])] }, permissions: { allow: ['Bash', 5], deny: ['x y'] }, modelPicker: { options: [{ model: 'a' }, 5] }, crossSessionInbound: 'x', remoteControl: { shareHostProfile: 'x' }, allowedMcpServers: [5, { serverName: 'a' }], enabledMcpjsonServers: 'x' },
+];
+
 // Raw texts for the paths that never reach the sanitizers.
 export const TEXTS = ['{"b":1,"2":3,"a":2,"1":4}', '{"model":"m","10":1,"9":2,"x":{"b":1,"7":2,"3":3}}', '', '   ', '\n', 'null', '[]', '5', '"x"', 'true', '{', '{"model":"m"}', '{"model":"m"} x', '﻿{"model":"m"}', '{"model":"m","model":"n"}', '{"permissions":{"allow":["Read"]},"model":"a","model":"b"}',
   '{"model":"m",}', '{/*c*/"model":"m"}', '// c\n{"model":"m"}', '{"model":"m"} // c', "{'model':'m'}", '{"model":"m"}\n\n', '{"x":1.0,"y":1e2,"z":-0,"w":0.1}', '{"x":12345678901234567890}', '{"model":"\\u00e9\\ud83d\\ude00"}', '{"a":[1,2,],"model":"m"}', '\n  {"model":"m"}  \n'];

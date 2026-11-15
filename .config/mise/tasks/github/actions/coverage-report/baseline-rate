@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Read the verified baseline coverage rate"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 if [[ -f "${COVERAGE_STORAGE_BRANCH}/data/${COVERAGE_DIFF_BRANCH}/${COVERAGE_STORAGE_SUBDIRECTORY}/coverage.xml" ]]

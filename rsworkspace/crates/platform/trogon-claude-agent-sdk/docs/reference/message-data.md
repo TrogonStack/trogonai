@@ -66,7 +66,7 @@ JSON can preserve content shapes beyond Python's annotated str/list/None field.
 | result / total_cost_usd | optional str / optional float | Success result:string and cost:number | Option<String> and Option<f64> also represent absent legacy data. |
 | usage / model_usage | optional object; model_usage maps model names | usage / modelUsage | Optional raw JsonObject; TypeScript's camelCase modelUsage is a distinct wire spelling. |
 | structured_output | Any | structured_output?: unknown | Option<Value> permits manually represented JSON null separately from absent data. |
-| errors / permission_denials / deferred_tool_use | optional list[str] / list[Any] / DeferredToolUse | SDKResultError.errors / permission_denials / deferred_tool_use | Optional string list, raw JSON list and JsonObject; unreported errors remain distinct from a reported empty list. |
+| errors / permission_denials / deferred_tool_use | optional list[str] / list[Any] / DeferredToolUse | SDKResultError.errors / permission_denials / deferred_tool_use | Optional string list, raw JSON list and JsonObject; unreported errors remain distinct from a reported empty list. `typed_permission_denials` wraps each raw entry in a `PermissionDenial` with `tool_name`, `tool_use_id`, `tool_input`, `typed_input` and `to_sdk_permission_denial` views. |
 | api_error_status / stop_reason / terminal_reason | optional int / str / str | api_error_status?: number or null; stop_reason; TerminalReason | Option<u16> and optional String fields; no status or terminal-reason interpretation is added. |
 | origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional MessageOrigin. |
 | result_index / queued_turn_count | Not declared on the pinned Python ResultMessage | result_index?: number / queued_turn_count?: number | Optional u64 metadata. |
@@ -91,8 +91,17 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | content | str or list[ContentBlock] | message: MessageParam | Content text or block data, flattened from the envelope. |
 | parent_tool_use_id / session_id / uuid | optional parent ID and uuid; no separate session_id field | nullable parent ID and optional session_id/UUID | Optional identifier wrappers. |
 | origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional origin object; `MessageOrigin::validated` opts in to refusing a `kind` among the extension fields. |
-| tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. Both pinned SDKs pass the wire value through unchanged; tool_use_result_object gives the dictionary view Python annotates. |
+| tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. Both pinned SDKs pass the wire value through unchanged; tool_use_result_object gives the dictionary view Python annotates, and `typed_tool_use_result(tool_name)` the `sdk-tools` output type TypeScript declares for that tool. |
 | additional_fields / message_fields | No separate typed extension fields | Envelope and MessageParam scopes differ | Explicit maps preserve manually supplied outer and nested extension data. |
+
+## User input
+
+| Rust field family | Python streamed message | TypeScript SDKUserMessage | Written representation |
+| --- | --- | --- | --- |
+| content | str or list of blocks | message: MessageParam | `UserInput::from(Prompt)` text or `UserInput::blocks`; a `query()` string prompt is one text block under TypeScript and a string under Python. |
+| parent_tool_use_id / isSynthetic / tool_use_result / priority / origin / shouldQuery / timestamp / client_composed / uuid / pasted_content / inline_pastes / session_id / agent_id / subagent_type / task_description | dict keys written as given | declared SDKUserMessage fields | Optional typed fields written in declaration order; `UserInputPriority` keeps unknown strings. |
+| additional_fields | dict keys written as given | extra keys written as given | Appended after the typed fields without replacing them. |
+| `UserInput::from_json` | streamed dict written as given | streamed object written as given | The object as given, key order included; typed fields set afterwards replace keys in place or append. |
 
 ## Partial events
 
@@ -119,7 +128,9 @@ Every message keeps the object the CLI wrote in `raw`, so no field is dropped.
 from `upstream::messages`, which covers every member the pinned sdk.d.ts
 declares; encoding that value gives back `raw`. The per-struct
 `to_sdk_message` methods return the matching member, or None when the message
-does not match its shape exactly.
+does not match its shape exactly. TypeScript `query()` also yields the
+`active_goal` message, which sdk.d.ts declares outside the `SDKMessage` union;
+`Message::to_active_goal_message` types it as `SDKActiveGoalMessage`.
 
 ## Decoding
 

@@ -1,4 +1,27 @@
+use std::collections::HashMap;
+
 use super::*;
+
+/// What CPython's `str(float)` printed for each double of a corpus, as `[bits, text]` pairs per section
+/// (`.config/mise/lib/claude-sdk-freshness/usd_budget_goldens.py` writes it).
+const GOLDENS: &str = include_str!("../tests/fixtures/usd_budget/goldens.json");
+
+/// The pairs of one section of the goldens, next to the pairs `python_text` makes of the same doubles.
+type Pairs = Vec<(String, String)>;
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+fn printed_and_expected(section: &str) -> Result<(Pairs, Pairs), Box<dyn std::error::Error>> {
+    let mut goldens: HashMap<String, Pairs> = serde_json::from_str(GOLDENS)?;
+    let expected = goldens.remove(section).unwrap_or_default();
+    let printed = expected
+        .iter()
+        .map(|(bits, _)| {
+            let value = f64::from_bits(u64::from_str_radix(bits, 16)?);
+            Ok((bits.clone(), UsdBudget::new(value).python_text()))
+        })
+        .collect::<Result<Pairs, std::num::ParseIntError>>()?;
+    Ok((printed, expected))
+}
 
 #[test]
 fn checked_budgets_reject_nonfinite_and_negative_values() {
@@ -49,4 +72,48 @@ fn python_text_matches_cpython_float_repr() {
     ] {
         assert_eq!(UsdBudget::new(value).python_text(), text, "{value}");
     }
+}
+
+#[test]
+fn python_text_keeps_the_even_digit_on_a_tie_like_cpython() -> TestResult {
+    let (printed, expected) = printed_and_expected("ties")?;
+    assert!(expected.len() > 500, "the corpus shrank to {} ties", expected.len());
+    let two_to_the_minus_25 = (
+        format!("{:016x}", 2f64.powi(-25).to_bits()),
+        "2.9802322387695312e-08".to_owned(),
+    );
+    assert!(expected.contains(&two_to_the_minus_25), "the corpus lost 2**-25");
+    assert_eq!(printed, expected);
+    Ok(())
+}
+
+#[test]
+fn python_text_prints_every_double_like_cpython_str() -> TestResult {
+    let (printed, expected) = printed_and_expected("values")?;
+    assert!(expected.len() > 5000, "the corpus shrank to {} values", expected.len());
+    assert_eq!(printed, expected);
+    Ok(())
+}
+
+#[test]
+fn integer_amounts_print_like_python_str_of_an_int() {
+    for (value, python, typescript) in [(0, "0", "0"), (5, "5", "5"), (-1, "-1", "-1")] {
+        let budget = UsdBudget::from_integer(value);
+        assert_eq!(budget.python_text(), python, "{value}");
+        assert_eq!(budget.typescript_text(), typescript, "{value}");
+    }
+    assert_eq!(UsdBudget::from_integer(0).get().to_bits(), 0.0_f64.to_bits());
+}
+
+#[test]
+fn integer_and_float_amounts_compare_like_python() {
+    assert_eq!(UsdBudget::from_integer(0), UsdBudget::new(0.0));
+    assert_eq!(UsdBudget::new(-0.0), UsdBudget::from_integer(0));
+    assert_eq!(UsdBudget::from_integer(2), UsdBudget::new(2.0));
+    assert_ne!(UsdBudget::from_integer(2), UsdBudget::new(2.5));
+    assert_ne!(
+        UsdBudget::from_integer(i64::MAX),
+        UsdBudget::new(9_223_372_036_854_775_808.0)
+    );
+    assert_ne!(UsdBudget::from_integer(0), UsdBudget::new(f64::NAN));
 }

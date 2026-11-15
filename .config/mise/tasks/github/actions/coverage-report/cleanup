@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Remove the task-owned coverage storage checkout"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 if [[ -n "${GITHUB_WORKSPACE:-}" && "${COVERAGE_SKIP_STORAGE:-false}" != 'true' ]]; then

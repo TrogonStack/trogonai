@@ -4,9 +4,9 @@
 use serde_json::Value;
 
 use crate::{
-    session_fork_ts::js_stringify,
     session_mutations::{SessionMutationError, sanitize_unicode_ts},
     session_project_key::project_name_with,
+    settings_json::js_stringify,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;

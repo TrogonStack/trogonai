@@ -29,10 +29,10 @@ use recording_filesystem::RecordingFileSystem;
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 use trogon_claude_agent_sdk::{
-    Environment, InMemorySessionStore, Message, MirrorEnqueueError, MirrorFailureError, QueueCapacity, SessionEntry,
-    SessionEntryError, SessionError, SessionId, SessionKey, SessionKeyError, SessionPreparationOptions,
+    Environment, EnvironmentMode, InMemorySessionStore, Message, MirrorEnqueueError, MirrorFailureError, QueueCapacity,
+    SessionEntry, SessionEntryError, SessionError, SessionId, SessionKey, SessionKeyError, SessionPreparationOptions,
     SessionProjectKey, SessionProjectKeyError, SessionRuntime, SessionStore, SessionStoreError, SessionStoreFuture,
-    SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume, TranscriptMirror,
+    SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume, SummaryDialect, TranscriptMirror,
     adapters::{CanonicalizePath, SpawnProcess},
     test_support::FixedEnvironment,
 };
@@ -42,9 +42,9 @@ const SESSION: &str = "123e4567-e89b-42d3-a456-426614174000";
 
 fn key() -> Result<SessionKey, Box<dyn StdError>> {
     Ok(SessionKey::new(
-        SessionProjectKey::new("project")?,
+        SessionProjectKey::new("project"),
         SessionId::from(SESSION),
-    )?)
+    ))
 }
 
 fn entry() -> Result<SessionEntry, SessionEntryError> {
@@ -114,7 +114,7 @@ fn s25_transcript_paths_below_a_session_map_to_subpaths() -> TestResult {
 #[test]
 fn session_keys_preserve_identity_and_reject_unrecognized_or_non_unicode_paths() -> TestResult {
     let main = key()?;
-    let subpath = SessionSubpath::new("subagents/nested/agent-one")?;
+    let subpath = SessionSubpath::new("subagents/nested/agent-one");
     let sub = main.clone().with_subpath(subpath.clone());
     assert_eq!(sub.main(), main);
     assert_eq!(sub.subpath(), Some(&subpath));
@@ -122,7 +122,7 @@ fn session_keys_preserve_identity_and_reject_unrecognized_or_non_unicode_paths()
     assert_eq!(main.session_id().to_string(), SESSION);
     for unsafe_id in ["", "line\nbreak"] {
         assert!(matches!(
-            SessionKey::new(SessionProjectKey::new("project")?, SessionId::from(unsafe_id)),
+            SessionKey::checked(SessionProjectKey::new("project"), SessionId::from(unsafe_id)),
             Err(SessionKeyError::UnsafeSessionId)
         ));
     }
@@ -235,7 +235,7 @@ async fn optional_store_operations_are_explicit_and_debug_output_hides_configura
 #[test]
 fn mirror_failure_messages_preserve_context_and_bound_suppressed_failures() -> TestResult {
     let main = key()?;
-    let child = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")?);
+    let child = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one"));
     for (failure, expected_key) in [
         (
             MirrorFailureError::Append {
@@ -435,7 +435,7 @@ async fn memory_store_reports_clock_exhaustion_and_poisoning_as_non_retryable() 
 fn resume_options(store: Arc<dyn SessionStore>, config: &Path) -> Result<SessionStoreOptions, Box<dyn StdError>> {
     let mut options = SessionStoreOptions::from(store);
     options.config_directory = Some(config.to_path_buf());
-    options.project_key = Some(SessionProjectKey::new("project")?);
+    options.project_key = Some(SessionProjectKey::new("project"));
     Ok(options)
 }
 
@@ -463,6 +463,7 @@ async fn prepare(
         resume,
         cwd: &environment.directory,
         subprocess_environment: &Environment::default(),
+        environment_mode: EnvironmentMode::default(),
         environment: &environment,
         process: &NoProcess,
         filesystem,
@@ -485,24 +486,70 @@ fn resume_directories(filesystem: &RecordingFileSystem) -> io::Result<Vec<PathBu
 }
 
 #[tokio::test(start_paused = true)]
-async fn resume_rejects_relative_configuration_and_requires_listing_for_latest() -> TestResult {
+async fn python_resume_joins_relative_configuration_and_requires_listing_for_latest() -> TestResult {
     let store = Arc::new(BasicStore);
     let filesystem = RecordingFileSystem::new()?;
     let config = filesystem.path("config");
     let mut options = resume_options(store, &config)?;
-    for path in ["", "relative"] {
-        options.config_directory = Some(path.into());
+    options.dialect = SummaryDialect::Python;
+    // `Path(caller_config_dir)` keeps a relative directory as given.
+    options.config_directory = Some("relative".into());
+    let runtime = prepare(&options, StoreResume::None, filesystem.clone()).await?;
+    assert!(runtime.materialized.is_none());
+    // An empty value is falsy, so Python falls through to the home directory, which this environment lacks.
+    options.config_directory = Some("".into());
+    assert!(matches!(
+        prepare(&options, StoreResume::None, filesystem.clone()).await,
+        Err(SessionError::MissingConfigDirectory)
+    ));
+    // The opt-in check refuses a relative directory with the typed error in either dialect.
+    options.require_absolute_config_paths = true;
+    for dialect in [SummaryDialect::Python, SummaryDialect::TypeScript] {
+        options.dialect = dialect;
+        options.config_directory = Some("relative".into());
         assert!(matches!(
             prepare(&options, StoreResume::None, filesystem.clone()).await,
             Err(SessionError::UnsafeConfigPath)
         ));
     }
+    options.require_absolute_config_paths = false;
+    options.dialect = SummaryDialect::Python;
+    options.config_directory = Some(config.clone());
+    // `_with_timeout` wraps the `NotImplementedError` of the missing `list_sessions`, whose text is empty.
+    let outcome = prepare(&options, StoreResume::Latest, filesystem.clone()).await;
+    let Err(error) = outcome else {
+        return Err("expected the missing listing to fail".into());
+    };
+    assert_eq!(
+        error.to_string(),
+        "SessionStore.list_sessions() failed during resume materialization: "
+    );
+    assert!(matches!(
+        error,
+        SessionError::ResumeStore {
+            source: SessionStoreError::Unsupported(SessionStoreOperation::List),
+            ..
+        }
+    ));
+    assert!(resume_directories(&filesystem)?.is_empty());
+    Ok(())
+}
+
+/// TypeScript joins whatever configuration directory it is given and checks for `listSessions` before continuing.
+#[tokio::test(start_paused = true)]
+async fn ts_resume_accepts_relative_configuration_and_requires_listing_for_latest() -> TestResult {
+    let filesystem = RecordingFileSystem::new()?;
+    let config = filesystem.path("config");
+    let mut options = resume_options(Arc::new(BasicStore), &config)?;
+    for path in ["", "relative"] {
+        options.config_directory = Some(path.into());
+        let runtime = prepare(&options, StoreResume::None, filesystem.clone()).await?;
+        assert!(runtime.materialized.is_none());
+    }
     options.config_directory = Some(config);
     assert!(matches!(
         prepare(&options, StoreResume::Latest, filesystem.clone()).await,
-        Err(SessionError::Store(SessionStoreError::Unsupported(
-            SessionStoreOperation::List
-        )))
+        Err(SessionError::ContinueRequiresList)
     ));
     assert!(resume_directories(&filesystem)?.is_empty());
     Ok(())
@@ -567,14 +614,14 @@ async fn latest_resume_limits_the_candidate_listing_before_materialization() -> 
     let store = Arc::new(InMemorySessionStore::new());
     store.append(&key()?, &[entry()?]).await?;
     let other = SessionKey::new(
-        SessionProjectKey::new("project")?,
+        SessionProjectKey::new("project"),
         SessionId::from(uuid::Uuid::nil().to_string()),
-    )?;
+    );
     store.append(&other, &[entry()?]).await?;
     let filesystem = RecordingFileSystem::new()?;
     let config = filesystem.path("config");
     let mut options = resume_options(store, &config)?;
-    options.limits.max_resume_entries = NonZeroUsize::new(1).ok_or("zero limit")?;
+    options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero limit")?);
     assert!(matches!(
         prepare(&options, StoreResume::Latest, filesystem.clone()).await,
         Err(SessionError::EntryLimit)
@@ -592,7 +639,7 @@ async fn resume_counts_transcript_newlines_and_metadata_against_budgets() -> Tes
     store.append(&main, std::slice::from_ref(&transcript)).await?;
     let filesystem = RecordingFileSystem::new()?;
     let mut options = resume_options(store.clone(), &filesystem.path("config"))?;
-    options.limits.max_resume_bytes = NonZeroUsize::new(encoded_length).ok_or("zero limit")?;
+    options.limits.max_resume_bytes = Some(NonZeroUsize::new(encoded_length).ok_or("zero limit")?);
     assert!(matches!(
         prepare(&options, StoreResume::Session(SessionId::from(SESSION)), filesystem).await,
         Err(SessionError::ByteLimit)
@@ -600,7 +647,7 @@ async fn resume_counts_transcript_newlines_and_metadata_against_budgets() -> Tes
     let metadata = SessionEntry::try_from(json!({"type":"agent_metadata","agentType":"reviewer"}))?;
     store
         .append(
-            &main.with_subpath(SessionSubpath::new("subagents/metadata-only")?),
+            &main.with_subpath(SessionSubpath::new("subagents/metadata-only")),
             &[metadata],
         )
         .await?;
@@ -609,9 +656,9 @@ async fn resume_counts_transcript_newlines_and_metadata_against_budgets() -> Tes
         let config = filesystem.path("config");
         let mut options = resume_options(store.clone(), &config)?;
         if entry_limit {
-            options.limits.max_resume_entries = NonZeroUsize::new(1).ok_or("zero limit")?;
+            options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero limit")?);
         } else {
-            options.limits.max_resume_bytes = NonZeroUsize::new(encoded_length + 2).ok_or("zero limit")?;
+            options.limits.max_resume_bytes = Some(NonZeroUsize::new(encoded_length + 2).ok_or("zero limit")?);
         }
         let outcome = prepare(
             &options,
@@ -650,7 +697,7 @@ async fn resume_preserves_single_component_subpaths_and_their_metadata() -> Test
     let child = SessionEntry::try_from(json!({"type":"assistant","text":"child"}))?;
     store
         .append(
-            &main.clone().with_subpath(SessionSubpath::new("standalone")?),
+            &main.clone().with_subpath(SessionSubpath::new("standalone")),
             &[
                 child.clone(),
                 SessionEntry::try_from(json!({"type":"agent_metadata","agentType":"worker"}))?,
@@ -659,7 +706,7 @@ async fn resume_preserves_single_component_subpaths_and_their_metadata() -> Test
         .await?;
     store
         .append(
-            &main.clone().with_subpath(SessionSubpath::new("transcript-only")?),
+            &main.clone().with_subpath(SessionSubpath::new("transcript-only")),
             std::slice::from_ref(&child),
         )
         .await?;

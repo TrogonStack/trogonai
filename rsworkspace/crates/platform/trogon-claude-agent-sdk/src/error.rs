@@ -15,9 +15,22 @@ pub enum ControlOperation {
     ContextUsage,
     McpReconnect,
     McpToggle,
+    McpReadResource,
     StopTask,
     BackgroundTasks,
     McpSetServers,
+    SetMcpPermissionModeOverride,
+    SetMaxThinkingTokens,
+    ApplyFlagSettings,
+    UpdateSettings,
+    GetUsage,
+    ReadFile,
+    ReloadPlugins,
+    ReloadSkills,
+    ReloadOutputStyles,
+    SeedReadState,
+    RemoteControl,
+    ClaimSession,
 }
 
 impl std::fmt::Display for ControlOperation {
@@ -32,9 +45,22 @@ impl std::fmt::Display for ControlOperation {
             Self::ContextUsage => "get_context_usage",
             Self::McpReconnect => "mcp_reconnect",
             Self::McpToggle => "mcp_toggle",
+            Self::McpReadResource => "mcp_read_resource",
             Self::StopTask => "stop_task",
             Self::BackgroundTasks => "background_tasks",
             Self::McpSetServers => "mcp_set_servers",
+            Self::SetMcpPermissionModeOverride => "set_mcp_permission_mode_override",
+            Self::SetMaxThinkingTokens => "set_max_thinking_tokens",
+            Self::ApplyFlagSettings => "apply_flag_settings",
+            Self::UpdateSettings => "update_settings",
+            Self::GetUsage => "get_usage",
+            Self::ReadFile => "read_file",
+            Self::ReloadPlugins => "reload_plugins",
+            Self::ReloadSkills => "reload_skills",
+            Self::ReloadOutputStyles => "reload_output_styles",
+            Self::SeedReadState => "seed_read_state",
+            Self::RemoteControl => "remote_control",
+            Self::ClaimSession => "claim_session",
         })
     }
 }
@@ -54,12 +80,40 @@ pub enum ProtocolError {
 
 #[derive(thiserror::Error)]
 #[error("Claude Code rejected the control request")]
-pub struct ControlRejectionError(pub(crate) String);
+pub struct ControlRejectionError {
+    message: String,
+    error_code: Option<String>,
+}
 
 impl ControlRejectionError {
-    pub fn message(&self) -> &str {
-        &self.0
+    /// TypeScript keeps an `error_code` only when it is a lowercase identifier (`/^[a-z][a-z0-9_]{0,63}$/`);
+    /// Python never reads it.
+    pub(crate) fn new(message: String, error_code: Option<serde_json::Value>, style: crate::ArgvStyle) -> Self {
+        let error_code = match (style, error_code) {
+            (crate::ArgvStyle::TypeScript, Some(serde_json::Value::String(code))) if error_code_shape(&code) => {
+                Some(code)
+            }
+            _ => None,
+        };
+        Self { message, error_code }
     }
+
+    /// The `error` text the CLI sent.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// TypeScript's `errorCode`: the CLI's machine-readable reason, when it sent a well-formed one.
+    pub fn error_code(&self) -> Option<&str> {
+        self.error_code.as_deref()
+    }
+}
+
+fn error_code_shape(code: &str) -> bool {
+    let mut bytes = code.bytes();
+    code.len() <= 64
+        && bytes.next().is_some_and(|first| first.is_ascii_lowercase())
+        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 impl std::fmt::Debug for ControlRejectionError {
@@ -73,7 +127,10 @@ pub enum Error {
     #[error("the CLI path cannot be started safely")]
     CliPath(#[from] crate::CliPathError),
     #[error(transparent)]
-    CliNotFound(#[from] crate::CliNotFoundError),
+    CliNotFound(#[from] crate::cli_not_found_error::CliNotFoundError),
+    /// Node `os.homedir()` or Python `Path.home()` found no home directory where the dialect needs one.
+    #[error(transparent)]
+    HomeDirectory(#[from] crate::HomeDirectoryError),
     #[error(transparent)]
     Session(#[from] crate::SessionError),
     /// Python `CLIConnectionError("Failed to start Claude Code: ...")` for any spawn failure other than the two below.
@@ -164,14 +221,21 @@ pub enum Error {
     DialogKindsWithoutHandler,
     #[error("SDK configuration could not be encoded")]
     InvalidConfiguration,
-    #[error("file checkpointing is not yet supported with a session store")]
+    /// TypeScript's refusal of `sessionStore` together with `persistSession: false`.
+    #[error(
+        "sessionStore cannot be used with persistSession: false -- the storage adapter requires local writes to mirror from. To avoid keeping a local copy, pass env: {{ ...process.env, CLAUDE_CONFIG_DIR: dir }}, where dir is a new private directory such as fs.mkdtempSync(path.join(os.tmpdir(), 'claude-')), and delete dir when the query ends."
+    )]
+    SessionStoreWithoutPersistence,
+    /// File checkpointing together with a session store. `Display` is TypeScript's text, `python_message`
+    /// Python's.
+    #[error(
+        "enableFileCheckpointing is not yet supported with sessionStore (backup blobs are not mirrored, so rewindFiles() fails after a store-backed resume)."
+    )]
     FileCheckpointingWithSessionStore,
-    #[error("continue_conversation with a session store requires the store to support listing sessions")]
+    /// `continue` against a session store that cannot list sessions. `Display` is TypeScript's text,
+    /// `python_message` Python's.
+    #[error("Options.continue with sessionStore requires store.listSessions to be implemented")]
     ContinueRequiresListSessions,
-    #[error("an MCP server replacement is already in progress")]
-    McpUpdateInProgress,
-    #[error("an MCP server name is configured as both external and embedded")]
-    DuplicateMcpServer,
     /// Python's text for a control request that went unanswered for the configured wait.
     #[error("Control request timeout: {operation}")]
     ControlTimeout { operation: ControlOperation },
@@ -188,6 +252,14 @@ pub enum Error {
     /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` that is not an integer.
     #[error("invalid literal for int() with base 10: {literal}")]
     InvalidStreamCloseTimeout { literal: String },
+    /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` with more digits than its default limit.
+    #[error(
+        "Exceeds the limit (4300 digits) for integer string conversion: value has {digits} digits; use sys.set_int_max_str_digits() to increase the limit"
+    )]
+    StreamCloseTimeoutDigits { digits: usize },
+    /// Python's error when `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` is too large for the float it is divided as.
+    #[error("int too large to convert to float")]
+    StreamCloseTimeoutOverflow,
     #[error("the {operation} control request was rejected")]
     ControlRejected {
         operation: ControlOperation,
@@ -210,14 +282,28 @@ pub enum Error {
     },
     #[error("the SDK driver has stopped; receive remaining messages for its terminal error")]
     DriverStopped,
+    /// TypeScript's rejection of a control request still waiting for its answer when the query is closed.
+    #[error("Query closed before response received")]
+    QueryClosed,
     #[error("the client is not initialized")]
     NotInitialized,
+    /// The first initialize failed. TypeScript rejects `initializationResult()` with the same error that ended
+    /// the run, so the text is the inner error's.
+    #[error(transparent)]
+    InitializationFailed(std::sync::Arc<Error>),
+    /// A `TypeError` the TypeScript SDK leaves to its JavaScript engine, worded as the engine chosen with
+    /// [`crate::JsRuntime`] words it.
+    #[error("{0}")]
+    TypeError(String),
     #[error("control request counter exhausted")]
     RequestIdExhausted,
     #[error("SDK driver task failed")]
     DriverTask(#[source] tokio::task::JoinError),
     #[error("permission callback task failed")]
     CallbackTask(#[source] tokio::task::JoinError),
+    /// TypeScript's `initialize_timeout` error: the CLI did not answer initialize within the startup limit.
+    #[error(transparent)]
+    InitializeTimeout(#[from] InitializeTimeoutError),
     #[doc(hidden)]
     #[error("the subprocess owner requested shutdown")]
     ShutdownRequested,
@@ -250,10 +336,24 @@ impl Error {
         }
     }
 
+    /// Python's text for the errors whose `Display` is TypeScript's and whose wording differs between the two SDKs.
+    pub fn python_message(&self) -> Option<&'static str> {
+        match self {
+            Self::FileCheckpointingWithSessionStore => Some(
+                "session_store cannot be combined with enable_file_checkpointing (checkpoints are local-disk only and would diverge from the mirrored transcript)",
+            ),
+            Self::ContinueRequiresListSessions => {
+                Some("continue_conversation with session_store requires the store to implement list_sessions()")
+            }
+            _ => None,
+        }
+    }
+
     /// TypeScript's text for an unsuccessful exit: `Claude Code process exited with code N. stderr: <tail>` or
     /// `Claude Code process terminated by signal SIG<NAME>`, with the stderr tail appended when it is not blank.
     pub fn typescript_message(&self) -> Option<String> {
         match self {
+            Self::InitializationFailed(inner) => return inner.typescript_message(),
             Self::WriteToTerminatedProcess { .. } => return Some("Cannot write to terminated process".to_owned()),
             Self::BlockingHooksUnsupported => {
                 return Some(
@@ -267,13 +367,28 @@ impl Error {
                         .to_owned(),
                 );
             }
+            Self::Spawn(source) => {
+                return Some(
+                    match source
+                        .get_ref()
+                        .and_then(|inner| inner.downcast_ref::<SpawnFailureError>())
+                    {
+                        Some(failure) => launch_message(&failure.path),
+                        None => format!(
+                            "Failed to spawn Claude Code process: {}",
+                            crate::stderr_redaction::redact(&source.to_string())
+                        ),
+                    },
+                );
+            }
+            Self::CliNotFoundAt(path) => return Some(launch_message(path)),
             _ => {}
         }
         let Self::Process { status, stderr } = self else {
             return None;
         };
         let tail = String::from_utf8_lossy(stderr.as_bytes());
-        let tail = tail.trim();
+        let tail = tail.trim_matches(crate::js_regex::is_whitespace);
         let tail = if tail.is_empty() {
             String::new()
         } else {
@@ -295,6 +410,67 @@ impl Error {
     }
 }
 
+/// A spawn error that carries the path it tried to start, so TypeScript's launch-failure text can name it.
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub(crate) struct SpawnFailureError {
+    path: std::path::PathBuf,
+    error: io::Error,
+}
+
+/// Whether TypeScript words a spawn failure as a failed launch of the executable: the errors a missing or
+/// unusable path produces.
+fn is_launch_failure(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied) || has_launch_errno(error)
+}
+
+#[cfg(unix)]
+fn has_launch_errno(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::ENOTDIR | libc::ELOOP | libc::ENAMETOOLONG | libc::EROFS)
+    )
+}
+
+#[cfg(not(unix))]
+fn has_launch_errno(_error: &io::Error) -> bool {
+    false
+}
+
+/// Keeps the kind and text of a spawn error and, for a launch failure, the path that was started.
+pub(crate) fn launch_failure(path: &std::path::Path, error: io::Error) -> io::Error {
+    if is_launch_failure(&error) {
+        io::Error::new(
+            error.kind(),
+            SpawnFailureError {
+                path: path.to_path_buf(),
+                error,
+            },
+        )
+    } else {
+        error
+    }
+}
+
+/// TypeScript's text for a path that could not be started, which depends on whether it names a native binary and
+/// whether it exists.
+fn launch_message(path: &std::path::Path) -> String {
+    let native = !crate::process_options::is_script(path, crate::ArgvStyle::TypeScript);
+    let shown = crate::stderr_redaction::redact(&path.to_string_lossy());
+    match (native, path.exists()) {
+        (true, true) => format!(
+            "Claude Code native binary at {shown} exists but failed to launch. This usually means the binary does not match this system's libc \u{2014} e.g. spawning a musl-linked binary on a glibc Linux host fails because the musl dynamic loader (/lib/ld-musl-*) is missing. Specify a matching binary with options.pathToClaudeCodeExecutable."
+        ),
+        (false, true) => format!("Claude Code executable at {shown} exists but failed to launch."),
+        (true, false) => format!(
+            "Claude Code native binary not found at {shown}. Please ensure Claude Code is installed via native installer or specify a valid path with options.pathToClaudeCodeExecutable."
+        ),
+        (false, false) => {
+            format!("Claude Code executable not found at {shown}. Is options.pathToClaudeCodeExecutable set?")
+        }
+    }
+}
+
 #[cfg(unix)]
 fn signal_name(signal: i32) -> &'static str {
     match signal {
@@ -307,6 +483,65 @@ fn signal_name(signal: i32) -> &'static str {
         14 => "SIGALRM",
         15 => "SIGTERM",
         _ => "unknown",
+    }
+}
+
+/// TypeScript's `errorClass: "initialize_timeout"` error of `startup()` and `prewarm()`.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct InitializeTimeoutError {
+    message: String,
+    hooks_open: usize,
+    startup_mark: Option<String>,
+    startup_mark_age_ms: Option<u64>,
+}
+
+impl InitializeTimeoutError {
+    pub(crate) fn new(message: String, hooks_open: usize) -> Self {
+        Self {
+            message,
+            hooks_open,
+            startup_mark: None,
+            startup_mark_age_ms: None,
+        }
+    }
+
+    /// Records the last startup mark the CLI reported, `none` when it reported no mark.
+    pub(crate) fn with_mark(mut self, mark: Option<(String, u64)>) -> Self {
+        match mark {
+            Some((mark, age)) => {
+                self.startup_mark = Some(mark);
+                self.startup_mark_age_ms = Some(age);
+            }
+            None => self.startup_mark = Some("none".to_owned()),
+        }
+        self
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// TypeScript's `telemetryMessage`: the first sentence of the message, without its period.
+    pub fn telemetry_message(&self) -> &str {
+        self.message
+            .split_once(". ")
+            .map_or(self.message.as_str(), |(head, _)| head)
+    }
+
+    /// TypeScript's `startupHooksOpen`: the SessionStart or Setup hooks still running when the wait ran out.
+    pub fn startup_hooks_open(&self) -> usize {
+        self.hooks_open
+    }
+
+    /// TypeScript's `startupMark`: the last mark the CLI reported, or `none`.
+    pub fn startup_mark(&self) -> Option<&str> {
+        self.startup_mark.as_deref()
+    }
+
+    /// TypeScript's `startupMarkAgeMs`: how long before the timeout that mark arrived.
+    pub fn startup_mark_age_ms(&self) -> Option<u64> {
+        self.startup_mark_age_ms
     }
 }
 
@@ -345,6 +580,14 @@ impl JsonDecodeError {
         Self {
             line: format!("JSON message exceeded maximum buffer size of {limit} bytes"),
             original_error: JsonDecodeSourceError::BufferExceeded { length, limit },
+        }
+    }
+
+    /// Python `CLIJSONDecodeError.__init__(line, original_error)` for a parser failure.
+    pub fn from_line(line: &str, original_error: serde_json::Error) -> Self {
+        Self {
+            line: line.to_owned(),
+            original_error: JsonDecodeSourceError::Json(original_error),
         }
     }
 
@@ -427,6 +670,18 @@ impl ResultError {
         }
     }
 
+    /// Python `ResultError.__init__(message, data, exit_code)`: `data` is optional and anything but an object
+    /// is treated as empty.
+    pub fn from_python(message: &str, data: Option<JsonObject>, exit_code: Option<i32>) -> Self {
+        Self::new(message.to_owned(), data.unwrap_or_default(), exit_code)
+    }
+
+    /// `str()` of the Python exception: the message followed by the exit code, as `ProcessError.__init__` builds
+    /// it (a `ResultError` carries no stderr).
+    pub fn python_text(&self) -> String {
+        python_process_error_text(&self.message, self.exit_code, None)
+    }
+
     /// `Claude Code returned an error result: <text>`.
     pub fn message(&self) -> &str {
         &self.message
@@ -464,6 +719,38 @@ impl ResultError {
 
     pub fn session_id(&self) -> Option<&str> {
         self.data.get("session_id").and_then(serde_json::Value::as_str)
+    }
+
+    /// TypeScript's `startupFailureReason`: the error result's `startup_failure_reason` when it is a string.
+    pub fn startup_failure_reason(&self) -> Option<crate::upstream::messages::SDKStartupFailureReason> {
+        let reason = self.data.get("startup_failure_reason")?;
+        if !reason.is_string() {
+            return None;
+        }
+        serde_json::from_value(reason.clone()).ok()
+    }
+}
+
+/// Python `CLINotFoundError.__init__(message, cli_path)`: the message (default `Claude Code not found`), then
+/// `: <cli_path>` when the path is non-empty.
+pub fn python_cli_not_found_text(message: Option<&str>, cli_path: Option<&str>) -> String {
+    let message = message.unwrap_or("Claude Code not found");
+    match cli_path {
+        Some(path) if !path.is_empty() => format!("{message}: {path}"),
+        _ => message.to_owned(),
+    }
+}
+
+/// Python `ProcessError.__init__(message, exit_code, stderr)`: the exit code is appended when given (zero
+/// included) and a non-empty stderr goes on its own line.
+pub fn python_process_error_text(message: &str, exit_code: Option<i32>, stderr: Option<&str>) -> String {
+    let mut text = message.to_owned();
+    if let Some(code) = exit_code {
+        text = format!("{text} (exit code: {code})");
+    }
+    match stderr {
+        Some(output) if !output.is_empty() => format!("{text}\nError output: {output}"),
+        _ => text,
     }
 }
 
@@ -543,3 +830,7 @@ pub(crate) fn error_result_data(result: &crate::ResultMessage) -> JsonObject {
     }
     data
 }
+
+#[cfg(test)]
+#[path = "error_tests.rs"]
+mod tests;

@@ -10433,3 +10433,141 @@ impl<'de> Deserialize<'de> for SDKStartupFailureReason {
         })
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SDKActiveGoalMessageType {
+    /// `active_goal`
+    ActiveGoal,
+    /// A value the pinned upstream declarations do not list; it round-trips unchanged.
+    Unknown(String),
+}
+
+impl SDKActiveGoalMessageType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ActiveGoal => "active_goal",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl Serialize for SDKActiveGoalMessageType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SDKActiveGoalMessageType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "active_goal" => Self::ActiveGoal,
+            _ => Self::Unknown(value),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SDKActiveGoalMessageValue {
+    pub condition: String,
+    pub iterations: serde_json::Number,
+    pub set_at: serde_json::Number,
+    pub tokens_at_start: serde_json::Number,
+    pub last_reason: Option<String>,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "SDKActiveGoalMessageValue")]
+struct SDKActiveGoalMessageValueWire {
+    pub condition: String,
+    pub iterations: serde_json::Number,
+    pub set_at: serde_json::Number,
+    pub tokens_at_start: serde_json::Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_reason: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl SDKActiveGoalMessageValue {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["condition", "iterations", "set_at", "tokens_at_start", "last_reason"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[])
+    }
+}
+
+impl Serialize for SDKActiveGoalMessageValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(SDKActiveGoalMessageValueWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SDKActiveGoalMessageValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = SDKActiveGoalMessageValueWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}
+
+/// Emitted when the user's /goal Stop hook reports met (clears) or not-yet-met (bumps iterations + last_reason). Any surface with a goal indicator re-renders from this. value is null when the goal is cleared. From internal QueryEvent 'active_goal'.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SDKActiveGoalMessage {
+    pub r#type: SDKActiveGoalMessageType,
+    pub value: Option<SDKActiveGoalMessageValue>,
+    pub uuid: String,
+    pub session_id: String,
+    /// Keys the pinned upstream declarations do not list, in the order they were decoded.
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// The key order this value was decoded with; encoding reproduces it.
+    pub key_order: super::support::KeyOrder,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "SDKActiveGoalMessage")]
+struct SDKActiveGoalMessageWire {
+    pub r#type: SDKActiveGoalMessageType,
+    #[serde(default)]
+    pub value: Option<SDKActiveGoalMessageValue>,
+    pub uuid: String,
+    pub session_id: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip)]
+    pub key_order: super::support::KeyOrder,
+}
+
+impl SDKActiveGoalMessage {
+    /// The keys the pinned upstream declarations list for this object.
+    pub const KNOWN_KEYS: &'static [&'static str] = &["type", "value", "uuid", "session_id"];
+
+    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.
+    pub fn match_score(value: &serde_json::Value) -> usize {
+        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[("type", &["active_goal"])])
+    }
+}
+
+impl Serialize for SDKActiveGoalMessage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        super::support::ordered(SDKActiveGoalMessageWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SDKActiveGoalMessage {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let mut decoded = SDKActiveGoalMessageWire::deserialize(value.clone()).map_err(serde::de::Error::custom)?;
+        decoded.key_order = super::support::KeyOrder::of(&value);
+        Ok(decoded)
+    }
+}

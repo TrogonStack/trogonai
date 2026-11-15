@@ -12,38 +12,18 @@ use crate::{
         MODEL_OVERRIDES_KEY, REPLACED_ADMIN_ARRAY_KEYS, RESTRICTIVE_RULES, SANDBOX_PLATFORMS_PATH,
         STRICT_PLUGIN_ONLY_KEY,
     },
-    settings_merge_spec::MergeSpec,
-    settings_resolve_values::{SettingsMap, get_path, omit, union_arrays},
+    settings_resolve_values::{SettingsMap, get_path, omit, set_path, union_arrays},
     settings_schema::schema,
 };
 
-/// `Qt` upstream: sets (or, with `None`, removes) the value at `path`, copying each object on the way and pruning
-/// objects that a removal leaves empty.
-fn set_path(map: &mut SettingsMap, path: &[&str], value: Option<&Value>) {
-    let Some((first, rest)) = path.split_first() else {
-        return;
-    };
-    if rest.is_empty() {
-        match value {
-            Some(value) => {
-                map.insert((*first).to_owned(), value.clone());
-            }
-            None => {
-                map.shift_remove(*first);
-            }
-        }
-        return;
-    }
-    let mut child = match map.get(*first) {
-        Some(Value::Object(existing)) => existing.clone(),
-        _ => SettingsMap::new(),
-    };
-    set_path(&mut child, rest, value);
-    if value.is_none() && child.is_empty() {
-        map.shift_remove(*first);
-    } else {
-        map.insert((*first).to_owned(), Value::Object(child));
-    }
+/// Whether the extracted upstream merge description replaces this key's arrays instead of unioning them.
+fn replaced_array(key: &str) -> bool {
+    schema().is_some_and(|schema| schema.merge_spec().replaced_arrays.iter().any(|listed| listed == key))
+}
+
+/// Whether the extracted upstream merge description spreads this key's object instead of merging it deeply.
+fn shallow_object(key: &str) -> bool {
+    schema().is_some_and(|schema| schema.merge_spec().shallow_objects.iter().any(|listed| listed == key))
 }
 
 /// What a lower tier contributes: no helpers, identity or environment keys, no `permissions.defaultMode`, and its
@@ -104,8 +84,7 @@ fn unclaimed_pairs(existing: &[Value], incoming: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-fn merge_value(rules: &MergeSpec, key: &str, destination: &mut Value, source: &Value) {
-    let listed = |keys: &[String]| keys.iter().any(|listed| listed == key);
+fn merge_value(key: &str, destination: &mut Value, source: &Value) {
     if REPLACED_ADMIN_ARRAY_KEYS.contains(&key) || LOWER_TIER_REPLACED_KEYS.contains(&key) {
         let next = match (key == AWS_PAIRS_KEY, &*destination, source) {
             (true, Value::Array(existing), Value::Array(incoming)) => {
@@ -118,25 +97,25 @@ fn merge_value(rules: &MergeSpec, key: &str, destination: &mut Value, source: &V
         *destination = next;
         return;
     }
-    if !listed(&rules.replaced_arrays)
+    if !replaced_array(key)
         && let (Value::Array(left), Value::Array(right)) = (&*destination, source)
     {
         let merged = union_arrays(right, left);
         *destination = Value::Array(merged);
         return;
     }
-    if listed(&rules.replaced) {
+    if key == "modelPicker" {
         *destination = source.clone();
         return;
     }
     match (destination, source) {
-        (Value::Object(left), Value::Object(right)) if listed(&rules.shallow_objects) => {
+        (Value::Object(left), Value::Object(right)) if shallow_object(key) => {
             for (name, value) in right {
                 left.insert(name.clone(), value.clone());
             }
         }
         (Value::Array(left), Value::Array(right)) => *left = right.clone(),
-        (Value::Object(left), Value::Object(right)) => merge_tier(rules, left, right),
+        (Value::Object(left), Value::Object(right)) => merge_tier(left, right),
         (Value::Array(_), Value::Object(_)) => {}
         (destination, source) => *destination = source.clone(),
     }
@@ -144,10 +123,10 @@ fn merge_value(rules: &MergeSpec, key: &str, destination: &mut Value, source: &V
 
 /// `On(destination, source, BP)` upstream: a deep merge where later tiers' arrays come first in a union and the
 /// allow-list keys are replaced whole.
-fn merge_tier(rules: &MergeSpec, destination: &mut SettingsMap, source: &SettingsMap) {
+fn merge_tier(destination: &mut SettingsMap, source: &SettingsMap) {
     for (key, value) in source {
         match destination.get_mut(key) {
-            Some(existing) => merge_value(rules, key, existing, value),
+            Some(existing) => merge_value(key, existing, value),
             None => {
                 destination.insert(key.clone(), value.clone());
             }
@@ -248,13 +227,11 @@ pub(crate) fn build_admin(tiers: &[SettingsMap], merge: bool, demoted: usize, pl
         restrict(&mut admin, &considered);
         return Some(admin);
     }
-    let fallback = MergeSpec::default();
-    let rules = schema().map_or(&fallback, |schema| schema.merge_spec());
     let mut admin = SettingsMap::new();
     for tier in lower.iter().rev() {
-        merge_tier(rules, &mut admin, tier);
+        merge_tier(&mut admin, tier);
     }
-    merge_tier(rules, &mut admin, &top);
+    merge_tier(&mut admin, &top);
     restrict(&mut admin, &considered);
     pin_model_overrides(&mut admin, &considered);
     Some(admin)

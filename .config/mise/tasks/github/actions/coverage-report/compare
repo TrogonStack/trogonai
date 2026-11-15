@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Compare coverage against the verified main baseline"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 echo "storage_subdirectory = '${COVERAGE_STORAGE_SUBDIRECTORY}'"

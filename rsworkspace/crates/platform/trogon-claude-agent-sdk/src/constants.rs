@@ -12,6 +12,20 @@ pub(crate) const KEYCHAIN_FALLBACK_ACCOUNT: &str = "claude-code-user";
 /// Settings keys removed from the copied `settings.json` of a resumed session.
 pub(crate) const RESUME_SETTINGS_STRIPPED_KEYS: [&str; 2] = ["enabledPlugins", "extraKnownMarketplaces"];
 
+/// The settings keys the TypeScript SDK strips from a resumed session's settings files.
+pub(crate) const RESUME_SETTINGS_STRIPPED_KEYS_TS: [&str; 3] =
+    ["enabledPlugins", "extraKnownMarketplaces", "additionalMarketplaces"];
+
+/// The TypeScript SDK's per-environment OAuth file name suffixes beyond the default `.claude.json`.
+pub(crate) const OAUTH_FILE_SUFFIXES_TS: [&str; 3] = ["-staging-oauth", "-local-oauth", "-custom-oauth"];
+
+/// The custom OAuth endpoints the TypeScript SDK approves for `CLAUDE_CODE_CUSTOM_OAUTH_URL`.
+pub(crate) const APPROVED_OAUTH_ENDPOINTS_TS: [&str; 3] = [
+    "https://beacon.claude-ai.staging.ant.dev",
+    "https://claude.fedstart.com",
+    "https://claude-staging.fedstart.com",
+];
+
 /// Attempts to remove a materialized resume directory before giving up.
 pub(crate) const CLEANUP_ATTEMPTS: usize = 4;
 
@@ -318,6 +332,33 @@ pub(crate) const SETTINGS_SCHEMA_JSON: &str = include_str!("upstream/settings_sc
 
 /// Magnitude up to which every integer is exactly a JavaScript number (2^53).
 pub(crate) const JS_MAX_EXACT_INTEGER: u64 = 1 << 53;
+
+/// The double a settings value holds for `Infinity` (2^63). `serde_json` has no number for Infinity, and number
+/// normalization turns every whole double below 2^64 that a document holds into an integer, so no document
+/// leaves a float with this value behind.
+pub(crate) const SETTINGS_INFINITY_MARKER: f64 = 9_223_372_036_854_775_808.0;
+
+/// The double a settings value holds for `-Infinity` (-2^62), for the same reason as [`SETTINGS_INFINITY_MARKER`].
+pub(crate) const SETTINGS_NEGATIVE_INFINITY_MARKER: f64 = -4_611_686_018_427_387_904.0;
+
+/// The integer equal to [`SETTINGS_INFINITY_MARKER`]. A finite double with the marker's value, such as a document's
+/// `9223372036854775808.0`, is held as this integer so that it does not read back as `Infinity`.
+pub(crate) const SETTINGS_INFINITY_MARKER_INTEGER: u64 = 1 << 63;
+
+/// The integer equal to [`SETTINGS_NEGATIVE_INFINITY_MARKER`], for the same reason as
+/// [`SETTINGS_INFINITY_MARKER_INTEGER`].
+pub(crate) const SETTINGS_NEGATIVE_INFINITY_MARKER_INTEGER: i64 = -(1 << 62);
+
+/// The double the first exact Python number of a resolve stands for (2^62). The n-th one is this plus
+/// `n * SETTINGS_PYTHON_NUMBER_MARKER_STEP`, below [`SETTINGS_INFINITY_MARKER`]. A whole double below 2^64 that a
+/// document holds is normalized into an integer, so only a marker is left as a float in this range.
+pub(crate) const SETTINGS_PYTHON_NUMBER_MARKER_BASE: f64 = 4_611_686_018_427_387_904.0;
+
+/// The distance between two consecutive Python number markers; doubles from 2^62 to 2^63 are 1024 apart.
+pub(crate) const SETTINGS_PYTHON_NUMBER_MARKER_STEP: f64 = 2048.0;
+
+/// The most decimal digits Python's `int()` converts from a string (`sys.get_int_max_str_digits()`).
+pub(crate) const PYTHON_INT_MAX_STR_DIGITS: usize = 4300;
 
 /// Largest integer a JavaScript number holds exactly (`Number.MAX_SAFE_INTEGER`).
 pub(crate) const SETTINGS_SCHEMA_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
@@ -785,6 +826,78 @@ pub(crate) const RESTRICTIVE_RULES: [(&[&str], &[&str]); 72] = [
     (&["isolation", "persistHome"], &["false"]),
 ];
 
+/// The ranked value of a restrictive rule whose restrictive value is `true` itself (`restrictive: true` in `Go()`).
+pub(crate) const RESTRICTIVE_TRUE: &str = "true";
+
+/// Keys the restriction of a user-writable policy file never keeps from the file as written (`yJ` upstream).
+pub(crate) const RESTRICT_SKIPPED_KEYS: [&str; 2] = ["disableAllHooks", "disableReplyCheck"];
+
+/// Path the restriction pins to `false` when a policy file turns attribution off.
+pub(crate) const RESTRICT_ATTRIBUTION_PATH: [&str; 2] = ["attribution", "sessionUrl"];
+
+/// Permission keys a restricted policy file keeps.
+pub(crate) const RESTRICT_PERMISSION_KEYS: [&str; 4] =
+    ["deny", "ask", "disableBypassPermissionsMode", "disableAutoMode"];
+
+/// Keys a restricted policy file keeps as written (`cXe` upstream).
+pub(crate) const RESTRICT_COPIED_KEYS: [&str; 15] = [
+    "allowedMcpServers",
+    "deniedMcpServers",
+    "allowManagedMcpServersOnly",
+    "disabledMcpjsonServers",
+    "allowManagedHooksOnly",
+    "allowedHttpHookUrls",
+    "strictKnownMarketplaces",
+    "allowedMarketplaces",
+    "blockedMarketplaces",
+    "strictPluginOnlyCustomization",
+    "availableModels",
+    "enforceAvailableModels",
+    "availableModelsMatch",
+    "deniedModels",
+    "allowedProviders",
+];
+
+/// Sandbox filesystem keys a restricted policy file keeps.
+pub(crate) const RESTRICT_FILESYSTEM_KEYS: [&str; 3] = ["denyRead", "denyWrite", "allowManagedReadPathsOnly"];
+
+/// Sandbox network keys a restricted policy file keeps.
+pub(crate) const RESTRICT_NETWORK_KEYS: [&str; 3] = ["deniedDomains", "strictAllowlist", "allowManagedDomainsOnly"];
+
+/// Sandbox credential keys a restricted policy file keeps.
+pub(crate) const RESTRICT_CREDENTIAL_KEYS: [&str; 2] = ["files", "envVars"];
+
+/// Paths the restriction always drops (`p8e` upstream).
+pub(crate) const RESTRICT_DROPPED_PATHS: [&[&str]; 3] = [
+    &["allowedHttpHookUrls"],
+    &["httpHookAllowedEnvVars"],
+    &["isolation", "required"],
+];
+
+/// Credential lists the restriction rewrites into deny entries, with the field each entry names (`p5` upstream).
+pub(crate) const RESTRICT_DENY_ENTRY_LISTS: [(&[&str], &str); 2] = [
+    (&["sandbox", "credentials", "files"], "path"),
+    (&["sandbox", "credentials", "envVars"], "name"),
+];
+
+/// Permission lists the restriction drops negated path rules from.
+pub(crate) const RESTRICT_PERMISSION_LISTS: [&[&str]; 2] = [&["permissions", "deny"], &["permissions", "ask"]];
+
+/// Rule prefixes whose negated path form (`!path` or `./!path`) the restriction drops (`If` upstream).
+pub(crate) const RESTRICT_NEGATABLE_RULE_PREFIXES: [&str; 2] = ["Read(", "Edit("];
+
+/// Plugin the organization policy-mod options belong to (`hu` upstream).
+pub(crate) const SECURITY_PLUGIN_ID: &str = "cc-plugin-sec-default@builtin";
+
+/// Earlier names of the security plugin whose options still count, read before the current one (`N4` upstream).
+pub(crate) const LEGACY_SECURITY_PLUGIN_IDS: [&str; 1] = ["sec-default@builtin"];
+
+/// Security plugin options a restricted policy file keeps (`qy.policyModOptions` upstream).
+pub(crate) const POLICY_MOD_OPTIONS: [&str; 1] = ["allowManagedModsOnly"];
+
+/// Marketplace of the plugins that ship with the CLI (`YS` upstream).
+pub(crate) const BUILTIN_PLUGIN_MARKETPLACE: &str = "builtin";
+
 /// Settings key that pins the organization a login must belong to.
 pub(crate) const LOGIN_ORGANIZATION_KEY: &str = "forceLoginOrgUUID";
 
@@ -797,9 +910,6 @@ pub(crate) const LOGIN_METHODS: [&str; 2] = ["claudeai", "console"];
 /// Folder name whose contents the connector download flow owns (`J8e` upstream), compared after normalization.
 pub(crate) const CONNECTOR_DOWNLOADS_NAME: &str = "connector-downloads";
 
-/// The sandbox mount that always counts as a connector download folder (`z8e` upstream).
-pub(crate) const CONNECTOR_DOWNLOADS_ROOT: &str = "/mnt/user-data/uploads/connector-downloads";
-
 /// Whole contents of a `.gitignore` that marks a connector download folder as ignored (`n7e` upstream).
 pub(crate) const CONNECTOR_GITIGNORE_MARKERS: [&[u8]; 3] = [b"*", b"*\n", b"*\r\n"];
 
@@ -809,19 +919,179 @@ pub(crate) const CONNECTOR_GITIGNORE_MAX_BYTES: u64 = 3;
 /// Entries the connector folder check remembers before it forgets all of them (`nE` upstream).
 pub(crate) const CONNECTOR_CACHE_LIMIT: usize = 64;
 
-/// Names of the temporary files a connector download leaves behind (`e7e` upstream).
-pub(crate) const CONNECTOR_DOWNLOAD_TEMP_PATTERN: &str = r"^(?:download-[0-9a-f]{8}(?:-[0-9]+)?(?:\.[^./\\]*)?|\.download-[0-9a-f]{8}(?:-[0-9]+)?(?:\.[^./\\]*)?\.(?:from\.json|part))$";
-
 /// Symbolic links the path walk follows before it gives up on the path.
 pub(crate) const LINK_HOP_LIMIT: usize = 64;
 
-/// `ENAMETOOLONG` as the host reports it.
-#[cfg(target_os = "macos")]
-pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 63;
+/// The sandbox mount that always counts as a connector download folder (`z8e` upstream, the parent of
+/// `/mnt/user-data/uploads` joined with `/connector-downloads`).
+pub(crate) const CONNECTOR_DOWNLOADS_MOUNT: &str = "/mnt/user-data/connector-downloads";
 
-/// `ENAMETOOLONG` as the host reports it.
-#[cfg(not(target_os = "macos"))]
-pub(crate) const NAME_TOO_LONG_ERRNO: i32 = 36;
+/// Bytes of a `.gitignore` the connector check reads (`t7e` upstream).
+pub(crate) const CONNECTOR_GITIGNORE_READ_BYTES: usize = 4;
+
+/// Error code the path vetting walk throws when it refuses a path (`yd` upstream).
+pub(crate) const VETTING_REFUSAL_CODE: &str = "ERR_SYMLINK_TO_NETWORK_PATH";
+
+/// Environment variable naming the kind of session the CLI runs as (`Nm` upstream).
+pub(crate) const VETTING_SESSION_KIND_VARIABLE: &str = "CLAUDE_CODE_SESSION_KIND";
+
+/// Session kind whose launch directory the path vetting walk does not trust (`Nm` upstream).
+pub(crate) const VETTING_BACKGROUND_SESSION_KIND: &str = "bg";
+
+/// macOS folder of open file descriptors, which the walk never reads through.
+pub(crate) const VETTING_DEV_FD: &str = "/dev/fd";
+
+/// Folder the macOS automounter may own (`TI.homeIsOwnMount` upstream).
+pub(crate) const VETTING_HOME_MOUNT: &str = "/home";
+
+/// Folder whose device `/home` is compared with (`TI.homeIsOwnMount` upstream).
+pub(crate) const VETTING_USERS_MOUNT: &str = "/Users";
+
+/// libuv's `uv_translate_sys_error` as node runs it on Windows: the `code` each Windows system error takes, in the
+/// order of its `switch`. A code missing here is `UNKNOWN`.
+pub(crate) const LIBUV_WINDOWS_ERRORS: [(i32, &str); 100] = [
+    (10013, "EACCES"),
+    (740, "EACCES"),
+    (1920, "EACCES"),
+    (1227, "EADDRINUSE"),
+    (10048, "EADDRINUSE"),
+    (10049, "EADDRNOTAVAIL"),
+    (10047, "EAFNOSUPPORT"),
+    (10035, "EAGAIN"),
+    (232, "EAGAIN"),
+    (10037, "EALREADY"),
+    (1004, "EBADF"),
+    (6, "EBADF"),
+    (33, "EBUSY"),
+    (231, "EBUSY"),
+    (32, "EBUSY"),
+    (995, "ECANCELED"),
+    (10004, "ECANCELED"),
+    (1113, "ECHARSET"),
+    (1236, "ECONNABORTED"),
+    (10053, "ECONNABORTED"),
+    (1225, "ECONNREFUSED"),
+    (10061, "ECONNREFUSED"),
+    (64, "ECONNRESET"),
+    (10054, "ECONNRESET"),
+    (183, "EEXIST"),
+    (80, "EEXIST"),
+    (998, "EFAULT"),
+    (10014, "EFAULT"),
+    (1232, "EHOSTUNREACH"),
+    (10065, "EHOSTUNREACH"),
+    (122, "EINVAL"),
+    (13, "EINVAL"),
+    (87, "EINVAL"),
+    (1464, "EINVAL"),
+    (10022, "EINVAL"),
+    (10046, "EINVAL"),
+    (1102, "EIO"),
+    (1111, "EIO"),
+    (23, "EIO"),
+    (1166, "EIO"),
+    (1165, "EIO"),
+    (1393, "EIO"),
+    (1129, "EIO"),
+    (1101, "EIO"),
+    (31, "EIO"),
+    (1106, "EIO"),
+    (1117, "EIO"),
+    (1104, "EIO"),
+    (205, "EIO"),
+    (110, "EIO"),
+    (1103, "EIO"),
+    (156, "EIO"),
+    (10056, "EISCONN"),
+    (1921, "ELOOP"),
+    (4, "EMFILE"),
+    (10024, "EMFILE"),
+    (10040, "EMSGSIZE"),
+    (111, "ENAMETOOLONG"),
+    (206, "ENAMETOOLONG"),
+    (1231, "ENETUNREACH"),
+    (10051, "ENETUNREACH"),
+    (10055, "ENOBUFS"),
+    (161, "ENOENT"),
+    (267, "ENOENT"),
+    (203, "ENOENT"),
+    (2, "ENOENT"),
+    (123, "ENOENT"),
+    (15, "ENOENT"),
+    (4392, "ENOENT"),
+    (126, "ENOENT"),
+    (3, "ENOENT"),
+    (11001, "ENOENT"),
+    (11004, "ENOENT"),
+    (8, "ENOMEM"),
+    (14, "ENOMEM"),
+    (82, "ENOSPC"),
+    (112, "ENOSPC"),
+    (277, "ENOSPC"),
+    (1100, "ENOSPC"),
+    (39, "ENOSPC"),
+    (2250, "ENOTCONN"),
+    (10057, "ENOTCONN"),
+    (145, "ENOTEMPTY"),
+    (10038, "ENOTSOCK"),
+    (50, "ENOTSUP"),
+    (109, "EOF"),
+    (5, "EPERM"),
+    (1314, "EPERM"),
+    (230, "EPIPE"),
+    (233, "EPIPE"),
+    (10058, "EPIPE"),
+    (10043, "EPROTONOSUPPORT"),
+    (19, "EROFS"),
+    (121, "ETIMEDOUT"),
+    (10060, "ETIMEDOUT"),
+    (17, "EXDEV"),
+    (1, "EISDIR"),
+    (208, "E2BIG"),
+    (10044, "ESOCKTNOSUPPORT"),
+    (193, "EFTYPE"),
+];
+
+/// `ERROR_INVALID_HANDLE`, which libuv's Windows `realpath` raises for a final path it cannot shorten.
+pub(crate) const WINDOWS_ERROR_INVALID_HANDLE: i32 = 6;
+
+/// The prefix `GetFinalPathNameByHandleW` puts on a network path, which libuv's `realpath` turns into `\\`.
+pub(crate) const LIBUV_UNC_PATH_PREFIX: &str = "\\\\?\\UNC\\";
+
+/// The prefix `GetFinalPathNameByHandleW` puts on a local path, which libuv's `realpath` drops.
+pub(crate) const LIBUV_LONG_PATH_PREFIX: &str = "\\\\?\\";
+
+/// The UTF-16 units node reads for each byte of the WTF-8 spelling of a lone surrogate: one U+FFFD apiece.
+pub(crate) const LIBUV_LONE_SURROGATE_TEXT: [u16; 3] = [0xFFFD; 3];
+
+/// The `code` libuv gives a Windows system error its table does not name.
+pub(crate) const LIBUV_UNKNOWN_ERROR: &str = "UNKNOWN";
+
+/// The macOS automounter map that says whether `/home` is automounted (`TI.readAutoMaster` upstream).
+pub(crate) const VETTING_AUTO_MASTER: &str = "/etc/auto_master";
+
+/// Path components the automount checks look at (`NQ` upstream).
+pub(crate) const VETTING_AUTOMOUNT_DEPTH: usize = 6;
+
+/// Folders the macOS data volume firmlinks to the root (`VQ` upstream), in upstream order.
+pub(crate) const VETTING_FIRMLINKED_FOLDERS: [&str; 16] = [
+    "usr/local",
+    "usr/libexec/cups",
+    "usr/share/snmp",
+    "AppleInternal",
+    "Applications",
+    "Library",
+    "Users",
+    "Volumes",
+    "cores",
+    "home",
+    "media",
+    "mnt",
+    "opt",
+    "pkg",
+    "private",
+    "sw",
+];
 
 /// Milliseconds the machine policy reading stays in force when the last read answered (`ret` upstream).
 pub(crate) const MDM_REREAD_IDLE_MS: i128 = 1_800_000;
@@ -834,6 +1104,10 @@ pub(crate) const MDM_REREAD_LOSS_MS: i128 = 30_000;
 
 /// Milliseconds a call waits for a re-read before it goes on with the reading in force (`oet` upstream).
 pub(crate) const MDM_REREAD_WAIT_MS: i128 = 1_000;
+
+/// The longest a call waits for a background re-read by the machine's own steady clock, whatever the host's clock
+/// shows, so a clock that stands still or goes back cannot hold the caller past the second upstream waits.
+pub(crate) const MDM_REREAD_WAIT: Duration = Duration::from_millis(1_000);
 
 /// Unanswered reads in a row after which the slow idle interval applies again.
 pub(crate) const MDM_UNANSWERED_RETRY_LIMIT: u32 = 4;
@@ -873,3 +1147,242 @@ pub(crate) const STDERR_SETTLE: Duration = Duration::from_millis(200);
 
 /// Python: each wait of its close sequence.
 pub(crate) const PYTHON_CLOSE_WAIT: Duration = Duration::from_secs(5);
+
+pub(crate) const OAUTH_REFRESH_ENV: &str = "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH";
+pub(crate) const HOST_AUTH_REFRESH_ENV: &str = "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH";
+pub(crate) const QUESTION_PREVIEW_FORMAT_ENV: &str = "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT";
+pub(crate) const QUESTION_EXTENDED_ENV: &str = "CLAUDE_CODE_QUESTION_EXTENDED";
+pub(crate) const QUESTION_OPTIONAL_DESCRIPTIONS_ENV: &str = "CLAUDE_CODE_QUESTION_OPTIONAL_DESCRIPTIONS";
+
+/// Variables upstream deletes from an inherited environment (in any letter case) unless `toolConfig` sets them.
+pub(crate) const TOOL_CONFIG_ENVS: [&str; 3] = [
+    QUESTION_EXTENDED_ENV,
+    QUESTION_OPTIONAL_DESCRIPTIONS_ENV,
+    AGENT_PROGRESS_SUMMARIES_ENV,
+];
+
+pub(crate) const OAUTH_CALLBACK_MISSING: &str = "getOAuthToken callback is not provided.";
+pub(crate) const HOST_AUTH_CALLBACK_MISSING: &str = "getHostAuthToken callback is not provided.";
+
+/// The protocol versions the Python `mcp` server negotiates; anything else is answered with the latest.
+pub(crate) const PYTHON_MCP_PROTOCOL_VERSIONS: [&str; 4] = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+
+/// The protocol version the Python server answers with when the client asks for an unsupported one.
+pub(crate) const PYTHON_MCP_LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
+
+/// The requests a server built by `create_sdk_mcp_server` registers handlers for.
+pub(crate) const PYTHON_MCP_METHODS: [&str; 4] = ["initialize", "ping", "tools/list", "tools/call"];
+
+/// The `ToolAnnotations` fields `Tool.model_validate` keeps.
+pub(crate) const PYTHON_MCP_ANNOTATION_FIELDS: [&str; 5] = [
+    "title",
+    "readOnlyHint",
+    "destructiveHint",
+    "idempotentHint",
+    "openWorldHint",
+];
+
+/// `Number.MAX_SAFE_INTEGER`, the largest integer request id the TypeScript dialect accepts.
+pub(crate) const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+
+/// The `$schema` the TypeScript dialect adds to a tool input schema.
+pub(crate) const MCP_TS_JSON_SCHEMA_DRAFT_07: &str = "http://json-schema.org/draft-07/schema#";
+
+/// Variable naming the surface that launched the process.
+pub(crate) const ENTRYPOINT_VARIABLE: &str = "CLAUDE_CODE_ENTRYPOINT";
+
+/// Entrypoints of a cloud session that takes its managed settings from the organization (`Cf` upstream).
+pub(crate) const ORGANIZATION_ENTRYPOINTS: [&str; 2] = ["remote_cowork", "remote_cowork_trigger"];
+
+/// Allow-list keys a document the organization withholds can still narrow (`JP` upstream).
+pub(crate) const HELD_ALLOW_LIST_KEYS: [&str; 8] = [
+    "allowedMcpServers",
+    "availableModels",
+    "strictKnownMarketplaces",
+    "allowedChannelPlugins",
+    "allowedProviders",
+    "allowedMarketplaces",
+    "allowedHttpHookUrls",
+    "httpHookAllowedEnvVars",
+];
+
+/// Gate keys that mean nothing without the allow list they gate (`HX` upstream).
+pub(crate) const ALLOW_LIST_GATES: [(&str, &str); 2] = [
+    ("allowManagedMcpServersOnly", "allowedMcpServers"),
+    ("enforceAvailableModels", "availableModels"),
+];
+
+/// The allow list of MCP servers, which the admin may take from any managed tier when servers are managed-only.
+pub(crate) const MCP_SERVER_ALLOW_LIST_KEY: &str = "allowedMcpServers";
+
+/// Key that says whether the parent process's managed settings merge under the managed tier.
+pub(crate) const PARENT_SETTINGS_BEHAVIOR_KEY: &str = "parentSettingsBehavior";
+
+/// Links the writability walk follows before it gives up and treats the document as writable (`DYe` upstream).
+pub(crate) const WRITABLE_WALK_LINK_LIMIT: usize = 40;
+
+/// The write bit for others (`S_IWOTH`) and for the group (`S_IWGRP`) of a mode.
+pub(crate) const MODE_OTHER_WRITABLE: u32 = 0o2;
+pub(crate) const MODE_GROUP_WRITABLE: u32 = 0o20;
+
+// Node `path` port
+
+/// UTF-16 code unit of `.`.
+pub(crate) const NODE_PATH_CHAR_DOT: u16 = 0x2e;
+
+/// UTF-16 code unit of `/`.
+pub(crate) const NODE_PATH_CHAR_FORWARD_SLASH: u16 = 0x2f;
+
+/// UTF-16 code unit of `\`.
+pub(crate) const NODE_PATH_CHAR_BACKWARD_SLASH: u16 = 0x5c;
+
+/// UTF-16 code unit of `:`.
+pub(crate) const NODE_PATH_CHAR_COLON: u16 = 0x3a;
+
+/// Device names the Windows flavor of node's `path` treats as reserved (compared after `toUpperCase`).
+pub(crate) const NODE_WINDOWS_RESERVED_NAMES: &[&str] = &[
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+    "COM\u{b9}",
+    "COM\u{b2}",
+    "COM\u{b3}",
+    "LPT\u{b9}",
+    "LPT\u{b2}",
+    "LPT\u{b3}",
+];
+
+/// TypeScript subtypes addressed to the machine serving the session's tools, which the SDK leaves unanswered.
+pub(crate) const REMOTE_TOOL_SUBTYPES: [&str; 4] = [
+    "remote_tool_call",
+    "remote_plumbing_call",
+    "remote_tools_probe",
+    "remote_tools_reannounce",
+];
+
+/// The longest tool name the TypeScript `McpServer` registers without printing a warning.
+pub(crate) const MCP_TS_TOOL_NAME_MAX_LENGTH: usize = 128;
+
+/// Python 3.11+ refuses to convert an integer of more than this many digits.
+pub(crate) const PYTHON_INTEGER_DIGIT_LIMIT: usize = 4300;
+
+/// Nesting beyond this is refused instead of recursing without bound when a request id is scanned.
+pub(crate) const RAW_JSON_MAX_DEPTH: usize = 200;
+
+/// The prefix of the placeholder text a request id that a `Value` cannot hold stands for until it is written.
+pub(crate) const PYTHON_ID_MARKER_PREFIX: &str = "\u{0}pyid:";
+
+/// TypeScript `oA`: how long the WebSocket transport's connection may take to open.
+pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_millis(15_000);
+
+/// TypeScript `g4`: the delay between the WebSocket transport's keep-alive frames.
+pub(crate) const WEBSOCKET_KEEP_ALIVE_INTERVAL: Duration = Duration::from_millis(50_000);
+
+/// The line the WebSocket transport sends as a keep-alive frame.
+pub(crate) const WEBSOCKET_KEEP_ALIVE_LINE: &str = "{\"type\":\"keep_alive\"}\n";
+
+/// The reason the WebSocket transport gives when it closes the connection.
+pub(crate) const WEBSOCKET_CLOSE_REASON: &str = "Normal closure";
+
+/// The code a browser reports for a close frame without a status.
+pub(crate) const WEBSOCKET_NO_STATUS_CODE: u16 = 1005;
+
+/// The code a browser reports when the connection drops without a close frame.
+pub(crate) const WEBSOCKET_ABNORMAL_CODE: u16 = 1006;
+
+/// The pydantic model union a JSON-RPC message is validated against, as pydantic titles its `ValidationError`.
+pub(crate) const PYDANTIC_JSONRPC_MESSAGE_TITLE: &str =
+    "union[JSONRPCRequest,JSONRPCNotification,JSONRPCResponse,JSONRPCError]";
+
+/// pydantic refuses to convert a string of more than this many significant digits to an integer.
+pub(crate) const PYDANTIC_MAX_INT_DIGITS: usize = 4300;
+
+/// The pydantic minor version that documents each error type.
+pub(crate) const PYDANTIC_DOCUMENTATION_VERSION: &str = "2.14";
+
+/// pydantic-core shows at most this many bytes of an input's `repr`.
+pub(crate) const PYDANTIC_MAX_REPR_BYTES: usize = 50;
+
+/// The bytes pydantic-core keeps from the start of a `repr` it truncates.
+pub(crate) const PYDANTIC_REPR_HEAD_BYTES: usize = 25;
+
+/// The bytes pydantic-core keeps from the end of a `repr` it truncates.
+pub(crate) const PYDANTIC_REPR_TAIL_BYTES: usize = 24;
+
+/// `OE`: the prefix of every request id the manifest capture sends, which marks a late reply for dropping.
+pub(crate) const MCP_MANIFEST_CAPTURE_ID_PREFIX: &str = "sdk-manifest-capture:";
+
+/// `$8`: how long the manifest capture waits for every server before the CLI is left to handshake the rest.
+pub(crate) const MCP_MANIFEST_CAPTURE_DEADLINE: Duration = Duration::from_millis(250);
+
+/// `F8`: the protocol version the manifest capture's `initialize` asks for.
+pub(crate) const MCP_MANIFEST_CAPTURE_PROTOCOL_VERSION: &str = "2025-11-25";
+
+/// Python's precision in `invalid literal for int() with base 10: %.200R`.
+pub(crate) const PYTHON_INT_LITERAL_REPR_CHARS: usize = 200;
+
+/// Python's floor and default for the initialize wait, in seconds: `max(int(...) / 1000.0, 60.0)`.
+pub(crate) const PYTHON_INITIALIZE_TIMEOUT_SECONDS: f64 = 60.0;
+
+/// The `uiHost` subtypes the driver routes to `UiHost`.
+pub(crate) const UI_SUBTYPES: [&str; 6] = [
+    "ui_copy",
+    "ui_prompt_read",
+    "ui_prompt_fill",
+    "ui_prompt_paint",
+    "ui_prompt_suggest",
+    "ui_read_selection",
+];
+
+/// `AE`: the startup initialize limit when the caller passes none.
+pub(crate) const STARTUP_DEFAULT_LIMIT: Duration = Duration::from_millis(60_000);
+/// `w8`: how long hook time stays uncounted, only when the caller passed no limit.
+pub(crate) const STARTUP_UNCOUNTED_BUDGET: Duration = Duration::from_millis(600_000);
+/// `itt`: how many hook ids are followed one by one; later ones are only counted.
+pub(crate) const STARTUP_FOLLOWED_LIMIT: usize = 64;
+/// The hook events whose running time `startup()` leaves uncounted.
+pub(crate) const STARTUP_HOOK_EVENTS: [&str; 2] = ["SessionStart", "Setup"];
+
+/// The keys of `ClaimOptions.settings` that govern hooks. A claim cannot apply them.
+pub(crate) const CLAIM_HOOK_SETTINGS: [&str; 5] = [
+    "hooks",
+    "disableAllHooks",
+    "allowManagedHooksOnly",
+    "allowedHttpHookUrls",
+    "httpHookAllowedEnvVars",
+];
+
+/// The settings keys that follow the claim, in the order `claim()` sends them.
+pub(crate) const CLAIM_FOLLOWING_SETTINGS: [&str; 6] = [
+    "model",
+    "agent",
+    "fastMode",
+    "permissions",
+    "availableModels",
+    "disableAutoMode",
+];
+
+/// The session id Python's `ClaudeSDKClient.connect(str)` and `query` write when the caller names none.
+pub(crate) const PYTHON_DEFAULT_SESSION: &str = "default";
+
+/// The keyword a schema `pattern` takes in the TypeScript call check.
+pub(crate) const ECMA_PATTERN: &str = "x-trogon-pattern";

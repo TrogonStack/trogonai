@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use serde_json::json;
 use trogon_claude_agent_sdk::{
-    CancellationToken, LocalMcpServer, LocalMcpServerOptions, McpServerName, McpToolInputSchema, McpToolName,
-    McpToolOutput, McpToolRequest, SdkMcpServer, SdkTool, SdkToolOptions, SdkTools, SdkToolsError,
+    CancellationToken, LocalMcpServer, LocalMcpServerOptions, McpServerDialect, McpServerName, McpToolInputSchema,
+    McpToolName, McpToolOutput, McpToolRequest, SdkMcpServer, SdkTool, SdkToolOptions, SdkTools, SdkToolsError,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -26,6 +26,9 @@ fn tool(name: &str) -> Result<SdkTool, Box<dyn std::error::Error>> {
             let response = response.clone();
             async move { Ok(McpToolOutput::text(response)) }
         }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     }))
 }
 
@@ -66,6 +69,14 @@ fn duplicate_error_identifies_the_repeated_name_after_unique_tools() -> TestResu
 }
 
 #[test]
+fn python_collections_keep_repeated_names() -> TestResult {
+    let tools = SdkTools::with_duplicates([tool("echo")?, tool("echo")?, tool("read")?]);
+    assert_eq!(tools.len(), 3);
+    assert!(!tools.is_empty());
+    Ok(())
+}
+
+#[test]
 fn an_empty_iterator_creates_an_empty_collection() -> TestResult {
     let tools = SdkTools::new(std::iter::empty())?;
     assert!(tools.is_empty());
@@ -86,11 +97,14 @@ fn default_and_single_tool_construction_are_infallible() -> TestResult {
 }
 
 #[tokio::test]
-async fn server_lists_and_dispatches_every_validated_tool_in_name_order() -> TestResult {
+async fn server_lists_and_dispatches_every_validated_tool_in_registration_order() -> TestResult {
     let registry = LocalMcpServer::from(LocalMcpServerOptions {
         name: McpServerName::from("collection"),
-        version: "1".into(),
-        tools: SdkTools::new([tool("zeta")?, tool("alpha")?, tool("Alpha")?])?,
+        version: Some("1".into()),
+        tools: Some(SdkTools::new([tool("zeta")?, tool("alpha")?, tool("Alpha")?])?),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     });
     let session = registry.open_session();
     let initialized = session
@@ -126,8 +140,8 @@ async fn server_lists_and_dispatches_every_validated_tool_in_name_order() -> Tes
         .iter()
         .map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names, [Some("Alpha"), Some("alpha"), Some("zeta")]);
-    for (index, name) in ["Alpha", "alpha", "zeta"].into_iter().enumerate() {
+    assert_eq!(names, [Some("zeta"), Some("alpha"), Some("Alpha")]);
+    for (index, name) in ["zeta", "alpha", "Alpha"].into_iter().enumerate() {
         let response = session
             .request(
                 serde_json::from_value(json!({

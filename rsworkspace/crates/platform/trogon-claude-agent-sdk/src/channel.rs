@@ -53,6 +53,14 @@ impl<T> Sender<T> {
         }
     }
 
+    /// Resolves once the receiver is gone or closed.
+    pub(crate) async fn closed(&self) {
+        match self {
+            Self::Bounded(sender) => sender.closed().await,
+            Self::Unbounded(sender) => sender.closed().await,
+        }
+    }
+
     /// Resolves once a bounded queue has room; an unbounded queue always has room.
     pub(crate) async fn ready(&self) -> bool {
         match self {
@@ -67,6 +75,22 @@ impl<T> Receiver<T> {
         match self {
             Self::Bounded(receiver) => receiver.recv().await,
             Self::Unbounded(receiver) => receiver.recv().await,
+        }
+    }
+
+    /// [`Self::recv`] for a `Stream`: registers `cx` to be woken when a value arrives or the queue closes.
+    pub(crate) fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<T>> {
+        match self {
+            Self::Bounded(receiver) => receiver.poll_recv(cx),
+            Self::Unbounded(receiver) => receiver.poll_recv(cx),
+        }
+    }
+
+    /// A value already queued, without waiting.
+    pub(crate) fn try_recv(&mut self) -> Option<T> {
+        match self {
+            Self::Bounded(receiver) => receiver.try_recv().ok(),
+            Self::Unbounded(receiver) => receiver.try_recv().ok(),
         }
     }
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Configure the coverage publication identity"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 name="${COVERAGE_GIT_NAME}"

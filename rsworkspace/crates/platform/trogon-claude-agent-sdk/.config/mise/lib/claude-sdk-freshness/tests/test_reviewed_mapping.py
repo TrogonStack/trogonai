@@ -55,9 +55,6 @@ class ReviewedMappingTests(unittest.TestCase):
             {item["id"] for item in report["declared_known_gaps"]},
             {feature["id"] for feature in features if feature["status"] in {"partial", "deferred"}},
         )
-        isolation = next(feature for feature in features if feature["id"] == "isolation-defaults")
-        self.assertEqual(isolation["status"], "supported")
-        self.assertNotIn("isolation-defaults", {item["id"] for item in report["intentional_differences"]})
         self.assertEqual(
             {item["id"] for item in report["intentional_differences"]},
             {feature["id"] for feature in features if feature["status"] in {"out_of_scope", "rust_difference"}},

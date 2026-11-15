@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Commit the coverage badge after verification"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 git switch "${COVERAGE_STORAGE_BRANCH}"

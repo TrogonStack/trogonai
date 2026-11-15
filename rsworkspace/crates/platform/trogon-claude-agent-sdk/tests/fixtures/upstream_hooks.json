@@ -1,0 +1,1037 @@
+{
+  "HookInput": [
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PreToolUse",
+      "tool_name": "text",
+      "tool_input": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "tool_use_id": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      }
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PostToolUse",
+      "tool_name": "text",
+      "tool_input": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "tool_response": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "tool_use_id": "text",
+      "duration_ms": 2.5,
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      }
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PostToolUseFailure",
+      "tool_name": "text",
+      "tool_input": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "tool_use_id": "text",
+      "error": "text",
+      "is_interrupt": true,
+      "duration_ms": 3,
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      }
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PostToolBatch",
+      "tool_calls": [
+        {
+          "tool_name": "text",
+          "tool_input": {
+            "any": [
+              "thing",
+              null
+            ]
+          },
+          "tool_use_id": "text",
+          "tool_response": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PermissionDenied",
+      "tool_name": "text",
+      "tool_input": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "tool_use_id": "text",
+      "reason": "text",
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      }
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "Notification",
+      "message": "text",
+      "title": "text",
+      "notification_type": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "UserPromptSubmit",
+      "prompt": "text",
+      "source": "user",
+      "session_title": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "UserPromptExpansion",
+      "expansion_type": "mcp_prompt",
+      "command_name": "text",
+      "command_args": "text",
+      "command_source": "text",
+      "prompt": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "SessionStart",
+      "source": "compact",
+      "model": "text",
+      "session_title": "text",
+      "seconds_since_last_response": 3,
+      "context_tokens": 3,
+      "prompt_cache_likely_expired": true,
+      "estimated_cache_write_usd": 3
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "SessionEnd",
+      "reason": "other"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "Stop",
+      "stop_hook_active": true,
+      "last_assistant_message": "text",
+      "background_tasks": [
+        {
+          "id": "text",
+          "type": "text",
+          "status": "text",
+          "description": "text",
+          "command": "text",
+          "agent_type": "text",
+          "server": "text",
+          "tool": "text",
+          "name": "text"
+        }
+      ],
+      "session_crons": [
+        {
+          "id": "text",
+          "schedule": "text",
+          "recurring": true,
+          "prompt": "text"
+        }
+      ]
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "StopFailure",
+      "error": "max_output_tokens",
+      "error_details": "text",
+      "last_assistant_message": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "SubagentStart"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "SubagentStop",
+      "stop_hook_active": false,
+      "agent_transcript_path": "text",
+      "last_assistant_message": "text",
+      "background_tasks": [
+        {
+          "id": "text",
+          "type": "text",
+          "status": "text",
+          "description": "text",
+          "command": "text",
+          "agent_type": "text",
+          "server": "text",
+          "tool": "text",
+          "name": "text"
+        }
+      ],
+      "session_crons": [
+        {
+          "id": "text",
+          "schedule": "text",
+          "recurring": false,
+          "prompt": "text"
+        }
+      ]
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PreCompact",
+      "trigger": "manual",
+      "custom_instructions": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PostCompact",
+      "trigger": "auto",
+      "compact_summary": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PreModelSwitch",
+      "from_model": "text",
+      "to_model": "text",
+      "requested_model": "text",
+      "source": "picker",
+      "context_tokens": 3,
+      "prompt_cache_warm": true,
+      "cache_ttl": "5m",
+      "estimated_cache_write_usd": 3,
+      "pricing": "catalog"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PostModelSwitch",
+      "from_model": "text",
+      "to_model": "text",
+      "requested_model": "text",
+      "source": "sdk",
+      "context_tokens": 2.5,
+      "prompt_cache_warm": false,
+      "cache_ttl": "1h",
+      "estimated_cache_write_usd": 2.5,
+      "pricing": "default"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "text",
+      "tool_input": {
+        "any": [
+          "thing",
+          null
+        ]
+      },
+      "permission_suggestions": [
+        {
+          "type": "addRules",
+          "rules": [
+            {
+              "toolName": "text",
+              "ruleContent": "text"
+            }
+          ],
+          "behavior": "allow",
+          "destination": "session"
+        }
+      ],
+      "mcp_server": {
+        "name": "text",
+        "source": "text"
+      }
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "Setup",
+      "trigger": "maintenance"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "TeammateIdle",
+      "teammate_name": "text",
+      "team_name": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "TaskCreated",
+      "task_id": "text",
+      "task_subject": "text",
+      "task_description": "text",
+      "teammate_name": "text",
+      "team_name": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "TaskCompleted",
+      "task_id": "text",
+      "task_subject": "text",
+      "task_description": "text",
+      "teammate_name": "text",
+      "team_name": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "Elicitation",
+      "mcp_server_name": "text",
+      "message": "text",
+      "mode": "url",
+      "url": "text",
+      "elicitation_id": "text",
+      "requested_schema": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "ElicitationResult",
+      "mcp_server_name": "text",
+      "elicitation_id": "text",
+      "mode": "form",
+      "action": "accept",
+      "content": {
+        "key": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "ConfigChange",
+      "source": "user_settings",
+      "file_path": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "InstructionsLoaded",
+      "file_path": "text",
+      "memory_type": "Local",
+      "load_reason": "nested_traversal",
+      "globs": [
+        "text"
+      ],
+      "trigger_file_path": "text",
+      "parent_file_path": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "WorktreeCreate",
+      "name": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "WorktreeRemove",
+      "worktree_path": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "CwdChanged",
+      "old_cwd": "text",
+      "new_cwd": "text"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "FileChanged",
+      "file_path": "text",
+      "event": "change"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "DirectoryAdded",
+      "directory": "text",
+      "source": "register_repo_root"
+    },
+    {
+      "session_id": "text",
+      "transcript_path": "text",
+      "cwd": "text",
+      "prompt_id": "text",
+      "permission_mode": "text",
+      "agent_id": "text",
+      "agent_type": "text",
+      "effort": {
+        "level": "text"
+      },
+      "hook_event_name": "MessageDisplay",
+      "turn_id": "text",
+      "message_id": "text",
+      "index": 3,
+      "final": true,
+      "delta": "text"
+    }
+  ],
+  "SyncHookJSONOutput": [
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+        "permissionDecisionReason": "text",
+        "updatedInput": {
+          "key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        },
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": "text",
+        "sessionTitle": "text",
+        "suppressOriginalPrompt": false
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptExpansion",
+        "additionalContext": "text",
+        "suppressOriginalPrompt": true
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "SessionStart",
+        "additionalContext": "text",
+        "initialUserMessage": "text",
+        "sessionTitle": "text",
+        "watchPaths": [
+          "text"
+        ],
+        "reloadSkills": false
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "Setup",
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "PreModelSwitch",
+        "permissionDecision": "ask",
+        "permissionDecisionReason": "text"
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "PostModelSwitch",
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "SubagentStart",
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "PostToolUse",
+        "additionalContext": "text",
+        "classifierContext": "text",
+        "updatedToolOutput": {
+          "any": [
+            "thing",
+            null
+          ]
+        },
+        "updatedMCPToolOutput": {
+          "any": [
+            "thing",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "PostToolUseFailure",
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "PostToolBatch",
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "Stop",
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "SubagentStop",
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "PermissionDenied",
+        "retry": false
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "Notification",
+        "additionalContext": "text"
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "PermissionRequest",
+        "decision": {
+          "behavior": "deny",
+          "message": "text",
+          "interrupt": false
+        }
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "Elicitation",
+        "action": "decline",
+        "content": {
+          "key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "ElicitationResult",
+        "action": "cancel",
+        "content": {
+          "key": {
+            "any": [
+              "thing",
+              null
+            ]
+          }
+        }
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "CwdChanged",
+        "watchPaths": [
+          "text"
+        ]
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "FileChanged",
+        "watchPaths": [
+          "text"
+        ]
+      }
+    },
+    {
+      "continue": true,
+      "suppressOutput": true,
+      "stopReason": "text",
+      "decision": "approve",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "WorktreeCreate",
+        "worktreePath": "text"
+      }
+    },
+    {
+      "continue": false,
+      "suppressOutput": false,
+      "stopReason": "text",
+      "decision": "block",
+      "systemMessage": "text",
+      "terminalSequence": "text",
+      "reason": "text",
+      "hookSpecificOutput": {
+        "hookEventName": "MessageDisplay",
+        "displayContent": "text"
+      }
+    }
+  ],
+  "AsyncHookJSONOutput": [
+    {
+      "async": true,
+      "asyncTimeout": 3
+    }
+  ]
+}

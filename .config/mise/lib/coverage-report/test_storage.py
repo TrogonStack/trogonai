@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 import base64
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -168,8 +167,7 @@ class StorageCheckoutTests(publication.PublicationTests):
         return source, repo, pair, env
 
     def task(self, cwd, name, env, check=True):
-        interpreter = sys.executable if name == 'threshold' else 'bash'
-        return publication.run(cwd, interpreter, str(TASKS / name), env=env, check=check)
+        return publication.run(cwd, str(TASKS / name), env=env, check=check)
 
     def publish_production_pair(self, branch):
         source, repo, pair, env = self.production_fixture(branch)

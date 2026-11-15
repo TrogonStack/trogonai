@@ -1,7 +1,8 @@
 //! The subprocess implementation of [`Transport`], Python's `SubprocessCLITransport`.
 
 use std::{
-    ffi::OsStr,
+    collections::BTreeMap,
+    ffi::{OsStr, OsString},
     io,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
@@ -9,11 +10,12 @@ use std::{
     time::Duration,
 };
 
+use futures_util::{FutureExt, future::OptionFuture};
 use tokio::{
     io::AsyncWriteExt,
     process::{Child, ChildStdin, ChildStdout, Command as ProcessCommand},
     task::JoinHandle,
-    time::timeout,
+    time::{sleep, timeout},
 };
 
 use crate::{
@@ -21,19 +23,13 @@ use crate::{
     adapters::SpawnProcess,
     argv,
     constants::{
-        CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, PYTHON_CLOSE_WAIT, SCRIPT_EXTENSIONS, STDERR_SETTLE,
-        TYPESCRIPT_CLOSE_GRACE, TYPESCRIPT_KILL_DELAY,
+        CLIENT_APP_ENV, DERIVED_CLIENT_APP_ENV, PYTHON_CLOSE_WAIT, STDERR_SETTLE, TYPESCRIPT_CLOSE_GRACE,
+        TYPESCRIPT_KILL_DELAY,
     },
     environment_plan::{self, Inherited},
     framing::{FrameReader, SharedTail, drain_stderr_with},
-    process_options::EnvironmentMode,
+    process_options::{EnvironmentMode, is_script},
 };
-
-fn is_script(path: &Path) -> bool {
-    path.extension()
-        .and_then(OsStr::to_str)
-        .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
-}
 
 /// Builds the child command. A script path runs under `script_runtime.executable` (default `node`), as the
 /// TypeScript SDK does; any other path is the program itself.
@@ -44,7 +40,7 @@ pub(crate) fn command(
     derived_debug_file: Option<&Path>,
 ) -> Result<ProcessCommand, Error> {
     let arguments = argv::build(options, derived_debug_file)?;
-    let mut command = if is_script(cli_path) {
+    let mut command = if is_script(cli_path, options.argv_style) {
         let runtime = options
             .script_runtime
             .executable
@@ -55,7 +51,12 @@ pub(crate) fn command(
         command.arg(cli_path);
         command
     } else {
-        ProcessCommand::new(cli_path)
+        let mut command = ProcessCommand::new(cli_path);
+        // TypeScript puts `executableArgs` before the arguments of a native binary too.
+        if options.argv_style == ArgvStyle::TypeScript {
+            command.args(&options.script_runtime.arguments);
+        }
+        command
     };
     command.args(arguments);
     if let Some(cwd) = &options.cwd {
@@ -83,10 +84,22 @@ pub(crate) fn command(
         return Err(Error::FileCheckpointingWithSessionStore);
     }
     #[cfg(unix)]
-    if let Some(name) = &options.user {
-        command.uid(crate::run_as::lookup(name).map_err(Error::Io)?);
-    } else if let Some(uid) = options.run_as_uid {
-        command.uid(uid);
+    {
+        let uid = match (&options.user, options.run_as_uid) {
+            (Some(name), _) => Some(crate::run_as::lookup(name).map_err(Error::Io)?),
+            (None, uid) => uid,
+        };
+        if let Some(uid) = uid {
+            // `setreuid(-1, -1)` changes nothing yet succeeds, so a privileged parent would keep its identity;
+            // CPython refuses that value for `Popen(user=)` too.
+            if uid == u32::MAX {
+                return Err(Error::Io(std::io::Error::from(std::io::ErrorKind::InvalidInput)));
+            }
+            // SAFETY: the closure only calls `setreuid`, which is async-signal-safe and allocates nothing.
+            unsafe {
+                command.pre_exec(move || crate::run_as::set_real_and_effective_uid(uid));
+            }
+        }
     }
     command
         .stdin(Stdio::piped())
@@ -108,6 +121,23 @@ enum ClosedReason {
     NotReady,
 }
 
+impl ClosedReason {
+    /// How each SDK words a write once the process has stopped.
+    fn after_stop(style: ArgvStyle, exit_code: Option<i32>) -> Self {
+        match style {
+            ArgvStyle::Python => Self::Terminated { exit_code },
+            _ => Self::NotReady,
+        }
+    }
+
+    fn error(self) -> Error {
+        match self {
+            Self::Terminated { exit_code } => Error::WriteToTerminatedProcess { exit_code },
+            Self::NotReady => Error::NotReadyForWriting,
+        }
+    }
+}
+
 impl Closed {
     fn record(&self, reason: ClosedReason) {
         if let Ok(mut slot) = self.0.lock() {
@@ -117,11 +147,7 @@ impl Closed {
 
     /// The write error for a stopped process, or `None` when the run did not record how it ended.
     pub(crate) fn write_error(&self) -> Option<Error> {
-        let reason = self.0.lock().ok()?.clone()?;
-        Some(match reason {
-            ClosedReason::Terminated { exit_code } => Error::WriteToTerminatedProcess { exit_code },
-            ClosedReason::NotReady => Error::NotReadyForWriting,
-        })
+        self.0.lock().ok()?.clone().map(ClosedReason::error)
     }
 }
 
@@ -133,7 +159,60 @@ pub(crate) struct ProcessSpawn<'a, P> {
     pub config_dir: Option<&'a Path>,
     /// The TypeScript default debug file, derived by `connect` when the SDK spawns the CLI itself.
     pub derived_debug_file: Option<&'a Path>,
+    /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` for a child resumed from a store, when the session runtime sets it.
+    pub secure_storage_config_dir: Option<std::ffi::OsString>,
     pub closed: Closed,
+    /// The caller's whole environment, which a `spawn_claude_code_process` callback receives with the changes
+    /// applied. Read only when that callback is set.
+    pub parent_environment: Vec<(OsString, OsString)>,
+    /// `startup()` and `prewarm()`: ask the CLI to report startup marks, unless the caller's environment already
+    /// carries the variable.
+    pub startup_marks: bool,
+}
+
+/// TypeScript's `SpawnOptions` for the command the SDK would run. `signal` is the forwarded abort signal.
+fn spawn_options(
+    options: &ClaudeAgentOptions,
+    inherited: &Inherited,
+    parent_environment: Vec<(OsString, OsString)>,
+    command: &ProcessCommand,
+    signal: crate::CancellationToken,
+) -> Result<crate::SpawnOptions, Error> {
+    let command = command.as_std();
+    let mut env: BTreeMap<OsString, OsString> = if environment_plan::plan(options, inherited).clear {
+        BTreeMap::new()
+    } else {
+        parent_environment.into_iter().collect()
+    };
+    for (name, value) in command.get_envs() {
+        match value {
+            Some(value) => env.insert(name.to_owned(), value.to_owned()),
+            None => env.remove(name),
+        };
+    }
+    #[cfg(unix)]
+    let uid = match &options.user {
+        Some(name) => Some(crate::run_as::lookup(name).map_err(Error::Io)?),
+        None => options.run_as_uid,
+    };
+    #[cfg(not(unix))]
+    let uid = None;
+    Ok(crate::SpawnOptions {
+        command: command.get_program().to_owned(),
+        args: command.get_args().map(OsStr::to_owned).collect(),
+        cwd: command.get_current_dir().map(Path::to_path_buf),
+        env,
+        signal,
+        uid,
+    })
+}
+
+/// TypeScript logs a throw from `onProcessSpawned` and carries on.
+fn report_spawn(callback: &crate::OnProcessSpawned, pid: u32, spawn_sync_ms: f64) {
+    let call = std::panic::AssertUnwindSafe(|| (callback.0)(pid, crate::ProcessSpawnInfo { spawn_sync_ms }));
+    if std::panic::catch_unwind(call).is_err() {
+        tracing::debug!("onProcessSpawned threw");
+    }
 }
 
 pub(crate) struct ProcessTransport {
@@ -151,6 +230,18 @@ pub(crate) struct ProcessTransport {
     /// TypeScript's `endInput` ends the stream but keeps the transport ready, so a later write is dropped without
     /// an error (`[ProcessTransport] Dropping write to ended stdin stream`).
     input_ended: bool,
+    /// The reader reached the end of stdout, so the CLI finished on its own rather than being stopped.
+    stdout_ended: bool,
+    /// The `mcp_message` ids of the line `read_message` returned last, for the Python dialect.
+    wire_ids: Option<crate::McpWireIds>,
+    /// TypeScript's `forwardedAbort` for a `spawn_claude_code_process` process, with the caller's abort controller
+    /// it follows once the close grace is over.
+    forwarded_abort: Option<ForwardedAbort>,
+}
+
+struct ForwardedAbort {
+    caller: crate::CancellationToken,
+    forwarded: crate::CancellationToken,
 }
 
 impl ProcessTransport {
@@ -164,41 +255,72 @@ impl ProcessTransport {
             process,
             config_dir,
             derived_debug_file,
+            secure_storage_config_dir,
             closed,
+            parent_environment,
+            startup_marks,
         } = input;
         let mut command = command(options, &cli_path, inherited, derived_debug_file)?;
+        if startup_marks {
+            command.env("CLAUDE_CODE_SDK_READS_STARTUP_MARKS", "1");
+        }
         if let Some(config_dir) = config_dir {
             command.env("CLAUDE_CONFIG_DIR", config_dir);
         }
+        command.envs(secure_storage_config_dir.map(|directory| ("CLAUDE_SECURESTORAGE_CONFIG_DIR", directory)));
         crate::cli_path::reject_windows_batch_cli(cli_path.as_os_str(), options.windows_batch_cli)?;
-        let mut child = process.spawn(&mut command).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                match options.cwd.as_ref() {
-                    Some(cwd) if !cwd.exists() => Error::WorkingDirectoryMissing(cwd.clone()),
-                    _ => Error::CliNotFoundAt(cli_path.clone()),
+        let mut forwarded_abort = None;
+        let mut child = if let Some(spawner) = &options.spawn_claude_code_process {
+            let forwarded = crate::CancellationToken::new();
+            let spawn = spawn_options(options, inherited, parent_environment, &command, forwarded.clone())?;
+            forwarded_abort = Some(ForwardedAbort {
+                caller: options.abort_controller.clone().unwrap_or_default(),
+                forwarded,
+            });
+            (spawner.0)(spawn).map_err(Error::Spawn)?
+        } else {
+            let started = std::time::Instant::now();
+            let child = process.spawn(&mut command).map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    match options.cwd.as_ref() {
+                        Some(cwd) if !cwd.exists() => Error::WorkingDirectoryMissing(cwd.clone()),
+                        _ => Error::CliNotFoundAt(cli_path.clone()),
+                    }
+                } else {
+                    Error::Spawn(crate::error::launch_failure(&cli_path, error))
                 }
-            } else {
-                Error::Spawn(error)
+            })?;
+            let spawn_sync_ms = started.elapsed().as_secs_f64() * 1000.0;
+            if let (Some(pid), Some(callback)) = (child.id(), &options.on_process_spawned) {
+                report_spawn(callback, pid, spawn_sync_ms);
             }
-        })?;
+            child
+        };
         let stdin = child.stdin.take().ok_or(Error::PipeUnavailable)?;
         let stdout = child.stdout.take().ok_or(Error::PipeUnavailable)?;
-        let stderr = child.stderr.take().ok_or(Error::PipeUnavailable)?;
-        let stderr_tail = SharedTail::new(options.limits.stderr_tail);
-        let stderr = tokio::spawn(drain_stderr_with(
-            stderr,
-            stderr_tail.clone(),
-            options
-                .limits
-                .max_buffer_size
-                .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE)
-                .get(),
-            options.stderr_handler.clone(),
-        ));
+        // A process from `spawn_claude_code_process` may come without a stderr pipe, as in TypeScript. The SDK's own
+        // spawn always pipes stderr, like `sdk.mjs`, so a process adapter that drops it fails like a missing pipe.
+        let stderr = match child.stderr.take() {
+            None if options.spawn_claude_code_process.is_none() => return Err(Error::PipeUnavailable),
+            stderr => stderr,
+        };
+        let stderr_tail = SharedTail::new(options.limits.stderr_tail, options.argv_style == ArgvStyle::TypeScript);
+        let stderr = match stderr {
+            Some(stderr) => tokio::spawn(drain_stderr_with(
+                stderr,
+                stderr_tail.clone(),
+                options
+                    .limits
+                    .max_buffer_size
+                    .unwrap_or(crate::Limits::PYTHON_MAX_BUFFER_SIZE),
+                options.stderr_handler.clone(),
+            )),
+            None => tokio::spawn(async { Ok(()) }),
+        };
         Ok(Self {
             child: Some(child),
             stdin: Some(stdin),
-            frames: FrameReader::new(stdout, options.limits.max_buffer_size.map(std::num::NonZeroUsize::get)),
+            frames: FrameReader::new(stdout, options.limits.max_buffer_size),
             stderr,
             stderr_tail,
             argv_style: options.argv_style,
@@ -206,6 +328,9 @@ impl ProcessTransport {
             closed,
             forced: false,
             input_ended: false,
+            stdout_ended: false,
+            wire_ids: None,
+            forwarded_abort,
         })
     }
 
@@ -222,15 +347,13 @@ impl ProcessTransport {
         if self.stdin.is_none() && !self.input_ended {
             return Some(Error::NotReadyForWriting);
         }
-        if let Some(Ok(Some(status))) = self.child.as_mut().map(Child::try_wait) {
-            return Some(match self.argv_style {
-                ArgvStyle::Python => Error::WriteToTerminatedProcess {
-                    exit_code: crate::error::exit_code(&status),
-                },
-                _ => Error::NotReadyForWriting,
-            });
-        }
-        None
+        // One chain: whether the child has exited by the time of a write is a race the tests cannot pin, so the
+        // exited and running cases share every line.
+        let style = self.argv_style;
+        self.child
+            .as_mut()
+            .and_then(|child| child.try_wait().ok().flatten())
+            .map(|status| ClosedReason::after_stop(style, crate::error::exit_code(&status)).error())
     }
 
     /// SIGTERM on Unix, a hard kill where there is no such signal or it cannot be delivered.
@@ -262,8 +385,8 @@ impl ProcessTransport {
         }
     }
 
-    /// TypeScript's close: wait 2 seconds, then SIGTERM (none on Windows), and SIGKILL 5 seconds later without
-    /// waiting for it. Stderr gets 200 ms after the exit. Nothing here fails.
+    /// TypeScript's close: wait 2 seconds, then SIGTERM (none on Windows), and SIGKILL 5 seconds later if the process
+    /// is still running, without waiting for it. Stderr gets 200 ms after the exit. Nothing here fails.
     async fn reap_typescript(&mut self) -> Option<(ExitStatus, StderrTail)> {
         let mut child = self.child.take()?;
         if let Ok(Ok(status)) = timeout(TYPESCRIPT_CLOSE_GRACE, child.wait()).await {
@@ -274,14 +397,8 @@ impl ProcessTransport {
         if let Err(error) = Self::terminate(&mut child).await {
             tracing::debug!(%error, "could not send SIGTERM to Claude Code");
         }
-        tokio::spawn(async move {
-            if timeout(TYPESCRIPT_KILL_DELAY, child.wait()).await.is_err() {
-                if let Err(error) = child.start_kill() {
-                    tracing::debug!(%error, "could not send SIGKILL to Claude Code");
-                }
-                let _ = child.wait().await;
-            }
-        });
+        // One line, because a test ends long before the delay and the task never resumes.
+        tokio::spawn(sleep(TYPESCRIPT_KILL_DELAY).map(move |()| kill_if_running(&mut child)));
         None
     }
 
@@ -352,9 +469,7 @@ impl Transport for ProcessTransport {
     }
 
     async fn write(&mut self, data: &str) -> Result<(), Error> {
-        if let Some(error) = self.write_unavailable() {
-            return Err(error);
-        }
+        self.write_unavailable().map_or(Ok(()), Err)?;
         if self.input_ended {
             tracing::debug!("dropping a write to an ended stdin stream");
             return Ok(());
@@ -369,6 +484,7 @@ impl Transport for ProcessTransport {
     async fn read_message(&mut self) -> Result<Option<JsonObject>, Error> {
         loop {
             let Some(frame) = self.frames.next().await? else {
+                self.stdout_ended = true;
                 return Ok(None);
             };
             if !frame.trim_ascii_start().starts_with(b"{") {
@@ -377,8 +493,18 @@ impl Transport for ProcessTransport {
                 }
                 continue;
             }
-            match serde_json::from_slice::<JsonObject>(&frame) {
-                Ok(object) => return Ok(Some(object)),
+            // Python reads the ids of an `mcp_message` with `json.loads`; the scan keeps their exact text and
+            // hands `serde_json` the line with those ids replaced by `null`.
+            let scan = if self.argv_style == ArgvStyle::Python {
+                crate::McpWireScan::new(&frame)
+            } else {
+                crate::McpWireScan::new(&[])
+            };
+            match serde_json::from_slice::<JsonObject>(scan.frame(&frame)) {
+                Ok(object) => {
+                    self.wire_ids = scan.into_ids();
+                    return Ok(Some(object));
+                }
                 Err(error) => {
                     if self.argv_style == ArgvStyle::TypeScript || self.frames.last_was_tail() {
                         tracing::debug!("skipping undecodable line from CLI stdout");
@@ -390,6 +516,10 @@ impl Transport for ProcessTransport {
         }
     }
 
+    fn take_wire_ids(&mut self) -> Option<crate::McpWireIds> {
+        self.wire_ids.take()
+    }
+
     /// Closes stdin, then waits for the process with the escalation described on `reap`. An unsuccessful exit the
     /// SDK did not cause is `Error::Process`.
     async fn close(&mut self) -> Result<(), Error> {
@@ -397,18 +527,25 @@ impl Transport for ProcessTransport {
         self.input_ended = false;
         let reaped = self.reap().await;
         self.stderr.abort();
+        // TypeScript aborts the forwarded signal after the close grace, and only when the caller aborted.
+        if let Some(abort) = &self.forwarded_abort
+            && abort.caller.is_cancelled()
+        {
+            abort.forwarded.cancel();
+        }
         let Some((status, stderr)) = reaped? else {
-            self.closed.record(match self.argv_style {
-                ArgvStyle::Python => ClosedReason::Terminated { exit_code: None },
-                _ => ClosedReason::NotReady,
-            });
+            self.closed.record(ClosedReason::after_stop(self.argv_style, None));
             return Ok(());
         };
         let exit_code = crate::error::exit_code(&status);
-        self.closed.record(match self.argv_style {
-            ArgvStyle::Python => ClosedReason::Terminated { exit_code },
-            _ => ClosedReason::NotReady,
-        });
+        // Python's clean end of the stream closes the transport (`_ready` is false) before a later write, which
+        // then reports "not ready"; a failed exit or a stopped run leaves it ready and reports the terminated process.
+        let reason = if self.argv_style == ArgvStyle::Python && self.stdout_ended && !self.forced && status.success() {
+            ClosedReason::NotReady
+        } else {
+            ClosedReason::after_stop(self.argv_style, exit_code)
+        };
+        self.closed.record(reason);
         if !self.forced && !status.success() {
             return Err(Error::Process { status, stderr });
         }
@@ -428,11 +565,31 @@ impl Transport for ProcessTransport {
 
     async fn kill(&mut self) -> Result<(), Error> {
         self.forced = true;
-        if let Some(child) = self.child.as_mut()
-            && child.try_wait().map_err(Error::Io)?.is_none()
-        {
-            Self::terminate(child).await?;
-        }
-        Ok(())
+        // One chain: whether the child exits before the kill lands is a race the tests cannot pin, so the running
+        // and exited cases share every line.
+        let running = self
+            .child
+            .as_mut()
+            .map(|child| child.try_wait().map(|status| status.is_none().then_some(child)))
+            .transpose()
+            .map_err(Error::Io)?
+            .flatten();
+        OptionFuture::from(running.map(Self::terminate)).await.unwrap_or(Ok(()))
     }
 }
+
+/// The delayed half of TypeScript's close: SIGKILL only a process that has not exited (`exitCode === null`
+/// upstream, where an exited child has no handle left and the kill does nothing). Whether the signal was sent.
+fn kill_if_running(child: &mut Child) -> bool {
+    let running = matches!(child.try_wait(), Ok(None));
+    running && child.start_kill().is_ok()
+}
+
+#[cfg(test)]
+mod command_tests;
+
+#[cfg(all(test, unix))]
+mod tests;
+
+#[cfg(all(test, unix))]
+mod run_as_tests;

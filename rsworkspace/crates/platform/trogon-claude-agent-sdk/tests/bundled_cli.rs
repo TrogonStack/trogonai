@@ -190,6 +190,20 @@ fn host_target_is_a_node_spelling() {
     assert_ne!(host.arch(), "x86_64");
 }
 
+/// Upstream prefers the musl package on Linux unless the Node process report has a glibc runtime version.
+#[test]
+fn host_target_prefers_musl_on_linux_unless_the_process_runs_against_glibc() {
+    let first = NativePackageTarget::host()
+        .specifiers()
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    assert_eq!(
+        first.contains("-musl/"),
+        cfg!(target_os = "linux") && !cfg!(target_env = "gnu")
+    );
+}
+
 #[test]
 fn derived_client_app_minimum_compares_the_leading_triple_as_a_list() {
     for version in [

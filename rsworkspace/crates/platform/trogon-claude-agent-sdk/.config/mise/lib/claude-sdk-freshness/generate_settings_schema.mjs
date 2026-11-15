@@ -15,7 +15,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { NUMBER_DOCUMENTS } from './settings_number_battery.mjs';
 import { MERGE_PAIRS } from './settings_merge_battery.mjs';
-import { KEYED, TEXTS } from './settings_read_battery.mjs';
+import { policyDocuments } from './settings_policy_battery.mjs';
+import { KEYED, POLICY_KEYED, TEXTS } from './settings_read_battery.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => {
@@ -38,7 +39,7 @@ const REFINE_ANCHOR = ',e(r.value,r)),t);return n}';
 // the schemas the in-place sanitizers validate entries with and the constants they consult.
 const READ_PATH_NAMES = [
   'lE', 'cm', 'Zk', 'Qk', 'Xk', 'Jk', 'yk', 'vS', 'zS', 'BS', 'K7e', 'Iu', 'GS', 'Es', 'Vf', 'b6', 'em', '$S',
-  'D7e', 'I7e', 'J5e', 'm7e', 'm3', 'qJe', 'W3e', 'On', 'ao',
+  'D7e', 'I7e', 'J5e', 'm7e', 'm3', 'qJe', 'W3e', 'Go', 'Pu', 'WS', 'Qi', 'Qa', 'Bk', 'ku', 'Cu', 'On', 'ao', 'w6e', 'v6e', 'k6e',
 ];
 // The schemas the sanitizers validate single entries with, by the name the Rust side looks them up under.
 const READ_ROOTS = {
@@ -50,6 +51,10 @@ const READ_ROOTS = {
   hookEntry: 'vS',
   allowedMcpServer: 'zS',
   deniedMcpServer: 'BS',
+  // The `Sandbox*ConfigSchema()` factories the `sandbox` setting builds its parts with.
+  sandboxNetwork: 'w6e',
+  sandboxFilesystem: 'v6e',
+  sandboxCredentials: 'k6e',
 };
 const unique = (text, anchor, what) => {
   const first = text.indexOf(anchor);
@@ -103,7 +108,7 @@ async function main() {
 
 // Pretty prints the document but keeps each recorded probe list and battery on one line.
 const INLINE_KEYS = new Set(['probes', 'string', 'object', 'value', 'rule']);
-const LINE_PER_ITEM_KEYS = new Set(['documents', 'numbers', 'merges']);
+const LINE_PER_ITEM_KEYS = new Set(['documents', 'numbers', 'merges', 'policySanitized']);
 function render(document) {
   const inline = [];
   const text = JSON.stringify(
@@ -200,6 +205,8 @@ function serialize({ fields, active }, read) {
     const withChecks = (value) => (checks.length > 0 ? { ...value, checks } : value);
     switch (def.type) {
       case 'string':
+        // `z.coerce.string()` runs the input through `String()` before it checks the type.
+        return withChecks(def.coerce ? { type: 'string', coerce: true } : { type: 'string' });
       case 'boolean':
       case 'number':
       case 'unknown':
@@ -255,6 +262,33 @@ function readSection(read, roots) {
     const { settings } = read.lE(input, 'f', false);
     return { input, output: settings === null ? null : JSON.parse(JSON.stringify(settings)) };
   });
+  const policyProbes = [...KEYED, ...POLICY_KEYED].map((document) => {
+    const input = JSON.stringify(document);
+    const parsed = structuredClone(JSON.parse(input));
+    read.cm(parsed, 'f', { skipMcpServerEntryFilter: true, policySource: true });
+    return { input, output: JSON.parse(JSON.stringify(parsed)) };
+  });
+  const restrictive = read.Go().map(({ path, restrictive: value }) => ({ path, restrictive: value }));
+  if ([...read.WS.keys()].join() !== 'permissions.defaultMode') throw new Error('the value readers no longer cover only the default mode');
+  const defaultMode = read.WS.get('permissions.defaultMode');
+  const modes = [...read.Qa, ...read.Bk(read.ku())];
+  const modeCandidates = [...new Set([...modes, 'manual', 'bogus'])];
+  for (const candidate of modeCandidates) {
+    const expected = modes.find((mode) => mode === read.Cu(candidate));
+    if (defaultMode.read(candidate) !== expected) throw new Error('the default mode reader no longer reads as modeled');
+  }
+  const policyDocumentProbes = policyDocuments(restrictive).map((document) => {
+    const input = JSON.stringify(document);
+    const result = read.lE(input, 'f', true);
+    return {
+      input,
+      output: {
+        settings: result.settings === null ? null : JSON.parse(JSON.stringify(result.settings)),
+        documentHasPolicyContent: result.documentHasPolicyContent ?? null,
+        loadState: result.loadState,
+      },
+    };
+  });
   return {
     roots,
     managedOnlyKeys: [...read.K7e],
@@ -280,6 +314,19 @@ function readSection(read, roots) {
       const { settings } = read.lE(input, 'f', false);
       return { input, output: JSON.stringify(settings) };
     }),
+    policySanitized: policyProbes,
+    policy: {
+      restrictive,
+      defaultMode: {
+        path: 'permissions.defaultMode',
+        modes,
+        aliases: Object.fromEntries(modeCandidates.filter((mode) => read.Cu(mode) !== mode).map((mode) => [mode, read.Cu(mode)])),
+        inert: [...defaultMode.inert],
+        floor: defaultMode.floor,
+      },
+      metaKeys: [...read.Qi],
+      documents: policyDocumentProbes,
+    },
   };
 }
 

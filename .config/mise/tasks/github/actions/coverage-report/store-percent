@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Record the measured coverage and artifact name"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 echo "coverage_total=$(cat .coverage-total)" >> "$GITHUB_OUTPUT"

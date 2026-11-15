@@ -1,3 +1,5 @@
+#![allow(clippy::panic)]
+
 use serde_json::{Value, json};
 
 use super::*;
@@ -33,12 +35,15 @@ fn typescript_consumes_keep_alive_and_python_counts_it_without_yielding_it() -> 
 #[test]
 fn a_type_that_is_not_a_string_is_yielded_by_typescript_and_skipped_by_python() -> Result<(), ProtocolError> {
     let message = object(json!({"type":5,"field":1}));
-    assert!(matches!(
-        decode(&message, MessageDecoding::TypeScript)?,
-        Decoded::Message(decoded)
-            if matches!(decoded.as_ref(), Message::Unknown { kind, data, raw }
-                if kind.is_empty() && data == &object(json!({"field":1})) && raw == &message)
-    ));
+    let Decoded::Message(decoded) = decode(&message, MessageDecoding::TypeScript)? else {
+        panic!("expected an unknown message");
+    };
+    let Message::Unknown { kind, data, raw } = *decoded else {
+        panic!("expected an unknown message");
+    };
+    assert_eq!(kind, "");
+    assert_eq!(data, object(json!({"field":1})));
+    assert_eq!(raw, message);
     assert!(matches!(decode(&message, MessageDecoding::Python)?, Decoded::Unparsed));
     Ok(())
 }
@@ -82,12 +87,13 @@ fn python_names_the_type_of_a_block_that_is_not_an_object() {
 #[test]
 fn python_checks_hook_messages_before_the_type() -> Result<(), ProtocolError> {
     let message = object(json!({"type":"system","subtype":"hook_response"}));
-    assert!(matches!(
-        decode(&message, MessageDecoding::Python)?,
-        Decoded::Message(decoded)
-            if matches!(decoded.as_ref(), Message::System(system)
-                if matches!(&system.event, SystemEvent::Hook(hook) if hook.hook_event_name.is_empty()))
-    ));
+    let Decoded::Message(decoded) = decode(&message, MessageDecoding::Python)? else {
+        panic!("expected a system message");
+    };
+    let Message::System(system) = *decoded else {
+        panic!("expected a system message");
+    };
+    assert!(matches!(system.event, SystemEvent::Hook(hook) if hook.hook_event_name.is_empty()));
     Ok(())
 }
 
@@ -97,13 +103,10 @@ fn a_typed_view_needs_the_value_types_python_annotates() {
         json!({"type":"system","subtype":"task_started","task_id":1,"description":"d",
         "uuid":"u","session_id":"s"}),
     );
-    assert!(matches!(
-        system(&message),
-        Some(SystemMessage {
-            event: SystemEvent::Other,
-            ..
-        })
-    ));
+    let Some(system) = system(&message) else {
+        panic!("expected a system message");
+    };
+    assert!(matches!(system.event, SystemEvent::Other));
 }
 
 #[test]

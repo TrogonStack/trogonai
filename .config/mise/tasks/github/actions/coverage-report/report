@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Generate the complete text coverage report"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 rm -f .coverage-comparison-status

@@ -109,9 +109,10 @@ pub struct SessionStoreLimits {
     pub max_retained_failures: Option<QueueCapacity>,
     pub max_pending_entries: NonZeroUsize,
     pub max_pending_bytes: NonZeroUsize,
-    pub max_resume_entries: NonZeroUsize,
-    pub max_resume_bytes: NonZeroUsize,
-    pub max_subkeys: QueueCapacity,
+    /// Opt-in hardening for a store-backed resume. Upstream imposes none, so every default is unlimited.
+    pub max_resume_entries: Option<NonZeroUsize>,
+    pub max_resume_bytes: Option<NonZeroUsize>,
+    pub max_subkeys: Option<QueueCapacity>,
     pub append_timeout: Timeout,
     /// Opt-in deadline for waiting on a transcript mirror flush. Upstream does not bound the flush beyond each
     /// append's own timeout, so `None` waits for it; a deadline fails the wait with
@@ -126,9 +127,9 @@ impl Default for SessionStoreLimits {
             max_retained_failures: None,
             max_pending_entries: NonZeroUsize::new(500).unwrap_or(NonZeroUsize::MIN),
             max_pending_bytes: NonZeroUsize::new(1024 * 1024).unwrap_or(NonZeroUsize::MIN),
-            max_resume_entries: NonZeroUsize::new(100_000).unwrap_or(NonZeroUsize::MIN),
-            max_resume_bytes: NonZeroUsize::new(64 * 1024 * 1024).unwrap_or(NonZeroUsize::MIN),
-            max_subkeys: QueueCapacity::default(),
+            max_resume_entries: None,
+            max_resume_bytes: None,
+            max_subkeys: None,
             append_timeout: Timeout::default(),
             flush_timeout: None,
             load_timeout: Timeout::default(),
@@ -163,10 +164,18 @@ pub enum MirrorSizeEstimate {
 pub struct SessionStoreOptions {
     pub store: Arc<dyn SessionStore>,
     pub config_directory: Option<PathBuf>,
+    /// Opt-in hardening for a store-backed resume: refuse a relative configuration or home directory with
+    /// [`SessionError::UnsafeConfigPath`](crate::SessionError::UnsafeConfigPath). Both upstream SDKs join a relative
+    /// path as given, so the default accepts it.
+    pub require_absolute_config_paths: bool,
+    /// Opt-in override of the project key a store-backed resume loads from. `None`, the default, derives it from the
+    /// working directory as both upstream SDKs do. A key set here is joined to the projects directory as given.
     pub project_key: Option<SessionProjectKey>,
     pub limits: SessionStoreLimits,
     pub flush: SessionStoreFlush,
     pub size_estimate: MirrorSizeEstimate,
+    /// The upstream SDK whose resume rules apply. Defaults to the TypeScript SDK.
+    pub dialect: crate::SummaryDialect,
 }
 
 impl<S: SessionStore + 'static> From<Arc<S>> for SessionStoreOptions {
@@ -180,10 +189,12 @@ impl From<Arc<dyn SessionStore>> for SessionStoreOptions {
         Self {
             store,
             config_directory: None,
+            require_absolute_config_paths: false,
             project_key: None,
             limits: SessionStoreLimits::default(),
             flush: SessionStoreFlush::default(),
             size_estimate: MirrorSizeEstimate::default(),
+            dialect: crate::SummaryDialect::default(),
         }
     }
 }

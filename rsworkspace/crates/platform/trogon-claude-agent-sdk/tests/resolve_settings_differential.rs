@@ -1,11 +1,11 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 //! Runs the pinned TypeScript `resolveSettings` and the Rust port against the same fixture trees and compares
-//! the JSON they produce byte for byte.
+//! the JSON they produce byte for byte, the Rust side printed through `js_stringify` as `JSON.stringify` prints it.
 //!
 //! Opt in with `mise run claude-sdk:resolve-diff`, which fetches the pinned package and points
-//! `CLAUDE_SDK_TS_PACKAGE_DIR` at it. Without that variable the test only checks that the fixtures are
-//! well-formed.
+//! `CLAUDE_SDK_TS_PACKAGE_DIR` at it. Without that variable the tests check that the fixtures are well-formed and
+//! replay what upstream printed for the cases that record it in `expected.json`.
 
 use std::{
     collections::BTreeMap,
@@ -17,18 +17,20 @@ use std::{
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    ResolveSettingsOptions, ResolverState,
+    PolicyRereads, ResolveSettingsOptions, ResolverState,
     adapters::{EnvironmentVariable, ExecuteFile, ExecuteFileRequest, NativeHost, OperatingSystem},
-    filter_escalating_default_mode, resolve_settings_with_state,
+    filter_escalating_default_mode, js_stringify, resolve_settings_with_state,
 };
 
 #[path = "support/remap_settings_host.rs"]
 mod remap_settings_host;
 
-use remap_settings_host::RemapHost;
+use remap_settings_host::{ProcessIdentity, RemapHost};
 
 const PACKAGE_VARIABLE: &str = "CLAUDE_SDK_TS_PACKAGE_DIR";
-const SCRUBBED: [&str; 4] = [
+const ROOT_MARKER: &str = "$ROOT";
+const SCRUBBED: [&str; 5] = [
+    "CLAUDE_CODE_ENTRYPOINT",
     "CLAUDE_CONFIG_DIR",
     "WSL_DISTRO_NAME",
     "WSL_INTEROP",
@@ -127,13 +129,53 @@ fn environment(spec: &Value, root: &str) -> BTreeMap<String, Option<String>> {
     env
 }
 
+/// The process ids a case pins (`process`: `euid`, `uid`, `egid`, `gid` and `groups`, null for a call the platform
+/// lacks); without `process` the real ids stay.
+fn identity(spec: &Value) -> Option<ProcessIdentity> {
+    let process = spec.get("process").filter(|process| process.is_object())?;
+    let id = |name: &str| process[name].as_u64().map(|value| u32::try_from(value).expect("id"));
+    Some(ProcessIdentity {
+        euid: id("euid"),
+        uid: id("uid"),
+        egid: id("egid"),
+        gid: id("gid"),
+        groups: process["groups"].as_array().map(|groups| {
+            groups
+                .iter()
+                .map(|group| u32::try_from(group.as_u64().expect("group")).expect("group"))
+                .collect()
+        }),
+    })
+}
+
+/// The write checks a case answers (`writable`: path, with `$ROOT` for the root, or `*` to an answer).
+fn writable(spec: &Value, root: &str) -> BTreeMap<String, String> {
+    spec["writable"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(path, answer)| (path.replace("$ROOT", root), answer.as_str().expect("answer").to_owned()))
+        .collect()
+}
+
 /// The calls a case makes: one without `steps`, otherwise one per step, each at its own time and after the
-/// step's file changes (`files`: path under the root to new text, or null to delete it).
+/// step's file changes (`files`: path under the root to new text, or null to delete it). A step's `durations` maps a
+/// command line, as the resolver writes it before any path moves under the root, to the milliseconds that command
+/// takes in the call; both sides count that time on a fake clock, so a slow read is the same on any machine.
 fn steps(spec: &Value) -> Vec<Value> {
     match spec["steps"].as_array() {
         Some(steps) => steps.clone(),
         None => vec![json!({})],
     }
+}
+
+fn durations(step: &Value) -> BTreeMap<String, u64> {
+    step["durations"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(line, milliseconds)| (line.clone(), milliseconds.as_u64().expect("milliseconds")))
+        .collect()
 }
 
 fn apply_files(step: &Value, root: &Path) {
@@ -154,7 +196,7 @@ fn apply_files(step: &Value, root: &Path) {
 /// What the Rust port prints for each call, in the oracle's shape, sharing one resolver state across the calls.
 fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
     let root_text = root.to_string_lossy().into_owned();
-    let state = ResolverState::new();
+    let state = ResolverState::with_rereads(PolicyRereads::Inline);
     let options: ResolveSettingsOptions =
         serde_json::from_value(substitute(&spec["options"], &root_text)).expect("options");
     let mut printed = Vec::new();
@@ -165,6 +207,9 @@ fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
             system: OperatingSystem::Linux,
             env: environment(spec, &root_text),
             now_ms: step["at"].as_u64().unwrap_or(0),
+            identity: identity(spec),
+            writable: writable(spec, &root_text),
+            durations: durations(step),
         };
         let resolved = resolve_settings_with_state(&host, &options, &state).expect("resolve");
         let filtered = filter_escalating_default_mode(&resolved);
@@ -173,14 +218,11 @@ fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
         } else {
             name.to_owned()
         };
-        printed.push(
-            json!({
-                "name": label,
-                "result": serde_json::to_value(&resolved).expect("encode"),
-                "filtered": serde_json::to_value(filtered).expect("encode"),
-            })
-            .to_string(),
-        );
+        printed.push(js_stringify(&json!({
+            "name": label,
+            "result": serde_json::to_value(&resolved).expect("encode"),
+            "filtered": serde_json::to_value(filtered).expect("encode"),
+        })));
     }
     printed
 }
@@ -200,12 +242,15 @@ fn oracle_results(package: &str, cases: &[(String, PathBuf, Value, PathBuf)]) ->
             "root": root_text,
             "platform": spec["platform"],
             "env": environment(&spec, &root_text),
+            "process": spec["process"],
+            "writable": writable(&spec, &root_text),
             "cases": steps(&spec).iter().enumerate().map(|(index, step)| {
                 let label = if spec["steps"].is_array() { format!("{name}/{index}") } else { name.clone() };
                 json!({
                     "name": label,
                     "at": step["at"],
                     "files": step["files"],
+                    "durations": durations(step),
                     "options": substitute(&spec["options"], &root_text),
                 })
             }).collect::<Vec<_>>(),
@@ -243,7 +288,35 @@ fn fixtures_are_well_formed() {
     assert!(!cases.is_empty());
     for case in &cases {
         assert!(case.spec["options"]["cwd"].is_string(), "{} needs a cwd", case.name);
+        for step in steps(&case.spec) {
+            durations(&step);
+        }
     }
+}
+
+/// What the pinned TypeScript resolver printed for a case whose answer holds on any machine (`expected.json` beside
+/// `tree`, with `$ROOT` for the fixture root).
+fn recorded(tree: &Path) -> Option<String> {
+    let text = fs::read_to_string(tree.with_file_name("expected.json")).ok()?;
+    Some(text.trim_end().to_owned())
+}
+
+#[test]
+fn rust_matches_the_recorded_typescript_output() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    let mut replayed = 0;
+    for case in cases() {
+        let Some(expected) = recorded(&case.tree) else {
+            continue;
+        };
+        let root = scratch.path().join(&case.name);
+        prepare(&case.tree, &case.spec, &root);
+        let ours = format!("[{}]", rust_results(&case.name, &case.spec, &root).join(","));
+        let ours = ours.replace(&*root.to_string_lossy(), ROOT_MARKER);
+        assert_eq!(ours, expected, "{} differs from what upstream printed", case.name);
+        replayed += 1;
+    }
+    assert!(replayed > 0, "no case records what upstream printed");
 }
 
 #[test]
@@ -274,6 +347,13 @@ fn rust_matches_the_pinned_typescript_resolver_byte_for_byte() {
         let theirs = upstream.as_str();
         if ours != theirs {
             mismatches.push(format!("{name}\n  rust:     {ours}\n  upstream: {theirs}"));
+        }
+        if let Some(stored) = recorded(tree)
+            && theirs.replace(&*root.to_string_lossy(), ROOT_MARKER) != stored
+        {
+            mismatches.push(format!(
+                "{name}\n  expected.json no longer matches what upstream prints"
+            ));
         }
     }
     assert!(

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Test the Go workspace with race detection"
+#MISE depends=["test:go:race"]
+set -euo pipefail

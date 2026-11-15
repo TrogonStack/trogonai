@@ -14,9 +14,9 @@ use std::{
 use serde_json::{Value, json};
 use tokio::{sync::mpsc, time::timeout};
 use trogon_claude_agent_sdk::{
-    ClaudeAgentOptions, ClaudeSdkClient, Error, InMemorySessionStore, JsonObject, Message, Prompt, SessionEntry,
-    SessionId, SessionKey, SessionProjectKey, SessionStore, SessionStoreFuture, SessionStoreOptions, Timeout,
-    Transport, query_turn_with_transport, query_with_transport,
+    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, ConnectPrompt, Error, InMemorySessionStore, JsonObject, Message,
+    Prompt, QueueCapacity, SessionEntry, SessionId, SessionKey, SessionProjectKey, SessionStore, SessionStoreFuture,
+    SessionStoreOptions, Timeout, Transport, UserInput, query_turn_with_transport, query_with_transport,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -243,7 +243,7 @@ async fn q01_query_with_a_transport_writes_the_prompt_after_initialize_and_ends_
     assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
     drop(peer.incoming);
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(peer.calls.count("connect"), 1);
     assert_eq!(peer.calls.count("end_input"), 1);
     assert_eq!(peer.calls.count("close"), 1);
@@ -260,7 +260,7 @@ async fn q01_a_one_turn_query_stops_after_the_first_result() -> TestResult {
     peer.send(result("first"))?;
     assert!(matches!(query.next_message().await?, Some(Message::Result(_))));
     assert!(query.next_message().await?.is_none());
-    query.close().await?;
+    query.disconnect().await?;
     assert_eq!(peer.calls.count("close"), 1);
     Ok(())
 }
@@ -364,7 +364,7 @@ impl SessionStore for CountingStore {
 async fn t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirror() -> TestResult {
     let directory = tempfile::tempdir()?;
     let resumed = SessionId::from("11111111-1111-4111-8111-111111111111");
-    let project = SessionProjectKey::new("scripted-project")?;
+    let project = SessionProjectKey::new("scripted-project");
     let store = Arc::new(CountingStore {
         inner: InMemorySessionStore::default(),
         loads: AtomicUsize::new(0),
@@ -375,7 +375,7 @@ async fn t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirro
     store
         .inner
         .append(
-            &SessionKey::new(project.clone(), resumed.clone())?,
+            &SessionKey::new(project.clone(), resumed.clone()),
             &[SessionEntry::new(earlier)],
         )
         .await?;
@@ -415,9 +415,75 @@ async fn t16_a_custom_transport_skips_resume_materialization_but_keeps_the_mirro
     }
     let mirrored = store
         .inner
-        .load(&SessionKey::new(project, SessionId::from("scripted-session"))?)
+        .load(&SessionKey::new(project, SessionId::from("scripted-session")))
         .await?;
     assert_eq!(mirrored.map(|entries| entries.len()), Some(1));
     client.disconnect().await?;
+    Ok(())
+}
+
+/// Python `ClaudeSDKClient(options, transport=transport).connect(prompt)`: when writing the prompt fails, the client
+/// disconnects and the failure is raised.
+#[tokio::test]
+async fn t15_connect_through_a_transport_disconnects_when_the_prompt_cannot_be_written() -> TestResult {
+    let (transport, mut peer) = transport(false);
+    let mut configured = options()?;
+    configured.argv_style = ArgvStyle::Python;
+    let (outcome, answered) = tokio::join!(
+        ClaudeSdkClient::new(configured)
+            .with_transport(transport)
+            .connect(Prompt::from("hello")),
+        async {
+            let request = peer.read().await?;
+            assert_eq!(request["request"]["subtype"], "initialize");
+            // Python waits for this answer before it writes the prompt, so the prompt is the first write to fail.
+            peer.fail_writes.store(true, Ordering::SeqCst);
+            peer.respond(&request, json!({}))
+        },
+    );
+    answered?;
+    assert!(outcome.is_err(), "the prompt write must fail the connect");
+    assert_eq!(peer.calls.count("connect"), 1);
+    assert!(peer.calls.count("write") >= 2, "{:?}", peer.calls.all());
+    Ok(())
+}
+
+/// `sdk.mjs` aborts the query when `streamInput` of its prompt fails; here the second input of the stream finds
+/// the input queue full.
+#[tokio::test]
+async fn t15_a_failed_prompt_stream_aborts_a_typescript_client() -> TestResult {
+    let (transport, mut peer) = transport(false);
+    let mut configured = options()?;
+    configured.limits.max_queued_inputs = Some(QueueCapacity::new(1)?);
+    let inputs = futures_util::stream::iter([
+        UserInput::from(Prompt::from("one")),
+        UserInput::from(Prompt::from("two")),
+    ]);
+    let (connected, answered) = tokio::join!(
+        ClaudeSdkClient::new(configured)
+            .with_transport(transport)
+            .connect(ConnectPrompt::stream(inputs)),
+        peer.accept_initialize(),
+    );
+    answered?;
+    let mut client = connected?;
+    let first = peer.read().await?;
+    assert_eq!(first["message"]["content"], "one");
+    let error = timeout(Duration::from_secs(5), async {
+        loop {
+            match client.next_message().await {
+                Ok(Some(_)) => {}
+                Ok(None) => return None,
+                Err(error) => return Some(error),
+            }
+        }
+    })
+    .await?;
+    assert!(matches!(error, Some(Error::Aborted(_))), "{error:?}");
+    let _ = client.disconnect().await;
+    let calls = peer.calls.all();
+    let kill = calls.iter().position(|call| *call == "kill");
+    let close = calls.iter().position(|call| *call == "close");
+    assert!(kill.is_some() && kill < close, "kill precedes close: {calls:?}");
     Ok(())
 }

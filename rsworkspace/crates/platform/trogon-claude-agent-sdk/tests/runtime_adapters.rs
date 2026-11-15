@@ -18,9 +18,9 @@ use std::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
-    ClaudeAgentOptions, ClaudeSdkClient, InMemorySessionStore, McpServerName, McpServerOptions, McpUrl, PermissionMode,
-    Prompt, SessionEntry, SessionError, SessionId, SessionKey, SessionProjectKey, SessionStore, SessionStoreOptions,
-    SettingSource,
+    ClaudeAgentOptions, ClaudeSdkClient, InMemorySessionStore, McpRemoteServerOptions, McpServerName, McpServerOptions,
+    McpServers, PermissionMode, Prompt, SdkMcpServers, SessionEntry, SessionError, SessionId, SessionKey,
+    SessionProjectKey, SessionStore, SessionStoreOptions, SettingSource, SummaryDialect,
     adapters::{
         CurrentDirectory, EnvironmentVariable, NativeFileSystem, RuntimeAdapters, TemporaryDirectory, WallClock,
     },
@@ -207,11 +207,16 @@ async fn injected_process_runs_protocol_and_closes_input_on_disconnect() -> Resu
     };
     let client = ClaudeSdkClient::connect_with_adapters(options, adapters).await?;
     assert_eq!(
-        client.connection_info().claude_code_version.as_deref(),
+        client
+            .handle()
+            .initialization_result()
+            .await?
+            .claude_code_version
+            .as_deref(),
         Some("scripted-cli")
     );
-    let status = client.handle().mcp_status().await?;
-    assert_eq!(status.mcp_servers[0]["name"], "scripted");
+    let status = client.handle().mcp_status().await?.decode()?;
+    assert_eq!(status.mcp_servers[0].name, "scripted");
     client.disconnect().await?;
     assert_eq!(server.await??, ["initialize", "mcp_status"]);
     let commands = observer.commands()?;
@@ -231,7 +236,9 @@ async fn injected_process_runs_protocol_and_closes_input_on_disconnect() -> Resu
             .windows(2)
             .any(|pair| pair == ["--output-format", "stream-json"])
     );
-    assert_eq!(command.environment.get(&OsString::from("CLAUDECODE")), Some(&None));
+    // A configured `env` replaces the child environment by default, as in TypeScript, so `CLAUDECODE` is never
+    // inherited and needs no explicit removal.
+    assert_eq!(command.environment.get(&OsString::from("CLAUDECODE")), None);
     assert_eq!(
         command.environment.get(&OsString::from("SDK_TEST_SENTINEL")),
         Some(&Some("child-value".into()))
@@ -258,7 +265,7 @@ async fn injected_session_adapters_resolve_resume_and_clean_up() -> Result<(), B
     let project_key = SessionProjectKey::for_directory_with_filesystem(&project, &filesystem)?;
     let relative_transcript = format!("projects/{}/{session_id}.jsonl", project_key.as_str());
     let store = Arc::new(InMemorySessionStore::with_clock(FrozenClock));
-    let key = SessionKey::new(project_key, SessionId::from(session_id))?;
+    let key = SessionKey::new(project_key, SessionId::from(session_id));
     let entry = SessionEntry::new(serde_json::from_value(json!({"type":"assistant","text":"seed"}))?);
     store.append(&key, std::slice::from_ref(&entry)).await?;
     let (process, harness) = ScriptedProcessSpawner::new();
@@ -313,6 +320,8 @@ async fn injected_session_adapters_resolve_resume_and_clean_up() -> Result<(), B
     Ok(())
 }
 
+/// Python's `build_mirror_batcher` resolves the projects directory at connect, so `Path.home()` raises before the
+/// child starts.
 #[tokio::test]
 async fn missing_injected_config_stops_before_process_creation() -> Result<(), Box<dyn std::error::Error>> {
     let filesystem = RecordingFileSystem::new()?;
@@ -320,7 +329,7 @@ async fn missing_injected_config_stops_before_process_creation() -> Result<(), B
     let (process, _harness) = ScriptedProcessSpawner::new();
     let observer = process.observer();
     let options = ClaudeAgentOptions {
-        session_store: Some(session_options()),
+        session_store: Some(session_options(SummaryDialect::Python)),
         ..ClaudeAgentOptions::default()
     };
     let result = ClaudeSdkClient::connect_with_adapters(
@@ -347,6 +356,26 @@ async fn missing_injected_config_stops_before_process_creation() -> Result<(), B
             EnvironmentAccess::Variable("HOME".into()),
         ]
     );
+    Ok(())
+}
+
+/// TypeScript resolves `CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")` only when a mirror frame arrives,
+/// so a session without a resume starts the child with no home to find.
+#[tokio::test]
+async fn missing_injected_config_still_starts_a_typescript_session_without_a_resume() -> TestResult {
+    let filesystem = RecordingFileSystem::new()?;
+    let environment = TrackedEnvironment::new(&filesystem);
+    let command = connect_with_tracked_environment(
+        &filesystem,
+        ClaudeAgentOptions {
+            cwd: Some(filesystem.path("project")),
+            session_store: Some(session_options(SummaryDialect::TypeScript)),
+            ..ClaudeAgentOptions::default()
+        },
+        environment,
+    )
+    .await?;
+    assert_eq!(command.directory, Some(filesystem.path("project")));
     Ok(())
 }
 
@@ -409,8 +438,12 @@ async fn cancelling_connect_after_initialization_request_closes_input() -> TestR
     let (process, harness) = ScriptedProcessSpawner::new();
     let observer = process.observer();
     let mut lines = BufReader::new(harness.stdin).lines();
+    // Only Python's `connect` waits for the response, so only there is a connect left to cancel.
     let connection = tokio::spawn(ClaudeSdkClient::connect_with_adapters(
-        ClaudeAgentOptions::default(),
+        ClaudeAgentOptions {
+            argv_style: trogon_claude_agent_sdk::ArgvStyle::Python,
+            ..ClaudeAgentOptions::default()
+        },
         process_adapters(process),
     ));
     let request = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
@@ -526,6 +559,14 @@ impl EnvironmentVariable for TrackedEnvironment {
         self.record(EnvironmentAccess::Variable(key.to_owned())).ok()?;
         self.variables.get(key).cloned()
     }
+
+    fn effective_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
+
+    fn real_user_home_directory(&self) -> Option<OsString> {
+        None
+    }
 }
 
 impl TemporaryDirectory for TrackedEnvironment {
@@ -543,10 +584,6 @@ impl CurrentDirectory for TrackedEnvironment {
         self.record(EnvironmentAccess::CurrentDirectory)?;
         self.directory.clone().map_err(io::Error::from)
     }
-}
-
-fn session_options() -> SessionStoreOptions {
-    SessionStoreOptions::from(Arc::new(InMemorySessionStore::with_clock(FrozenClock)))
 }
 
 async fn connect_with_tracked_environment(
@@ -578,58 +615,121 @@ async fn connect_with_tracked_environment(
         .ok_or_else(|| io::Error::other("missing captured process command").into())
 }
 
+fn session_options(dialect: SummaryDialect) -> SessionStoreOptions {
+    let mut options = SessionStoreOptions::from(Arc::new(InMemorySessionStore::with_clock(FrozenClock)));
+    options.dialect = dialect;
+    options
+}
+
+fn variable(name: &str) -> EnvironmentAccess {
+    EnvironmentAccess::Variable(name.into())
+}
+
+/// TypeScript `Wn(directory, undefined)` reads `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_PROJECT_DIR_NAME` from the process
+/// to name the project; Python derives the name from the directory alone. A configured `env` replaces the child
+/// environment by default, so TypeScript then reads those settings from it alone and nothing from the process.
+/// Connecting then reads the run-end ceiling, `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, from the process in both
+/// dialects, since `options.env` does not set it.
+fn connect_lookups(dialect: SummaryDialect) -> Vec<EnvironmentAccess> {
+    let project_name: &[&str] = match dialect {
+        SummaryDialect::TypeScript => &["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROJECT_DIR_NAME"],
+        SummaryDialect::Python => &[],
+    };
+    project_name
+        .iter()
+        .copied()
+        .chain(["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"])
+        .map(variable)
+        .collect()
+}
+
+const DIALECTS: [SummaryDialect; 2] = [SummaryDialect::TypeScript, SummaryDialect::Python];
+
 #[tokio::test]
 async fn explicit_store_config_and_working_directory_short_circuit_environment_lookups() -> TestResult {
-    let filesystem = RecordingFileSystem::new()?;
-    let environment = TrackedEnvironment {
-        directory: Err(io::ErrorKind::PermissionDenied),
-        variables: BTreeMap::from([
-            ("CLAUDE_CONFIG_DIR".into(), "/unused-environment-config".into()),
-            ("HOME".into(), "/unused-home".into()),
-        ]),
-        ..TrackedEnvironment::new(&filesystem)
-    };
-    let mut store = session_options();
-    store.config_directory = Some(filesystem.path("explicit-store-config"));
-    let command = connect_with_tracked_environment(
-        &filesystem,
-        ClaudeAgentOptions {
-            cwd: Some(filesystem.path("project")),
-            session_store: Some(store),
-            ..ClaudeAgentOptions::default()
-        },
-        environment.clone(),
-    )
-    .await?;
-    assert!(environment.accesses()?.is_empty());
-    assert_eq!(command.directory, Some(filesystem.path("project")));
-    assert_eq!(
-        command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
-        Some(&Some(filesystem.path("explicit-store-config").into_os_string()))
-    );
+    for dialect in DIALECTS {
+        let filesystem = RecordingFileSystem::new()?;
+        let environment = TrackedEnvironment {
+            directory: Err(io::ErrorKind::PermissionDenied),
+            variables: BTreeMap::from([
+                ("CLAUDE_CONFIG_DIR".into(), "/unused-environment-config".into()),
+                ("HOME".into(), "/unused-home".into()),
+            ]),
+            ..TrackedEnvironment::new(&filesystem)
+        };
+        let mut store = session_options(dialect);
+        store.config_directory = Some(filesystem.path("explicit-store-config"));
+        let command = connect_with_tracked_environment(
+            &filesystem,
+            ClaudeAgentOptions {
+                cwd: Some(filesystem.path("project")),
+                session_store: Some(store),
+                ..ClaudeAgentOptions::default()
+            },
+            environment.clone(),
+        )
+        .await?;
+        assert_eq!(environment.accesses()?, connect_lookups(dialect));
+        assert_eq!(command.directory, Some(filesystem.path("project")));
+        assert_eq!(
+            command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
+            Some(&Some(filesystem.path("explicit-store-config").into_os_string()))
+        );
+    }
     Ok(())
 }
 
 #[tokio::test]
 async fn child_config_override_precedes_environment_and_accepts_matching_store_config() -> TestResult {
-    let filesystem = RecordingFileSystem::new()?;
-    let child_config = filesystem.path("child-config");
-    let child_config_text = child_config.to_str().ok_or("temporary path is not UTF-8")?;
-    for configured in [None, Some(child_config.clone())] {
-        let environment = TrackedEnvironment {
-            variables: BTreeMap::from([("CLAUDE_CONFIG_DIR".into(), "/unused-environment-config".into())]),
-            ..TrackedEnvironment::new(&filesystem)
-        };
-        let mut store = session_options();
-        store.config_directory = configured;
+    for dialect in DIALECTS {
+        let filesystem = RecordingFileSystem::new()?;
+        let child_config = filesystem.path("child-config");
+        let child_config_text = child_config.to_str().ok_or("temporary path is not UTF-8")?;
+        for configured in [None, Some(child_config.clone())] {
+            let environment = TrackedEnvironment {
+                variables: BTreeMap::from([("CLAUDE_CONFIG_DIR".into(), "/unused-environment-config".into())]),
+                ..TrackedEnvironment::new(&filesystem)
+            };
+            let mut store = session_options(dialect);
+            store.config_directory = configured;
+            let command = connect_with_tracked_environment(
+                &filesystem,
+                ClaudeAgentOptions {
+                    cwd: Some(filesystem.path("project")),
+                    env: trogon_claude_agent_sdk::Environment::from([(
+                        "CLAUDE_CONFIG_DIR".into(),
+                        child_config_text.into(),
+                    )]),
+                    session_store: Some(store),
+                    ..ClaudeAgentOptions::default()
+                },
+                environment.clone(),
+            )
+            .await?;
+            assert!(environment.accesses()?.is_empty());
+            assert_eq!(
+                command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
+                Some(&Some(child_config.clone().into_os_string()))
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+/// TypeScript only warns when the child `CLAUDE_CONFIG_DIR` differs from the store configuration; the child value
+/// still reaches the subprocess.
+async fn s21_conflicting_config_warns_and_keeps_the_child_value() -> TestResult {
+    for dialect in DIALECTS {
+        let filesystem = RecordingFileSystem::new()?;
+        let environment = TrackedEnvironment::new(&filesystem);
+        let mut store = session_options(dialect);
+        store.config_directory = Some(filesystem.path("store-config"));
         let command = connect_with_tracked_environment(
             &filesystem,
             ClaudeAgentOptions {
                 cwd: Some(filesystem.path("project")),
-                env: trogon_claude_agent_sdk::Environment::from([(
-                    "CLAUDE_CONFIG_DIR".into(),
-                    child_config_text.into(),
-                )]),
+                env: trogon_claude_agent_sdk::Environment::from([("CLAUDE_CONFIG_DIR".into(), "/child-config".into())]),
                 session_store: Some(store),
                 ..ClaudeAgentOptions::default()
             },
@@ -639,139 +739,111 @@ async fn child_config_override_precedes_environment_and_accepts_matching_store_c
         assert!(environment.accesses()?.is_empty());
         assert_eq!(
             command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
-            Some(&Some(child_config.clone().into_os_string()))
+            Some(&Some(OsString::from("/child-config")))
         );
     }
     Ok(())
 }
 
 #[tokio::test]
-/// TypeScript only warns when the child `CLAUDE_CONFIG_DIR` differs from the store configuration; the child value
-/// still reaches the subprocess.
-async fn s21_conflicting_config_warns_and_keeps_the_child_value() -> TestResult {
-    let filesystem = RecordingFileSystem::new()?;
-    let environment = TrackedEnvironment::new(&filesystem);
-    let mut store = session_options();
-    store.config_directory = Some(filesystem.path("store-config"));
-    let command = connect_with_tracked_environment(
-        &filesystem,
-        ClaudeAgentOptions {
-            cwd: Some(filesystem.path("project")),
-            env: trogon_claude_agent_sdk::Environment::from([("CLAUDE_CONFIG_DIR".into(), "/child-config".into())]),
-            session_store: Some(store),
-            ..ClaudeAgentOptions::default()
-        },
-        environment.clone(),
-    )
-    .await?;
-    assert!(environment.accesses()?.is_empty());
-    assert_eq!(
-        command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
-        Some(&Some(OsString::from("/child-config")))
-    );
-    Ok(())
-}
-
-#[tokio::test]
 async fn injected_config_short_circuits_home_and_resolves_current_directory_once() -> TestResult {
-    let filesystem = RecordingFileSystem::new()?;
-    let config = filesystem.path("environment-config");
-    let environment = TrackedEnvironment {
-        variables: BTreeMap::from([
-            ("CLAUDE_CONFIG_DIR".into(), config.clone().into_os_string()),
-            ("HOME".into(), "/unused-home".into()),
-        ]),
-        ..TrackedEnvironment::new(&filesystem)
-    };
-    let command = connect_with_tracked_environment(
-        &filesystem,
-        ClaudeAgentOptions {
-            session_store: Some(session_options()),
-            ..ClaudeAgentOptions::default()
-        },
-        environment.clone(),
-    )
-    .await?;
-    assert_eq!(
-        environment.accesses()?,
-        [
-            EnvironmentAccess::CurrentDirectory,
-            EnvironmentAccess::Variable("CLAUDE_CONFIG_DIR".into()),
-        ]
-    );
-    assert_eq!(
-        command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
-        None,
-        "the child inherits the caller configuration directory"
-    );
-    assert_eq!(
-        command.directory,
-        Some(filesystem.path("project")),
-        "the child runs in the directory the session key was derived from"
-    );
+    for dialect in DIALECTS {
+        let filesystem = RecordingFileSystem::new()?;
+        let config = filesystem.path("environment-config");
+        let environment = TrackedEnvironment {
+            variables: BTreeMap::from([
+                ("CLAUDE_CONFIG_DIR".into(), config.clone().into_os_string()),
+                ("HOME".into(), "/unused-home".into()),
+            ]),
+            ..TrackedEnvironment::new(&filesystem)
+        };
+        let command = connect_with_tracked_environment(
+            &filesystem,
+            ClaudeAgentOptions {
+                session_store: Some(session_options(dialect)),
+                ..ClaudeAgentOptions::default()
+            },
+            environment.clone(),
+        )
+        .await?;
+        let mut expected = vec![EnvironmentAccess::CurrentDirectory, variable("CLAUDE_CONFIG_DIR")];
+        expected.extend(connect_lookups(dialect));
+        assert_eq!(environment.accesses()?, expected);
+        assert_eq!(
+            command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
+            None,
+            "the child inherits the caller configuration directory"
+        );
+        assert_eq!(
+            command.directory, None,
+            "the child inherits the working directory the session key was derived from"
+        );
+    }
     Ok(())
 }
 
 #[tokio::test]
 async fn missing_config_variable_falls_back_to_injected_home_in_order() -> TestResult {
-    let filesystem = RecordingFileSystem::new()?;
-    let home = filesystem.path("home");
-    let environment = TrackedEnvironment {
-        variables: BTreeMap::from([("HOME".into(), home.clone().into_os_string())]),
-        ..TrackedEnvironment::new(&filesystem)
-    };
-    let command = connect_with_tracked_environment(
-        &filesystem,
-        ClaudeAgentOptions {
-            session_store: Some(session_options()),
-            ..ClaudeAgentOptions::default()
-        },
-        environment.clone(),
-    )
-    .await?;
-    assert_eq!(
-        environment.accesses()?,
-        [
+    for dialect in DIALECTS {
+        let filesystem = RecordingFileSystem::new()?;
+        let home = filesystem.path("home");
+        let environment = TrackedEnvironment {
+            variables: BTreeMap::from([("HOME".into(), home.clone().into_os_string())]),
+            ..TrackedEnvironment::new(&filesystem)
+        };
+        let command = connect_with_tracked_environment(
+            &filesystem,
+            ClaudeAgentOptions {
+                session_store: Some(session_options(dialect)),
+                ..ClaudeAgentOptions::default()
+            },
+            environment.clone(),
+        )
+        .await?;
+        let mut expected = vec![
             EnvironmentAccess::CurrentDirectory,
-            EnvironmentAccess::Variable("CLAUDE_CONFIG_DIR".into()),
-            EnvironmentAccess::Variable("HOME".into()),
-        ]
-    );
-    assert_eq!(
-        command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
-        None,
-        "the child inherits the default configuration directory"
-    );
-    assert_eq!(command.directory, Some(filesystem.path("project")));
+            variable("CLAUDE_CONFIG_DIR"),
+            variable("HOME"),
+        ];
+        expected.extend(connect_lookups(dialect));
+        assert_eq!(environment.accesses()?, expected);
+        assert_eq!(
+            command.environment.get(OsStr::new("CLAUDE_CONFIG_DIR")),
+            None,
+            "the child inherits the default configuration directory"
+        );
+        assert_eq!(command.directory, None, "the child inherits the working directory");
+    }
     Ok(())
 }
 
 #[tokio::test]
 async fn explicit_working_directory_skips_failing_current_directory_provider() -> TestResult {
-    let filesystem = RecordingFileSystem::new()?;
-    let environment = TrackedEnvironment {
-        directory: Err(io::ErrorKind::PermissionDenied),
-        variables: BTreeMap::from([(
-            "CLAUDE_CONFIG_DIR".into(),
-            filesystem.path("environment-config").into_os_string(),
-        )]),
-        ..TrackedEnvironment::new(&filesystem)
-    };
-    let command = connect_with_tracked_environment(
-        &filesystem,
-        ClaudeAgentOptions {
-            cwd: Some(filesystem.path("project")),
-            session_store: Some(session_options()),
-            ..ClaudeAgentOptions::default()
-        },
-        environment.clone(),
-    )
-    .await?;
-    assert_eq!(
-        environment.accesses()?,
-        [EnvironmentAccess::Variable("CLAUDE_CONFIG_DIR".into())]
-    );
-    assert_eq!(command.directory, Some(filesystem.path("project")));
+    for dialect in DIALECTS {
+        let filesystem = RecordingFileSystem::new()?;
+        let environment = TrackedEnvironment {
+            directory: Err(io::ErrorKind::PermissionDenied),
+            variables: BTreeMap::from([(
+                "CLAUDE_CONFIG_DIR".into(),
+                filesystem.path("environment-config").into_os_string(),
+            )]),
+            ..TrackedEnvironment::new(&filesystem)
+        };
+        let command = connect_with_tracked_environment(
+            &filesystem,
+            ClaudeAgentOptions {
+                cwd: Some(filesystem.path("project")),
+                session_store: Some(session_options(dialect)),
+                ..ClaudeAgentOptions::default()
+            },
+            environment.clone(),
+        )
+        .await?;
+        let mut expected = vec![variable("CLAUDE_CONFIG_DIR")];
+        expected.extend(connect_lookups(dialect));
+        assert_eq!(environment.accesses()?, expected);
+        assert_eq!(command.directory, Some(filesystem.path("project")));
+    }
     Ok(())
 }
 
@@ -786,7 +858,7 @@ async fn current_directory_failure_stops_before_config_lookup_or_process_creatio
     let observer = process.observer();
     let result = ClaudeSdkClient::connect_with_adapters(
         ClaudeAgentOptions {
-            session_store: Some(session_options()),
+            session_store: Some(session_options(SummaryDialect::default())),
             ..ClaudeAgentOptions::default()
         },
         RuntimeAdapters {
@@ -812,7 +884,11 @@ async fn ordinary_connection_never_reads_session_environment_or_current_director
         ..TrackedEnvironment::new(&filesystem)
     };
     connect_with_tracked_environment(&filesystem, ClaudeAgentOptions::default(), environment.clone()).await?;
-    assert!(environment.accesses()?.is_empty());
+    // The run-end ceiling is the one process variable every connection reads.
+    assert_eq!(
+        environment.accesses()?,
+        [variable("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")]
+    );
     Ok(())
 }
 
@@ -822,17 +898,21 @@ async fn s12_outbound_prompts_and_controls_are_never_capped_by_the_inbound_frame
     let (process, harness) = ScriptedProcessSpawner::new();
     let server = tokio::spawn(serve_controls(harness));
     let mut options = ClaudeAgentOptions::default();
-    options.limits.max_buffer_size = Some(std::num::NonZeroUsize::new(1024).ok_or("invalid limit")?);
+    options.limits.max_buffer_size = Some(1024);
     let client = ClaudeSdkClient::connect_with_adapters(options, process_adapters(process)).await?;
     client.send_prompt(Prompt::from("x".repeat(2048))).await?;
-    let replacement = BTreeMap::from([(
+    let replacement = McpServers::from([(
         McpServerName::from("large"),
-        McpServerOptions::Http {
-            url: McpUrl::new(&format!("https://example.com/{}", "x".repeat(2048)))?,
-            headers: BTreeMap::new(),
-        },
+        McpServerOptions::Http(McpRemoteServerOptions::new(format!(
+            "https://example.com/{}",
+            "x".repeat(2048)
+        ))),
     )]);
-    let result = client.handle().set_mcp_servers(replacement, BTreeMap::new()).await?;
+    let result = client
+        .handle()
+        .set_mcp_servers(replacement, SdkMcpServers::new())
+        .await?
+        .decode()?;
     assert_eq!(result.added, ["large"]);
     client.disconnect().await?;
     assert_eq!(server.await??, ["initialize", "user:2048", "mcp_set_servers"]);

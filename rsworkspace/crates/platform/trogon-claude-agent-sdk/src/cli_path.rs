@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::{ffi::OsStr, path::Path};
 
 /// Whether a Windows `.bat` or `.cmd` CLI path may be started.
 ///
@@ -17,61 +17,36 @@ pub enum WindowsBatchCli {
 pub enum CliPathError {
     #[error(
         "Refusing to execute batch script {}: Windows runs .bat/.cmd files via cmd.exe, which can execute commands injected through CLI arguments, and no reliable escaping for cmd.exe exists. Use a native claude executable instead: install Claude Code natively (irm https://claude.ai/install.ps1 | iex), point ClaudeAgentOptions(cli_path=...) at a claude.exe, or install the claude-agent-sdk wheel for a platform that bundles claude.exe (e.g. Windows x64).",
-        python_repr(&.path.to_string_lossy())
+        quoted(.path)
     )]
     WindowsBatchScript { path: std::path::PathBuf },
 }
 
-#[cfg(windows)]
 pub(crate) fn reject_windows_batch_cli(path: &OsStr, policy: WindowsBatchCli) -> Result<(), CliPathError> {
-    if policy == WindowsBatchCli::Refuse && is_windows_batch_cli(path) {
+    refuse_batch_cli(path, policy, cfg!(windows))
+}
+
+/// Python asks `platform.system() == "Windows"` at run time; `windows` is that answer.
+fn refuse_batch_cli(path: &OsStr, policy: WindowsBatchCli, windows: bool) -> Result<(), CliPathError> {
+    if policy == WindowsBatchCli::Refuse && windows && is_windows_batch_cli(path) {
         return Err(CliPathError::WindowsBatchScript { path: path.into() });
     }
     Ok(())
 }
 
-#[cfg(not(windows))]
-pub(crate) fn reject_windows_batch_cli(_: &OsStr, _: WindowsBatchCli) -> Result<(), CliPathError> {
-    Ok(())
-}
-
-#[cfg(any(windows, test))]
+/// Python's `any(segment.rstrip(". ").lower().endswith((".bat", ".cmd")) ...)` over every `/`, `\` and `:` part.
 fn is_windows_batch_cli(path: &OsStr) -> bool {
     path.to_string_lossy().replace('\\', "/").split('/').any(|part| {
         part.split(':').any(|segment| {
-            let segment = segment.trim_end_matches(['.', ' ']).to_ascii_lowercase();
+            let segment = segment.trim_end_matches(['.', ' ']).to_lowercase();
             segment.ends_with(".bat") || segment.ends_with(".cmd")
         })
     })
 }
 
-/// Python `repr` of a `str`, which the Python SDK uses to quote the refused path.
-fn python_repr(text: &str) -> String {
-    let quote = if text.contains('\'') && !text.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut output = String::with_capacity(text.len() + 2);
-    output.push(quote);
-    for character in text.chars() {
-        match character {
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            character if character == quote => {
-                output.push('\\');
-                output.push(character);
-            }
-            character if (character as u32) < 0x20 || character as u32 == 0x7f => {
-                output.push_str(&format!("\\x{:02x}", character as u32));
-            }
-            character => output.push(character),
-        }
-    }
-    output.push(quote);
-    output
+/// Python `repr` of the `str` it holds for the path.
+fn quoted(path: &Path) -> String {
+    crate::python_text::repr(&crate::python_text::from_os_str(path.as_os_str()))
 }
 
 #[cfg(test)]

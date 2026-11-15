@@ -20,6 +20,11 @@ use crate::{
 pub enum MirrorEnqueueError {
     #[error(transparent)]
     Key(#[from] SessionKeyError),
+    /// No projects directory to place the frame under: TypeScript resolves
+    /// `CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")` per frame, so a missing home fails the frame, not
+    /// the connect.
+    #[error("the session store projects directory could not be resolved: no home directory")]
+    MissingConfigDirectory,
     #[error("transcript mirror worker stopped")]
     Closed,
 }
@@ -145,7 +150,8 @@ impl MirrorFlush {
 /// drain. Frames are never rejected for size. Each drain coalesces entries per key and appends them in order.
 #[derive(Clone)]
 pub struct TranscriptMirror {
-    projects_dir: PathBuf,
+    projects_dir: Option<PathBuf>,
+    dialect: crate::SummaryDialect,
     commands: mpsc::UnboundedSender<MirrorCommand>,
     flush_timeout: Option<std::time::Duration>,
     owner: Arc<WorkerOwner>,
@@ -166,6 +172,16 @@ impl std::fmt::Debug for TranscriptMirror {
 
 impl TranscriptMirror {
     pub fn new(options: &SessionStoreOptions, projects_dir: PathBuf) -> Self {
+        Self::start(options, Some(projects_dir))
+    }
+
+    /// A mirror with no projects directory, for a TypeScript session whose home directory is unavailable: every frame
+    /// fails with [`MirrorEnqueueError::MissingConfigDirectory`] and nothing reaches the store.
+    pub fn without_projects_dir(options: &SessionStoreOptions) -> Self {
+        Self::start(options, None)
+    }
+
+    fn start(options: &SessionStoreOptions, projects_dir: Option<PathBuf>) -> Self {
         let (commands, receiver) = mpsc::unbounded_channel();
         let worker = tokio::spawn(run_worker(
             options.store.clone(),
@@ -176,18 +192,23 @@ impl TranscriptMirror {
         ));
         Self {
             projects_dir,
+            dialect: options.dialect,
             commands,
             flush_timeout: options.limits.flush_timeout.map(crate::Timeout::as_duration),
             owner: Arc::new(WorkerOwner(worker.abort_handle())),
         }
     }
 
-    pub fn projects_dir(&self) -> &Path {
-        &self.projects_dir
+    pub fn projects_dir(&self) -> Option<&Path> {
+        self.projects_dir.as_deref()
     }
 
     pub fn enqueue(&self, file_path: &Path, entries: Vec<SessionEntry>) -> Result<(), MirrorEnqueueError> {
-        let key = SessionKey::from_transcript_path(file_path, &self.projects_dir)?;
+        let projects_dir = self
+            .projects_dir
+            .as_deref()
+            .ok_or(MirrorEnqueueError::MissingConfigDirectory)?;
+        let key = SessionKey::from_transcript_path_with(file_path, projects_dir, self.dialect)?;
         if entries.is_empty() {
             return Ok(());
         }

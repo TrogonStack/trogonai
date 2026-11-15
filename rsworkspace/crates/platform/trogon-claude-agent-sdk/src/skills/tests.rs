@@ -1,4 +1,4 @@
-use super::{effective_allowed_tools, effective_setting_sources, initialize_skills, python_repr};
+use super::{effective_allowed_tools, effective_setting_sources, initialize_skills};
 use crate::{ArgvStyle, ClaudeAgentOptions, SettingSource, Skills, ToolRule};
 
 fn options(style: ArgvStyle, skills: Option<Skills>, allowed: &[&str]) -> ClaudeAgentOptions {
@@ -172,14 +172,4 @@ fn the_dialects_disagree_on_whitespace_and_the_byte_order_mark() {
     assert!(message(ArgvStyle::Python, "a\u{1c}").contains("leading or trailing whitespace"));
     assert!(message(ArgvStyle::TypeScript, "a\u{2028}").contains("leading or trailing whitespace"));
     assert!(message(ArgvStyle::TypeScript, "a\u{a0}").contains("leading or trailing whitespace"));
-}
-
-#[test]
-fn python_repr_matches_python() {
-    assert_eq!(python_repr("plain"), "'plain'");
-    assert_eq!(python_repr("it's"), "\"it's\"");
-    assert_eq!(python_repr("it's \"x\""), "'it\\'s \"x\"'");
-    assert_eq!(python_repr("a\tb\n"), "'a\\tb\\n'");
-    assert_eq!(python_repr("\u{7f}\u{a0}\u{2028}\u{e9}"), "'\\x7f\\xa0\\u2028\u{e9}'");
-    assert_eq!(python_repr("\u{10ffff}"), "'\\U0010ffff'");
 }

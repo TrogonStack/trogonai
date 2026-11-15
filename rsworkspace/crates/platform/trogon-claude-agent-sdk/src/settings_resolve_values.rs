@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 
 use crate::settings_schema::{SettingsSchema, schema};
 
-use crate::{constants::POLICY_META_KEYS, settings_merge_spec::MergeSpec};
+use crate::{constants::POLICY_META_KEYS, settings_merge_spec::MergeSpec, settings_numbers::same_value_zero};
 
 pub(crate) type SettingsMap = Map<String, Value>;
 
@@ -49,7 +49,7 @@ fn is_primitive(value: &Value) -> bool {
 pub(crate) fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
     let mut merged: Vec<Value> = Vec::with_capacity(left.len() + right.len());
     for value in left.iter().chain(right) {
-        if is_primitive(value) && merged.iter().any(|seen| seen == value) {
+        if is_primitive(value) && merged.iter().any(|seen| same_value_zero(seen, value)) {
             continue;
         }
         merged.push(value.clone());
@@ -110,6 +110,35 @@ pub(crate) fn get_path<'a>(settings: &'a SettingsMap, path: &[&str]) -> Option<&
         current = current.as_object()?.get(*segment)?;
     }
     Some(current)
+}
+
+/// `Qt` upstream: sets (or, with `None`, removes) the value at `path`, copying each object on the way and pruning
+/// objects that a removal leaves empty.
+pub(crate) fn set_path(map: &mut SettingsMap, path: &[&str], value: Option<&Value>) {
+    let Some((first, rest)) = path.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        match value {
+            Some(value) => {
+                map.insert((*first).to_owned(), value.clone());
+            }
+            None => {
+                map.shift_remove(*first);
+            }
+        }
+        return;
+    }
+    let mut child = match map.get(*first) {
+        Some(Value::Object(existing)) => existing.clone(),
+        _ => SettingsMap::new(),
+    };
+    set_path(&mut child, rest, value);
+    if value.is_none() && child.is_empty() {
+        map.shift_remove(*first);
+    } else {
+        map.insert((*first).to_owned(), Value::Object(child));
+    }
 }
 
 /// Reorders a settings document the way the upstream schema parse does: schema keys first in

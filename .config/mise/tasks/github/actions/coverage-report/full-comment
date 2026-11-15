@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#MISE description="Assemble the complete coverage report comment"
 #MISE dir = "{{cwd}}"
 set -euo pipefail
 if [[ "${COVERAGE_VISIBILITY}" == "public" && "${COVERAGE_SKIP_STORAGE}" != "true" ]]
