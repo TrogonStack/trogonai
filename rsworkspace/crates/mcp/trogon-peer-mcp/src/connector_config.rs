@@ -23,6 +23,20 @@ impl TryFrom<ConnectorConfigInput> for ConnectorConfig {
 }
 
 impl ConnectorConfig {
+    pub(crate) fn from_parts(
+        installation_id: InstallationId,
+        connector_id: ConnectorId,
+        collaboration_ref: CollaborationRef,
+        display_name: PeerDisplayName,
+    ) -> Self {
+        Self {
+            installation_id,
+            connector_id,
+            collaboration_ref,
+            display_name,
+        }
+    }
+
     pub(crate) fn installation_id(&self) -> &InstallationId {
         &self.installation_id
     }
