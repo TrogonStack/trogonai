@@ -1,0 +1,863 @@
+{
+  "templates": {
+    "resolution": {
+      "type": "trogonai.secrets.sources.v1alpha1.SourceResolutionEvidence",
+      "payload": {
+        "resolutionId": {
+          "value": "resolution_1"
+        },
+        "sourceEntryRef": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "binding": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "secretRef": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        },
+        "correlationId": {
+          "value": "correlation_1"
+        },
+        "observedAt": "2030-01-01T00:00:00Z",
+        "succeeded": {
+          "observedVersion": {
+            "awsVersionId": "version_1"
+          },
+          "valueValidationRef": {
+            "validationId": {
+              "value": "value_validation_1"
+            },
+            "sourceEntryRef": {
+              "sourceRef": {
+                "scope": {
+                  "tenantId": {
+                    "value": "tenant_1"
+                  },
+                  "resourceParent": {
+                    "projectId": {
+                      "value": "project_1"
+                    }
+                  }
+                },
+                "sourceId": {
+                  "value": "source_1"
+                },
+                "definitionRevision": "1",
+                "recoveryFence": "1",
+                "definitionDigest": {
+                  "algorithm": "sha256",
+                  "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+                }
+              },
+              "binding": {
+                "entryId": {
+                  "value": "entry_1"
+                },
+                "secretRef": {
+                  "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                }
+              }
+            },
+            "observedVersion": {
+              "awsVersionId": "version_1"
+            },
+            "correlationId": {
+              "value": "correlation_1"
+            }
+          },
+          "cacheExpiresAt": "2030-01-01T00:05:30Z"
+        }
+      }
+    },
+    "observed": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceState",
+      "payload": {
+        "registration": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "provider": 1,
+          "bindings": [
+            {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            }
+          ],
+          "metadataValidationRef": {
+            "validationId": {
+              "value": "metadata_1"
+            },
+            "sourceRef": {
+              "scope": {
+                "tenantId": {
+                  "value": "tenant_1"
+                },
+                "resourceParent": {
+                  "projectId": {
+                    "value": "project_1"
+                  }
+                }
+              },
+              "sourceId": {
+                "value": "source_1"
+              },
+              "definitionRevision": "1",
+              "recoveryFence": "1",
+              "definitionDigest": {
+                "algorithm": "sha256",
+                "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+              }
+            }
+          }
+        },
+        "lifecycle": 1,
+        "entries": [
+          {
+            "binding": {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            },
+            "lifecycle": 1,
+            "lastResolution": {
+              "resolutionId": {
+                "value": "resolution_1"
+              },
+              "sourceEntryRef": {
+                "sourceRef": {
+                  "scope": {
+                    "tenantId": {
+                      "value": "tenant_1"
+                    },
+                    "resourceParent": {
+                      "projectId": {
+                        "value": "project_1"
+                      }
+                    }
+                  },
+                  "sourceId": {
+                    "value": "source_1"
+                  },
+                  "definitionRevision": "1",
+                  "recoveryFence": "1",
+                  "definitionDigest": {
+                    "algorithm": "sha256",
+                    "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+                  }
+                },
+                "binding": {
+                  "entryId": {
+                    "value": "entry_1"
+                  },
+                  "secretRef": {
+                    "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                  }
+                }
+              },
+              "correlationId": {
+                "value": "correlation_1"
+              },
+              "observedAt": "2030-01-01T00:00:00Z",
+              "succeeded": {
+                "observedVersion": {
+                  "awsVersionId": "version_1"
+                },
+                "valueValidationRef": {
+                  "validationId": {
+                    "value": "value_validation_1"
+                  },
+                  "sourceEntryRef": {
+                    "sourceRef": {
+                      "scope": {
+                        "tenantId": {
+                          "value": "tenant_1"
+                        },
+                        "resourceParent": {
+                          "projectId": {
+                            "value": "project_1"
+                          }
+                        }
+                      },
+                      "sourceId": {
+                        "value": "source_1"
+                      },
+                      "definitionRevision": "1",
+                      "recoveryFence": "1",
+                      "definitionDigest": {
+                        "algorithm": "sha256",
+                        "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+                      }
+                    },
+                    "binding": {
+                      "entryId": {
+                        "value": "entry_1"
+                      },
+                      "secretRef": {
+                        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                      }
+                    }
+                  },
+                  "observedVersion": {
+                    "awsVersionId": "version_1"
+                  },
+                  "correlationId": {
+                    "value": "correlation_1"
+                  }
+                },
+                "cacheExpiresAt": "2030-01-01T00:05:30Z"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "revocation": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceEntryRevoked",
+      "payload": {
+        "sourceEntryRef": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "binding": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "secretRef": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        },
+        "evidence": {
+          "scope": {
+            "tenantId": {
+              "value": "tenant_1"
+            },
+            "resourceParent": {
+              "projectId": {
+                "value": "project_1"
+              }
+            }
+          },
+          "secretRef": {
+            "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "reason": 1,
+          "revokedAt": "2030-01-01T00:00:01Z"
+        }
+      }
+    },
+    "denied": {
+      "type": "trogonai.secrets.sources.v1alpha1.SourceResolutionEvidence",
+      "payload": {
+        "resolutionId": {
+          "value": "resolution_1"
+        },
+        "sourceEntryRef": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "binding": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "secretRef": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        },
+        "correlationId": {
+          "value": "correlation_1"
+        },
+        "observedAt": "2030-01-01T00:00:00Z",
+        "failed": {
+          "category": 1
+        }
+      }
+    },
+    "unavailable": {
+      "type": "trogonai.secrets.sources.v1alpha1.SourceResolutionEvidence",
+      "payload": {
+        "resolutionId": {
+          "value": "resolution_1"
+        },
+        "sourceEntryRef": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "binding": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "secretRef": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        },
+        "correlationId": {
+          "value": "correlation_1"
+        },
+        "observedAt": "2030-01-01T00:00:00Z",
+        "failed": {
+          "category": 3
+        }
+      }
+    },
+    "throttled": {
+      "type": "trogonai.secrets.sources.v1alpha1.SourceResolutionEvidence",
+      "payload": {
+        "resolutionId": {
+          "value": "resolution_1"
+        },
+        "sourceEntryRef": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "binding": {
+            "entryId": {
+              "value": "entry_1"
+            },
+            "secretRef": {
+              "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        },
+        "correlationId": {
+          "value": "correlation_1"
+        },
+        "observedAt": "2030-01-01T00:00:00Z",
+        "failed": {
+          "category": 4
+        }
+      }
+    },
+    "first-read-denied": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretSourceState",
+      "payload": {
+        "registration": {
+          "sourceRef": {
+            "scope": {
+              "tenantId": {
+                "value": "tenant_1"
+              },
+              "resourceParent": {
+                "projectId": {
+                  "value": "project_1"
+                }
+              }
+            },
+            "sourceId": {
+              "value": "source_1"
+            },
+            "definitionRevision": "1",
+            "recoveryFence": "1",
+            "definitionDigest": {
+              "algorithm": "sha256",
+              "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+            }
+          },
+          "provider": 1,
+          "bindings": [
+            {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            }
+          ],
+          "metadataValidationRef": {
+            "validationId": {
+              "value": "metadata_1"
+            },
+            "sourceRef": {
+              "scope": {
+                "tenantId": {
+                  "value": "tenant_1"
+                },
+                "resourceParent": {
+                  "projectId": {
+                    "value": "project_1"
+                  }
+                }
+              },
+              "sourceId": {
+                "value": "source_1"
+              },
+              "definitionRevision": "1",
+              "recoveryFence": "1",
+              "definitionDigest": {
+                "algorithm": "sha256",
+                "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+              }
+            }
+          }
+        },
+        "lifecycle": 1,
+        "entries": [
+          {
+            "binding": {
+              "entryId": {
+                "value": "entry_1"
+              },
+              "secretRef": {
+                "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            },
+            "lifecycle": 1,
+            "lastResolution": {
+              "resolutionId": {
+                "value": "resolution_1"
+              },
+              "sourceEntryRef": {
+                "sourceRef": {
+                  "scope": {
+                    "tenantId": {
+                      "value": "tenant_1"
+                    },
+                    "resourceParent": {
+                      "projectId": {
+                        "value": "project_1"
+                      }
+                    }
+                  },
+                  "sourceId": {
+                    "value": "source_1"
+                  },
+                  "definitionRevision": "1",
+                  "recoveryFence": "1",
+                  "definitionDigest": {
+                    "algorithm": "sha256",
+                    "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+                  }
+                },
+                "binding": {
+                  "entryId": {
+                    "value": "entry_1"
+                  },
+                  "secretRef": {
+                    "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                  }
+                }
+              },
+              "correlationId": {
+                "value": "correlation_1"
+              },
+              "observedAt": "2030-01-01T00:00:00Z",
+              "failed": {
+                "category": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    "degraded": {
+      "type": "trogonai.secrets.sources.v1alpha1.SecretReferenceDegraded",
+      "payload": {
+        "secretRef": {
+          "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "failure": {
+          "category": 3
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "resolution safe evidence contract",
+      "template": "resolution"
+    },
+    {
+      "name": "observed safe evidence contract",
+      "template": "observed"
+    },
+    {
+      "name": "revocation safe evidence contract",
+      "template": "revocation"
+    },
+    {
+      "name": "source cache cannot exceed platform backstop",
+      "template": "resolution",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/succeeded/cacheExpiresAt",
+          "value": "2030-01-01T00:05:31Z"
+        }
+      ],
+      "violations": [
+        "successful source cache validity is finite and at most 330 seconds"
+      ]
+    },
+    {
+      "name": "source cache cannot have zero validity",
+      "template": "resolution",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/succeeded/cacheExpiresAt",
+          "value": "2030-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "successful source cache validity is finite and at most 330 seconds"
+      ]
+    },
+    {
+      "name": "new observed version requires matching value validation",
+      "template": "resolution",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/succeeded/observedVersion/awsVersionId",
+          "value": "version_2"
+        }
+      ],
+      "violations": [
+        "material validation must cover the exact observed source version"
+      ]
+    },
+    {
+      "name": "value validation cannot refer to another entry",
+      "template": "resolution",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/succeeded/valueValidationRef/sourceEntryRef/binding/entryId/value",
+          "value": "entry_2"
+        }
+      ],
+      "violations": [
+        "source material validation must cover the exact resolved entry"
+      ]
+    },
+    {
+      "name": "source state observation cannot cross registration scope",
+      "template": "observed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/lastResolution/sourceEntryRef/sourceRef/scope/resourceParent/projectId/value",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "entry observations must belong to this exact source definition"
+      ]
+    },
+    {
+      "name": "source version evidence must match provider family",
+      "template": "observed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/entries/0/lastResolution",
+          "value": {
+            "resolutionId": {
+              "value": "resolution_1"
+            },
+            "sourceEntryRef": {
+              "sourceRef": {
+                "scope": {
+                  "tenantId": {
+                    "value": "tenant_1"
+                  },
+                  "resourceParent": {
+                    "projectId": {
+                      "value": "project_1"
+                    }
+                  }
+                },
+                "sourceId": {
+                  "value": "source_1"
+                },
+                "definitionRevision": "1",
+                "recoveryFence": "1",
+                "definitionDigest": {
+                  "algorithm": "sha256",
+                  "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+                }
+              },
+              "binding": {
+                "entryId": {
+                  "value": "entry_1"
+                },
+                "secretRef": {
+                  "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                }
+              }
+            },
+            "correlationId": {
+              "value": "correlation_1"
+            },
+            "observedAt": "2030-01-01T00:00:00Z",
+            "succeeded": {
+              "observedVersion": {
+                "googleVersion": "17"
+              },
+              "valueValidationRef": {
+                "validationId": {
+                  "value": "value_validation_1"
+                },
+                "sourceEntryRef": {
+                  "sourceRef": {
+                    "scope": {
+                      "tenantId": {
+                        "value": "tenant_1"
+                      },
+                      "resourceParent": {
+                        "projectId": {
+                          "value": "project_1"
+                        }
+                      }
+                    },
+                    "sourceId": {
+                      "value": "source_1"
+                    },
+                    "definitionRevision": "1",
+                    "recoveryFence": "1",
+                    "definitionDigest": {
+                      "algorithm": "sha256",
+                      "value": "DDK27vMOWvzFL4bf6ftDq21loxZXXFdlwH5AW1xqQaA="
+                    }
+                  },
+                  "binding": {
+                    "entryId": {
+                      "value": "entry_1"
+                    },
+                    "secretRef": {
+                      "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    }
+                  }
+                },
+                "observedVersion": {
+                  "googleVersion": "17"
+                },
+                "correlationId": {
+                  "value": "correlation_1"
+                }
+              },
+              "cacheExpiresAt": "2030-01-01T00:05:30Z"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "observed version metadata must match the registered provider"
+      ]
+    },
+    {
+      "name": "source denied remains typed",
+      "template": "denied"
+    },
+    {
+      "name": "source unavailable remains typed",
+      "template": "unavailable"
+    },
+    {
+      "name": "source throttled remains typed",
+      "template": "throttled"
+    },
+    {
+      "name": "metadata registration can still fail first material read",
+      "template": "first-read-denied"
+    },
+    {
+      "name": "source read failure cannot imply OAuth refresh state",
+      "template": "denied",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failed/category",
+          "value": 6
+        }
+      ],
+      "violations": [
+        "source failure keeps denied unavailable throttled integrity and internal categories distinct"
+      ]
+    },
+    {
+      "name": "source read denial cannot carry retry delay",
+      "template": "denied",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/failed/retryAfter",
+          "value": "1s"
+        }
+      ],
+      "violations": [
+        "retry_after is carried only for THROTTLED and REFRESH_PENDING"
+      ]
+    },
+    {
+      "name": "reference revocation cannot select another SecretRef",
+      "template": "revocation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/evidence/secretRef",
+          "value": {
+            "id": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+          }
+        }
+      ],
+      "violations": [
+        "revocation evidence must match the exact scoped SecretRef"
+      ]
+    },
+    {
+      "name": "value validation cannot borrow another consumer admission",
+      "template": "resolution",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/succeeded/valueValidationRef/correlationId/value",
+          "value": "correlation_2"
+        }
+      ],
+      "violations": [
+        "material validation must belong to the original accepted consumer use"
+      ]
+    },
+    {
+      "name": "source degradation exposes only ref and typed category",
+      "template": "degraded"
+    },
+    {
+      "name": "source degradation cannot request OAuth refresh state",
+      "template": "degraded",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/failure/category",
+          "value": 6
+        }
+      ],
+      "violations": [
+        "source degradation must preserve a supported source failure category"
+      ]
+    }
+  ]
+}

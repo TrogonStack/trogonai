@@ -328,22 +328,26 @@ test('runner selection runs in its own job and fails loudly', async () => {
   }
 });
 
-test('only main pushes and dispatches can read the Baton key', async () => {
+test('only main pushes, dispatches and same-repository pull requests can read the Baton key', async () => {
   const job = load('.github/workflows/ci-selection.yml').jobs.runner;
   assert.equal(job.permissions['id-token'], 'write');
   const auth = job.steps.find((item) => item.id === 'gcp');
+  const repository = 'TrogonStack/trogonai';
   const cases = [
-    ['push', 'refs/heads/main', true],
-    ['workflow_dispatch', 'refs/heads/main', true],
-    ['pull_request', 'refs/pull/1/merge', false],
-    ['pull_request_target', 'refs/heads/main', false],
-    ['merge_group', 'refs/heads/gh-readonly-queue/main/pr-1', false],
-    ['push', 'refs/heads/feature', false],
+    ['push', 'refs/heads/main', undefined, true],
+    ['workflow_dispatch', 'refs/heads/main', undefined, true],
+    ['pull_request', 'refs/pull/1/merge', repository, true],
+    ['pull_request', 'refs/pull/1/merge', 'someone/trogonai', false],
+    ['pull_request_target', 'refs/heads/main', 'someone/trogonai', false],
+    ['merge_group', 'refs/heads/gh-readonly-queue/main/pr-1', undefined, false],
+    ['push', 'refs/heads/feature', undefined, false],
   ];
-  for (const [event_name, ref, trusted] of cases) {
-    const context = { github: { event_name, ref } };
-    assert.equal((await evaluate(job.environment, context)).coerceString(), trusted ? 'github-app-baton' : '', `${event_name} ${ref}`);
-    assert.equal((await evaluate(auth.if, context)).coerceString(), String(trusted), `${event_name} ${ref}`);
+  for (const [event_name, ref, head, trusted] of cases) {
+    const event = head === undefined ? {} : { pull_request: { head: { repo: { full_name: head } } } };
+    const context = { github: { event_name, ref, repository, event } };
+    const where = `${event_name} ${ref} ${head ?? ''}`;
+    assert.equal((await evaluate(job.environment, context)).coerceString(), trusted ? 'github-app-baton' : '', where);
+    assert.equal((await evaluate(auth.if, context)).coerceString(), String(trusted), where);
   }
   for (const id of ['gcp', 'baton_key', 'baton']) {
     assert.equal(job.steps.find((item) => item.id === id)['continue-on-error'], true, id);

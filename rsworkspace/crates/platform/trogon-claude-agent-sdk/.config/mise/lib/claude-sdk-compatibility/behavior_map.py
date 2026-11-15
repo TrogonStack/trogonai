@@ -20,6 +20,12 @@ ROW_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 REVISION = re.compile(r"[0-9a-f]{40}")
 RUST_PATH = re.compile(r"src/(?:[a-z0-9_]+/)*[a-z0-9_]+\.rs")
+UNIT_SELECTOR = re.compile(r"(src/(?:[a-z0-9_]+/)*[a-z0-9_]+\.rs)::([A-Za-z_][A-Za-z0-9_]*)")
+UNIT_TEST = re.compile(
+    r"^[ \t]*#\[(?:tokio::)?test(?:\([^\]]*\))?\][ \t]*\n"
+    r"(?:[ \t]*(?:#\[.*\]|//.*)\n)*"
+    r"[ \t]*(?:async[ \t]+)?fn[ \t]+([A-Za-z_][A-Za-z0-9_]*)",
+    re.MULTILINE)
 
 
 def require(condition, code, selector):
@@ -282,11 +288,30 @@ def validate(behaviors, pins, sources, require_contracts=False):
     return tuple(ids)
 
 
+def unit_test_selectors(files):
+    """`src/<path>.rs::<name>` for each `#[test]` or `#[tokio::test]` function in `files`.
+
+    `files` maps a crate-relative source path to its text, so the caller decides what is read.
+    """
+    require(isinstance(files, dict), Code.FORMAT, "unit-test-files")
+    selectors = set()
+    for path, text in files.items():
+        require(isinstance(path, str) and RUST_PATH.fullmatch(path) is not None and isinstance(text, str),
+                Code.FORMAT, f"unit-test-files.{path}")
+        selectors.update(f"{path}::{name}" for name in UNIT_TEST.findall(text))
+    return frozenset(selectors)
+
+
 @format_boundary("behaviors")
-def contracts_check(behaviors, compiled_selectors):
-    """Require every mapped contract to name a compiled, listed Rust test."""
+def contracts_check(behaviors, compiled_selectors, unit_selectors=frozenset()):
+    """Require every mapped contract to name a compiled integration test or a unit test in src/."""
     require(isinstance(compiled_selectors, (set, frozenset)), Code.FORMAT, "compiled-selectors")
+    require(isinstance(unit_selectors, (set, frozenset)), Code.FORMAT, "unit-selectors")
     for row in behaviors["rows"]:
         for selector in row["contracts"]:
-            require(selector in compiled_selectors, Code.REFERENCE,
-                    f"{row['id']}.contracts.{selector}")
+            where = f"{row['id']}.contracts.{selector}"
+            if selector.startswith("src/"):
+                require(UNIT_SELECTOR.fullmatch(selector) is not None, Code.FORMAT, where)
+                require(selector in unit_selectors, Code.REFERENCE, where)
+            else:
+                require(selector in compiled_selectors, Code.REFERENCE, where)
