@@ -1,0 +1,38 @@
+name: Runner smoke test
+
+on:
+  push:
+    branches: [yordis/ci-sunny-go-smoke]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: sunny-go-trogonstack-linux-x64
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Runner
+        run: |
+          nproc
+          free -h | head -2
+          df -h /srv/ci | tail -1
+
+      - name: Sticky disk
+        id: sticky
+        run: sticky-disk mount smoke "$RUNNER_TEMP/../smoke-cache" || /opt/runner-hooks/sticky-disk mount smoke "$(pwd)/.smoke-cache"
+
+      - name: Docker through the mirror
+        run: time docker pull -q rust:1-slim >/dev/null
+
+      - name: Bazel remote cache
+        run: |
+          if command -v bazel >/dev/null || command -v bazelisk >/dev/null; then
+            time bazel build //... --nobuild 2>&1 | tail -5
+          else
+            echo "no bazel on PATH"
+          fi
