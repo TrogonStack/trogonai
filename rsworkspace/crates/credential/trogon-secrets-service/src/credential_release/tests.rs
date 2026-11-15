@@ -8,9 +8,9 @@ use trogon_credential_aggregate::proto::{
     active_state_to_proto, revoked_to_proto_state, rotation_pending_to_proto_state,
 };
 use trogon_credential_domain::{
-    AllowedHosts, AllowedRuntimeServices, ConfiguredReleasePolicy, CredentialFingerprint, CredentialIdentity,
-    CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
-    InjectionLocation, InjectionLocations, RuntimeReleasePolicy, SourceKind,
+    AllowedHosts, AllowedRuntimeServices, AuditCorrelationId, ConfiguredReleasePolicy, CredentialFingerprint,
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, InjectionLocation, InjectionLocations, RuntimeReleasePolicy, SourceKind,
 };
 use trogon_secret_store::{InMemorySecretStore, SecretStorePut, SecretStoreRevoke, SecretVerifier};
 use trogon_std::SecretString;
@@ -36,12 +36,16 @@ enum TestStore {
     VerifierOnly,
 }
 
-impl SecretStoreGet for TestStore {
+impl SecretStoreCorrelatedGet for TestStore {
     type Error = SecretStoreError;
 
-    async fn get(&self, credential: &CredentialRef) -> Result<SecretMaterial, SecretStoreError> {
+    async fn get_correlated(
+        &self,
+        credential: &CredentialRef,
+        correlation_id: &AuditCorrelationId,
+    ) -> Result<SecretMaterial, SecretStoreError> {
         match self {
-            Self::Real(store) => store.get(credential).await,
+            Self::Real(store) => store.get_correlated(credential, correlation_id).await,
             Self::Failing(error) => Err(error.clone()),
             Self::VerifierOnly => Ok(SecretMaterial::Verifier(SecretVerifier::new("verifier-hash").unwrap())),
         }
@@ -219,6 +223,18 @@ async fn an_undecodable_requester_xkey_is_key_denied_before_any_lookup() {
     assert_eq!(harness.states.reads(), 0);
     assert_eq!(harness.denial_reasons(), vec![DenialReason::RequesterXkeyInvalid]);
     assert_eq!(harness.seals(), 0);
+}
+
+#[tokio::test]
+async fn the_store_reads_under_the_release_correlation_id() {
+    let harness = Harness::new().await;
+
+    harness.release().await.unwrap();
+
+    assert_eq!(
+        harness.memory.correlation_ids().await,
+        vec![AuditCorrelationId::new(CORRELATION_ID).unwrap()]
+    );
 }
 
 #[tokio::test]

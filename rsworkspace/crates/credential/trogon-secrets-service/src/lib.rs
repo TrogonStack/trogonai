@@ -21,7 +21,6 @@
 //!   core without a credential stream or an audit writer. Off by default;
 //!   enable it only from `[dev-dependencies]`.
 
-mod audit_correlation_id;
 mod constants;
 mod credential_release;
 mod credential_release_error;
@@ -55,7 +54,6 @@ mod tenant_account;
 mod tenant_owners;
 mod xkey_sealer;
 
-pub use audit_correlation_id::{AuditCorrelationId, AuditCorrelationIdError};
 pub use constants::{RELEASE_TTL_BOUND, UNBUNDLED_GENERATION};
 pub use credential_release::CredentialRelease;
 pub use credential_release_error::CredentialReleaseError;
