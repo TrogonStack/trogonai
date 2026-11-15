@@ -1,0 +1,1661 @@
+{
+  "templates": {
+    "RecipientBinding-activation": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ActivateRecipientBinding",
+      "payload": {
+        "recipientBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          }
+        },
+        "approvalRef": {
+          "approvalId": {
+            "value": "approval_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          },
+          "ownerKind": 3,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "validationId": {
+            "value": "validation_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          },
+          "ownerKind": 3,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "RecipientBinding-state": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingState",
+      "payload": {
+        "configuration": {
+          "recipientBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "recipient_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/worker",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "purposeId": {
+              "value": "purpose_1"
+            },
+            "recipient": {
+              "awsWebIdentity": {
+                "accountId": "123456789012",
+                "roleArn": "arn:aws:iam::123456789012:role/worker",
+                "issuerProfileRef": {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "issuer_1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+                  }
+                },
+                "assertionSubject": "spiffe://example.test/worker",
+                "assertionAudience": "sts.amazonaws.com",
+                "requestedSessionDuration": "900s",
+                "rolePolicyOnly": {}
+              }
+            },
+            "operations": [
+              {
+                "operationId": {
+                  "value": "read_resource"
+                },
+                "resourceIds": [
+                  "resource_1"
+                ],
+                "scopes": [
+                  "read"
+                ]
+              }
+            ],
+            "maxLocalUse": "60s",
+            "delivery": 1,
+            "contractVersion": 1
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESNwo1ChxzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvd29ya2VyEgh0ZW5hbnRfMRoJcHJvamVjdF8xIAMaCwoJcHVycG9zZV8xIrsBCrgBCgwxMjM0NTY3ODkwMTISJWFybjphd3M6aWFtOjoxMjM0NTY3ODkwMTI6cm9sZS93b3JrZXIaSQoVCgh0ZW5hbnRfMRIJcHJvamVjdF8xEjAKCGlzc3Vlcl8xEAEYASIg4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3VoiHHNwaWZmZTovL2V4YW1wbGUudGVzdC93b3JrZXIqEXN0cy5hbWF6b25hd3MuY29tMgMIhAc6ACojCg8KDXJlYWRfcmVzb3VyY2USCnJlc291cmNlXzEaBHJlYWQyAgg8OAFAAQ=="
+          }
+        },
+        "lifecycle": 2,
+        "admission": 1,
+        "approvalRef": {
+          "approvalId": {
+            "value": "approval_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          },
+          "ownerKind": 3,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "validationId": {
+            "value": "validation_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          },
+          "ownerKind": 3,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "RecipientBinding-revision": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ReviseRecipientBinding",
+      "payload": {
+        "previousRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          }
+        },
+        "configuration": {
+          "recipientBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "recipient_1",
+              "revision": "2",
+              "recoveryFence": "1",
+              "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/worker",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "purposeId": {
+              "value": "purpose_1"
+            },
+            "recipient": {
+              "awsWebIdentity": {
+                "accountId": "123456789012",
+                "roleArn": "arn:aws:iam::123456789012:role/worker",
+                "issuerProfileRef": {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "issuer_1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+                  }
+                },
+                "assertionSubject": "spiffe://example.test/worker",
+                "assertionAudience": "sts.amazonaws.com",
+                "requestedSessionDuration": "900s",
+                "rolePolicyOnly": {}
+              }
+            },
+            "operations": [
+              {
+                "operationId": {
+                  "value": "read_resource"
+                },
+                "resourceIds": [
+                  "resource_1"
+                ],
+                "scopes": [
+                  "read"
+                ]
+              }
+            ],
+            "maxLocalUse": "60s",
+            "delivery": 1,
+            "contractVersion": 1
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESNwo1ChxzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvd29ya2VyEgh0ZW5hbnRfMRoJcHJvamVjdF8xIAMaCwoJcHVycG9zZV8xIrsBCrgBCgwxMjM0NTY3ODkwMTISJWFybjphd3M6aWFtOjoxMjM0NTY3ODkwMTI6cm9sZS93b3JrZXIaSQoVCgh0ZW5hbnRfMRIJcHJvamVjdF8xEjAKCGlzc3Vlcl8xEAEYASIg4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3VoiHHNwaWZmZTovL2V4YW1wbGUudGVzdC93b3JrZXIqEXN0cy5hbWF6b25hd3MuY29tMgMIhAc6ACojCg8KDXJlYWRfcmVzb3VyY2USCnJlc291cmNlXzEaBHJlYWQyAgg8OAFAAQ=="
+          }
+        }
+      }
+    },
+    "RecipientBinding-list": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ListRecipientBindingRequest",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "pageSize": 25
+      }
+    },
+    "RecipientBinding-page": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.RecipientBindingPage",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "records": [
+          {
+            "configuration": {
+              "recipientBindingRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "recipient_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+                }
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "source": {
+                  "localWorkload": {
+                    "spiffeId": "spiffe://example.test/worker",
+                    "tenant": "tenant_1",
+                    "project": "project_1",
+                    "role": 3
+                  }
+                },
+                "purposeId": {
+                  "value": "purpose_1"
+                },
+                "recipient": {
+                  "awsWebIdentity": {
+                    "accountId": "123456789012",
+                    "roleArn": "arn:aws:iam::123456789012:role/worker",
+                    "issuerProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "issuer_1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+                      }
+                    },
+                    "assertionSubject": "spiffe://example.test/worker",
+                    "assertionAudience": "sts.amazonaws.com",
+                    "requestedSessionDuration": "900s",
+                    "rolePolicyOnly": {}
+                  }
+                },
+                "operations": [
+                  {
+                    "operationId": {
+                      "value": "read_resource"
+                    },
+                    "resourceIds": [
+                      "resource_1"
+                    ],
+                    "scopes": [
+                      "read"
+                    ]
+                  }
+                ],
+                "maxLocalUse": "60s",
+                "delivery": 1,
+                "contractVersion": 1
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESNwo1ChxzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvd29ya2VyEgh0ZW5hbnRfMRoJcHJvamVjdF8xIAMaCwoJcHVycG9zZV8xIrsBCrgBCgwxMjM0NTY3ODkwMTISJWFybjphd3M6aWFtOjoxMjM0NTY3ODkwMTI6cm9sZS93b3JrZXIaSQoVCgh0ZW5hbnRfMRIJcHJvamVjdF8xEjAKCGlzc3Vlcl8xEAEYASIg4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3VoiHHNwaWZmZTovL2V4YW1wbGUudGVzdC93b3JrZXIqEXN0cy5hbWF6b25hd3MuY29tMgMIhAc6ACojCg8KDXJlYWRfcmVzb3VyY2USCnJlc291cmNlXzEaBHJlYWQyAgg8OAFAAQ=="
+              }
+            },
+            "lifecycle": 2,
+            "admission": 1,
+            "approvalRef": {
+              "approvalId": {
+                "value": "approval_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "recipient_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+              },
+              "ownerKind": 3,
+              "operationPurpose": 1
+            },
+            "validationRef": {
+              "validationId": {
+                "value": "validation_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "recipient_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+              },
+              "ownerKind": 3,
+              "operationPurpose": 1
+            }
+          }
+        ]
+      }
+    },
+    "IssuerProfile-activation": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ActivateIssuerProfile",
+      "payload": {
+        "issuerProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "issuer_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+          }
+        },
+        "approvalRef": {
+          "approvalId": {
+            "value": "approval_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "issuer_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+          },
+          "ownerKind": 4,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "validationId": {
+            "value": "validation_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "issuer_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+          },
+          "ownerKind": 4,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "IssuerProfile-state": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.IssuerProfileState",
+      "payload": {
+        "configuration": {
+          "issuerProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "issuer_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "issuer": "https://issuer.example.test",
+            "discoveryUri": "https://issuer.example.test/.well-known/openid-configuration",
+            "jwksUri": "https://issuer.example.test/keys",
+            "algorithm": 1,
+            "signingProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "signing_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+              }
+            },
+            "maxAssertionLifetime": "60s",
+            "publishedKeySetProfile": 2,
+            "nativeSpire": {
+              "issuerDeploymentId": {
+                "value": "spire_1"
+              },
+              "oidcHelperArtifactSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+            },
+            "contractVersion": 1
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESG2h0dHBzOi8vaXNzdWVyLmV4YW1wbGUudGVzdBo8aHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZS50ZXN0Ly53ZWxsLWtub3duL29wZW5pZC1jb25maWd1cmF0aW9uIiBodHRwczovL2lzc3Vlci5leGFtcGxlLnRlc3Qva2V5cygBMkoKFQoIdGVuYW50XzESCXByb2plY3RfMRIxCglzaWduaW5nXzEQARgBIiBT39ttzvrmEsovMwqw9YoxGFFtl8Vh2wtrNkYzG8Ne2DoCCDxAAlgBSi0KCQoHc3BpcmVfMRIgAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+          }
+        },
+        "lifecycle": 2,
+        "admission": 1,
+        "approvalRef": {
+          "approvalId": {
+            "value": "approval_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "issuer_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+          },
+          "ownerKind": 4,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "validationId": {
+            "value": "validation_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "issuer_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+          },
+          "ownerKind": 4,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "IssuerProfile-revision": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ReviseIssuerProfile",
+      "payload": {
+        "previousRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "issuer_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+          }
+        },
+        "configuration": {
+          "issuerProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "issuer_1",
+              "revision": "2",
+              "recoveryFence": "1",
+              "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "issuer": "https://issuer.example.test",
+            "discoveryUri": "https://issuer.example.test/.well-known/openid-configuration",
+            "jwksUri": "https://issuer.example.test/keys",
+            "algorithm": 1,
+            "signingProfileRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "signing_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+              }
+            },
+            "maxAssertionLifetime": "60s",
+            "publishedKeySetProfile": 2,
+            "nativeSpire": {
+              "issuerDeploymentId": {
+                "value": "spire_1"
+              },
+              "oidcHelperArtifactSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+            },
+            "contractVersion": 1
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESG2h0dHBzOi8vaXNzdWVyLmV4YW1wbGUudGVzdBo8aHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZS50ZXN0Ly53ZWxsLWtub3duL29wZW5pZC1jb25maWd1cmF0aW9uIiBodHRwczovL2lzc3Vlci5leGFtcGxlLnRlc3Qva2V5cygBMkoKFQoIdGVuYW50XzESCXByb2plY3RfMRIxCglzaWduaW5nXzEQARgBIiBT39ttzvrmEsovMwqw9YoxGFFtl8Vh2wtrNkYzG8Ne2DoCCDxAAlgBSi0KCQoHc3BpcmVfMRIgAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+          }
+        }
+      }
+    },
+    "IssuerProfile-list": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ListIssuerProfileRequest",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "pageSize": 25
+      }
+    },
+    "IssuerProfile-page": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.IssuerProfilePage",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "records": [
+          {
+            "configuration": {
+              "issuerProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "issuer_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+                }
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "issuer": "https://issuer.example.test",
+                "discoveryUri": "https://issuer.example.test/.well-known/openid-configuration",
+                "jwksUri": "https://issuer.example.test/keys",
+                "algorithm": 1,
+                "signingProfileRef": {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "signing_1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+                  }
+                },
+                "maxAssertionLifetime": "60s",
+                "publishedKeySetProfile": 2,
+                "nativeSpire": {
+                  "issuerDeploymentId": {
+                    "value": "spire_1"
+                  },
+                  "oidcHelperArtifactSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+                },
+                "contractVersion": 1
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESG2h0dHBzOi8vaXNzdWVyLmV4YW1wbGUudGVzdBo8aHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZS50ZXN0Ly53ZWxsLWtub3duL29wZW5pZC1jb25maWd1cmF0aW9uIiBodHRwczovL2lzc3Vlci5leGFtcGxlLnRlc3Qva2V5cygBMkoKFQoIdGVuYW50XzESCXByb2plY3RfMRIxCglzaWduaW5nXzEQARgBIiBT39ttzvrmEsovMwqw9YoxGFFtl8Vh2wtrNkYzG8Ne2DoCCDxAAlgBSi0KCQoHc3BpcmVfMRIgAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+              }
+            },
+            "lifecycle": 2,
+            "admission": 1,
+            "approvalRef": {
+              "approvalId": {
+                "value": "approval_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "issuer_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+              },
+              "ownerKind": 4,
+              "operationPurpose": 1
+            },
+            "validationRef": {
+              "validationId": {
+                "value": "validation_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "issuer_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+              },
+              "ownerKind": 4,
+              "operationPurpose": 1
+            }
+          }
+        ]
+      }
+    },
+    "SigningProfile-activation": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ActivateSigningProfile",
+      "payload": {
+        "signingProfileRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          }
+        },
+        "approvalRef": {
+          "approvalId": {
+            "value": "approval_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          },
+          "ownerKind": 6,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "validationId": {
+            "value": "validation_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          },
+          "ownerKind": 6,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "SigningProfile-state": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SigningProfileState",
+      "payload": {
+        "configuration": {
+          "signingProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "signing_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "purpose": 4,
+            "algorithm": 4,
+            "inputProfile": 4,
+            "signerId": {
+              "value": "signer_1"
+            },
+            "publicKeyId": {
+              "value": "public_key_1"
+            },
+            "protection": 3,
+            "deploymentTier": 2,
+            "custodyQualificationId": {
+              "value": "custody_qualification_1"
+            },
+            "contractVersion": 1
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQBBgEIAQqCgoIc2lnbmVyXzEyDgoMcHVibGljX2tleV8xOANAAkoZChdjdXN0b2R5X3F1YWxpZmljYXRpb25fMVAB"
+          }
+        },
+        "lifecycle": 2,
+        "admission": 1,
+        "approvalRef": {
+          "approvalId": {
+            "value": "approval_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          },
+          "ownerKind": 6,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "validationId": {
+            "value": "validation_1"
+          },
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          },
+          "ownerKind": 6,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "SigningProfile-revision": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ReviseSigningProfile",
+      "payload": {
+        "previousRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "signing_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+          }
+        },
+        "configuration": {
+          "signingProfileRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "signing_1",
+              "revision": "2",
+              "recoveryFence": "1",
+              "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "purpose": 4,
+            "algorithm": 4,
+            "inputProfile": 4,
+            "signerId": {
+              "value": "signer_1"
+            },
+            "publicKeyId": {
+              "value": "public_key_1"
+            },
+            "protection": 3,
+            "deploymentTier": 2,
+            "custodyQualificationId": {
+              "value": "custody_qualification_1"
+            },
+            "contractVersion": 1
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQBBgEIAQqCgoIc2lnbmVyXzEyDgoMcHVibGljX2tleV8xOANAAkoZChdjdXN0b2R5X3F1YWxpZmljYXRpb25fMVAB"
+          }
+        }
+      }
+    },
+    "SigningProfile-list": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.ListSigningProfileRequest",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "pageSize": 25
+      }
+    },
+    "SigningProfile-page": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SigningProfilePage",
+      "payload": {
+        "scope": {
+          "tenant": "tenant_1",
+          "project": "project_1"
+        },
+        "records": [
+          {
+            "configuration": {
+              "signingProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "signing_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+                }
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "purpose": 4,
+                "algorithm": 4,
+                "inputProfile": 4,
+                "signerId": {
+                  "value": "signer_1"
+                },
+                "publicKeyId": {
+                  "value": "public_key_1"
+                },
+                "protection": 3,
+                "deploymentTier": 2,
+                "custodyQualificationId": {
+                  "value": "custody_qualification_1"
+                },
+                "contractVersion": 1
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQBBgEIAQqCgoIc2lnbmVyXzEyDgoMcHVibGljX2tleV8xOANAAkoZChdjdXN0b2R5X3F1YWxpZmljYXRpb25fMVAB"
+              }
+            },
+            "lifecycle": 2,
+            "admission": 1,
+            "approvalRef": {
+              "approvalId": {
+                "value": "approval_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "signing_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+              },
+              "ownerKind": 6,
+              "operationPurpose": 1
+            },
+            "validationRef": {
+              "validationId": {
+                "value": "validation_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "signing_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+              },
+              "ownerKind": 6,
+              "operationPurpose": 1
+            }
+          }
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "RecipientBinding exact owner activation",
+      "template": "RecipientBinding-activation",
+      "violations": []
+    },
+    {
+      "name": "RecipientBinding activation refuses wrong owner receipt",
+      "template": "RecipientBinding-activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvalRef/ownerKind",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "activation approval and validation must name the exact configuration"
+      ]
+    },
+    {
+      "name": "RecipientBinding activation refuses stale validation",
+      "template": "RecipientBinding-activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validationRef/version/revision",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "activation approval and validation must name the exact configuration"
+      ]
+    },
+    {
+      "name": "RecipientBinding current state is metadata",
+      "template": "RecipientBinding-state",
+      "violations": []
+    },
+    {
+      "name": "RecipientBinding retired state cannot remain enabled",
+      "template": "RecipientBinding-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/lifecycle",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "retired configuration must remain withdrawn"
+      ]
+    },
+    {
+      "name": "RecipientBinding active state requires validation",
+      "template": "RecipientBinding-state",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/validationRef"
+        }
+      ],
+      "violations": [
+        "active configuration requires exact approval and validation references"
+      ]
+    },
+    {
+      "name": "RecipientBinding monotonically revised configuration",
+      "template": "RecipientBinding-revision",
+      "violations": []
+    },
+    {
+      "name": "RecipientBinding revision cannot revive another fence",
+      "template": "RecipientBinding-revision",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/configuration/recipientBindingRef/version/recoveryFence",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "configuration revision must preserve owner identity and advance its revision"
+      ]
+    },
+    {
+      "name": "RecipientBinding bounded list query",
+      "template": "RecipientBinding-list",
+      "violations": []
+    },
+    {
+      "name": "RecipientBinding list refuses unbounded pages",
+      "template": "RecipientBinding-list",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageSize",
+          "value": 101
+        }
+      ],
+      "violations": [
+        "less than or equal to 100"
+      ]
+    },
+    {
+      "name": "RecipientBinding scoped configuration page",
+      "template": "RecipientBinding-page",
+      "violations": []
+    },
+    {
+      "name": "RecipientBinding page cannot cross scope",
+      "template": "RecipientBinding-page",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "every returned configuration must belong to the requested scope"
+      ]
+    },
+    {
+      "name": "RecipientBinding page cannot duplicate identity",
+      "template": "RecipientBinding-page",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/records/1",
+          "value": {
+            "configuration": {
+              "recipientBindingRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "recipient_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+                }
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "source": {
+                  "localWorkload": {
+                    "spiffeId": "spiffe://example.test/worker",
+                    "tenant": "tenant_1",
+                    "project": "project_1",
+                    "role": 3
+                  }
+                },
+                "purposeId": {
+                  "value": "purpose_1"
+                },
+                "recipient": {
+                  "awsWebIdentity": {
+                    "accountId": "123456789012",
+                    "roleArn": "arn:aws:iam::123456789012:role/worker",
+                    "issuerProfileRef": {
+                      "scope": {
+                        "tenant": "tenant_1",
+                        "project": "project_1"
+                      },
+                      "version": {
+                        "id": "issuer_1",
+                        "revision": "1",
+                        "recoveryFence": "1",
+                        "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+                      }
+                    },
+                    "assertionSubject": "spiffe://example.test/worker",
+                    "assertionAudience": "sts.amazonaws.com",
+                    "requestedSessionDuration": "900s",
+                    "rolePolicyOnly": {}
+                  }
+                },
+                "operations": [
+                  {
+                    "operationId": {
+                      "value": "read_resource"
+                    },
+                    "resourceIds": [
+                      "resource_1"
+                    ],
+                    "scopes": [
+                      "read"
+                    ]
+                  }
+                ],
+                "maxLocalUse": "60s",
+                "delivery": 1,
+                "contractVersion": 1
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESNwo1ChxzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvd29ya2VyEgh0ZW5hbnRfMRoJcHJvamVjdF8xIAMaCwoJcHVycG9zZV8xIrsBCrgBCgwxMjM0NTY3ODkwMTISJWFybjphd3M6aWFtOjoxMjM0NTY3ODkwMTI6cm9sZS93b3JrZXIaSQoVCgh0ZW5hbnRfMRIJcHJvamVjdF8xEjAKCGlzc3Vlcl8xEAEYASIg4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3VoiHHNwaWZmZTovL2V4YW1wbGUudGVzdC93b3JrZXIqEXN0cy5hbWF6b25hd3MuY29tMgMIhAc6ACojCg8KDXJlYWRfcmVzb3VyY2USCnJlc291cmNlXzEaBHJlYWQyAgg8OAFAAQ=="
+              }
+            },
+            "lifecycle": 2,
+            "admission": 1,
+            "approvalRef": {
+              "approvalId": {
+                "value": "approval_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "recipient_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+              },
+              "ownerKind": 3,
+              "operationPurpose": 1
+            },
+            "validationRef": {
+              "validationId": {
+                "value": "validation_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "recipient_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+              },
+              "ownerKind": 3,
+              "operationPurpose": 1
+            }
+          }
+        }
+      ],
+      "violations": [
+        "a configuration page cannot repeat an owner identity"
+      ]
+    },
+    {
+      "name": "IssuerProfile exact owner activation",
+      "template": "IssuerProfile-activation",
+      "violations": []
+    },
+    {
+      "name": "IssuerProfile activation refuses wrong owner receipt",
+      "template": "IssuerProfile-activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvalRef/ownerKind",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "activation approval and validation must name the exact configuration"
+      ]
+    },
+    {
+      "name": "IssuerProfile activation refuses stale validation",
+      "template": "IssuerProfile-activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validationRef/version/revision",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "activation approval and validation must name the exact configuration"
+      ]
+    },
+    {
+      "name": "IssuerProfile current state is metadata",
+      "template": "IssuerProfile-state",
+      "violations": []
+    },
+    {
+      "name": "IssuerProfile retired state cannot remain enabled",
+      "template": "IssuerProfile-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/lifecycle",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "retired configuration must remain withdrawn"
+      ]
+    },
+    {
+      "name": "IssuerProfile active state requires validation",
+      "template": "IssuerProfile-state",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/validationRef"
+        }
+      ],
+      "violations": [
+        "active configuration requires exact approval and validation references"
+      ]
+    },
+    {
+      "name": "IssuerProfile monotonically revised configuration",
+      "template": "IssuerProfile-revision",
+      "violations": []
+    },
+    {
+      "name": "IssuerProfile revision cannot revive another fence",
+      "template": "IssuerProfile-revision",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/configuration/issuerProfileRef/version/recoveryFence",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "configuration revision must preserve owner identity and advance its revision"
+      ]
+    },
+    {
+      "name": "IssuerProfile bounded list query",
+      "template": "IssuerProfile-list",
+      "violations": []
+    },
+    {
+      "name": "IssuerProfile list refuses unbounded pages",
+      "template": "IssuerProfile-list",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageSize",
+          "value": 101
+        }
+      ],
+      "violations": [
+        "less than or equal to 100"
+      ]
+    },
+    {
+      "name": "IssuerProfile scoped configuration page",
+      "template": "IssuerProfile-page",
+      "violations": []
+    },
+    {
+      "name": "IssuerProfile page cannot cross scope",
+      "template": "IssuerProfile-page",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "every returned configuration must belong to the requested scope"
+      ]
+    },
+    {
+      "name": "IssuerProfile page cannot duplicate identity",
+      "template": "IssuerProfile-page",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/records/1",
+          "value": {
+            "configuration": {
+              "issuerProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "issuer_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+                }
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "issuer": "https://issuer.example.test",
+                "discoveryUri": "https://issuer.example.test/.well-known/openid-configuration",
+                "jwksUri": "https://issuer.example.test/keys",
+                "algorithm": 1,
+                "signingProfileRef": {
+                  "scope": {
+                    "tenant": "tenant_1",
+                    "project": "project_1"
+                  },
+                  "version": {
+                    "id": "signing_1",
+                    "revision": "1",
+                    "recoveryFence": "1",
+                    "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+                  }
+                },
+                "maxAssertionLifetime": "60s",
+                "publishedKeySetProfile": 2,
+                "nativeSpire": {
+                  "issuerDeploymentId": {
+                    "value": "spire_1"
+                  },
+                  "oidcHelperArtifactSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+                },
+                "contractVersion": 1
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzESG2h0dHBzOi8vaXNzdWVyLmV4YW1wbGUudGVzdBo8aHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZS50ZXN0Ly53ZWxsLWtub3duL29wZW5pZC1jb25maWd1cmF0aW9uIiBodHRwczovL2lzc3Vlci5leGFtcGxlLnRlc3Qva2V5cygBMkoKFQoIdGVuYW50XzESCXByb2plY3RfMRIxCglzaWduaW5nXzEQARgBIiBT39ttzvrmEsovMwqw9YoxGFFtl8Vh2wtrNkYzG8Ne2DoCCDxAAlgBSi0KCQoHc3BpcmVfMRIgAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+              }
+            },
+            "lifecycle": 2,
+            "admission": 1,
+            "approvalRef": {
+              "approvalId": {
+                "value": "approval_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "issuer_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+              },
+              "ownerKind": 4,
+              "operationPurpose": 1
+            },
+            "validationRef": {
+              "validationId": {
+                "value": "validation_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "issuer_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "4AE23D2DgPoLeHiewoFFm5Pci/F+x56XZk7HyU/A3Vo="
+              },
+              "ownerKind": 4,
+              "operationPurpose": 1
+            }
+          }
+        }
+      ],
+      "violations": [
+        "a configuration page cannot repeat an owner identity"
+      ]
+    },
+    {
+      "name": "SigningProfile exact owner activation",
+      "template": "SigningProfile-activation",
+      "violations": []
+    },
+    {
+      "name": "SigningProfile activation refuses wrong owner receipt",
+      "template": "SigningProfile-activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvalRef/ownerKind",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "activation approval and validation must name the exact configuration"
+      ]
+    },
+    {
+      "name": "SigningProfile activation refuses stale validation",
+      "template": "SigningProfile-activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/validationRef/version/revision",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "activation approval and validation must name the exact configuration"
+      ]
+    },
+    {
+      "name": "SigningProfile current state is metadata",
+      "template": "SigningProfile-state",
+      "violations": []
+    },
+    {
+      "name": "SigningProfile retired state cannot remain enabled",
+      "template": "SigningProfile-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/lifecycle",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "retired configuration must remain withdrawn"
+      ]
+    },
+    {
+      "name": "SigningProfile active state requires validation",
+      "template": "SigningProfile-state",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/validationRef"
+        }
+      ],
+      "violations": [
+        "active configuration requires exact approval and validation references"
+      ]
+    },
+    {
+      "name": "SigningProfile monotonically revised configuration",
+      "template": "SigningProfile-revision",
+      "violations": []
+    },
+    {
+      "name": "SigningProfile revision cannot revive another fence",
+      "template": "SigningProfile-revision",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/configuration/signingProfileRef/version/recoveryFence",
+          "value": "2"
+        }
+      ],
+      "violations": [
+        "configuration revision must preserve owner identity and advance its revision"
+      ]
+    },
+    {
+      "name": "SigningProfile bounded list query",
+      "template": "SigningProfile-list",
+      "violations": []
+    },
+    {
+      "name": "SigningProfile list refuses unbounded pages",
+      "template": "SigningProfile-list",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/pageSize",
+          "value": 101
+        }
+      ],
+      "violations": [
+        "less than or equal to 100"
+      ]
+    },
+    {
+      "name": "SigningProfile scoped configuration page",
+      "template": "SigningProfile-page",
+      "violations": []
+    },
+    {
+      "name": "SigningProfile page cannot cross scope",
+      "template": "SigningProfile-page",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "every returned configuration must belong to the requested scope"
+      ]
+    },
+    {
+      "name": "SigningProfile page cannot duplicate identity",
+      "template": "SigningProfile-page",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/records/1",
+          "value": {
+            "configuration": {
+              "signingProfileRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "signing_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+                }
+              },
+              "definition": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "purpose": 4,
+                "algorithm": 4,
+                "inputProfile": 4,
+                "signerId": {
+                  "value": "signer_1"
+                },
+                "publicKeyId": {
+                  "value": "public_key_1"
+                },
+                "protection": 3,
+                "deploymentTier": 2,
+                "custodyQualificationId": {
+                  "value": "custody_qualification_1"
+                },
+                "contractVersion": 1
+              },
+              "artifact": {
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQBBgEIAQqCgoIc2lnbmVyXzEyDgoMcHVibGljX2tleV8xOANAAkoZChdjdXN0b2R5X3F1YWxpZmljYXRpb25fMVAB"
+              }
+            },
+            "lifecycle": 2,
+            "admission": 1,
+            "approvalRef": {
+              "approvalId": {
+                "value": "approval_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "signing_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+              },
+              "ownerKind": 6,
+              "operationPurpose": 1
+            },
+            "validationRef": {
+              "validationId": {
+                "value": "validation_1"
+              },
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "signing_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "U9/bbc765hLKLzMKsPWKMRhRbZfFYdsLazZGMxvDXtg="
+              },
+              "ownerKind": 6,
+              "operationPurpose": 1
+            }
+          }
+        }
+      ],
+      "violations": [
+        "a configuration page cannot repeat an owner identity"
+      ]
+    }
+  ]
+}
