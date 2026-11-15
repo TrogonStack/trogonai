@@ -78,6 +78,7 @@ mod openbao_address;
 mod openbao_address_error;
 mod openbao_section_wire;
 mod owner_holding;
+mod owner_tenants;
 #[cfg(any(test, feature = "test-support"))]
 mod recording_release_audit;
 mod refusal;
@@ -149,6 +150,7 @@ pub use jetstream_credential_states::JetStreamCredentialStates;
 pub use openbao_address::OpenBaoAddress;
 pub use openbao_address_error::OpenBaoAddressError;
 pub use owner_holding::OwnerHolding;
+pub use owner_tenants::OwnerTenants;
 #[cfg(any(test, feature = "test-support"))]
 pub use recording_release_audit::RecordingReleaseAudit;
 pub use release_answer::ReleaseAnswer;

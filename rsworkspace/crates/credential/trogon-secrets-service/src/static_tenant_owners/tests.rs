@@ -168,3 +168,37 @@ fn a_tenant_holds_each_owner_it_was_given() {
     assert_eq!(owners.holding(&known, &owner("project-1")), OwnerHolding::Held);
     assert_eq!(owners.holding(&known, &owner("project-2")), OwnerHolding::Held);
 }
+
+#[test]
+fn an_owner_no_tenant_holds_has_no_holder() {
+    let owners = StaticTenantOwners::new().with_owner(tenant(), owner("project-1"));
+
+    assert_eq!(owners.holder(&owner("project-2")), None);
+    assert_eq!(StaticTenantOwners::new().holder(&owner("project-1")), None);
+}
+
+#[test]
+fn an_owner_given_again_moves_to_the_later_tenant_so_it_never_has_two_holders() {
+    let (first, second) = (tenant(), tenant());
+    let owners = StaticTenantOwners::new()
+        .with_owner(first.clone(), owner("project-1"))
+        .with_owner(second.clone(), owner("project-1"));
+
+    assert_eq!(owners.holder(&owner("project-1")), Some(second.clone()));
+    assert_eq!(owners.holding(&first, &owner("project-1")), OwnerHolding::NotHeld);
+    assert_eq!(owners.holding(&second, &owner("project-1")), OwnerHolding::Held);
+}
+
+#[test]
+fn each_owner_is_held_by_the_tenant_its_file_names() {
+    let (first, second) = (tenant(), tenant());
+
+    let owners = load(&format!(
+        "[tenants]\n\"{first}\" = [\"project-1\", \"project-2\"]\n\"{second}\" = [\"project-3\"]\n"
+    ))
+    .unwrap();
+
+    assert_eq!(owners.holder(&owner("project-1")), Some(first.clone()));
+    assert_eq!(owners.holder(&owner("project-2")), Some(first));
+    assert_eq!(owners.holder(&owner("project-3")), Some(second));
+}
