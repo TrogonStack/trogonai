@@ -1,0 +1,492 @@
+{
+  "templates": {
+    "request": {
+      "type": "trogonai.secrets.exchange.v1alpha1.ResolveForReleaseRequest",
+      "payload": {
+        "credential": {
+          "credentialId": "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b",
+          "ownerId": "project-alpha"
+        },
+        "destinationHost": {
+          "host": "api.example.com",
+          "port": 443
+        },
+        "location": {
+          "header": "authorization"
+        },
+        "correlationId": {
+          "value": "audit-correlation-1"
+        },
+        "requesterXkey": {
+          "publicKey": "XAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "request rejects a credential id that is not a uuid",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/credentialId",
+          "value": "not-a-uuid"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects an uppercase credential id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/credentialId",
+          "value": "3F2B8C1E-5D4A-4E6F-9A7B-1C2D3E4F5A6B"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects an unhyphenated credential id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/credentialId",
+          "value": "3f2b8c1e5d4a4e6f9a7b1c2d3e4f5a6b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects an empty owner id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "at least 1 characters"
+      ]
+    },
+    {
+      "name": "request rejects a single dot owner id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": "."
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "request rejects a double dot owner id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": ".."
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "request rejects an overlong owner id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": "ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+        }
+      ],
+      "violations": [
+        "at most 128 characters"
+      ]
+    },
+    {
+      "name": "request rejects an owner id with a slash",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": "project/alpha"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects an unset location",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {}
+        }
+      ],
+      "violations": [
+        "exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "request rejects an empty header name",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "header": ""
+          }
+        }
+      ],
+      "violations": [
+        "at least 1 characters"
+      ]
+    },
+    {
+      "name": "request rejects a header name with a space",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "header": "x api key"
+          }
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects a header name with a colon",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "header": "authorization:"
+          }
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects an overlong header name",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "header": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+          }
+        }
+      ],
+      "violations": [
+        "at most 128 characters"
+      ]
+    },
+    {
+      "name": "request rejects an empty query parameter name",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "queryParameter": ""
+          }
+        }
+      ],
+      "violations": [
+        "at least 1 characters"
+      ]
+    },
+    {
+      "name": "request rejects a query parameter name with an equals sign",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "queryParameter": "api_key="
+          }
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects an overlong query parameter name",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "queryParameter": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+          }
+        }
+      ],
+      "violations": [
+        "at most 128 characters"
+      ]
+    },
+    {
+      "name": "request rejects an empty body field path",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "bodyField": ""
+          }
+        }
+      ],
+      "violations": [
+        "at least 1 characters"
+      ]
+    },
+    {
+      "name": "request rejects a body field path with an empty segment",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "bodyField": "auth..token"
+          }
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects a body field path with a trailing dot",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "bodyField": "auth."
+          }
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects a body field path with a bracket",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "bodyField": "auth[0]"
+          }
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects an overlong body field path",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "bodyField": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      ],
+      "violations": [
+        "at most 128 characters"
+      ]
+    },
+    {
+      "name": "request rejects a wildcard destination host",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/destinationHost/host",
+          "value": "*.example.com"
+        }
+      ],
+      "violations": [
+        "a host must be an exact name or address, never a pattern"
+      ]
+    },
+    {
+      "name": "request rejects destination port zero",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/destinationHost/port",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "greater than or equal to 1"
+      ]
+    },
+    {
+      "name": "request rejects an empty correlation id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/correlationId/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "at least 1 characters"
+      ]
+    },
+    {
+      "name": "request rejects a requester key that is not an xkey",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/requesterXkey/publicKey",
+          "value": "UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request rejects a short requester xkey",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/requesterXkey/publicKey",
+          "value": "XAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "request releases into a header",
+      "template": "request"
+    },
+    {
+      "name": "request accepts a mixed case header name",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "header": "X-Api-Key"
+          }
+        }
+      ]
+    },
+    {
+      "name": "request releases into a query parameter",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "queryParameter": "api_key"
+          }
+        }
+      ]
+    },
+    {
+      "name": "request releases into a nested body field",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "bodyField": "auth.client-secret"
+          }
+        }
+      ]
+    },
+    {
+      "name": "request addresses a static config owner",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": "static-config"
+        }
+      ]
+    },
+    {
+      "name": "request addresses an owner id with dots and colons",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": "org.team:alpha_1"
+        }
+      ]
+    },
+    {
+      "name": "request accepts a longest owner id",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/credential/ownerId",
+          "value": "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+        }
+      ]
+    }
+  ]
+}
