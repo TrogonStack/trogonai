@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use cel_interpreter::Program;
 
@@ -25,7 +24,7 @@ impl CelProgramHandle {
 #[derive(Debug)]
 struct CachedRule {
     path: PathBuf,
-    mtime: SystemTime,
+    source: String,
     program: CelProgramHandle,
 }
 
@@ -92,36 +91,39 @@ impl Tier2CompiledBundle {
                 continue;
             }
             let rule = RuleName::new_unchecked(stem);
-            let (program, mtime) = compiler::compile_cel_file(&path)?;
-            rules.insert(rule, CachedRule { path, mtime, program });
+            let (program, source) = compiler::compile_cel_file(&path)?;
+            rules.insert(rule, CachedRule { path, source, program });
         }
         Ok(Self { tier2_dir, rules })
     }
 
-    /// Refresh cached rules in-place. Picks up content changes via mtime,
-    /// drops cached entries whose source file was removed/renamed
-    /// (otherwise the policy would keep enforcing a rule the operator
-    /// deleted), and adds entries for new `.cel` files in the directory.
+    /// Refresh cached rules in-place. Picks up content changes by comparing
+    /// the file's current source with the source the cached program was
+    /// compiled from, drops cached entries whose source file was
+    /// removed/renamed (otherwise the policy would keep enforcing a rule the
+    /// operator deleted), and adds entries for new `.cel` files in the
+    /// directory.
+    ///
+    /// Content is compared instead of mtime because back-to-back rewrites can
+    /// land within one filesystem timestamp tick and keep the same mtime,
+    /// which would leave the previous rule enforced after an operator
+    /// replaced it. A failed compile keeps the cached source, so every later
+    /// refresh retries the broken file and keeps denying until it is fixed.
     pub fn refresh_if_stale(&mut self) -> Result<(), CelCompileError> {
         let mut removed: Vec<RuleName> = Vec::new();
         for (name, cached) in self.rules.iter_mut() {
-            match fs::metadata(&cached.path) {
-                Ok(meta) => {
-                    let current_mtime = meta.modified().map_err(|source| CelCompileError::Metadata {
-                        path: cached.path.clone(),
-                        source,
-                    })?;
-                    if current_mtime != cached.mtime {
-                        let (program, mtime) = compiler::compile_cel_file(&cached.path)?;
-                        cached.program = program;
-                        cached.mtime = mtime;
+            match fs::read_to_string(&cached.path) {
+                Ok(source) => {
+                    if source != cached.source {
+                        cached.program = compiler::compile_cel_path_source(&cached.path, &source)?;
+                        cached.source = source;
                     }
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                     removed.push(name.clone());
                 }
                 Err(source) => {
-                    return Err(CelCompileError::Metadata {
+                    return Err(CelCompileError::Read {
                         path: cached.path.clone(),
                         source,
                     });
@@ -184,8 +186,8 @@ impl Tier2CompiledBundle {
             if self.rules.contains_key(&rule) {
                 continue;
             }
-            let (program, mtime) = compiler::compile_cel_file(&path)?;
-            self.rules.insert(rule, CachedRule { path, mtime, program });
+            let (program, source) = compiler::compile_cel_file(&path)?;
+            self.rules.insert(rule, CachedRule { path, source, program });
         }
         Ok(())
     }

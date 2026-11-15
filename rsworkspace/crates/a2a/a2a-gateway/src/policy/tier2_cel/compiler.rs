@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use cel_interpreter::Program;
 
@@ -18,12 +17,6 @@ pub enum CelCompileError {
         #[source]
         source: std::io::Error,
     },
-    #[error("read cel file metadata {}", path.display())]
-    Metadata {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
     #[error("compile cel file {}", path.display())]
     Compile {
         path: PathBuf,
@@ -35,7 +28,7 @@ pub enum CelCompileError {
 impl CelCompileError {
     pub fn path(&self) -> &Path {
         match self {
-            Self::Read { path, .. } | Self::Metadata { path, .. } | Self::Compile { path, .. } => path,
+            Self::Read { path, .. } | Self::Compile { path, .. } => path,
         }
     }
 }
@@ -45,25 +38,20 @@ pub fn compile_cel_source(source: &str) -> Result<CelProgramHandle, cel_interpre
     Ok(CelProgramHandle::new(Arc::new(program)))
 }
 
-pub fn compile_cel_file(path: &Path) -> Result<(CelProgramHandle, SystemTime), CelCompileError> {
-    // Capture mtime BEFORE reading the source. If we read first and then
-    // stat, a writer that races us between the two syscalls would leave
-    // us with old contents stamped with the new mtime, which then
-    // mismatches the cached mtime on the next refresh and keeps us
-    // stuck on stale rules until another mtime change.
-    let mtime = fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .map_err(|source| CelCompileError::Metadata {
-            path: path.to_path_buf(),
-            source,
-        })?;
+/// Compile a CEL rule file, returning the program together with the exact
+/// source it was compiled from so the bundle can detect rewrites by content.
+pub fn compile_cel_file(path: &Path) -> Result<(CelProgramHandle, String), CelCompileError> {
     let source = fs::read_to_string(path).map_err(|source| CelCompileError::Read {
         path: path.to_path_buf(),
         source,
     })?;
-    let program = Program::compile(&source).map_err(|source| CelCompileError::Compile {
+    let program = compile_cel_path_source(path, &source)?;
+    Ok((program, source))
+}
+
+pub fn compile_cel_path_source(path: &Path, source: &str) -> Result<CelProgramHandle, CelCompileError> {
+    compile_cel_source(source).map_err(|source| CelCompileError::Compile {
         path: path.to_path_buf(),
         source,
-    })?;
-    Ok((CelProgramHandle::new(Arc::new(program)), mtime))
+    })
 }
