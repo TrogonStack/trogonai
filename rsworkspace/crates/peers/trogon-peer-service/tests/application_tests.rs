@@ -41,6 +41,7 @@ use trogon_peer_service::PreparedPresentation;
 use trogon_peer_service::PresentationInsert;
 use trogon_peer_service::PresentationKey;
 use trogon_peer_service::PresentationRead;
+use trogon_peer_service::ScopedPeerStore;
 use trogon_peer_service::{PeerPortError, WorkLimit};
 use trogonai_proto::peers::PeerEventCase;
 mod support;
@@ -1249,7 +1250,7 @@ async fn operations_without_required_fields_return_typed_errors_before_ports() -
     ));
     assert!(matches!(
         app.roster(&f.bob, Default::default()).await,
-        Err(PeerApplicationError::NotImplemented)
+        Err(PeerApplicationError::Input)
     ));
     assert_eq!(
         (
@@ -2056,6 +2057,188 @@ async fn acknowledging_an_unknown_batch_cannot_release_capacity_or_append_a_rece
     ));
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
     assert!(!f.app().prepare_batch(&f.bob, f.prepare()).await?.batch.is_set());
+    Ok(())
+}
+
+#[tokio::test]
+async fn authorized_roster_paginates_membership_and_observes_liveness_with_service_time() -> TestResult {
+    let f = Fixture::new().await?;
+    let first = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                page_size: Some(1),
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(first.peers.len(), 1);
+    let second = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                page_size: Some(1),
+                page_token: first.next_page_token,
+            },
+        )
+        .await?;
+    assert_eq!(second.peers.len(), 1);
+    assert_ne!(first.peers[0].peer_id, second.peers[0].peer_id);
+    assert!(!first.peers[0].active_at.is_set());
+    let before = f.store.reads.load(Ordering::SeqCst);
+    let catalog_calls = f.catalog.calls.load(Ordering::SeqCst);
+    f.policy.deny.store(true, Ordering::SeqCst);
+    assert!(
+        f.app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(1),
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), before);
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), catalog_calls);
+    Ok(())
+}
+
+#[tokio::test]
+async fn oversized_roster_requests_fail_before_storage_and_catalog_access() -> TestResult {
+    let f = Fixture::new().await?;
+    let reads = f.store.reads.load(Ordering::SeqCst);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(65),
+                    ..Default::default()
+                }
+            )
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Port(
+            trogon_peer_service::PeerPortError::Denied
+        ))
+    ));
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+struct ReturnedCatalogPage(Vec<trogon_peer::PeerId>);
+
+impl trogon_peer_service::PeerCatalog for ReturnedCatalogPage {
+    async fn page(
+        &self,
+        _scope: &trogon_peer_service::PeerAccess,
+        _collaboration: &trogon_peer::CollaborationRef,
+        _after: Option<&trogon_peer::PeerId>,
+        _limit: trogon_peer_service::WorkLimit,
+    ) -> Result<Vec<trogon_peer::PeerId>, trogon_peer_service::PeerPortError> {
+        Ok(self.0.clone())
+    }
+}
+
+#[tokio::test]
+async fn roster_rejects_overfull_duplicate_unsorted_and_rewound_catalog_pages() -> TestResult {
+    let f = Fixture::new().await?;
+    let mut ids = [
+        trogon_peer::PeerId::parse(
+            f.a.peer_id
+                .clone()
+                .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+        )?,
+        trogon_peer::PeerId::parse(
+            f.b.peer_id
+                .clone()
+                .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+        )?,
+    ];
+    ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    for (members, page_size, page_token) in [
+        (ids.to_vec(), 1, None),
+        (vec![ids[0].clone(), ids[0].clone()], 2, None),
+        (vec![ids[1].clone(), ids[0].clone()], 2, None),
+        (vec![ids[0].clone()], 2, Some(ids[1].as_str().to_owned())),
+    ] {
+        let app = trogon_peer_service::PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            f.clock.clone(),
+            f.content.clone(),
+            f.cache.clone(),
+            f.ids.clone(),
+            ReturnedCatalogPage(members),
+        );
+        let appends = f.store.appends.load(Ordering::SeqCst);
+        assert!(matches!(
+            app.roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(page_size),
+                    page_token,
+                }
+            )
+            .await,
+            Err(trogon_peer_service::PeerApplicationError::Scope)
+        ));
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn catalog_membership_cannot_advertise_a_peer_from_another_collaboration() -> TestResult {
+    let f = Fixture::new().await?;
+    let isolated_owner =
+        trogon_peer::TrustedPeerOwner::new(f.alice.tenant().clone(), trogon_peer::CallerId::new("isolated")?);
+    let service = trogon_peer_service::PeerService::new(
+        f.store.clone(),
+        ServiceCoverageIsolatedEnrollment(isolated_owner.clone()),
+        f.clock.clone(),
+    );
+    let mut enrollment = Fixture::enrollment("isolated");
+    enrollment.collaboration_ref = Some("isolated".into());
+    let isolated = service.enroll(&isolated_owner, enrollment).await?;
+    let id = trogon_peer::PeerId::parse(isolated.peer_id.ok_or(trogon_peer_service::PeerPortError::Integrity)?)?;
+    f.policy
+        .grants
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .insert(id.as_str().to_owned(), isolated_owner);
+    f.catalog
+        .peers
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .push(id);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        f.app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    ..Default::default()
+                }
+            )
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Scope)
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
     Ok(())
 }
 
@@ -3238,5 +3421,553 @@ async fn public_status_rejects_out_of_profile_seconds_after_its_live_attachment_
     for seconds in [-62_135_596_801, 253_402_300_800] {
         service_status_rejects_unrepresentable_observation(Some(seconds), 0).await?;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_roster_rejects_a_leap_clock_without_emitting_invalid_presence() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let renewed_at = f.clock.now() + Duration::seconds(58);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = renewed_at;
+    f.a = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.alice, Fixture::enrollment("alice"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    let ordinary = renewed_at + Duration::seconds(1);
+    let leap = chrono::Utc
+        .timestamp_opt(ordinary.timestamp(), 1_500_000_000)
+        .single()
+        .ok_or(PeerPortError::Integrity)?;
+    assert_eq!(leap.timestamp_subsec_nanos(), 1_500_000_000);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = leap;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let content_calls = f.content.calls.load(Ordering::SeqCst);
+    let cache_calls = f.cache.calls.load(Ordering::SeqCst);
+    let ids = f.ids.0.load(Ordering::SeqCst);
+    let app = f.app();
+    let owner = f.alice.clone();
+    let request = proto::RosterRequest {
+        attachment_ref: f.a.clone().into(),
+        ..Default::default()
+    };
+    let joined = tokio::spawn(async move { app.roster(&owner, request).await }).await;
+    assert!(
+        joined.is_ok(),
+        "public roster must reject an unrepresentable clock without panicking"
+    );
+    assert!(matches!(
+        joined?,
+        Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+            EvolveError::TimestampRange {
+                field: "presence.observed_at"
+            }
+        )))
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), cache_calls);
+    assert_eq!(f.ids.0.load(Ordering::SeqCst), ids);
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? = ordinary;
+    let roster = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(roster.peers.len(), 1);
+    assert_eq!(roster.peers[0].peer_id, f.a.peer_id);
+    assert_eq!(
+        roster.peers[0].availability.and_then(|value| value.as_known()),
+        Some(proto::PeerAvailability::PEER_AVAILABILITY_READY)
+    );
+    for peer in roster.peers {
+        assert_eq!(
+            peer.observed_at,
+            buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&ordinary))
+        );
+    }
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), content_calls);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), cache_calls);
+    assert_eq!(f.ids.0.load(Ordering::SeqCst), ids);
+    Ok(())
+}
+
+struct RosterObservationCatalog {
+    inner: CatalogFixture,
+    clock: ClockFixture,
+    observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl trogon_peer_service::PeerCatalog for RosterObservationCatalog {
+    async fn page(
+        &self,
+        scope: &trogon_peer_service::PeerAccess,
+        collaboration: &trogon_peer::CollaborationRef,
+        after: Option<&trogon_peer::PeerId>,
+        limit: trogon_peer_service::WorkLimit,
+    ) -> Result<Vec<trogon_peer::PeerId>, trogon_peer_service::PeerPortError> {
+        let members = trogon_peer_service::PeerCatalog::page(&self.inner, scope, collaboration, after, limit).await?;
+        *self
+            .clock
+            .time
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)? = self.observed_at;
+        Ok(members)
+    }
+}
+
+#[tokio::test]
+async fn public_roster_validates_only_emitted_observations_after_a_clock_change() -> TestResult {
+    for seconds in [-62_135_596_801, 253_402_300_800] {
+        let f = Fixture::new().await?;
+        let observed_at = chrono::Utc
+            .timestamp_opt(seconds, 0)
+            .single()
+            .ok_or(PeerPortError::Integrity)?;
+        let app = PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            f.clock.clone(),
+            f.content.clone(),
+            f.cache.clone(),
+            f.ids.clone(),
+            RosterObservationCatalog {
+                inner: f.catalog.clone(),
+                clock: f.clock.clone(),
+                observed_at,
+            },
+        );
+        let appends = f.store.appends.load(Ordering::SeqCst);
+        let result = app
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        if seconds < -62_135_596_800 {
+            assert!(matches!(
+                result,
+                Err(PeerApplicationError::Evidence(MessageError::InvalidState(
+                    EvolveError::TimestampRange {
+                        field: "presence.observed_at"
+                    }
+                )))
+            ));
+        } else {
+            let roster = result?;
+            assert!(roster.peers.is_empty());
+            assert!(roster.next_page_token.is_none());
+        }
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.ids.0.load(Ordering::SeqCst), 0);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_roster_preserves_empty_and_denied_pages_without_emitting_a_clock_observation() -> TestResult {
+    for deny_member in [false, true] {
+        let f = Fixture::new().await?;
+        let bob = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+        *f.catalog.peers.lock().map_err(|_| PeerPortError::Unavailable)? =
+            if deny_member { vec![bob.clone()] } else { vec![] };
+        if deny_member {
+            f.policy
+                .grants
+                .lock()
+                .map_err(|_| PeerPortError::Unavailable)?
+                .remove(bob.as_str());
+        }
+        let observed_at = chrono::Utc
+            .timestamp_opt(253_402_300_800, 0)
+            .single()
+            .ok_or(PeerPortError::Integrity)?;
+        let app = PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            f.clock.clone(),
+            f.content.clone(),
+            f.cache.clone(),
+            f.ids.clone(),
+            RosterObservationCatalog {
+                inner: f.catalog.clone(),
+                clock: f.clock.clone(),
+                observed_at,
+            },
+        );
+        let appends = f.store.appends.load(Ordering::SeqCst);
+        let roster = app
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert!(roster.peers.is_empty());
+        assert!(roster.next_page_token.is_none());
+        assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+        assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.ids.0.load(Ordering::SeqCst), 0);
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+struct RosterAuthorityStore {
+    inner: StoreFixture,
+    initial_tenant: trogon_peer::TenantId,
+    foreign_tenant: trogon_peer::TenantId,
+    authority_changed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    member: PeerId,
+    member_reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl trogon_peer_service::ScopedPeerStore for RosterAuthorityStore {
+    fn tenant(&self) -> &trogon_peer::TenantId {
+        if self.authority_changed.load(Ordering::SeqCst) {
+            &self.foreign_tenant
+        } else {
+            &self.initial_tenant
+        }
+    }
+}
+
+impl trogon_decider_runtime::StreamRead<PeerId> for RosterAuthorityStore {
+    type Error = <StoreFixture as trogon_decider_runtime::StreamRead<PeerId>>::Error;
+
+    async fn read_stream(
+        &self,
+        request: trogon_decider_runtime::ReadStreamRequest<'_, PeerId>,
+    ) -> Result<trogon_decider_runtime::ReadStreamResponse, Self::Error> {
+        if request.stream_id == &self.member {
+            self.member_reads.fetch_add(1, Ordering::SeqCst);
+        }
+        trogon_decider_runtime::StreamRead::read_stream(&self.inner, request).await
+    }
+
+    async fn read_stream_bounded(
+        &self,
+        request: trogon_decider_runtime::ReadStreamRequest<'_, PeerId>,
+        maximum: u64,
+    ) -> Result<trogon_decider_runtime::ReadStreamResponse, Self::Error> {
+        if request.stream_id == &self.member {
+            self.member_reads.fetch_add(1, Ordering::SeqCst);
+        }
+        trogon_decider_runtime::StreamRead::read_stream_bounded(&self.inner, request, maximum).await
+    }
+}
+
+impl trogon_decider_runtime::StreamAppend<PeerId> for RosterAuthorityStore {
+    type Error = <StoreFixture as trogon_decider_runtime::StreamAppend<PeerId>>::Error;
+
+    async fn append_stream(
+        &self,
+        request: trogon_decider_runtime::AppendStreamRequest<'_, PeerId>,
+    ) -> Result<trogon_decider_runtime::AppendStreamResponse, Self::Error> {
+        trogon_decider_runtime::StreamAppend::append_stream(&self.inner, request).await
+    }
+
+    fn classify_append_failure(&self, error: &Self::Error) -> trogon_decider_runtime::AppendFailure {
+        trogon_decider_runtime::StreamAppend::classify_append_failure(&self.inner, error)
+    }
+}
+
+struct DeniedRosterMemberPolicy {
+    inner: PolicyFixture,
+    member: PeerId,
+}
+
+impl trogon_decider_runtime::CommandAuthorizer<trogon_peer_service::PeerAccess> for DeniedRosterMemberPolicy {
+    fn authorize(
+        &self,
+        principal: &trogon_decider_runtime::CommandPrincipal,
+        scope: &trogon_peer_service::PeerAccess,
+    ) -> Result<(), trogon_decider_runtime::AuthorizationDeniedError> {
+        <PolicyFixture as trogon_decider_runtime::CommandAuthorizer<trogon_peer_service::PeerAccess>>::authorize(
+            &self.inner,
+            principal,
+            scope,
+        )?;
+        if scope.operation() == trogon_peer_service::PeerOperation::ReadPeer && scope.peer() == &self.member {
+            return Err(trogon_decider_runtime::AuthorizationDeniedError::new(
+                "roster member denied",
+            ));
+        }
+        Ok(())
+    }
+}
+
+struct AuthorityChangingRosterCatalog {
+    inner: CatalogFixture,
+    authority_changed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl trogon_peer_service::PeerCatalog for AuthorityChangingRosterCatalog {
+    async fn page(
+        &self,
+        scope: &trogon_peer_service::PeerAccess,
+        collaboration: &trogon_peer::CollaborationRef,
+        after: Option<&PeerId>,
+        limit: WorkLimit,
+    ) -> Result<Vec<PeerId>, trogon_peer_service::PeerPortError> {
+        let members = trogon_peer_service::PeerCatalog::page(&self.inner, scope, collaboration, after, limit).await?;
+        self.authority_changed.store(true, Ordering::SeqCst);
+        Ok(members)
+    }
+}
+
+#[tokio::test]
+async fn a_denied_roster_member_is_omitted_without_loading_its_history() -> TestResult {
+    let f = Fixture::new().await?;
+    let requester = PeerId::parse(f.a.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let member = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    assert_ne!(requester, member);
+    let store = RosterAuthorityStore {
+        inner: f.store.clone(),
+        initial_tenant: f.store.tenant.clone(),
+        foreign_tenant: trogon_peer::TenantId::new("foreign")?,
+        authority_changed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        member: member.clone(),
+        member_reads: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    };
+    let request = proto::RosterRequest {
+        attachment_ref: f.a.clone().into(),
+        page_size: Some(3),
+        page_token: None,
+    };
+    let app = PeerApplication::new(
+        store.clone(),
+        DeniedRosterMemberPolicy {
+            inner: f.policy.clone(),
+            member: member.clone(),
+        },
+        f.clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    );
+    let reads = f.store.reads.load(Ordering::SeqCst);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let catalog_calls = f.catalog.calls.load(Ordering::SeqCst);
+    let roster = app.roster(&f.alice, request.clone()).await?;
+    assert_eq!(roster.peers.len(), 1);
+    assert_eq!(roster.peers[0].peer_id.as_deref(), Some(requester.as_str()));
+    assert!(roster.next_page_token.is_none());
+    assert_eq!(store.member_reads.load(Ordering::SeqCst), 0);
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), reads + 2);
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), catalog_calls + 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    let ordinary = PeerApplication::new(
+        store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    )
+    .roster(&f.alice, request)
+    .await?;
+    assert_eq!(ordinary.peers.len(), 2);
+    assert!(
+        ordinary
+            .peers
+            .iter()
+            .any(|peer| peer.peer_id.as_deref() == Some(requester.as_str()))
+    );
+    assert!(
+        ordinary
+            .peers
+            .iter()
+            .any(|peer| peer.peer_id.as_deref() == Some(member.as_str()))
+    );
+    assert_eq!(store.member_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), reads + 5);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
+
+#[tokio::test]
+async fn roster_rechecks_store_tenant_after_catalog_await_before_loading_a_member() -> TestResult {
+    let f = Fixture::new().await?;
+    let member = PeerId::parse(f.b.peer_id.clone().ok_or(PeerPortError::Integrity)?)?;
+    let authority_changed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let store = RosterAuthorityStore {
+        inner: f.store.clone(),
+        initial_tenant: f.store.tenant.clone(),
+        foreign_tenant: trogon_peer::TenantId::new("foreign")?,
+        authority_changed: authority_changed.clone(),
+        member: member.clone(),
+        member_reads: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    };
+    assert_eq!(store.tenant(), f.alice.tenant());
+    let request = proto::RosterRequest {
+        attachment_ref: f.a.clone().into(),
+        page_size: Some(3),
+        page_token: None,
+    };
+    let app = PeerApplication::new(
+        store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        AuthorityChangingRosterCatalog {
+            inner: f.catalog.clone(),
+            authority_changed: authority_changed.clone(),
+        },
+    );
+    let reads = f.store.reads.load(Ordering::SeqCst);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let catalog_calls = f.catalog.calls.load(Ordering::SeqCst);
+    assert!(matches!(
+        app.roster(&f.alice, request.clone()).await,
+        Err(PeerApplicationError::Scope)
+    ));
+    assert!(authority_changed.load(Ordering::SeqCst));
+    assert_eq!(store.tenant(), &store.foreign_tenant);
+    assert_eq!(f.catalog.calls.load(Ordering::SeqCst), catalog_calls + 1);
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), reads + 1);
+    assert_eq!(store.member_reads.load(Ordering::SeqCst), 0);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    assert_eq!(f.content.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(f.cache.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        f.cache
+            .records
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    authority_changed.store(false, Ordering::SeqCst);
+    assert_eq!(store.tenant(), f.alice.tenant());
+    let ordinary = PeerApplication::new(
+        store.clone(),
+        f.policy.clone(),
+        f.clock.clone(),
+        f.content.clone(),
+        f.cache.clone(),
+        f.ids.clone(),
+        f.catalog.clone(),
+    )
+    .roster(&f.alice, request)
+    .await?;
+    assert_eq!(ordinary.peers.len(), 2);
+    assert!(
+        ordinary
+            .peers
+            .iter()
+            .any(|peer| peer.peer_id.as_deref() == Some(member.as_str()))
+    );
+    assert_eq!(f.store.reads.load(Ordering::SeqCst), reads + 4);
+    assert_eq!(store.member_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
+
+#[tokio::test]
+async fn roster_emits_ready_new_attachments_and_skips_expired_members_on_each_catalog_page() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let initial = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(initial.peers.len(), 2);
+    for presence in initial.peers {
+        assert_eq!(
+            presence.availability.and_then(|v| v.as_known()),
+            Some(proto::PeerAvailability::PEER_AVAILABILITY_READY)
+        );
+        assert!(!presence.active_at.is_set());
+    }
+    *f.clock.time.lock().map_err(|_| PeerPortError::Unavailable)? += chrono::Duration::seconds(10);
+    f.a = PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone())
+        .enroll(&f.alice, Fixture::enrollment("alice"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(PeerPortError::Integrity)?;
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let mut cursor = None;
+    let mut emitted = Vec::new();
+    for _ in 0..2 {
+        let page = f
+            .app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(1),
+                    page_token: cursor,
+                },
+            )
+            .await?;
+        cursor = page.next_page_token;
+        assert!(cursor.is_some(), "catalog cursor survives an empty filtered page");
+        for presence in page.peers {
+            assert_eq!(presence.peer_id, f.a.peer_id);
+            assert!(presence.availability.is_some());
+            emitted.push(presence);
+        }
+    }
+    assert_eq!(emitted.len(), 1);
+    assert!(
+        f.app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(1),
+                    page_token: cursor,
+                }
+            )
+            .await?
+            .peers
+            .is_empty()
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
     Ok(())
 }
