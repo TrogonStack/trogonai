@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Verify the behavior map and that every row's contracts name an existing Rust test"
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+cd "$root/.config/mise/lib/claude-sdk-compatibility"
+exec python3 -m unittest discover -s tests -p 'test_behavior_map.py' -v "$@"
