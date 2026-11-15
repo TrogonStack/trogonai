@@ -72,7 +72,7 @@ fn rename_appends_a_title_that_listing_reads_back() -> TestResult {
     ));
     assert!(matches!(
         f.files.rename_session("nope", "x", None),
-        Err(SessionMutationError::InvalidSessionId(_))
+        Err(SessionMutationError::InvalidSessionIdError(_))
     ));
     assert!(matches!(
         f.files
@@ -116,6 +116,18 @@ fn append_skips_empty_stubs_and_searches_every_project() -> TestResult {
     assert_eq!(fs::metadata(stub_dir.join(format!("{SESSION}.jsonl")))?.len(), 0);
     let info = f.files.get_session_info(SESSION, None).ok_or("missing")?;
     assert_eq!(info.tag.as_deref(), Some("keep"));
+    Ok(())
+}
+
+#[test]
+fn append_treats_a_lone_empty_stub_as_not_found() -> TestResult {
+    let f = fixture(&[])?;
+    let stub = f.dir.join(format!("{SESSION}.jsonl"));
+    assert!(matches!(
+        f.files.tag_session(SESSION, Some("keep"), None),
+        Err(SessionMutationError::NotFound { .. })
+    ));
+    assert_eq!(fs::metadata(&stub)?.len(), 0);
     Ok(())
 }
 

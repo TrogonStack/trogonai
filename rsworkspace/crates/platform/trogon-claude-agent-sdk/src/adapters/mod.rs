@@ -1,12 +1,19 @@
 mod environment;
+mod extract;
 mod filesystem;
 mod host;
+mod http;
+mod passwd;
 mod process;
 mod wall_clock;
 
-pub use environment::{CurrentDirectory, EnvironmentVariable, SystemEnvironment, TemporaryDirectory};
+pub use environment::{
+    CurrentDirectory, EnvironmentVariable, SystemEnvironment, TemporaryDirectory, capture_launch_directory,
+};
+pub use extract::*;
 pub use filesystem::*;
 pub use host::*;
+pub use http::HttpExecute;
 pub use process::{SpawnProcess, TokioProcessSpawner};
 pub use wall_clock::{SystemClock, WallClock};
 

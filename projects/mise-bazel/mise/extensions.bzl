@@ -1,7 +1,7 @@
 """Module extension that exposes every tool pinned in a mise configuration."""
 
 load("@toml.bzl", "toml")
-load(":repositories.bzl", "mise_go", "mise_hub", "mise_rust", "mise_tool")
+load(":repositories.bzl", "mise_go", "mise_hub", "mise_node", "mise_rust", "mise_tool")
 
 def _pin(tool, pin):
     if type(pin) == "list":
@@ -27,6 +27,8 @@ def _mise_impl(mctx):
         name = _repository(tool)
         if tool == "go":
             mise_go(name = name, tool = tool, version = version)
+        elif tool == "node":
+            mise_node(name = name, tool = tool, version = version)
         elif tool == "rust":
             mise_rust(name = name, tool = tool, version = version)
         else:

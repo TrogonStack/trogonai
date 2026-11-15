@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Validate protobuf contract fixtures"
+#MISE depends=["proto:validate"]
+set -euo pipefail

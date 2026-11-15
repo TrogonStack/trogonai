@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run the trogon-decider-nats live JetStream tests"
+#MISE dir="rsworkspace"
+set -euo pipefail
+
+exec cargo test -p trogon-decider-nats
