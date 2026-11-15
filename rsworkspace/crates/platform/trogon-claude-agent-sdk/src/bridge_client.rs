@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::adapters::{CurrentDirectory, EnvironmentVariable, HttpExecute, SystemEnvironment};
 use crate::bridge_git::{DefaultGitProbe, GitContextProbe, git_entries};
@@ -20,8 +20,10 @@ use crate::settings_numbers::js_value;
 use crate::settings_parse::parse_json;
 use crate::{BranchDropLogDedup, SensitiveString};
 
-pub(crate) const USER_AGENT: &str = "claude-code/0.3.323";
-const ENTRYPOINT_VARIABLE: &str = "CLAUDE_CODE_ENTRYPOINT";
+mod constants;
+
+use constants::ENTRYPOINT_VARIABLE;
+pub(crate) use constants::USER_AGENT;
 
 static REQUEST_ID: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"^req_[A-Za-z0-9_-]{1,36}$").ok());
 static SNAKE_CASE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"^[a-z0-9_]{1,64}$").ok());
@@ -67,7 +69,7 @@ where
     pub async fn fetch_remote_credentials(&self, options: &FetchRemoteCredentialsOptions) -> RemoteCredentialsOutcome {
         let id = &options.session_id;
         if id.is_empty() || !id.chars().all(valid_id_char) {
-            return RemoteCredentialsOutcome::Failure(CredentialsFailure::InvalidSessionId);
+            return RemoteCredentialsOutcome::Failure(CredentialsFailure::InvalidSessionIdError);
         }
         let url = format!("{}/v1/code/sessions/{id}/bridge", options.base_url);
         let Some(reply) = self
@@ -122,15 +124,18 @@ where
         if let Some(context) = options.git_context.as_ref()
             && let Some((source, outcome)) = git_entries(&self.git, context, dedup).await
         {
-            config.insert("sources".to_owned(), json!([source]));
-            config.insert("outcomes".to_owned(), json!([outcome]));
+            config.insert("sources".to_owned(), Value::Array(vec![source]));
+            config.insert("outcomes".to_owned(), Value::Array(vec![outcome]));
             config.insert("reuse_outcome_branches".to_owned(), Value::Bool(true));
         }
         let mut body = Map::new();
         body.insert("title".to_owned(), Value::String(options.title.clone()));
         body.insert("bridge".to_owned(), Value::Object(Map::new()));
         if !options.tags.is_empty() {
-            body.insert("tags".to_owned(), json!(options.tags));
+            body.insert(
+                "tags".to_owned(),
+                Value::Array(options.tags.iter().cloned().map(Value::String).collect()),
+            );
         }
         if let Some(group) = options.session_grouping_id.as_deref().filter(|group| !group.is_empty()) {
             body.insert("session_grouping_id".to_owned(), Value::String(group.to_owned()));

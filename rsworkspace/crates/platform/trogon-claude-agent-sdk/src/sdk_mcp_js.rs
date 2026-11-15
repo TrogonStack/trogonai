@@ -64,14 +64,6 @@ pub(crate) fn ordered(object: JsonObject) -> JsonObject {
         .collect()
 }
 
-/// `String(value)` of a finite number.
-pub(crate) fn number_text(value: f64) -> String {
-    if value == 0.0 {
-        return "0".to_owned();
-    }
-    js_string(&Value::from(value))
-}
-
 /// The `Number(value)` conversion of a JSON value, as the relational operators apply it.
 pub(crate) fn to_number(value: &Value) -> f64 {
     match value {
@@ -110,49 +102,26 @@ fn string_to_number(text: &str) -> f64 {
     text.parse().unwrap_or(f64::NAN)
 }
 
-/// `Number.parseInt(text)` for a decimal string.
-fn parse_int(text: &str) -> f64 {
-    let text = text.trim_start_matches(is_space);
-    let (sign, rest) = match text.strip_prefix('-') {
-        Some(rest) => (-1.0, rest),
-        None => (1.0, text.strip_prefix('+').unwrap_or(text)),
-    };
-    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    if digits.is_empty() {
-        return f64::NAN;
-    }
-    sign * digits.parse().unwrap_or(f64::NAN)
-}
-
-/// `value.toFixed(digits)`.
-fn to_fixed(value: f64, digits: usize) -> String {
-    if value.abs() >= 1e21 {
-        return number_text(value);
-    }
-    format!("{value:.digits$}")
-}
-
-fn decimals(text: &str) -> usize {
-    text.split('.').nth(1).map_or(0, |fraction| fraction.chars().count())
-}
-
-/// zod `floatSafeRemainder`: the remainder zod's `multipleOf` check compares with zero.
+/// zod `floatSafeRemainder`: the remainder zod's `multipleOf` check compares with zero. The quotient counts as
+/// whole when it is within four `Number.EPSILON` of the nearest integer, scaled by the quotient when above one.
 pub(crate) fn float_safe_remainder(value: f64, step: f64) -> f64 {
-    let value_decimals = decimals(&number_text(value));
-    let step_text = number_text(step);
-    let mut step_decimals = decimals(&step_text);
-    if step_decimals == 0
-        && let Some(position) = step_text.find("e-")
-        && let Some(digit) = step_text
-            .get(position + 2..)
-            .and_then(|rest| rest.chars().next())
-            .and_then(|character| character.to_digit(10))
-    {
-        step_decimals = digit as usize;
+    let quotient = value / step;
+    let nearest = js_round(quotient);
+    let tolerance = 4.0 * f64::EPSILON * quotient.abs().max(1.0);
+    if (quotient - nearest).abs() < tolerance {
+        return 0.0;
     }
-    let places = value_decimals.max(step_decimals);
-    let scaled = |number: f64| parse_int(&to_fixed(number, places).replacen('.', "", 1));
-    (scaled(value) % scaled(step)) / 10f64.powf(places as f64)
+    quotient - nearest
+}
+
+/// `Math.round(number)`: a half rounds up, toward positive infinity.
+fn js_round(number: f64) -> f64 {
+    let nearest = number.round();
+    if number - nearest == 0.5 {
+        nearest + 1.0
+    } else {
+        nearest
+    }
 }
 
 /// Whether `atob(text)` returns instead of throwing: the forgiving-base64 decode of the HTML standard.

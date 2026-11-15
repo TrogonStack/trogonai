@@ -3,4 +3,4 @@
 #MISE dir="rsworkspace"
 set -euo pipefail
 
-exec cargo clippy --all-targets --all-features
+exec cargo clippy --keep-going --all-targets --all-features

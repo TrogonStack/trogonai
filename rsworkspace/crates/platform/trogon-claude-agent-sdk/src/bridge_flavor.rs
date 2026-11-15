@@ -5,7 +5,6 @@
 //! where drive letters, backslashes and UNC roots count. The share, device and dot segment checks below do not depend
 //! on the platform: upstream applies them to every path text it is given.
 
-use crate::bridge_paths::{dirname, join, resolve, split_runs};
 use crate::bridge_platform::Platform;
 use crate::node_path::{JsString, NodeError, NodePath, NodePathDialect, NodeProcess, js, rust};
 
@@ -60,7 +59,7 @@ fn win32_root_len(text: &str) -> usize {
     usize::from(bytes.first().is_some_and(|byte| separator_byte(*byte)))
 }
 
-fn win32_path<T>(use_path: impl FnOnce(&NodePath<'_>) -> T) -> T {
+fn node_path<T>(use_path: impl FnOnce(&NodePath<'_>) -> T) -> T {
     let process = DrivelessProcess;
     use_path(&NodePath {
         dialect: NodePathDialect::Current,
@@ -71,7 +70,7 @@ fn win32_path<T>(use_path: impl FnOnce(&NodePath<'_>) -> T) -> T {
 
 /// `path.win32.normalize(text)`.
 fn win32_normalize(text: &str) -> String {
-    win32_path(|path| rust(&path.win32_normalize(&js(text))))
+    node_path(|path| rust(&path.win32_normalize(&js(text))))
 }
 
 impl Flavor {
@@ -132,7 +131,7 @@ impl Flavor {
     pub(crate) fn join(self, base: &str, name: &str) -> String {
         match self {
             Self::Posix => join(base, name),
-            Self::Win32 => win32_path(|path| rust(&path.win32_join(&[&js(base), &js(name)]))),
+            Self::Win32 => node_path(|path| rust(&path.win32_join(&[&js(base), &js(name)]))),
         }
     }
 
@@ -140,7 +139,7 @@ impl Flavor {
     pub(crate) fn dirname(self, text: &str) -> String {
         match self {
             Self::Posix => dirname(text),
-            Self::Win32 => win32_path(|path| rust(&path.win32_dirname(&js(text)))),
+            Self::Win32 => node_path(|path| rust(&path.win32_dirname(&js(text)))),
         }
     }
 
@@ -148,7 +147,7 @@ impl Flavor {
     pub(crate) fn resolve(self, base: &str, text: &str) -> String {
         match self {
             Self::Posix => resolve(base, text),
-            Self::Win32 => win32_path(|path| {
+            Self::Win32 => node_path(|path| {
                 path.win32_resolve(&[&js(base), &js(text)])
                     .map(|resolved| rust(&resolved))
                     .unwrap_or_default()
@@ -160,7 +159,7 @@ impl Flavor {
     pub(crate) fn resolve_alone(self, text: &str) -> String {
         match self {
             Self::Posix => resolve(text, "."),
-            Self::Win32 => win32_path(|path| {
+            Self::Win32 => node_path(|path| {
                 path.win32_resolve(&[&js(text)])
                     .map(|resolved| rust(&resolved))
                     .unwrap_or_default()
@@ -243,6 +242,59 @@ pub(crate) fn share_refused(text: &str, base: &str) -> bool {
     }
     let name = server_name(text);
     name.is_none() || name != server_name(base)
+}
+
+/// `path.posix.dirname(path)`.
+pub(crate) fn dirname(path: &str) -> String {
+    node_path(|node| rust(&node.posix_dirname(&js(path))))
+}
+
+/// `path.posix.join(base, name)`.
+pub(crate) fn join(base: &str, name: &str) -> String {
+    node_path(|node| rust(&node.posix_join(&[&js(base), &js(name)])))
+}
+
+/// `path.posix.resolve(base, text)` for an absolute `base`.
+pub(crate) fn resolve(base: &str, text: &str) -> String {
+    let combined = if text.starts_with('/') {
+        text.to_owned()
+    } else {
+        format!("{base}/{text}")
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for part in combined.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    format!("/{}", parts.join("/"))
+}
+
+/// `text.split(/\/+/)`, or `text.split(/[/\\]+/)` on Windows: runs of separators split, and a trailing run leaves one
+/// empty piece.
+pub(crate) fn split_runs(text: &str, windows: bool) -> Vec<&str> {
+    let separates = |byte: u8| byte == b'/' || (windows && byte == b'\\');
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if separates(bytes[index]) {
+            pieces.push(&text[start..index]);
+            while index < bytes.len() && separates(bytes[index]) {
+                index += 1;
+            }
+            start = index;
+        } else {
+            index += 1;
+        }
+    }
+    pieces.push(&text[start..]);
+    pieces
 }
 
 #[cfg(test)]

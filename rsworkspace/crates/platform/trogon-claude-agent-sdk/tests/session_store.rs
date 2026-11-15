@@ -849,18 +849,18 @@ const STORE_FAILURE_GOLDENS: &str = include_str!("fixtures/session_resume/python
 
 /// The recorded Python store: the call a case names raises with that backend message, and every other call answers
 /// one transcript entry, with a subagent `agent-a` when the store lists subkeys.
-struct FailingStore {
+struct ResumeFailingStore {
     case: String,
     entry: SessionEntry,
 }
 
-impl FailingStore {
+impl ResumeFailingStore {
     fn refuse<'a, T: Send + 'a>(message: &'static str) -> SessionStoreFuture<'a, T> {
         Box::pin(async move { Err(SessionStoreError::backend(std::io::Error::other(message))) })
     }
 }
 
-impl SessionStore for FailingStore {
+impl SessionStore for ResumeFailingStore {
     fn supports(&self, operation: SessionStoreOperation) -> bool {
         match operation {
             SessionStoreOperation::Append | SessionStoreOperation::Load => true,
@@ -907,7 +907,7 @@ async fn store_failures_during_resume_read_like_each_sdk() -> TestResult {
         };
         for dialect in [SummaryDialect::Python, SummaryDialect::TypeScript] {
             let root = tempfile::tempdir()?;
-            let store = Arc::new(FailingStore {
+            let store = Arc::new(ResumeFailingStore {
                 case: name.to_owned(),
                 entry: SessionEntry::try_from(json!({"type":"user","uuid":"u1"}))?,
             });

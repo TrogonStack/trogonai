@@ -6,12 +6,9 @@
 
 use std::cmp::Ordering;
 
-const BUFFER: usize = 65536;
-const WINDOW: usize = 4096;
-const NEWLINE: u8 = 10;
-const SPACE: u8 = 32;
-const HASH: u8 = 35;
-const CARET: u8 = 94;
+mod constants;
+
+use constants::{BUFFER, CARET, HASH, NEWLINE, SPACE, WINDOW};
 
 fn last_newline(buffer: &[u8], from: usize) -> Option<usize> {
     buffer[..=from].iter().rposition(|&byte| byte == NEWLINE)

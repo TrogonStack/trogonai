@@ -109,6 +109,9 @@ impl SessionKey {
             let parts =
                 crate::windows_path::components_below(base, file, cwd).ok_or(SessionKeyError::OutsideProjects)?;
             match dialect {
+                SummaryDialect::TypeScript if crate::windows_path::is_absolute(&parts.join("\\")) => {
+                    return Err(SessionKeyError::UnrecognizedPath);
+                }
                 SummaryDialect::TypeScript => parts,
                 SummaryDialect::Python => crate::windows_path::python_relative_parts(&parts),
             }

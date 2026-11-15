@@ -72,7 +72,7 @@ fn rename_appends_a_title_that_listing_reads_back() -> TestResult {
     ));
     assert!(matches!(
         f.files.rename_session("nope", "x", None),
-        Err(SessionMutationError::InvalidSessionId(_))
+        Err(SessionMutationError::InvalidSessionIdError(_))
     ));
     assert!(matches!(
         f.files

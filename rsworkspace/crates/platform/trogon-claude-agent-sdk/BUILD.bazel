@@ -9,7 +9,7 @@ rust_binary(
     edition = "2024",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     rustc_flags = ["-Dwarnings"],
-    deps = all_crate_deps(normal = True),
+    deps = [":trogon-claude-agent-sdk"] + all_crate_deps(normal = True),
 )
 
 rust_binary(
@@ -106,6 +106,10 @@ workspace_crate(
         "builtin_tool_name": {},
         "builtin_tool_name_storage": {},
         "bundled_cli": {},
+        "bundled_cli_discovery": {
+            "data": [":claude_sdk_fixture"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-fixture": "$(rootpath :claude_sdk_fixture)"},
+        },
         "callback_handlers": {},
         "callback_options": {
             "compile_data": glob([
@@ -233,6 +237,7 @@ workspace_crate(
         },
         "browser_query": {"compile_data": ["tests/fixtures/browser_query/cases.json"]},
         "js_stringify_goldens": {"compile_data": ["tests/fixtures/js_stringify/goldens.json"]},
+        "launch_directory": {},
         "sse_frame_filter_goldens": {"compile_data": ["tests/fixtures/sse_frames/sessions.json"]},
         "sse_frames_goldens": {"compile_data": ["tests/fixtures/sse_frames/parser.json"]},
         "json_object": {},
@@ -394,6 +399,14 @@ workspace_crate(
         },
         "usd_budget": {},
         "user_input": {},
+        "user_input_writes": {
+            "compile_data": glob([
+                "tests/fixtures/user_input.json",
+                "tests/support/*.rs",
+            ]),
+            "data": [":claude_sdk_relay"],
+            "rustc_env": {"CARGO_BIN_EXE_claude-sdk-relay": "$(rootpath :claude_sdk_relay)"},
+        },
         "user_message": {},
         "value_contracts": {},
         "websocket_remote_store": {},

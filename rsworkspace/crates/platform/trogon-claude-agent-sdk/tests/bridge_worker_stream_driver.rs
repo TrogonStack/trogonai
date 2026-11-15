@@ -15,7 +15,8 @@ use tokio::time::Instant;
 use trogon_claude_agent_sdk::adapters::HttpExecute;
 use trogon_claude_agent_sdk::{
     HeartbeatDriver, NonOrigin403, SensitiveString, StreamBody, StreamClocks, StreamConnector, StreamEffect,
-    StreamFailure, StreamRequest, StreamResponse, StreamSession, WorkerClient, WorkerConfig, WorkerPacing, run_stream,
+    StreamFailureError, StreamRequest, StreamResponse, StreamSession, WorkerClient, WorkerConfig, WorkerPacing,
+    run_stream,
 };
 
 const TIMELINES: &str = include_str!("fixtures/bridge_worker/timelines.json");
@@ -92,14 +93,14 @@ struct ScriptedBody {
 }
 
 impl StreamBody for ScriptedBody {
-    async fn next_chunk(&mut self) -> Option<Result<Vec<u8>, StreamFailure>> {
+    async fn next_chunk(&mut self) -> Option<Result<Vec<u8>, StreamFailureError>> {
         if let Some((at, bytes)) = self.chunks.pop_front() {
             tokio::time::sleep_until(at).await;
             return Some(Ok(bytes));
         }
         match self.finish {
             Finish::End => None,
-            Finish::Reset => Some(Err(StreamFailure("the connection was reset".to_owned()))),
+            Finish::Reset => Some(Err(StreamFailureError("the connection was reset".to_owned()))),
             Finish::Hold => std::future::pending().await,
         }
     }
@@ -120,7 +121,7 @@ impl StreamConnector for Scripted {
     fn open(
         &self,
         request: &StreamRequest,
-    ) -> impl Future<Output = Result<StreamResponse<ScriptedBody>, StreamFailure>> + Send {
+    ) -> impl Future<Output = Result<StreamResponse<ScriptedBody>, StreamFailureError>> + Send {
         let query = request
             .query
             .as_ref()
@@ -139,7 +140,7 @@ impl StreamConnector for Scripted {
         async move {
             match conn.as_str() {
                 Some("hang") => std::future::pending().await,
-                Some(_) => Err(StreamFailure("the connection was refused".to_owned())),
+                Some(_) => Err(StreamFailureError("the connection was refused".to_owned())),
                 None => {
                     let status = u16::try_from(conn["status"].as_u64().unwrap_or(200)).expect("a status");
                     let now = Instant::now();

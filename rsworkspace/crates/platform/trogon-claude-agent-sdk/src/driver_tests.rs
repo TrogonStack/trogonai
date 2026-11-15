@@ -16,6 +16,8 @@ struct ScriptedTransport {
     written: mpsc::UnboundedSender<String>,
     incoming: mpsc::UnboundedReceiver<JsonObject>,
     ready: bool,
+    /// How long each write takes before the document arrives, as a busy pipe or a remote transport would.
+    write_delay: Option<Duration>,
 }
 
 impl Transport for ScriptedTransport {
@@ -24,6 +26,9 @@ impl Transport for ScriptedTransport {
     }
 
     async fn write(&mut self, data: &str) -> Result<(), Error> {
+        if let Some(delay) = self.write_delay {
+            sleep(delay).await;
+        }
         self.written.send(data.to_owned()).map_err(|_| Error::DriverStopped)
     }
 
@@ -77,6 +82,7 @@ impl DriverFixture {
                 written: written_tx,
                 incoming,
                 ready: true,
+                write_delay: None,
             },
             input_ended: false,
             commands: command_rx,
@@ -230,7 +236,7 @@ async fn initialization_owns_admission_until_the_handshake_completes() -> Result
     fixture
         .driver
         .command(Command::Prompt {
-            input: crate::Prompt::from("before handshake").into(),
+            input: Box::new(crate::Prompt::from("before handshake").into()),
             response,
         })
         .await?;
@@ -266,6 +272,114 @@ async fn a_shutdown_already_requested_wins_before_more_input_is_read() -> Result
     let shutdown = std::mem::replace(&mut fixture.shutdown, replacement);
     shutdown.send(()).map_err(|_| Error::DriverStopped)?;
     fixture.driver.event_loop().await?;
+    fixture.finish().await
+}
+
+/// A fixture whose close was already requested before the driver writes, with writes that take `delay`.
+fn closed_before_a_write(delay: Option<Duration>) -> Result<DriverFixture, Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.transport.write_delay = delay;
+    let (replacement, _receiver) = oneshot::channel();
+    let shutdown = std::mem::replace(&mut fixture.shutdown, replacement);
+    shutdown.send(()).map_err(|_| Error::DriverStopped)?;
+    Ok(fixture)
+}
+
+fn prompt_command(text: &str) -> (Command, oneshot::Receiver<Result<(), Error>>) {
+    let (response, receiver) = oneshot::channel();
+    let command = Command::Prompt {
+        input: Box::new(crate::Prompt::from(text).into()),
+        response,
+    };
+    (command, receiver)
+}
+
+/// The close lands after the driver took the prompt, as when `WarmQuery.query` returns and the caller disconnects at
+/// once. A random choice between the close and a transport that is ready drops the prompt half the time, so every
+/// round must write it.
+#[tokio::test(start_paused = true)]
+async fn a_prompt_taken_before_the_close_is_written() -> Result<(), Box<dyn std::error::Error>> {
+    for round in 0..64 {
+        let mut fixture = closed_before_a_write(None)?;
+        let (command, receiver) = prompt_command("taken before the close");
+        fixture.driver.command(command).await?;
+        assert!(matches!(receiver.await?, Ok(())), "round {round}");
+        let written = fixture.harness.written.try_recv()?;
+        assert!(written.contains("taken before the close"), "round {round}: {written}");
+        // The close still ends the run before anything else is read.
+        fixture.driver.event_loop().await?;
+        assert!(fixture.driver.shutdown_seen, "round {round}");
+        fixture.finish().await?;
+    }
+    Ok(())
+}
+
+/// A transport that cannot take the frame now loses to the close, so a CLI that stopped reading cannot hold it.
+#[tokio::test(start_paused = true)]
+async fn a_write_that_has_to_wait_gives_way_to_the_close() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
+    let (command, _receiver) = prompt_command("never drained");
+    let started = Instant::now();
+    let outcome = fixture.driver.command(command).await;
+    assert!(matches!(outcome, Err(Error::ShutdownRequested)), "{outcome:?}");
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(fixture.driver.shutdown_seen);
+    fixture.finish().await
+}
+
+/// The close reached the driver ahead of commands queued before it: the prompts go to stdin in order and everything
+/// else is handed back unapplied.
+#[tokio::test(start_paused = true)]
+async fn prompts_queued_behind_the_close_are_written_and_the_rest_handed_back() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut fixture = closed_before_a_write(None)?;
+    fixture.driver.shutdown_seen = true;
+    let (first, first_written) = prompt_command("queued first");
+    let (initialize, _initialized) = oneshot::channel();
+    let (second, second_written) = prompt_command("queued second");
+    for command in [
+        first,
+        Command::Initialize {
+            first: false,
+            response: initialize,
+        },
+        second,
+    ] {
+        fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+    }
+    let unapplied = fixture.driver.write_queued_prompts().await;
+    assert!(matches!(
+        unapplied.as_slice(),
+        [Command::Initialize { first: false, .. }]
+    ));
+    assert!(matches!(first_written.await?, Ok(())));
+    assert!(matches!(second_written.await?, Ok(())));
+    for expected in ["queued first", "queued second"] {
+        let written = fixture.harness.written.try_recv()?;
+        assert!(written.contains(expected), "{written}");
+    }
+    fixture.finish().await
+}
+
+/// A queued prompt the transport cannot take stops the flush, so the prompts behind it stay unwritten.
+#[tokio::test(start_paused = true)]
+async fn a_queued_prompt_that_cannot_be_written_stops_the_flush() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
+    fixture.driver.shutdown_seen = true;
+    fixture.driver.abort.cancel();
+    let (stuck, _stuck_written) = prompt_command("stuck");
+    let (behind, _behind_written) = prompt_command("behind");
+    for command in [stuck, behind] {
+        fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+    }
+    let started = Instant::now();
+    let unapplied = fixture.driver.write_queued_prompts().await;
+    assert!(unapplied.is_empty());
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::Prompt { .. })
+    ));
     fixture.finish().await
 }
 
@@ -424,7 +538,7 @@ async fn a_result_reaches_the_run_end_machine_only_after_its_flush() -> Result<(
         "type": "system", "subtype": "session_state_changed", "state": "idle", "session_id": "s",
     }));
     fixture.driver.run_end.prompt_written();
-    fixture.driver.run_end.finish(false, true);
+    fixture.driver.run_end.finish(false, true, None);
     fixture.driver.held_observations.push_back((result, true));
     fixture.driver.held_observations.push_back((later, false));
     assert!(!fixture.driver.run_end.close_due());
@@ -619,7 +733,7 @@ async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects
             },
         );
         fixture.driver.held_commands.push_back(Command::Prompt {
-            input: crate::Prompt::from("hi").into(),
+            input: Box::new(crate::Prompt::from("hi").into()),
             response: prompt,
         });
         fixture.driver.held_commands.push_back(Command::Control {
@@ -636,10 +750,15 @@ async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects
         );
         // The prompt is dropped unsent, and the held control fails with the same message.
         assert!(matches!(prompted.await?, Ok(())));
-        assert!(matches!(
-            controlled.await?,
-            Err(Error::InitializationFailed(inner)) if inner.to_string() == expected
-        ));
+        let controlled = controlled.await?;
+        assert!(
+            matches!(controlled, Err(Error::InitializationFailed(_))),
+            "{controlled:?}"
+        );
+        assert_eq!(
+            controlled.err().map(|error| error.to_string()).as_deref(),
+            Some(expected)
+        );
         assert!(fixture.driver.held_commands.is_empty());
         fixture.finish().await?;
     }

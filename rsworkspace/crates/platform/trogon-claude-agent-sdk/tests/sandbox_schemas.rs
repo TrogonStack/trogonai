@@ -2,7 +2,7 @@
 //! for the same documents (`.config/mise/lib/claude-sdk-freshness/sandbox_schema_battery.mjs` writes the goldens).
 
 use serde_json::Value;
-use trogon_claude_agent_sdk::{SandboxConfigRejected, SandboxConfigSchema, js_stringify};
+use trogon_claude_agent_sdk::{SandboxConfigRejectedError, SandboxConfigSchema, js_stringify};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -81,7 +81,7 @@ fn every_schema_carries_its_upstream_export_name() {
 #[test]
 fn a_rejection_names_the_schema() {
     let rejected = SandboxConfigSchema::Network.parse(Some(&Value::Bool(true)));
-    assert_eq!(rejected, Err(SandboxConfigRejected(SandboxConfigSchema::Network)));
+    assert_eq!(rejected, Err(SandboxConfigRejectedError(SandboxConfigSchema::Network)));
     let message = rejected.err().map(|error| error.to_string());
     assert_eq!(
         message.as_deref(),

@@ -86,6 +86,14 @@ impl<T> Receiver<T> {
         }
     }
 
+    /// A value already queued, without waiting.
+    pub(crate) fn try_recv(&mut self) -> Option<T> {
+        match self {
+            Self::Bounded(receiver) => receiver.try_recv().ok(),
+            Self::Unbounded(receiver) => receiver.try_recv().ok(),
+        }
+    }
+
     pub(crate) fn close(&mut self) {
         match self {
             Self::Bounded(receiver) => receiver.close(),

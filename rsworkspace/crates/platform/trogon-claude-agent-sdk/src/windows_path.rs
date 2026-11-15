@@ -25,6 +25,8 @@ fn split_device(path: &str) -> (String, String) {
 }
 
 /// Node `path.win32.resolve(base, path)` as the device followed by its normalized components. `base` is absolute.
+/// A drive-relative `path` on the base's drive keeps its own spelling of the drive, as Node takes the device from the
+/// rightmost argument that names one.
 pub(crate) fn resolve(base: &str, path: &str) -> Vec<String> {
     let (base_device, base_rest) = split_device(base);
     let (device, rest) = split_device(path);
@@ -33,8 +35,10 @@ pub(crate) fn resolve(base: &str, path: &str) -> Vec<String> {
         (device, rest)
     } else if rest.starts_with('\\') {
         (base_device, rest)
-    } else if device.is_empty() || device.to_lowercase() == base_device.to_lowercase() {
+    } else if device.is_empty() {
         (base_device, below_base(&rest))
+    } else if device.to_lowercase() == base_device.to_lowercase() {
+        (device, below_base(&rest))
     } else {
         (device, format!("\\{rest}"))
     };

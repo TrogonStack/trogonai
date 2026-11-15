@@ -10,10 +10,10 @@
 
 use super::*;
 use crate::{
-    LengthChoice, McpToolName, McpToolOutput, McpToolRequest, NullabilityChoice, NumberFormatChoice, RefineFailure,
-    Refinement, SchemaCallback, SchemaCallbackOptions, SchemaChoice, SchemaPointer, SdkTool, SdkToolOptions,
-    StringCheckKind, StringFormatChoice, ToolResultStatus, Transformation, UnionChoice, ValidationChoices,
-    ValidationChoicesOptions, settings_json::js_stringify,
+    LengthChoice, McpToolName, McpToolOutput, McpToolRequest, NullabilityChoice, NumberFormatChoice, ObjectChoice,
+    RefineFailure, Refinement, SchemaCallback, SchemaCallbackOptions, SchemaChoice, SchemaPointer, SdkTool,
+    SdkToolOptions, StringCheckKind, StringFormatChoice, ToolResultStatus, Transformation, UnionChoice,
+    ValidationChoices, ValidationChoicesOptions, settings_json::js_stringify,
 };
 use serde_json::json;
 use tokio::sync::Notify;
@@ -131,6 +131,10 @@ fn choice(definition: &Value) -> Result<SchemaChoice, Box<dyn std::error::Error>
             _ => StringFormatChoice::PlainPattern,
         }),
         "regex_flags" => SchemaChoice::RegexFlags(word()?.to_owned()),
+        "object" => SchemaChoice::Object(match word()? {
+            "author" => ObjectChoice::Author,
+            _ => ObjectChoice::Bundled,
+        }),
         other => return Err(format!("unknown choice {other}").into()),
     })
 }
@@ -143,9 +147,10 @@ fn refinement(name: &str) -> Result<Refinement, String> {
         "starts_with_a" => ("", Some("must start with a")),
         other => return Err(format!("unknown fixture refinement {other}")),
     };
+    let prefix_check = name == "starts_with_a";
     Ok(Arc::new(move |value: &Value| {
         let text = value.as_str().unwrap_or_default();
-        let fails = if name == "starts_with_a" {
+        let fails = if prefix_check {
             !text.starts_with('a')
         } else {
             text == rejected

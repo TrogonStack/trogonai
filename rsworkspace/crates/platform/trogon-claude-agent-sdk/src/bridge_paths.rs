@@ -11,43 +11,15 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
-use crate::bridge_flavor::{Flavor, share_refused};
+use crate::bridge_flavor::{Flavor, dirname, share_refused};
 use crate::bridge_js::{is_js_space, js_trim};
 use crate::bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe};
 use crate::bridge_unicode::js_lowercase;
 use unicode_normalization::UnicodeNormalization;
 
-const LINK_DEPTH: u32 = 40;
-const PARTIAL_DEPTH: usize = 6;
-const AUTOFS_TYPE: i64 = 391;
-const ASKED_TWICE: u32 = 2;
-const EXPECTED_ERRORS: [&str; 7] = [
-    "ENOENT",
-    "ENOTDIR",
-    "EACCES",
-    "EPERM",
-    "ENOSYS",
-    "ENOTSUP",
-    "EOPNOTSUPP",
-];
-const DATA_VOLUME_ROOTS: [&str; 16] = [
-    "usr/local",
-    "usr/libexec/cups",
-    "usr/share/snmp",
-    "AppleInternal",
-    "Applications",
-    "Library",
-    "Users",
-    "Volumes",
-    "cores",
-    "home",
-    "media",
-    "mnt",
-    "opt",
-    "pkg",
-    "private",
-    "sw",
-];
+mod constants;
+
+use constants::{ASKED_TWICE, AUTOFS_TYPE, DATA_VOLUME_ROOTS, EXPECTED_ERRORS, LINK_DEPTH, PARTIAL_DEPTH};
 
 /// The automount roots upstream has already ruled out, and the lookups that failed once without being expected to.
 #[derive(Default)]
@@ -85,69 +57,6 @@ impl PathGuard {
     pub fn host() -> Arc<Self> {
         Arc::clone(&HOST_GUARD)
     }
-}
-
-/// `path.posix.dirname` for the paths the walker builds.
-pub(crate) fn dirname(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
-    match trimmed.rfind('/') {
-        None if path.starts_with('/') => "/".to_owned(),
-        None => ".".to_owned(),
-        Some(0) => "/".to_owned(),
-        Some(index) => trimmed[..index].trim_end_matches('/').to_owned(),
-    }
-}
-
-/// `path.posix.join(base, name)` for a plain `name`.
-pub(crate) fn join(base: &str, name: &str) -> String {
-    match base {
-        "" | "." => name.to_owned(),
-        "/" => format!("/{name}"),
-        other => format!("{}/{name}", other.trim_end_matches('/')),
-    }
-}
-
-/// `path.posix.resolve(base, text)` for an absolute `base`.
-pub(crate) fn resolve(base: &str, text: &str) -> String {
-    let combined = if text.starts_with('/') {
-        text.to_owned()
-    } else {
-        format!("{base}/{text}")
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    for part in combined.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            other => parts.push(other),
-        }
-    }
-    format!("/{}", parts.join("/"))
-}
-
-/// `text.split(/\/+/)`, or `text.split(/[/\\]+/)` on Windows: runs of separators split, and a trailing run leaves one
-/// empty piece.
-pub(crate) fn split_runs(text: &str, windows: bool) -> Vec<&str> {
-    let separates = |byte: u8| byte == b'/' || (windows && byte == b'\\');
-    let mut pieces = Vec::new();
-    let mut start = 0;
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if separates(bytes[index]) {
-            pieces.push(&text[start..index]);
-            while index < bytes.len() && separates(bytes[index]) {
-                index += 1;
-            }
-            start = index;
-        } else {
-            index += 1;
-        }
-    }
-    pieces.push(&text[start..]);
-    pieces
 }
 
 fn fold_case(text: &str) -> String {

@@ -96,3 +96,60 @@ fn a_claim_initialize_string_spreads_its_utf16_code_units() -> Result<(), Box<dy
     );
     Ok(())
 }
+
+/// A handle no driver serves: `initialize_watched` reads only the receivers it is given.
+fn unserved_handle() -> super::ClientHandle {
+    let (commands, _receiver) = crate::channel::channel(None);
+    super::ClientHandle {
+        commands,
+        timeout: None,
+        abort: crate::CancellationToken::default(),
+        close: super::CloseSignal::new(tokio::sync::oneshot::channel().0),
+        closed: super::Closed::default(),
+        initialization: std::sync::Arc::new(tokio::sync::watch::channel(None).0),
+        latest_commands: super::driver::LatestCommands::default(),
+        prompt_hold: super::driver::PromptHold::default(),
+        host: crate::remote_control::HostState::default(),
+        style: crate::ArgvStyle::TypeScript,
+        js_runtime: JsRuntime::default(),
+        claim_pending: std::sync::Arc::new(tokio::sync::watch::channel(false).0),
+    }
+}
+
+/// A startup watch whose driver side already stopped reporting frames.
+fn closed_startup_watch() -> crate::startup_timeout::StartupWatch {
+    let (_tap, events) = tokio::sync::mpsc::unbounded_channel();
+    crate::startup_timeout::StartupWatch {
+        settings: crate::startup_timeout::StartupSettings {
+            initialize_timeout: None,
+            on_hooks_running: None,
+        },
+        events,
+    }
+}
+
+#[tokio::test]
+async fn startup_still_takes_the_initialize_answer_after_the_frame_channel_closes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let handle = unserved_handle();
+    let (answer, initialize) = tokio::sync::oneshot::channel();
+    let mut waiting = std::pin::pin!(handle.initialize_watched(initialize, closed_startup_watch()));
+    // The closed frame channel is the only ready branch, so the first poll takes it and keeps waiting for initialize,
+    // as TypeScript's `m.race(initializationResult())` does once no more hook frames can arrive.
+    let first = std::future::poll_fn(|cx| std::task::Poll::Ready(waiting.as_mut().poll(cx))).await;
+    assert!(first.is_pending());
+    let response = json!({"commands": [], "models": []});
+    answer
+        .send(Ok(Some(response.clone())))
+        .map_err(|_| "the initialize wait dropped its receiver")?;
+    assert_eq!(waiting.await?, Some(response));
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn startup_still_times_out_after_the_frame_channel_closes() {
+    let handle = unserved_handle();
+    let (_answer, initialize) = tokio::sync::oneshot::channel();
+    let result = handle.initialize_watched(initialize, closed_startup_watch()).await;
+    assert!(matches!(result, Err(Error::InitializeTimeout(_))));
+}

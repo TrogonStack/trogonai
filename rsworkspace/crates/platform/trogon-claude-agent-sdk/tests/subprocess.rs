@@ -1,6 +1,6 @@
 #![cfg(feature = "test-support")]
 
-use std::{error::Error as StdError, sync::Arc, time::Duration};
+use std::{error::Error as StdError, ffi::OsStr, sync::Arc, time::Duration};
 
 use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
@@ -270,6 +270,16 @@ async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
     assert_eq!(info.hooks_applied, FeatureSupport::NotReported);
     assert_eq!(info.hook_on_failure_supported, FeatureSupport::NotReported);
     assert_eq!(info.as_json(), Some(&serde_json::json!({})));
+    client.disconnect().await?;
+    Ok(())
+}
+
+/// Python `ClaudeSDKClient(options).connect(prompt)`: the native connector spawns the CLI, and the prompt is written
+/// once the connection is up.
+#[tokio::test]
+async fn an_unconnected_client_spawns_the_cli_and_writes_its_prompt() -> TestResult {
+    let mut client = ClaudeSdkClient::new(options("normal")?).connect("hello").await?;
+    assert_eq!(read_result(&mut client).await?, "hello");
     client.disconnect().await?;
     Ok(())
 }
@@ -566,6 +576,33 @@ async fn process_failure_message_redacts_secrets_from_the_stderr_tail() -> TestR
     assert_eq!(
         error.typescript_message().as_deref(),
         Some("Claude Code process exited with code 7. stderr: rejected key <token> at startup")
+    );
+    client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_keeps_the_stderr_tail_it_opts_into_unredacted() -> TestResult {
+    let mut options = options("failure-secret")?;
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    options.limits.stderr_tail = 1024;
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("failure")).await?;
+    let error = loop {
+        match client.next_message().await {
+            Ok(Some(_)) => {}
+            Err(error) => break error,
+            Ok(None) => return Err(std::io::Error::other("missing error").into()),
+        }
+    };
+    let Error::Process { status, stderr } = error else {
+        return Err(std::io::Error::other("expected process error").into());
+    };
+    assert_eq!(status.code(), Some(7));
+    let secret = format!("sk-{}", "Ab1".repeat(8));
+    assert_eq!(
+        stderr.as_bytes(),
+        format!("rejected key {secret} at startup").as_bytes()
     );
     client.disconnect().await?;
     Ok(())
@@ -951,13 +988,6 @@ fn spawn_reporter(calls: Recorded<(u32, f64)>) -> trogon_claude_agent_sdk::OnPro
     ))
 }
 
-#[cfg_attr(
-    dylint_lib = "trogon_dylint_lints",
-    allow(
-        std_env_access,
-        reason = "The spawner must receive the inherited PATH, so the test reads the real process environment."
-    )
-)]
 #[tokio::test]
 async fn a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query() -> TestResult {
     let directory = tempfile::tempdir()?;
@@ -995,16 +1025,20 @@ async fn a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query()
     );
     assert_eq!(spawn.cwd.as_deref(), Some(directory.path()));
     assert_eq!(
+        spawn.env.get(OsStr::new("SPAWN_MARKER")).map(|value| value.as_os_str()),
+        Some(OsStr::new("custom"))
+    );
+    // The spawner gets the whole child environment, not only the SDK's changes. TypeScript builds it from
+    // `options.env` alone when that is given (`env ? {...env} : {...process.env}`), so the caller's entries arrive
+    // and the inherited `PATH` does not.
+    assert_eq!(
         spawn
             .env
-            .get(std::ffi::OsStr::new("SPAWN_MARKER"))
+            .get(OsStr::new("LLVM_PROFILE_FILE"))
             .map(|value| value.as_os_str()),
-        Some(std::ffi::OsStr::new("custom"))
+        Some(OsStr::new("/dev/null"))
     );
-    // The spawner gets the whole environment, the caller's included, not only the SDK's changes.
-    if let Some(path) = std::env::var_os("PATH") {
-        assert_eq!(spawn.env.get(std::ffi::OsStr::new("PATH")), Some(&path));
-    }
+    assert_eq!(spawn.env.get(OsStr::new("PATH")), None);
     assert_eq!(spawn.uid, None);
     // Closing without an abort leaves the forwarded signal alone, and TypeScript reports no spawn it did not make.
     assert!(!spawn.signal.is_cancelled());
@@ -1017,7 +1051,7 @@ async fn a_failing_custom_spawner_is_a_spawn_error() -> TestResult {
     let mut options = options("normal")?;
     options.spawn_claude_code_process = Some(trogon_claude_agent_sdk::SpawnClaudeCodeProcess(Arc::new(
         |_: trogon_claude_agent_sdk::SpawnOptions| -> std::io::Result<tokio::process::Child> {
-            Err(std::io::Error::other("no machine"))
+            Err(std::io::Error::from(std::io::ErrorKind::HostUnreachable))
         },
     )));
     let error = ClaudeSdkClient::connect(options)
@@ -1025,7 +1059,7 @@ async fn a_failing_custom_spawner_is_a_spawn_error() -> TestResult {
         .err()
         .ok_or_else(|| std::io::Error::other("connect succeeded without a process"))?;
     assert!(
-        matches!(&error, Error::Spawn(source) if source.to_string() == "no machine"),
+        matches!(&error, Error::Spawn(source) if source.kind() == std::io::ErrorKind::HostUnreachable),
         "{error:?}"
     );
     Ok(())

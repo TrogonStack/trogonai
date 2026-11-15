@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 
 use crate::bridge_gitcmd::GitProbeContext;
 use crate::bridge_js::js_trim;
@@ -257,18 +257,31 @@ pub(crate) async fn git_entries<G: GitContextProbe>(
         }
     }
     let slug = format!("{}/{}", repo.owner, repo.name);
-    let mut source = json!({
-        "type": "git_repository",
-        "url": format!("https://{}/{}/{}", repo.host, repo.owner, repo.name),
-    });
-    if let (Some(revision), Some(object)) = (revision, source.as_object_mut()) {
-        object.insert("revision".to_owned(), Value::String(revision.to_owned()));
+    let mut source = Map::new();
+    source.insert("type".to_owned(), Value::String("git_repository".to_owned()));
+    source.insert(
+        "url".to_owned(),
+        Value::String(format!("https://{}/{}/{}", repo.host, repo.owner, repo.name)),
+    );
+    if let Some(revision) = revision {
+        source.insert("revision".to_owned(), Value::String(revision.to_owned()));
     }
-    let outcome = json!({
-        "type": "git_repository",
-        "git_info": {"type": "github", "repo": slug, "branches": branches},
-    });
-    Some((source, outcome))
+    let mut git_info = Map::new();
+    git_info.insert("type".to_owned(), Value::String("github".to_owned()));
+    git_info.insert("repo".to_owned(), Value::String(slug));
+    git_info.insert(
+        "branches".to_owned(),
+        Value::Array(
+            branches
+                .into_iter()
+                .map(|branch| Value::String(branch.to_owned()))
+                .collect(),
+        ),
+    );
+    let mut outcome = Map::new();
+    outcome.insert("type".to_owned(), Value::String("git_repository".to_owned()));
+    outcome.insert("git_info".to_owned(), Value::Object(git_info));
+    Some((Value::Object(source), Value::Object(outcome)))
 }
 
 fn log_drop(reason: &str, url: &str, branch: &str) {

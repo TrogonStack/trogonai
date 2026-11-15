@@ -1410,7 +1410,7 @@
         }
       ],
       "status": "supported",
-      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification, writes nothing for AnsweredOutOfBand, still writes a cancelled handler's answer and skips a redelivered in-flight request id; Python echoes the original input on allow, rejects a null result with its TypeError text, drops a cancelled handler without a response and runs a redelivered id twice (DuplicateControlRequests::RunBoth, opt-in). A missing handler is answered with each SDK's own error text. CLI rules can authorize before consulting the host. ToolPermissionRequest.typed_input views input as the sdk-tools input type of tool_name, and PermissionDecision::allow_with_input sends a typed input back as updatedInput exactly as it encodes."
+      "rationale": "can_use_tool answers match sdk.mjs 0.3.323 and claude_agent_sdk 0.2.181 byte for byte in each ArgvStyle. TypeScript appends toolUseID, keeps decisionClassification, writes nothing for AnsweredOutOfBand, writes a PermissionDecision::Raw object as returned with toolUseID spread over it, still writes a cancelled handler's answer and skips a redelivered in-flight request id; Python echoes the original input on allow, rejects a null result or a raw dict with its TypeError text, drops a cancelled handler without a response and runs a redelivered id twice (DuplicateControlRequests::RunBoth, opt-in). A missing handler is answered with each SDK's own error text. CLI rules can authorize before consulting the host. ToolPermissionRequest.typed_input views input as the sdk-tools input type of tool_name, and PermissionDecision::allow_with_input sends a typed input back as updatedInput exactly as it encodes."
     },
     {
       "id": "permission-types",
@@ -2809,10 +2809,11 @@
       "upstream": {
         "python": {
           "symbols": [
-            "UserMessage",
             "ContentBlock"
           ],
-          "prefixes": []
+          "prefixes": [
+            "UserMessage"
+          ]
         },
         "typescript": {
           "symbols": [
@@ -2825,17 +2826,79 @@
       },
       "rust_api": [
         "UserInput",
+        "UserInput.from_json",
+        "UserInput.blocks",
+        "UserInputPriority",
         "InputBlock",
-        "MessageId"
+        "MessageId",
+        "MessageOrigin",
+        "UserMessage",
+        "ClaudeSdkClient.query",
+        "ClaudeSdkClient.query_in_session",
+        "ClaudeSdkClient.query_stream",
+        "ClaudeSdkClient.query_stream_in_session",
+        "ClaudeSdkClient.stream_input"
       ],
       "tests": [
+        {
+          "path": "tests/user_input_writes.rs",
+          "name": "a_string_prompt_is_written_as_each_sdk_writes_it"
+        },
+        {
+          "path": "tests/user_input_writes.rs",
+          "name": "a_streamed_message_is_written_as_given"
+        },
+        {
+          "path": "tests/user_input_writes.rs",
+          "name": "a_one_shot_message_prompt_is_written_as_given"
+        },
+        {
+          "path": "tests/user_input_writes.rs",
+          "name": "python_client_query_writes_the_session_last"
+        },
+        {
+          "path": "tests/user_input_writes.rs",
+          "name": "typescript_client_query_writes_the_sdk_mjs_string_prompt"
+        },
+        {
+          "path": "tests/user_input_writes.rs",
+          "name": "python_client_query_stream_fills_only_an_unnamed_session"
+        },
+        {
+          "path": "tests/user_input.rs",
+          "name": "text_input_serializes_as_a_user_message_without_a_session"
+        },
+        {
+          "path": "tests/user_input.rs",
+          "name": "structured_input_carries_blocks_and_every_field_in_declaration_order"
+        },
+        {
+          "path": "tests/user_input.rs",
+          "name": "a_message_object_is_written_as_given_with_typed_fields_overlaid"
+        },
+        {
+          "path": "tests/user_input.rs",
+          "name": "user_input_priorities_round_trip_upstream_literals"
+        },
+        {
+          "path": "src/user_input_tests.rs",
+          "name": "a_query_prompt_follows_each_sdk"
+        },
+        {
+          "path": "src/user_input_tests.rs",
+          "name": "fill_session_names_only_an_unnamed_message"
+        },
+        {
+          "path": "tests/user_message.rs",
+          "name": "user_messages_keep_text_blocks_injected_origin_and_tool_metadata"
+        },
         {
           "path": "tests/runtime_features.rs",
           "name": "structured_input_and_declarative_configuration_reach_the_cli"
         }
       ],
-      "status": "partial",
-      "rationale": "Rust validates text/image/document/tool-result input and permits explicit future extensions; upstream message types also contain output/history details beyond the prompt constructor."
+      "status": "supported",
+      "rationale": "UserInput carries every SDKUserMessage field as a typed field in declaration order, keeps unknown keys after them, and UserInput::from_json writes a caller's message object as given, so key order and unknown keys survive. Goldens recorded from the pinned claude_agent_sdk and sdk.mjs compare every written user line byte for byte: a string query() prompt (one text block in TypeScript, a string in Python), streamed messages, verbatim prompts, and Python ClaudeSDKClient.query writing session \"default\" last and filling it only on streamed messages that name none. UserMessage decodes the user messages the CLI writes back."
     },
     {
       "id": "message-metadata",
@@ -6214,7 +6277,7 @@
       },
       "rust_api": [
         "SandboxConfigSchema",
-        "SandboxConfigRejected"
+        "SandboxConfigRejectedError"
       ],
       "tests": [
         {

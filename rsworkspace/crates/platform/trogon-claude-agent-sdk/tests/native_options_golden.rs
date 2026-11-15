@@ -33,8 +33,10 @@ use trogon_claude_agent_sdk::{
     SessionPersistence, SessionStore, SessionStoreFlush, SessionStoreOptions, SettingSource, Settings, SettingsInput,
     Skills, SystemPrompt, TaskBudget, ThinkingConfig, ThinkingDisplay, Timeout, ToolName, ToolPermissionRequest,
     ToolRule, ToolSet, UsdBudget, UserDialogRequest, UserDialogResponse, VerbatimPrompts,
-    adapters::{NativeFileSystem, RuntimeAdapters, SystemClock},
-    test_support::FixedEnvironment,
+    adapters::{
+        CurrentDirectory, EnvironmentVariable, NativeFileSystem, RuntimeAdapters, SystemClock, TemporaryDirectory,
+    },
+    test_support::{FixedEnvironment, WithPasswd},
 };
 
 #[path = "support/scripted_process.rs"]
@@ -109,17 +111,38 @@ async fn serve(process: ScriptedProcessHarness) -> Result<(String, bool), std::i
     Ok((request, composed))
 }
 
+/// The passwd home of the user the upstream capture ran as. Python resolves `Path.home()` when a session store
+/// connects (`build_mirror_batcher` calls `_get_projects_dir`), which raises without one, so the recorded Python
+/// session store runs had a home. It adds nothing to the child environment: those cases record an empty `env`.
+const CAPTURE_HOME: &str = "/nonexistent-capture-home";
+
 async fn observe(options: ClaudeAgentOptions) -> Result<Observation, Box<dyn std::error::Error>> {
+    let environment = FixedEnvironment {
+        directory: PathBuf::from("unused-directory"),
+        variables: BTreeMap::new(),
+    };
+    if options.argv_style == ArgvStyle::Python && options.session_store.is_some() {
+        let environment = WithPasswd {
+            environment,
+            effective: Some(CAPTURE_HOME.into()),
+            real: Some(CAPTURE_HOME.into()),
+        };
+        return observe_in(options, environment).await;
+    }
+    observe_in(options, environment).await
+}
+
+async fn observe_in<E>(options: ClaudeAgentOptions, environment: E) -> Result<Observation, Box<dyn std::error::Error>>
+where
+    E: EnvironmentVariable + CurrentDirectory<Error = std::io::Error> + TemporaryDirectory,
+{
     let (process, harness) = ScriptedProcessSpawner::new();
     let observer = process.observer();
     let server = tokio::spawn(serve(harness));
     let client = ClaudeSdkClient::connect_with_adapters(
         options,
         RuntimeAdapters {
-            environment: FixedEnvironment {
-                directory: PathBuf::from("unused-directory"),
-                variables: BTreeMap::new(),
-            },
+            environment,
             process,
             filesystem: NativeFileSystem,
         },
@@ -290,6 +313,8 @@ fn agents(options: &mut ClaudeAgentOptions, every_field: bool) {
         reviewer.skills = Some(vec!["s1".to_owned()]);
         reviewer.max_turns = Some(3.into());
         reviewer.effort = Some(EffortLevel::High.into());
+        // The captured TypeScript caller lists `prompt` right after `description`.
+        reviewer.key_order = ["description", "prompt"].map(str::to_owned).to_vec();
     }
     options.agents.insert(AgentName::from("rev"), reviewer);
     if every_field {
@@ -582,7 +607,7 @@ fn python_options(name: &str, o: &mut ClaudeAgentOptions) -> Build {
         "include_hook_events_true" => o.include_hook_events = HookEvents::Include,
         "include_partial_messages_true" => o.partial_messages = PartialMessages::Include,
         "max_budget_usd" => o.max_budget_usd = Some(UsdBudget::new(1.5)),
-        "max_budget_usd_zero" => o.max_budget_usd = Some(UsdBudget::new(0.0)),
+        "max_budget_usd_zero" => o.max_budget_usd = Some(UsdBudget::from_integer(0)),
         "max_thinking_tokens" => o.max_thinking_tokens = Some(1000),
         "max_thinking_tokens_zero" => o.max_thinking_tokens = Some(0),
         "max_turns" => o.max_turns = NonZeroUsize::new(7),

@@ -60,9 +60,12 @@ messages queued. `receive_messages()` streams on without stopping. `Query` and
 `ClaudeSdkClient` are themselves `futures_util::Stream`s of
 `Result<Message, Error>`, TypeScript's `for await`, ending where `next_message`
 returns `None`.
-`send_input(UserInput)` accepts structured content and message identity.
-`InputBlock` is a transparent JSON-object wrapper forwarded verbatim, with a
-`text` convenience constructor; the CLI and the Messages API validate block shapes.
+`send_input(UserInput)` accepts structured content and every `SDKUserMessage`
+field, written in declaration order with unknown keys after them.
+`UserInput::from_json` writes a message object as given, as both SDKs write a
+streamed message. `InputBlock` is a transparent JSON-object wrapper forwarded
+verbatim, with a `text` convenience constructor; the CLI and the Messages API
+validate block shapes.
 
 Ordinary sends reject overlapping turns. Use the cloneable `ClientHandle` for
 queued input or `stream_input`, and receive on the owner concurrently. Call
@@ -191,7 +194,8 @@ request and tool identities, suggestions, MCP provenance, the decision reason
 with its type and code, the matched ask rule, the computer folder, plugin and
 server prompt, plus a cancellation signal. A field of the wrong type stays in
 `additional_fields`. Decisions carry updated input, permission updates,
-interrupt and a decision classification; `AnsweredOutOfBand` writes nothing.
+interrupt and a decision classification; `AnsweredOutOfBand` writes nothing,
+and `Raw` writes any other object as returned (Python rejects it as a `dict`).
 Answers match `sdk.mjs` byte for byte by default and `claude_agent_sdk` under
 `ArgvStyle::Python`, including the answer without a handler, a callback the CLI
 cancels (TypeScript still writes its answer, Python writes nothing) and a
@@ -307,6 +311,10 @@ of a string in the order they were declared, which is the order of its issues;
 or `number().int().min(..).max(..)` (`safeint`); `StringFormatChoice` picks
 `iso.time()` (format `time`) or a plain `regex` pattern; and
 `SchemaChoice::RegexFlags` gives the flags the listed `pattern` loses.
+`ObjectChoice`, recorded in `tests/fixtures/sdk_mcp/typescript_zod.json`, picks
+the bundled object a raw shape is wrapped in (an absent required key whose
+schema takes `undefined`, such as a zod 4.1.12 `catch`, reports `nonoptional`)
+or the author's own `z.object` (the key keeps the value its schema gives).
 `SchemaCallbackOptions` opts a schema node in to a `refine` and a `transform`
 callback, which run where zod runs them: the refinement after the node's checks
 unless one aborted them, as a `custom` issue with its path and message, and the
@@ -482,7 +490,9 @@ upstream SDKs).
 - `Transport` is Python's transport interface: `connect`, `write`, `read_message`
   (one object per call, `None` at the end of the stream, in place of Python's
   `read_messages` iterator), `close`, `is_ready` and `end_input`, plus a provided
-  `kill` that `abort()` calls before `close` (TypeScript's abort signal). It is a
+  `kill` that `abort()` calls before `close` (TypeScript's abort signal) and a
+  provided `accepts_writes`, `is_ready` unless the transport's `write` waits for
+  its own connection, as the SSE transport's does. It is a
   generic bound, not a trait object. `ClaudeSdkClient::connect_with_transport`,
   `connect_with_transport_and_adapters`, `query_with_transport` and
   `query_turn_with_transport` inject one; the subprocess implementation is the
@@ -667,8 +677,10 @@ Options include programmatic agents, model/effort, tool rules, budget, output
 schema, checkpointing, environment, additional directories, resume and fork.
 `OutputSchema::new` and `UsdBudget::new` keep any value and pass it on, as both
 upstream SDKs do; `OutputSchema::validated` and `UsdBudget::checked` opt in to
-rejecting nonlocal references and nonfinite or negative amounts. Rewind
-requires checkpointing and CLI support.
+rejecting nonlocal references and nonfinite or negative amounts.
+`UsdBudget::from_integer` keeps a Python `int` amount, which the Python SDK sends
+as `str(0)`, `0`, where the float `0.0` goes as `0.0`. Rewind requires
+checkpointing and CLI support.
 
 The default system prompt is empty; choose `SystemPrompt::ClaudeCode` for the
 CLI preset. `SystemPrompt` also carries a list of texts, the custom and preset
@@ -715,9 +727,8 @@ parent process). The result carries per-key provenance and `machinePolicy.didNot
 command output. A `ResolverState` holds what upstream keeps between calls;
 `ResolverState::with_rereads(PolicyRereads::Inline)` runs machine policy re-reads on the calling
 thread, so the host's clock alone decides when one has ended. Upstream reads the launch directory
-when the SDK module is imported; nothing here runs at load time, so `resolve_settings` reads it on
-its first call unless the binary calls `adapters::capture_launch_directory()` at the top of `main`,
-which gives the upstream timing. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+when the SDK module is imported; here the loader reads it when the binary that links the crate
+loads, before `main`, and `adapters::capture_launch_directory()` returns that reading. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
 byte for byte. Numbers read as `JSON.parse` reads them: integers above 2^53 round, and a number
 past the double range reads as `Infinity`. A typed setting refuses `Infinity`, an `env` value spells
@@ -815,7 +826,11 @@ non-UUID, empty and sidechain sessions. File checkpointing cannot be combined
 with a session store. As upstream, a relative configuration or home directory
 is used as given and store loads are unbounded;
 `SessionStoreOptions::require_absolute_config_paths` and the resume limits in
-`SessionStoreLimits` opt into typed errors instead.
+`SessionStoreLimits` opt into typed errors instead. Without a home directory,
+Python fails the connect with `SessionError::MissingConfigDirectory`, while
+TypeScript, which finds the projects directory per mirror frame, connects and
+drops each frame with `MirrorEnqueueError::MissingConfigDirectory`; a store
+resume without a configured directory needs it in both.
 
 Project-key sanitization uses the pinned TypeScript SDK’s UTF-16 replacement
 behavior. Native hashing can differ for long project paths; use an explicit

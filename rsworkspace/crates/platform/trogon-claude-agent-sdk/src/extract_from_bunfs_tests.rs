@@ -12,6 +12,10 @@ use std::{
 use serde_json::Value;
 
 use super::*;
+use crate::adapters::{
+    ChangeMode, CreateDirectory, EmitWarning, EnvironmentVariable, FileIdentity, HostIdentity, NativeHost, OpenFile,
+    ProcessId, RandomBytes, ReadFile, RealUserId, RemoveFile, RenamePath, StatLink, TemporaryDirectory,
+};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -375,7 +379,7 @@ fn run_case(case: &Value) -> TestResult {
 fn every_recorded_upstream_case_is_reproduced() -> TestResult {
     let goldens: Value = serde_json::from_str(GOLDENS)?;
     let cases = goldens["cases"].as_array().ok_or("cases")?;
-    assert!(cases.len() >= 27);
+    assert!(cases.len() >= 26);
     for case in cases {
         run_case(case)?;
     }

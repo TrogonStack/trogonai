@@ -6,17 +6,10 @@ use std::{
     time::Duration,
 };
 
-/// TypeScript `QI`: reconnects in a row before the transport gives up.
-pub(crate) const RECONNECT_BUDGET: u32 = 5;
-/// TypeScript `n4`: how long the stream request may take to answer.
-pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_millis(15_000);
-/// TypeScript `r4`: how long the stream may stay silent.
-pub(crate) const LIVENESS_TIMEOUT: Duration = Duration::from_millis(45_000);
-/// TypeScript `o4`: how long a write POST may take.
-pub(crate) const POST_TIMEOUT: Duration = Duration::from_millis(30_000);
-const BACKOFF_BASE_MS: u64 = 1_000;
-const BACKOFF_CAP_MS: u64 = 30_000;
-const JITTER_US: u64 = 250_000;
+mod constants;
+
+use constants::{BACKOFF_BASE_MS, BACKOFF_CAP_MS, JITTER_US};
+pub(crate) use constants::{CONNECT_TIMEOUT, LIVENESS_TIMEOUT, POST_TIMEOUT, RECONNECT_BUDGET};
 
 fn backoff_ms(attempt: u32) -> u64 {
     let doublings = 1u64.checked_shl(attempt.saturating_sub(1)).unwrap_or(u64::MAX);

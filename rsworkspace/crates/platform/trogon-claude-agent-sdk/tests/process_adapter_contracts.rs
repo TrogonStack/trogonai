@@ -63,7 +63,12 @@ async fn native_environment_defaults_prepare_a_store_without_materializing_trans
     )
     .await?;
     assert!(runtime.config_dir.is_none());
-    assert!(runtime.projects_dir.is_absolute());
+    assert!(
+        runtime
+            .projects_dir
+            .as_deref()
+            .is_some_and(std::path::Path::is_absolute)
+    );
     assert!(runtime.materialized.is_none());
     assert!(runtime.resume_session_id.is_none());
     Ok(())

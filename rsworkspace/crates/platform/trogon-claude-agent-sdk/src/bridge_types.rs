@@ -65,7 +65,7 @@ impl FailureSource {
 /// A credentials request that failed in a way that retrying with the same inputs cannot fix.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CredentialsFailure {
-    InvalidSessionId,
+    InvalidSessionIdError,
     UntrustedDevice { refusal: DeviceRefusal },
     SessionStaleRelogin,
     SessionSecurityTierBelowOrgPolicy,
@@ -76,7 +76,7 @@ pub enum CredentialsFailure {
 impl CredentialsFailure {
     pub fn reason(&self) -> &'static str {
         match self {
-            Self::InvalidSessionId => "invalid_session_id",
+            Self::InvalidSessionIdError => "invalid_session_id",
             Self::UntrustedDevice { .. } => "untrusted_device",
             Self::SessionStaleRelogin => "session_stale_relogin",
             Self::SessionSecurityTierBelowOrgPolicy => "session_security_tier_below_org_policy",

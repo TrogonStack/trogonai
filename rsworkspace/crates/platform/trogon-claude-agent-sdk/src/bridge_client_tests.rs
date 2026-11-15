@@ -2,6 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use super::*;
+use serde_json::json;
 
 struct Environment {
     entrypoint: Option<&'static str>,
@@ -96,7 +97,7 @@ async fn refuses_session_ids_that_are_not_path_safe_without_sending() {
             .await;
         assert_eq!(
             outcome,
-            RemoteCredentialsOutcome::Failure(CredentialsFailure::InvalidSessionId),
+            RemoteCredentialsOutcome::Failure(CredentialsFailure::InvalidSessionIdError),
             "{id:?}"
         );
     }

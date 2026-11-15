@@ -11,18 +11,15 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
+mod constants;
+
+use constants::{
+    BASE_DELAY_MS, COST_KEYS, DELETE_OUTLIVES_STATUS, JITTER_MS, MAX_DELAY_MS, OWED_KEYS, REQUEUED_ALONE,
+    RIDES_A_STATUS,
+};
+
 /// One `PUT /worker` body, without the `worker_epoch` the request adds.
 pub type Patch = Map<String, Value>;
-
-const BASE_DELAY_MS: f64 = 500.0;
-const MAX_DELAY_MS: f64 = 30_000.0;
-const JITTER_MS: f64 = 500.0;
-/// The `internal_metadata` keys that only mean something next to a status.
-const RIDES_A_STATUS: [&str; 2] = ["reply_degraded", "card_turn_stamp"];
-/// The riders a `null` outlives the status for.
-const DELETE_OUTLIVES_STATUS: [&str; 1] = ["card_turn_stamp"];
-/// The keys that are re-sent one group at a time after a refusal.
-const REQUEUED_ALONE: [&str; 1] = ["disabled_mcp_servers"];
 
 fn has_status(patch: &Patch) -> bool {
     patch.contains_key("worker_status")
@@ -278,9 +275,6 @@ impl PatchQueue {
             let mut marker = Patch::new();
             marker.insert("internal_metadata".to_owned(), Value::Object(alone));
             let others = subtract_patches(&owed, &marker);
-            if others.is_none() && self.pending.is_some() {
-                return;
-            }
             let source = others.as_ref().unwrap_or(&owed);
             let first = source.iter().next().map(|(group, value)| {
                 let mut single = Patch::new();
@@ -306,13 +300,15 @@ impl PatchQueue {
 
     /// What to do next. `jitter` is a fresh value in `[0, 1)` for the backoff.
     pub fn poll(&mut self, jitter: f64) -> Next {
+        self.poll_with(&mut || jitter)
+    }
+
+    /// [`poll`](Self::poll) for a caller that draws its random numbers as the upstream client does: one only when a
+    /// failed patch is given its backoff, so a poll that sends or finds nothing to do leaves the sequence alone.
+    pub fn poll_with(&mut self, jitter: &mut dyn FnMut() -> f64) -> Next {
         loop {
-            if self.claim.is_none() {
-                self.drain();
-                if self.claim.is_none() {
-                    return Next::Idle;
-                }
-            }
+            // `drain` only claims a patch when none is claimed yet.
+            self.drain();
             let Some(claim) = self.claim.clone() else {
                 return Next::Idle;
             };
@@ -355,7 +351,7 @@ impl PatchQueue {
                         held.rearmed = rearmed;
                         held.phase = Phase::Paused;
                     }
-                    return Next::Pause(retry_delay(attempts, jitter));
+                    return Next::Pause(retry_delay(attempts, jitter()));
                 }
                 Phase::Paused => {
                     if self.closed || self.hands_back_without_status(&claim.patch) {
@@ -404,9 +400,6 @@ impl PatchQueue {
         if !self.closed_to_new_patches || !has_status(patch) {
             return false;
         }
-        if self.closed {
-            return true;
-        }
         self.has_dropped_something = true;
         self.cut_kept_metadata |= self
             .pending
@@ -427,24 +420,6 @@ pub fn retry_delay(attempt: u32, jitter: f64) -> Duration {
         (BASE_DELAY_MS * 2_f64.powi(i32::try_from(attempt.saturating_sub(1)).unwrap_or(i32::MAX))).min(MAX_DELAY_MS);
     Duration::from_secs_f64((grown + jitter * JITTER_MS) / 1000.0)
 }
-
-const COST_KEYS: [&str; 8] = [
-    "cumulative_cost_usd",
-    "cumulative_input_tokens",
-    "cumulative_output_tokens",
-    "cumulative_cache_read_tokens",
-    "cumulative_cache_write_tokens",
-    "cost_state",
-    "memory_extract_place",
-    "model_turn_stored",
-];
-const OWED_KEYS: [&str; 5] = [
-    "last_served_model",
-    "worker_permission_mode",
-    "plan_doc",
-    "card_turn_stamp",
-    "card_answer_handed_on",
-];
 
 /// What goes back into the queue after the service refused a patch with `400`, `413` or `422`.
 #[derive(Clone, Debug, Default, PartialEq)]

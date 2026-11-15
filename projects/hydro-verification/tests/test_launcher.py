@@ -5,7 +5,9 @@ import tempfile
 import unittest
 
 
-LAUNCHER = Path(__file__).resolve().parents[1] / ".config/mise/lib/verify"
+# Not resolved: under Bazel the launcher sits next to this file in the
+# runfiles tree, where symlinks point elsewhere.
+LAUNCHER = Path(os.path.abspath(__file__)).parents[1] / ".config/mise/lib/verify"
 
 
 class HydroLauncherTests(unittest.TestCase):

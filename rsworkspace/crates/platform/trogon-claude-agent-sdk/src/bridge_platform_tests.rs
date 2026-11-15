@@ -84,6 +84,11 @@ fn reports_the_platform_and_the_home_directory() {
     let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     assert_eq!(
         probe.home_dir(),
-        std::env::var(variable).ok().filter(|home| !home.is_empty())
+        crate::adapters::EnvironmentVariable::var_os(
+            &crate::adapters::SystemEnvironment,
+            std::ffi::OsStr::new(variable)
+        )
+        .and_then(|home| home.into_string().ok())
+        .filter(|home| !home.is_empty())
     );
 }

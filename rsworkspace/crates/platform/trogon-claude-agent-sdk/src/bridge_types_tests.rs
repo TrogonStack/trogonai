@@ -28,7 +28,7 @@ fn describes_credentials_failures() {
         source: None,
     };
     let expected = [
-        (CredentialsFailure::InvalidSessionId, "invalid_session_id", None),
+        (CredentialsFailure::InvalidSessionIdError, "invalid_session_id", None),
         (device, "untrusted_device", None),
         (CredentialsFailure::SessionStaleRelogin, "session_stale_relogin", None),
         (
@@ -50,7 +50,7 @@ fn describes_credentials_failures() {
     }
     assert_eq!(rejected.source(), Some(FailureSource::Origin));
     assert_eq!(plain.source(), None);
-    assert_eq!(CredentialsFailure::InvalidSessionId.source(), None);
+    assert_eq!(CredentialsFailure::InvalidSessionIdError.source(), None);
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn describes_create_session_failures() {
 fn classifies_outcomes() {
     let rejection = CredentialsRejection;
     assert_eq!((rejection.reason(), rejection.terminal()), ("oauth_rejected", false));
-    let failure = RemoteCredentialsOutcome::Failure(CredentialsFailure::InvalidSessionId);
+    let failure = RemoteCredentialsOutcome::Failure(CredentialsFailure::InvalidSessionIdError);
     assert!(failure.is_credentials_failure() && !failure.is_credentials_rejection());
     let rejected = RemoteCredentialsOutcome::Rejected(rejection);
     assert!(rejected.is_credentials_rejection() && !rejected.is_credentials_failure());
