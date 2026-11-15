@@ -3,6 +3,10 @@ use std::fmt;
 use std::net::Ipv6Addr;
 
 use super::constants::MAX_HOST_LEN;
+use super::host_syntax::{
+    HostSyntaxError, bracketed, has_port, is_port, normalize_host, unbracketed_ipv6_literal, validate_ipv6_literal,
+    validate_labels,
+};
 
 /// One entry in a credential's allowed-host list.
 ///
@@ -144,9 +148,17 @@ pub enum AllowedHostError {
     InvalidIpv6Literal,
 }
 
-fn normalize_host(value: &str) -> String {
-    let lowered = value.to_ascii_lowercase();
-    lowered.strip_suffix('.').unwrap_or(&lowered).to_string()
+impl From<HostSyntaxError> for AllowedHostError {
+    fn from(error: HostSyntaxError) -> Self {
+        match error {
+            HostSyntaxError::Empty => Self::Empty,
+            HostSyntaxError::EmptyLabel => Self::EmptyLabel,
+            HostSyntaxError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            HostSyntaxError::MisplacedWildcard => Self::MisplacedWildcard,
+            HostSyntaxError::PortNotAllowed => Self::PortNotAllowed,
+            HostSyntaxError::InvalidIpv6Literal => Self::InvalidIpv6Literal,
+        }
+    }
 }
 
 /// Strips the port from an authority so `example.com:8443` is matched against
@@ -176,60 +188,6 @@ fn normalize_candidate(candidate: &str) -> Option<String> {
 
     let normalized = normalize_host(without_port);
     validate_labels(&normalized).ok().map(|()| normalized)
-}
-
-fn has_port(value: &str) -> bool {
-    value.split_once(':').is_some_and(|(_, port)| is_port(port))
-}
-
-fn is_port(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
-}
-
-fn bracketed(address: Ipv6Addr) -> String {
-    format!("[{address}]")
-}
-
-fn unbracketed_ipv6_literal(value: &str) -> Option<String> {
-    value.parse::<Ipv6Addr>().ok().map(bracketed)
-}
-
-fn validate_ipv6_literal(value: &str) -> Result<Ipv6Addr, AllowedHostError> {
-    let (address, rest) = value
-        .strip_prefix('[')
-        .and_then(|inner| inner.split_once(']'))
-        .ok_or(AllowedHostError::InvalidIpv6Literal)?;
-    if has_port(rest) {
-        return Err(AllowedHostError::PortNotAllowed);
-    }
-    if !rest.is_empty() {
-        return Err(AllowedHostError::InvalidIpv6Literal);
-    }
-    address.parse().map_err(|_| AllowedHostError::InvalidIpv6Literal)
-}
-
-fn validate_labels(value: &str) -> Result<(), AllowedHostError> {
-    if value.is_empty() {
-        return Err(AllowedHostError::Empty);
-    }
-    for label in value.split('.') {
-        if label.is_empty() {
-            return Err(AllowedHostError::EmptyLabel);
-        }
-        for ch in label.chars() {
-            if ch == '*' {
-                return Err(AllowedHostError::MisplacedWildcard);
-            }
-            if !is_host_char(ch) {
-                return Err(AllowedHostError::InvalidCharacter(ch));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn is_host_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')
 }
 
 #[cfg(test)]
