@@ -15,7 +15,9 @@ use trogon_peer::{
     CallerId, CollaborationRef, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId, PeerId, PeerValueError,
     TenantId, TrustedPeerOwner,
 };
-use trogon_peer_service::{EnrollServiceError, EnrollmentField, PeerClock, PeerService};
+use trogon_peer_service::{
+    EnrollServiceError, EnrollmentField, PeerApplicationError, PeerClock, PeerOperation, PeerService,
+};
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
@@ -88,6 +90,8 @@ struct EnrollmentPolicy {
     owner: TrustedPeerOwner,
     collaboration: CollaborationRef,
     observed_principals: Arc<Mutex<Vec<CommandPrincipal>>>,
+    allowed_peer: Option<PeerId>,
+    allowed_operation: Option<PeerOperation>,
 }
 
 impl CommandAuthorizer<Enroll> for EnrollmentPolicy {
@@ -132,6 +136,8 @@ fn policy() -> EnrollmentPolicy {
         owner: owner(),
         collaboration: CollaborationRef::new("collaboration_alpha").unwrap(),
         observed_principals: Arc::new(Mutex::new(Vec::new())),
+        allowed_peer: None,
+        allowed_operation: None,
     }
 }
 
@@ -690,6 +696,211 @@ fn assert_same_durable_history(actual: &ReadStreamResponse, expected: &ReadStrea
     }
 }
 
+impl CommandAuthorizer<trogon_peer_service::PeerAccess> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        access: &trogon_peer_service::PeerAccess,
+    ) -> Result<(), AuthorizationDeniedError> {
+        if access.owner() != &self.owner
+            || principal.kind() != PrincipalKind::Agent
+            || principal.id().as_str() != self.owner.caller().as_str()
+            || self.allowed_peer.as_ref().is_some_and(|peer| peer != access.peer())
+            || self
+                .allowed_operation
+                .is_some_and(|operation| operation != access.operation())
+        {
+            return Err(AuthorizationDeniedError::new("outside owner grant"));
+        }
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn heartbeat_renews_then_detach_is_idempotent_and_old_generation_is_fenced() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let first = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let reference = first.attachment.attachment_ref.clone();
+    let later = PeerService::new(
+        store.clone(),
+        policy(),
+        FixedClock(now() + chrono::Duration::seconds(2)),
+    );
+    let renewed = later
+        .heartbeat(
+            &owner(),
+            proto::HeartbeatRequest {
+                attachment_ref: reference.clone(),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(renewed.is_ok(), "heartbeat should renew: {renewed:?}");
+    assert_eq!(
+        renewed.unwrap().attachment.expires_at.as_option(),
+        Some(&timestamp_from_datetime(&(now() + chrono::Duration::seconds(12))))
+    );
+    later
+        .detach(
+            &owner(),
+            proto::DetachRequest {
+                attachment_ref: reference.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let appends = store.appends.load(Ordering::SeqCst);
+    later
+        .detach(
+            &owner(),
+            proto::DetachRequest {
+                attachment_ref: reference.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
+    let replacement = later.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    assert_eq!(replacement.attachment.attachment_ref.generation, Some(2));
+    assert!(
+        later
+            .heartbeat(
+                &owner(),
+                proto::HeartbeatRequest {
+                    attachment_ref: reference,
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err()
+    );
+}
+
+impl CommandAuthorizer<trogon_peer::Heartbeat> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Heartbeat,
+    ) -> Result<(), AuthorizationDeniedError> {
+        self.authorize(
+            principal,
+            &trogon_peer_service::PeerAccess::new(
+                command.owner().clone(),
+                command.attachment().peer_id().clone(),
+                trogon_peer_service::PeerOperation::Heartbeat,
+            ),
+        )
+    }
+}
+impl CommandAuthorizer<trogon_peer::Detach> for EnrollmentPolicy {
+    fn authorize(
+        &self,
+        principal: &CommandPrincipal,
+        command: &trogon_peer::Detach,
+    ) -> Result<(), AuthorizationDeniedError> {
+        self.authorize(
+            principal,
+            &trogon_peer_service::PeerAccess::new(
+                command.owner().clone(),
+                command.attachment().peer_id().clone(),
+                trogon_peer_service::PeerOperation::Detach,
+            ),
+        )
+    }
+}
+
+#[tokio::test]
+async fn a_future_generation_cannot_detach_the_current_attachment() {
+    let store = ObservedStore::default();
+    let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+    let response = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    let reference = response.attachment.attachment_ref.clone();
+    let mut future = reference.clone();
+    future.as_option_mut().expect("enrolled attachment").generation = Some(2);
+    let appends = store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        service
+            .detach(&owner(), proto::DetachRequest { attachment_ref: future })
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Detach(CommandError::Decide(
+            _
+        )))
+    ));
+    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
+    let heartbeat = service
+        .heartbeat(
+            &owner(),
+            proto::HeartbeatRequest {
+                attachment_ref: reference,
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        heartbeat.attachment.status.and_then(|v| v.as_known()),
+        Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
+    );
+}
+
+#[tokio::test]
+async fn heartbeat_grant_cannot_authorize_another_peer_or_a_detach_operation() {
+    let store = ObservedStore::default();
+    let enrollment = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .enroll(&owner(), request("collaboration_alpha"))
+        .await
+        .unwrap();
+    let reference = enrollment.attachment.attachment_ref.clone();
+    let mut grant = policy();
+    grant.allowed_peer = Some(PeerId::parse(enrollment.peer_id.unwrap()).unwrap());
+    grant.allowed_operation = Some(PeerOperation::Heartbeat);
+    let service = PeerService::new(store.clone(), grant, FixedClock(now() + chrono::Duration::seconds(1)));
+    service
+        .heartbeat(
+            &owner(),
+            proto::HeartbeatRequest {
+                attachment_ref: reference.clone(),
+                availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let reads = store.reads.load(Ordering::SeqCst);
+    let appends = store.appends.load(Ordering::SeqCst);
+    assert!(matches!(
+        service
+            .detach(
+                &owner(),
+                proto::DetachRequest {
+                    attachment_ref: reference.clone()
+                }
+            )
+            .await,
+        Err(PeerApplicationError::Detach(CommandError::Unauthorized(_)))
+    ));
+    let mut foreign = reference;
+    foreign.as_option_mut().unwrap().peer_id = Some("f".repeat(64));
+    assert!(matches!(
+        service
+            .heartbeat(
+                &owner(),
+                proto::HeartbeatRequest {
+                    attachment_ref: foreign,
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                    ..Default::default()
+                }
+            )
+            .await,
+        Err(PeerApplicationError::Heartbeat(CommandError::Unauthorized(_)))
+    ));
+    assert_eq!(store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(store.appends.load(Ordering::SeqCst), appends);
+}
+
 async fn expired_resume_unknown_authority_history() -> (ObservedStore, PeerId, ReadStreamResponse, DateTime<Utc>) {
     let store = ObservedStore::default();
     let enrolled = PeerService::new(store.clone(), policy(), FixedClock(now()))
@@ -1057,6 +1268,138 @@ async fn live_resume_refuses_detach_or_foreign_replacement_during_its_response_r
             .unwrap();
         assert_eq!(history.events.len(), if replace { 4 } else { 3 });
     }
+}
+
+#[tokio::test]
+async fn lifetime_operations_refuse_unknown_authority_history_without_appending() {
+    for detach in [false, true] {
+        let store = ObservedStore::default();
+        let service = PeerService::new(store.clone(), policy(), FixedClock(now()));
+        let enrolled = service.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+        let peer = PeerId::parse(enrolled.peer_id.clone().unwrap()).unwrap();
+        let snapshot = store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap();
+        let mut future = snapshot.events[0].event.clone();
+        future.id = "00000000-0000-4000-8000-fffffffffff2".parse().unwrap();
+        future.r#type = "trogonai.peers.future.PeerAuthorityTransferred".into();
+        store
+            .append_stream(AppendStreamRequest {
+                stream_id: &peer,
+                stream_write_precondition: snapshot.current_position.into(),
+                events: vec![future],
+            })
+            .await
+            .unwrap();
+        let before = store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap();
+        let appends = store.appends.load(Ordering::SeqCst);
+        let result = if detach {
+            service
+                .detach(
+                    &owner(),
+                    proto::DetachRequest {
+                        attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                    },
+                )
+                .await
+                .map(|_| ())
+        } else {
+            service
+                .heartbeat(
+                    &owner(),
+                    proto::HeartbeatRequest {
+                        attachment_ref: enrolled.attachment.attachment_ref.clone(),
+                        availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map(|_| ())
+        };
+        assert!(
+            matches!(
+                result,
+                Err(PeerApplicationError::LifetimeHistory(
+                    trogon_peer_service::HistoryError::UnknownEvent
+                ))
+            ),
+            "lifetime writes must reject unknown authority, detach={detach}: {result:?}"
+        );
+        assert_eq!(store.appends.load(Ordering::SeqCst), appends);
+        let after = store
+            .read_stream(ReadStreamRequest {
+                stream_id: &peer,
+                from: ReadFrom::Beginning,
+            })
+            .await
+            .unwrap();
+        assert_same_durable_history(&after, &before);
+    }
+}
+
+#[tokio::test]
+async fn idempotent_detach_rechecks_unknown_authority_after_its_validated_snapshot() {
+    let inner = ObservedStore::default();
+    let initial = PeerService::new(inner.clone(), policy(), FixedClock(now()));
+    let enrolled = initial.enroll(&owner(), request("collaboration_alpha")).await.unwrap();
+    initial
+        .detach(
+            &owner(),
+            proto::DetachRequest {
+                attachment_ref: enrolled.attachment.attachment_ref.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let peer = PeerId::parse(enrolled.peer_id.clone().unwrap()).unwrap();
+    let store = UnknownAuthorityAfterHistoryRead {
+        inner: inner.clone(),
+        armed: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        injected_history: Arc::new(Mutex::new(None)),
+    };
+    let appends = inner.appends.load(Ordering::SeqCst);
+    let result = PeerService::new(store.clone(), policy(), FixedClock(now()))
+        .detach(
+            &owner(),
+            proto::DetachRequest {
+                attachment_ref: enrolled.attachment.attachment_ref.clone(),
+            },
+        )
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(PeerApplicationError::LifetimeHistory(
+                trogon_peer_service::HistoryError::UnknownEvent
+            ))
+        ),
+        "idempotent success must not ignore raced authority: {result:?}"
+    );
+    assert!(!store.armed.load(Ordering::SeqCst));
+    assert_eq!(
+        inner.appends.load(Ordering::SeqCst),
+        appends + 1,
+        "only the competing authority may append"
+    );
+    let injected = store.injected_history.lock().unwrap().clone().unwrap();
+    let actual = inner
+        .read_stream(ReadStreamRequest {
+            stream_id: &peer,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .unwrap();
+    assert_same_durable_history(&actual, &injected);
 }
 
 #[derive(Clone)]
