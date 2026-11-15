@@ -306,6 +306,156 @@
         "SDKSettingsParseError",
         "SettingSource"
       ]
+    },
+    {
+      "source": "sdk.d.ts",
+      "output": "src/upstream/messages.rs",
+      "foreign": {
+        "UUID": "string",
+        "BetaMessage": "object",
+        "MessageParam": "object",
+        "BetaRawMessageStreamEvent": "object",
+        "NonNullableUsage": "object"
+      },
+      "tagged": {
+        "SDKMessage": [
+          "type",
+          "subtype",
+          "isReplay"
+        ]
+      },
+      "roots": [
+        "SDKMessage",
+        "SDKActiveGoalMessage"
+      ],
+      "fixtures": {
+        "output": "tests/fixtures/upstream_messages.json",
+        "roots": [
+          "SDKMessage",
+          "SDKActiveGoalMessage"
+        ]
+      }
+    },
+    {
+      "source": "sdk.d.ts",
+      "output": "src/upstream/control.rs",
+      "foreign": {
+        "UUID": "string",
+        "BetaMessage": "object",
+        "MessageParam": "object",
+        "BetaRawMessageStreamEvent": "object",
+        "NonNullableUsage": "object",
+        "JSONRPCMessage": "object",
+        "HookInput": "object"
+      },
+      "tagged": {
+        "SDKControlRequestInner": [
+          "subtype"
+        ]
+      },
+      "roots": [
+        "SDKControlInitializeResponse",
+        "SlashCommand",
+        "ModelInfo",
+        "AgentInfo",
+        "AccountInfo",
+        "McpServerStatus",
+        "SDKControlInterruptResponse",
+        "SDKControlGetContextUsageResponse",
+        "SDKControlGetUsageResponse",
+        "SDKControlReadFileResponse",
+        "SDKControlReloadPluginsResponse",
+        "SDKControlReloadSkillsResponse",
+        "SDKControlReloadOutputStylesResponse",
+        "SDKControlMcpReadResourceResponse",
+        "RewindFilesResult",
+        "McpSetServersResult",
+        "SDKControlRequest",
+        "SDKControlResponse",
+        "SDKControlCancelRequest"
+      ],
+      "fixtures": {
+        "output": "tests/fixtures/upstream_control.json",
+        "roots": [
+          "SDKControlRequest",
+          "SDKControlResponse",
+          "ControlResponse",
+          "ControlErrorResponse",
+          "SDKControlApplyFlagSettingsRequest",
+          "SDKControlBackgroundTasksRequest",
+          "SDKControlCancelAsyncMessageRequest",
+          "SDKControlCancelRequest",
+          "SDKControlElicitationRequest",
+          "SDKControlFileSuggestionsRequest",
+          "SDKControlGetBinaryVersionRequest",
+          "SDKControlGetContextUsageRequest",
+          "SDKControlGetHooksListingRequest",
+          "SDKControlGetSessionCostRequest",
+          "SDKControlGetSettingsRequest",
+          "SDKControlGetTaskOutputRequest",
+          "SDKControlGetUsageRequest",
+          "SDKControlInitializeRequest",
+          "SDKControlInterruptRequest",
+          "SDKControlListModelsRequest",
+          "SDKControlListPermissionRulesRequest",
+          "SDKControlMcpCallRequest",
+          "SDKControlMcpMessageRequest",
+          "SDKControlMcpReadResourceRequest",
+          "SDKControlMcpReconnectRequest",
+          "SDKControlMcpSetServersRequest",
+          "SDKControlMcpStatusRequest",
+          "SDKControlMcpToggleRequest",
+          "SDKControlPermissionRequest",
+          "SDKControlReadFileRequest",
+          "SDKControlRegisterRepoRootRequest",
+          "SDKControlReloadOutputStylesRequest",
+          "SDKControlReloadPluginsRequest",
+          "SDKControlReloadSkillsRequest",
+          "SDKControlRenameSessionRequest",
+          "SDKControlRequestUserDialogRequest",
+          "SDKControlRewindFilesRequest",
+          "SDKControlSeedReadStateRequest",
+          "SDKControlSetColorRequest",
+          "SDKControlSetHasSubscribersRequest",
+          "SDKControlSetMaxThinkingTokensRequest",
+          "SDKControlSetModelRequest",
+          "SDKControlSetPermissionModeRequest",
+          "SDKControlStopTaskRequest",
+          "SDKControlUpdateSettingsRequest"
+        ]
+      }
+    },
+    {
+      "source": "sdk.d.ts",
+      "output": "src/upstream/hooks.rs",
+      "extern": {
+        "PermissionMode": "super::messages::PermissionMode",
+        "SDKAssistantMessageError": "super::messages::SDKAssistantMessageError"
+      },
+      "tagged": {
+        "HookInput": [
+          "hook_event_name"
+        ],
+        "SyncHookJSONOutputHookSpecificOutput": [
+          "hookEventName"
+        ]
+      },
+      "roots": [
+        "HOOK_EVENTS",
+        "EXIT_REASONS",
+        "HookEvent",
+        "ExitReason",
+        "HookInput",
+        "HookJSONOutput"
+      ],
+      "fixtures": {
+        "output": "tests/fixtures/upstream_hooks.json",
+        "roots": [
+          "HookInput",
+          "SyncHookJSONOutput",
+          "AsyncHookJSONOutput"
+        ]
+      }
     }
   ]
 }

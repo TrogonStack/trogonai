@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Create both nested test target dirs so rust-cache cleanup can traverse them"
+set -euo pipefail
+
+# rust-cache v2.9.2 traverses both paths, but trybuild creates only one.
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+mkdir -p rsworkspace/target/tests/{target,trybuild}

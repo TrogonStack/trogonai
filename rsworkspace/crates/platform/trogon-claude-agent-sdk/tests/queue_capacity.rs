@@ -8,7 +8,7 @@ fn queue_capacities_preserve_supported_values_and_explicit_defaults() -> Result<
         assert_eq!(QueueCapacity::try_from(count)?, value);
     }
     assert_eq!(QueueCapacity::default().get(), 32);
-    assert_eq!(QueueCapacity::DEFAULT_MESSAGES.get(), 256);
+    assert_eq!(QueueCapacity::PYTHON_MESSAGES.get(), 100);
     Ok(())
 }
 

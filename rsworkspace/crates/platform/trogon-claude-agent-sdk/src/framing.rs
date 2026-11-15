@@ -1,19 +1,35 @@
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 
-use crate::{Error, StderrTail};
+use crate::{Error, StderrTail, error::JsonDecodeError};
 
 pub(crate) struct FrameReader<R> {
     reader: BufReader<R>,
     buffer: Vec<u8>,
-    limit: usize,
+    /// Characters held in `buffer`, which is what Python's `len(str)` guard counts.
+    chars: usize,
+    limit: Option<usize>,
     tail: bool,
 }
 
+/// Python counts the decoded characters of a line: every byte that is not a UTF-8 continuation byte.
+fn chars_in(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|byte| (**byte & 0xC0) != 0x80).count()
+}
+
+fn guard(limit: Option<usize>, length: usize) -> Result<(), Error> {
+    match limit {
+        Some(limit) if length > limit => Err(Error::JsonDecode(JsonDecodeError::buffer_exceeded(limit, length))),
+        _ => Ok(()),
+    }
+}
+
 impl<R: AsyncRead + Unpin> FrameReader<R> {
-    pub(crate) fn new(reader: R, limit: usize) -> Self {
+    /// `limit` is Python's `max_buffer_size`; TypeScript has no such bound, so `None` keeps every line.
+    pub(crate) fn new(reader: R, limit: Option<usize>) -> Self {
         Self {
             reader: BufReader::new(reader),
             buffer: Vec::new(),
+            chars: 0,
             limit,
             tail: false,
         }
@@ -30,6 +46,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
             let available = self.reader.fill_buf().await.map_err(Error::Io)?;
             if available.is_empty() {
                 self.tail = !self.buffer.is_empty();
+                self.chars = 0;
                 return Ok(if self.buffer.is_empty() {
                     None
                 } else {
@@ -38,13 +55,17 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
             }
             let newline = available.iter().position(|byte| *byte == b'\n');
             let count = newline.map_or(available.len(), |index| index + 1);
-            if self.buffer.len().saturating_add(count) > self.limit {
-                return Err(Error::FrameTooLarge { limit: self.limit });
-            }
+            // A finished line is measured without its newline; an unfinished one by everything received.
+            let length = self
+                .chars
+                .saturating_add(chars_in(&available[..newline.unwrap_or(count)]));
+            guard(self.limit, length)?;
             self.buffer.extend_from_slice(&available[..count]);
+            self.chars = length;
             self.reader.consume(count);
             if newline.is_some() {
                 self.buffer.pop();
+                self.chars = 0;
                 if self.buffer.last() == Some(&b'\r') {
                     self.buffer.pop();
                 }
@@ -72,21 +93,129 @@ fn deliver_lines(handler: &crate::StderrHandler, pending: &mut Vec<u8>, flush: b
     }
 }
 
+/// Python `str.rstrip()` also strips the four ASCII separators U+001C to U+001F.
+fn python_whitespace(character: char) -> bool {
+    character.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&character)
+}
+
+/// Node's `StringDecoder("utf8").write`: an invalid sequence becomes U+FFFD and an incomplete one at the end stays
+/// in `pending` for the next chunk, so a character split across reads reaches the callback whole.
+fn decode_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> String {
+    pending.extend_from_slice(chunk);
+    let bytes = std::mem::take(pending);
+    let mut text = String::new();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        match std::str::from_utf8(&bytes[offset..]) {
+            Ok(valid) => {
+                text.push_str(valid);
+                break;
+            }
+            Err(error) => {
+                let end = offset + error.valid_up_to();
+                text.push_str(&String::from_utf8_lossy(&bytes[offset..end]));
+                offset = end;
+                match error.error_len() {
+                    Some(length) => {
+                        text.push('\u{fffd}');
+                        offset += length;
+                    }
+                    None => {
+                        pending.extend_from_slice(&bytes[offset..]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    text
+}
+
 fn deliver_line(handler: &crate::StderrHandler, line: &[u8]) {
     let text = String::from_utf8_lossy(line);
-    let trimmed = text.trim_end();
+    let trimmed = text.trim_end_matches(python_whitespace);
     if !trimmed.is_empty() {
         deliver(handler, trimmed);
     }
 }
 
+/// The stderr read so far, readable while the drain still runs so a stream left open does not lose it.
+///
+/// It follows the TypeScript SDK's `stderrTail`: each chunk is decoded as UTF-8 and appended, and once the text
+/// holds more than twice `units` UTF-16 code units it is cut to the last `units`. With `redact` the secrets in
+/// it are removed before every cut and again when the tail is read, as `redactSecrets` does there.
+#[derive(Clone, Default)]
+pub(crate) struct SharedTail {
+    state: std::sync::Arc<std::sync::Mutex<TailState>>,
+    units: usize,
+    redact: bool,
+}
+
+#[derive(Default)]
+struct TailState {
+    text: String,
+    /// The start of a character a chunk ended in the middle of.
+    incomplete: Vec<u8>,
+}
+
+impl SharedTail {
+    pub(crate) fn new(units: usize, redact: bool) -> Self {
+        Self {
+            state: std::sync::Arc::default(),
+            units,
+            redact,
+        }
+    }
+
+    /// The last UTF-16 code units of what has been read, without surrounding whitespace, as TypeScript's
+    /// `formatStderrTail` keeps them.
+    pub(crate) fn snapshot(&self) -> StderrTail {
+        let text = self.state.lock().map(|state| state.text.clone()).unwrap_or_default();
+        let scrubbed = self.scrubbed(&text);
+        let kept = last_units(&scrubbed, self.units).trim_matches(crate::js_regex::is_whitespace);
+        StderrTail(kept.as_bytes().to_vec())
+    }
+
+    fn scrubbed(&self, text: &str) -> String {
+        if self.redact {
+            crate::stderr_redaction::redact(text)
+        } else {
+            text.to_owned()
+        }
+    }
+
+    pub(crate) fn append(&self, chunk: &[u8]) {
+        if let Ok(mut state) = self.state.lock() {
+            let decoded = decode_chunk(&mut state.incomplete, chunk);
+            state.text.push_str(&decoded);
+            if state.text.encode_utf16().count() > self.units.saturating_mul(2) {
+                let scrubbed = self.scrubbed(&state.text);
+                state.text = last_units(&scrubbed, self.units).to_owned();
+            }
+        }
+    }
+
+    /// The stream ended: a character it ended in the middle of becomes one U+FFFD, as the decoder's `end` returns.
+    pub(crate) fn finish(&self) {
+        if let Ok(mut state) = self.state.lock()
+            && !state.incomplete.is_empty()
+        {
+            state.incomplete.clear();
+            state.text.push('\u{fffd}');
+        }
+    }
+}
+
+/// Reads stderr to its end into `tail` and delivers it to the handler. A partial line longer than `line_limit`
+/// characters is delivered without waiting for its newline.
 pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
     mut reader: R,
-    limit: usize,
+    tail: SharedTail,
+    line_limit: usize,
     handler: Option<crate::StderrHandler>,
-) -> Result<StderrTail, std::io::Error> {
-    let mut tail = Vec::with_capacity(limit.min(8192));
+) -> Result<(), std::io::Error> {
     let mut pending = Vec::new();
+    let mut incomplete = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
         let count = reader.read(&mut chunk).await?;
@@ -96,28 +225,43 @@ pub(crate) async fn drain_stderr_with<R: AsyncRead + Unpin>(
             {
                 deliver_lines(handler, &mut pending, true);
             }
-            return Ok(StderrTail(tail));
+            tail.finish();
+            return Ok(());
         }
         if let Some(handler) = &handler {
             match handler.delivery {
-                crate::StderrDelivery::Chunks => deliver(handler, &String::from_utf8_lossy(&chunk[..count])),
+                crate::StderrDelivery::Chunks => {
+                    deliver(handler, &decode_chunk(&mut incomplete, &chunk[..count]));
+                }
                 crate::StderrDelivery::Lines => {
                     pending.extend_from_slice(&chunk[..count]);
                     deliver_lines(handler, &mut pending, false);
-                    // Python flushes a partial line once it exceeds the buffer limit.
-                    if pending.len() > limit {
+                    // Python flushes a partial line once it exceeds the buffer limit, counted in characters.
+                    if chars_in(&pending) > line_limit {
                         deliver_lines(handler, &mut pending, true);
                     }
                 }
             }
         }
-        if count >= limit {
-            tail.clear();
-            tail.extend_from_slice(&chunk[count - limit..count]);
-        } else {
-            let excess = tail.len().saturating_add(count).saturating_sub(limit);
-            tail.drain(..excess);
-            tail.extend_from_slice(&chunk[..count]);
-        }
+        tail.append(&chunk[..count]);
     }
 }
+
+/// The last `units` UTF-16 code units of `text`, TypeScript's `slice(-units)`. A surrogate pair cut in half leaves a
+/// lone low surrogate in JavaScript, which UTF-8 cannot carry, so it is dropped.
+fn last_units(text: &str, units: usize) -> &str {
+    let mut kept = 0_usize;
+    let mut start = text.len();
+    for (index, character) in text.char_indices().rev() {
+        let width = character.len_utf16();
+        if kept + width > units {
+            break;
+        }
+        kept += width;
+        start = index;
+    }
+    &text[start..]
+}
+
+#[cfg(test)]
+mod tests;
