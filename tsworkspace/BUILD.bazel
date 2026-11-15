@@ -1,4 +1,6 @@
 load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
+load("@npm_tsworkspace//tsworkspace:oxfmt/package_json.bzl", oxfmt_bin = "bin")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 npm_link_all_packages(name = "node_modules")
 
@@ -8,3 +10,44 @@ exports_files([
     "package.json",
     "pnpm-workspace.yaml",
 ])
+
+# oxfmt skips symlinks when it walks a directory, and runfiles are symlinks, so
+# every file is named on the command line instead.
+oxfmt_bin.oxfmt_test(
+    name = "fmt",
+    args = [
+        "--check",
+        "--config",
+        "$(rootpath .oxfmtrc.json)",
+        "$(rootpaths :fmt_inputs)",
+        "$(rootpaths //tsworkspace/apps/console:fmt_inputs)",
+        "$(rootpaths //tsworkspace/packages/proto:fmt_inputs)",
+        "$(rootpaths //tsworkspace/packages/slack-bolt-fixtures:fmt_inputs)",
+    ],
+    data = [
+        ".oxfmtrc.json",
+        ":fmt_inputs",
+        "//tsworkspace/apps/console:fmt_inputs",
+        "//tsworkspace/packages/proto:fmt_inputs",
+        "//tsworkspace/packages/slack-bolt-fixtures:fmt_inputs",
+    ],
+)
+
+filegroup(
+    name = "fmt_inputs",
+    srcs = [
+        ".oxfmtrc.json",
+        "package.json",
+        "pnpm-workspace.yaml",
+        "turbo.json",
+    ],
+)
+
+# ADR 0019 allows one headless primitive layer, Base UI, so Radix must not
+# come back through any dependency.
+sh_test(
+    name = "primitives_test",
+    srcs = ["primitives_test.sh"],
+    args = ["$(rootpath pnpm-lock.yaml)"],
+    data = ["pnpm-lock.yaml"],
+)

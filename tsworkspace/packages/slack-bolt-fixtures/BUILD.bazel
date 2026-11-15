@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
 load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
@@ -34,4 +35,27 @@ oxlint_bin.oxlint_test(
     args = ["."],
     chdir = package_name(),
     data = [":sources"],
+)
+
+# Every file oxfmt formats, for the format check in //tsworkspace. A js_library
+# copies them into the output tree in this package, which the js_test there
+# requires of files that live outside its own package.
+js_library(
+    name = "fmt_inputs",
+    srcs = glob(
+        [
+            "**/*.css",
+            "**/*.html",
+            "**/*.json",
+            "**/*.ts",
+            "**/*.tsx",
+            "**/*.yaml",
+        ],
+        allow_empty = True,
+        exclude = [
+            "coverage/**",
+            "dist/**",
+        ],
+    ),
+    visibility = ["//tsworkspace:__pkg__"],
 )
