@@ -1386,3 +1386,17 @@ pub(crate) const PYTHON_DEFAULT_SESSION: &str = "default";
 
 /// The keyword a schema `pattern` takes in the TypeScript call check.
 pub(crate) const ECMA_PATTERN: &str = "x-trogon-pattern";
+
+/// The key TypeScript spreads after a `canUseTool` result to carry the request's `tool_use_id`.
+pub(crate) const PERMISSION_TOOL_USE_ID_FIELD: &str = "toolUseID";
+
+/// Python's `TypeError` for a `can_use_tool` callback that returned anything but a `PermissionResult`; the type
+/// of the value follows.
+pub(crate) const PYTHON_PERMISSION_RESULT_TYPE_ERROR: &str =
+    "Tool permission callback must return PermissionResult (PermissionResultAllow or PermissionResultDeny), got ";
+
+/// How Python names the type of a `None` result.
+pub(crate) const PYTHON_NONE_TYPE: &str = "<class 'NoneType'>";
+
+/// How Python names the type of a `dict` result.
+pub(crate) const PYTHON_DICT_TYPE: &str = "<class 'dict'>";

@@ -308,7 +308,7 @@
     },
     "@@mise-bazel+//mise:extensions.bzl%mise": {
       "general": {
-        "bzlTransitiveDigest": "8dT1yfHRy4k7lxJocw6P+YWnuIDmFR+G3dd0YidzSgw=",
+        "bzlTransitiveDigest": "x91IscUlExDCOTkJ/VfMnFo22O3rphMwbimo90zHRq8=",
         "usagesDigest": "dnMvMkyLB/1kjDqZO50ReUEi0SbRl1IoO08MaAMa6NE=",
         "recordedInputs": [
           "REPO_MAPPING:mise-bazel+,toml.bzl toml.bzl+",

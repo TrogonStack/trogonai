@@ -1,0 +1,49 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+
+py_library(
+    name = "spire",
+    srcs = glob(
+        ["*.py"],
+        exclude = [
+            "bazel_entry.py",
+            "test_*.py",
+        ],
+    ),
+    data = ["deployment.example.json"],
+)
+
+# Every test_*.py, as `python3 -m unittest discover` finds them, including the
+# check that the Go admission fixture matches what the deployment renders; the
+# Go tests that evaluate it are //goworkspace/internal/spirepolicy.
+py_test(
+    name = "deployment_test",
+    size = "small",
+    srcs = ["bazel_entry.py"] + glob(["test_*.py"]),
+    args = ["--discover"],
+    data = ["//goworkspace/internal/spirepolicy:testdata/deployment.json"],
+    main = "bazel_entry.py",
+    deps = [":spire"],
+)
+
+# Every generated resource, validated by the pinned kubeconform against the
+# pinned Kubernetes schemas, both fetched by Bazel rather than at test time.
+py_test(
+    name = "schemas_test",
+    size = "small",
+    srcs = ["bazel_entry.py"],
+    args = [
+        "check_schemas.py",
+        "--kubeconform",
+        "$(rootpath @mise//tools/kubeconform)",
+        "--schema-commit-file",
+        "$(rootpath @kubernetes_json_schema//:COMMIT)",
+    ],
+    data = [
+        "@kubernetes_json_schema//:COMMIT",
+        "@kubernetes_json_schema//:schemas",
+        "@mise//tools/kubeconform",
+    ],
+    main = "bazel_entry.py",
+    deps = [":spire"],
+)

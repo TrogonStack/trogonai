@@ -194,7 +194,8 @@ request and tool identities, suggestions, MCP provenance, the decision reason
 with its type and code, the matched ask rule, the computer folder, plugin and
 server prompt, plus a cancellation signal. A field of the wrong type stays in
 `additional_fields`. Decisions carry updated input, permission updates,
-interrupt and a decision classification; `AnsweredOutOfBand` writes nothing.
+interrupt and a decision classification; `AnsweredOutOfBand` writes nothing,
+and `Raw` writes any other object as returned (Python rejects it as a `dict`).
 Answers match `sdk.mjs` byte for byte by default and `claude_agent_sdk` under
 `ArgvStyle::Python`, including the answer without a handler, a callback the CLI
 cancels (TypeScript still writes its answer, Python writes nothing) and a
@@ -726,9 +727,8 @@ parent process). The result carries per-key provenance and `machinePolicy.didNot
 command output. A `ResolverState` holds what upstream keeps between calls;
 `ResolverState::with_rereads(PolicyRereads::Inline)` runs machine policy re-reads on the calling
 thread, so the host's clock alone decides when one has ended. Upstream reads the launch directory
-when the SDK module is imported; nothing here runs at load time, so `resolve_settings` reads it on
-its first call unless the binary calls `adapters::capture_launch_directory()` at the top of `main`,
-which gives the upstream timing. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+when the SDK module is imported; here the loader reads it when the binary that links the crate
+loads, before `main`, and `adapters::capture_launch_directory()` returns that reading. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
 byte for byte. Numbers read as `JSON.parse` reads them: integers above 2^53 round, and a number
 past the double range reads as `Infinity`. A typed setting refuses `Infinity`, an `env` value spells

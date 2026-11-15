@@ -10,9 +10,13 @@ import { configDefaults, defineConfig } from 'vitest/config';
 // Vite and Node must load dependencies through the same canonical tree.
 const bazelRoot = process.env.VITE_BAZEL_RUNFILES === '1' ? dirname(realpathSync('vite.config.ts')) : undefined;
 
+// Bazel's declared dependencies can resolve outside the Vite root through runfiles symlinks.
+const allowOutsideRoot = process.env.VITE_ALLOW_OUTSIDE_ROOT === '1';
+
 const config = defineConfig({
   root: bazelRoot,
   resolve: { tsconfigPaths: true },
+  server: { fs: { strict: !allowOutsideRoot } },
   plugins: [devtools(), tailwindcss(), tanstackRouter({ target: 'react', autoCodeSplitting: true }), viteReact()],
   test: {
     environment: 'jsdom',

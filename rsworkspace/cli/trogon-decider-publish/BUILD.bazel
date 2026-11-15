@@ -1,20 +1,9 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-decider-publish",
-    binaries = {"decider-publish": {}},
     integration_tests = {
-        "gate": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-            # built by cargo component outside Bazel, and reads a suite from a sibling crate.
-            "tags": ["manual"],
-        },
+        # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
+        # built by cargo component outside Bazel, and reads a suite from a sibling crate.
+        "gate": {"tags": ["manual"]},
     },
-    deps = [
-        "//rsworkspace/cli/trogon-decider-test",
-        "//rsworkspace/crates/decider/trogon-decider-nats-server",
-        "//rsworkspace/crates/decider/trogon-decider-wasm-runtime",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
 )

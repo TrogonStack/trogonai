@@ -93,7 +93,10 @@ vitest_bin.vitest_test(
         ":sources",
         "//tsworkspace:node_modules/vitest",
     ],
-    env = {"VITE_BAZEL_RUNFILES": "1"},
+    env = {
+        "VITE_ALLOW_OUTSIDE_ROOT": "1",
+        "VITE_BAZEL_RUNFILES": "1",
+    },
     # Native ESM and Vite must agree on the canonical paths of declared dependencies.
     patch_node_fs = False,
 )

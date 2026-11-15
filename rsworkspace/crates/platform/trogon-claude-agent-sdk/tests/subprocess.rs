@@ -582,6 +582,33 @@ async fn process_failure_message_redacts_secrets_from_the_stderr_tail() -> TestR
 }
 
 #[tokio::test]
+async fn python_keeps_the_stderr_tail_it_opts_into_unredacted() -> TestResult {
+    let mut options = options("failure-secret")?;
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    options.limits.stderr_tail = 1024;
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("failure")).await?;
+    let error = loop {
+        match client.next_message().await {
+            Ok(Some(_)) => {}
+            Err(error) => break error,
+            Ok(None) => return Err(std::io::Error::other("missing error").into()),
+        }
+    };
+    let Error::Process { status, stderr } = error else {
+        return Err(std::io::Error::other("expected process error").into());
+    };
+    assert_eq!(status.code(), Some(7));
+    let secret = format!("sk-{}", "Ab1".repeat(8));
+    assert_eq!(
+        stderr.as_bytes(),
+        format!("rejected key {secret} at startup").as_bytes()
+    );
+    client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn consumer_lag_fails_with_a_bounded_queue() -> TestResult {
     let mut options = options("queue-overflow")?;
     options.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
