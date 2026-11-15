@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+// Health does not grant admission. Unspecified and unknown states are invalid.
+enum ConfigurationLifecycle {
+  CONFIGURATION_LIFECYCLE_UNSPECIFIED = 0;
+  CONFIGURATION_LIFECYCLE_PENDING_VALIDATION = 1;
+  CONFIGURATION_LIFECYCLE_ACTIVE = 2;
+  CONFIGURATION_LIFECYCLE_RETIRED = 3;
+}
+
+enum ConfigurationAdmission {
+  CONFIGURATION_ADMISSION_UNSPECIFIED = 0;
+  CONFIGURATION_ADMISSION_ENABLED = 1;
+  CONFIGURATION_ADMISSION_WITHDRAWN = 2;
+}

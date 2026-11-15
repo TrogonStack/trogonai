@@ -19,7 +19,9 @@ inputs:
       - proto/trogonai/library
       - proto/trogonai/platform/api_keys
       - proto/trogonai/platform/api_keyspaces
+      - proto/trogonai/platform/workload_federation
       - proto/trogonai/platform/key_custody
+      - proto/trogonai/policy
       - proto/trogonai/projects
       - proto/trogonai/secrets
       - proto/trogonai/session

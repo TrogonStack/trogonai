@@ -1,13 +1,5 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "acp-nats-agent",
     compile_data = ["README.md"],
-    version = "0.0.1",
-    deps = [
-        "//rsworkspace/crates/acp/acp-nats",
-        "//rsworkspace/crates/platform/jsonrpc-nats",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
 )
