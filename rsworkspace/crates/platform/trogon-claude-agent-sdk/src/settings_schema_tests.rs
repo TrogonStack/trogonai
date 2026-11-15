@@ -178,6 +178,16 @@ fn a_coerced_string_runs_its_checks_on_the_javascript_string() {
     assert_eq!(coerced.validate(None), Err(()));
 }
 
+/// The pinned schema checks a plugin source's `sha` (`n39` in the description) for exactly 40 characters.
+#[test]
+fn a_string_of_a_fixed_length_accepts_only_that_length() {
+    let sha = Node::Str(vec![Check::LengthEquals(40)]);
+    let exact = json!("a".repeat(40));
+    assert_eq!(sha.validate(Some(&exact)), Ok(Some(exact.clone())));
+    assert_eq!(sha.validate(Some(&json!("a".repeat(39)))), Err(()));
+    assert_eq!(sha.validate(Some(&json!("a".repeat(41)))), Err(()));
+}
+
 /// The pinned description with the given fields added (or replaced) and the given restrictive readings appended,
 /// so a policy read runs over a schema built to exercise one shape.
 fn schema_with(fields: Value, restrictive: Value) -> SettingsSchema {

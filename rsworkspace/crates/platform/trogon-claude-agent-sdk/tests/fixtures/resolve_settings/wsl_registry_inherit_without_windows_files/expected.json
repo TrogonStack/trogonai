@@ -1,0 +1,1 @@
+[{"name":"wsl_registry_inherit_without_windows_files","result":{"effective":{"model":"linux"},"provenance":{"model":{"source":"managed","policyOrigin":"file"}},"sources":[{"source":"managed","settings":{"model":"linux"},"policyOrigin":"file"}],"machinePolicy":{"didNotLoad":false}},"filtered":{"model":"linux"}}]

@@ -17,6 +17,8 @@ fn a_deep_parse_reads_what_the_shallow_parse_reads() {
         "{\"a\":1,}",
         "[1,]",
         "{\"a\" 1}",
+        "{\"a\":1 \"b\":2}",
+        "{\"a\":1]",
         "{\"a\":1}x",
         "[01]",
         "[1true]",

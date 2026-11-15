@@ -52,6 +52,11 @@ fn a_length_extends_with_holes_and_truncates_through_a_run() {
     assert_eq!(array.length(), 4);
     array.set_length(2);
     assert_eq!(items, vec![json!(1), MARK.run(1)]);
+    let mut items = vec![json!(1)];
+    let mut array = JsArray::new(&mut items, MARK);
+    array.fill_undefined(3);
+    assert_eq!(array.length(), 3);
+    assert_eq!(items, vec![json!(1), MARK.run(2)]);
 }
 
 #[test]
@@ -109,6 +114,11 @@ fn a_length_converts_its_value_as_javascript_does() {
         (json!(["1"]), Ok(1)),
         (json!([]), Ok(0)),
         (json!([[[]]]), Ok(0)),
+        (json!([null]), Ok(0)),
+        (json!([[null, null]]), Err(LengthError::InvalidArrayLength)),
+        (json!([true]), Err(LengthError::InvalidArrayLength)),
+        (json!([false]), Err(LengthError::InvalidArrayLength)),
+        (json!([{}]), Err(LengthError::InvalidArrayLength)),
         (json!(4_294_967_295_u64), Ok(4_294_967_295)),
         (json!("a"), Err(LengthError::InvalidArrayLength)),
         (json!({}), Err(LengthError::InvalidArrayLength)),

@@ -144,21 +144,21 @@ impl Target<'_> {
         }
     }
 
-    /// `target[key] = value`, which for the `length` of an array sets `ToNumber(value)` as its length.
+    /// `target[key] = value`, which for the `length` of an array sets `ToNumber(value)` as its length. An object
+    /// only ever takes a named key: [`Target::key`] names every member of an object, and lodash `baseMergeDeep` merges
+    /// a source array onto a held object through `copyArray`, so an object never takes the elements of an array.
     fn write(&mut self, key: Key<'_>, value: Value, mark: ArrayMark) -> Result<(), Stop> {
-        match (self, key) {
-            (Self::Object(entries), Key::Name(name)) => {
-                entries.insert(name.to_owned(), value);
+        match self {
+            Self::Object(entries) => {
+                if let Key::Name(name) = key {
+                    entries.insert(name.to_owned(), value);
+                }
             }
-            (Self::Object(entries), Key::Index(index)) => {
-                entries.insert(index.to_string(), value);
-            }
-            (Self::Object(entries), Key::Length) => {
-                entries.insert("length".to_owned(), value);
-            }
-            (Self::Array(array), Key::Index(index)) => array.set(index, value),
-            (Self::Array(array), Key::Length) => array.set_length(array_length(&value, mark).map_err(Stop::Length)?),
-            (Self::Array(array), Key::Name(name)) => array.set_prop(name, value),
+            Self::Array(array) => match key {
+                Key::Index(index) => array.set(index, value),
+                Key::Length => array.set_length(array_length(&value, mark).map_err(Stop::Length)?),
+                Key::Name(name) => array.set_prop(name, value),
+            },
         }
         Ok(())
     }

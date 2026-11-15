@@ -195,9 +195,7 @@ impl Reader<'_> {
         if self.peek()? != b'"' {
             return None;
         }
-        let Value::String(key) = self.scalar()? else {
-            return None;
-        };
+        let key = self.scalar()?.as_str()?.to_owned();
         self.skip_space();
         (self.take_byte()? == b':').then_some(key)
     }

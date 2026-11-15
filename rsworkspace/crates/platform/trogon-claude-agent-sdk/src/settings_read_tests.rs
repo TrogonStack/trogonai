@@ -135,6 +135,13 @@ fn every_recorded_policy_document_is_sanitized_like_the_pinned_resolver() {
 }
 
 #[test]
+fn a_policy_text_that_is_not_an_object_never_reaches_the_sanitizers() {
+    for text in ["[1]", "null", "\"text\"", "{"] {
+        assert!(sanitize_policy_document(text).is_none(), "{text}");
+    }
+}
+
+#[test]
 fn every_recorded_policy_document_is_read_like_the_pinned_resolver() {
     let description: Value = serde_json::from_str(SETTINGS_SCHEMA_JSON).expect("description");
     let documents = description["read"]["policy"]["documents"]

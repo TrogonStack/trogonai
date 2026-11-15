@@ -2,8 +2,8 @@ use serde_json::{Map, Value, json};
 
 use super::{NodeMerge, merge_within};
 use crate::{
-    node_merge_cost::MergeCost, node_merge_room::MergeRoom, node_merge_warmth::MergeWarmth,
-    settings_merge_spec::MergeSpec,
+    constants::V8_MAX_STRING_LENGTH, js_array_mark::ArrayMark, node_merge_cost::MergeCost, node_merge_room::MergeRoom,
+    node_merge_warmth::MergeWarmth, settings_merge_spec::MergeSpec, settings_resolve_error::ResolveSettingsError,
 };
 
 const COST: MergeCost = MergeCost {
@@ -319,4 +319,49 @@ fn the_machine_code_compile_of_the_index_pattern_spends_more_in_a_merge_after_th
             NodeMerge::InvalidRegularExpression,
         ]
     );
+}
+
+/// A merge that has tested both array indexes that compile the `isIndex` pattern, assigned a member and finished an
+/// array: every level spends only the level.
+const HOT: MergeWarmth = MergeWarmth {
+    index_tests: MergeWarmth::INDEX_COMPILES,
+    ..MergeWarmth::WARM
+};
+
+#[test]
+fn a_held_object_entered_past_the_stack_runs_out_as_the_merge_returns_from_it() {
+    let mut destination = object(json!({"x": {"z": 0}}));
+    assert_eq!(
+        merged(HOT, COST.level, &mut destination, &json!({"x": {}})),
+        NodeMerge::Overflowed
+    );
+    assert_eq!(Value::Object(destination), json!({"x": {"z": 0}}));
+}
+
+#[test]
+fn an_array_merged_onto_a_copy_of_an_array_like_object_that_runs_out_writes_no_copy() {
+    let mut destination = object(json!({"x": {"length": 1}}));
+    assert_eq!(
+        merged(HOT, 2 * COST.level, &mut destination, &json!({"x": [[1]]})),
+        NodeMerge::Overflowed
+    );
+    assert_eq!(Value::Object(destination), json!({"x": {"length": 1}}));
+}
+
+/// Outside a resolve the merge marks the holes of its arrays with [`ArrayMark::FALLBACK`]. The source holds an array
+/// of more holes than a V8 string holds commas, as an earlier merge leaves where an object sets the `length` of an
+/// array.
+#[test]
+fn a_length_set_to_an_array_that_joins_past_a_v8_string_rejects_with_an_invalid_string_length() {
+    let holes = Value::Array(vec![ArrayMark::FALLBACK.run(V8_MAX_STRING_LENGTH + 2)]);
+    let source = Value::Object(Map::from_iter([(
+        "o".to_owned(),
+        Value::Object(Map::from_iter([("length".to_owned(), holes)])),
+    )]));
+    let ended = merged(HOT, 10 * COST.level, &mut object(json!({"o": []})), &source);
+    assert_eq!(ended, NodeMerge::InvalidStringLength);
+    assert!(matches!(
+        ended.rejection(),
+        Some(ResolveSettingsError::InvalidStringLength)
+    ));
 }
