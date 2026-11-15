@@ -1,12 +1,13 @@
 #[path = "support/schema.rs"]
 mod schema;
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, ClaudeSdkClient, Customizations, HookEvent, HookFailureMode, HookOutput, HookRegistration,
-    HookRequest, LocalMcpServer, LocalMcpServerOptions, McpServerName, McpToolInputSchema, McpToolName, McpToolOutput,
-    McpToolRequest, SdkMcpServer, SdkTool, SdkToolOptions, SessionPersistence, ToolSet,
+    HookRequest, LocalMcpServer, LocalMcpServerOptions, McpServerDialect, McpServerName, McpToolInputSchema,
+    McpToolName, McpToolOutput, McpToolRequest, SdkMcpServer, SdkMcpServers, SdkTool, SdkToolOptions,
+    SessionPersistence, ToolSet, upstream::control::McpServerStatusStatus,
 };
 
 #[cfg_attr(
@@ -24,17 +25,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tool = SdkTool::from(SdkToolOptions {
         name: McpToolName::from("echo"),
         description: "Return the supplied text".into(),
-        input_schema: McpToolInputSchema::new(schema::echo_schema(None)?)?,
+        input_schema: McpToolInputSchema::new(schema::echo_schema(None)?),
         handler: Arc::new(|request: McpToolRequest| async move {
             Ok(McpToolOutput::text(
                 request.arguments["text"].as_str().unwrap_or_default(),
             ))
         }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
     });
     let server = LocalMcpServer::from(LocalMcpServerOptions {
         name: name.clone(),
-        version: "1.0.0".into(),
-        tools: tool.into(),
+        version: Some("1.0.0".into()),
+        tools: Some(tool.into()),
+        instructions: None,
+        always_load: false,
+        dialect: McpServerDialect::TypeScript,
     });
     let options = ClaudeAgentOptions {
         cli_path,
@@ -49,19 +56,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout: None,
             on_failure: Some(HookFailureMode::Block),
         }],
-        sdk_mcp_servers: BTreeMap::from([(name, Arc::new(server) as Arc<dyn SdkMcpServer>)]),
+        sdk_mcp_servers: SdkMcpServers::from([(name, Arc::new(server) as Arc<dyn SdkMcpServer>)]),
         ..ClaudeAgentOptions::default()
     };
     let client = ClaudeSdkClient::connect(options).await?;
     let handle = client.handle();
     let connected = tokio::time::timeout(Duration::from_secs(15), async {
         loop {
-            let status = handle.mcp_status().await?;
-            if status.mcp_servers.iter().any(|server| {
-                server.get("name").and_then(serde_json::Value::as_str) == Some("example")
-                    && server.get("status").and_then(serde_json::Value::as_str) == Some("connected")
-            }) {
-                return Ok::<(), trogon_claude_agent_sdk::Error>(());
+            let status = handle.mcp_status().await?.decode()?;
+            if status
+                .mcp_servers
+                .iter()
+                .any(|server| server.name == "example" && server.status == McpServerStatusStatus::Connected)
+            {
+                return Ok::<(), Box<dyn std::error::Error>>(());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }

@@ -1,0 +1,383 @@
+{
+  "network": [
+    {
+      "input": null,
+      "success": true,
+      "output": null
+    },
+    {
+      "input": "null",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "1",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "\"x\"",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "true",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "[]",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "[\"a\"]",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{}",
+      "success": true,
+      "output": "{}"
+    },
+    {
+      "input": "{\"unknownKey\":1}",
+      "success": true,
+      "output": "{}"
+    },
+    {
+      "input": "{\"allowedDomains\":[\"example.com\"],\"deniedDomains\":[]}",
+      "success": true,
+      "output": "{\"allowedDomains\":[\"example.com\"],\"deniedDomains\":[]}"
+    },
+    {
+      "input": "{\"allowedDomains\":[1]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"deniedDomains\":\"example.com\"}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"strictAllowlist\":true,\"allowManagedDomainsOnly\":false}",
+      "success": true,
+      "output": "{\"strictAllowlist\":true,\"allowManagedDomainsOnly\":false}"
+    },
+    {
+      "input": "{\"strictAllowlist\":\"yes\"}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"allowUnixSockets\":[\"/run/a.sock\"],\"allowAllUnixSockets\":true,\"allowLocalBinding\":false}",
+      "success": true,
+      "output": "{\"allowUnixSockets\":[\"/run/a.sock\"],\"allowAllUnixSockets\":true,\"allowLocalBinding\":false}"
+    },
+    {
+      "input": "{\"allowUnixSockets\":[null]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"allowMachLookup\":[\"com.apple.*\",\"com.apple.x\",\"*\"]}",
+      "success": true,
+      "output": "{\"allowMachLookup\":[\"com.apple.*\",\"com.apple.x\",\"*\"]}"
+    },
+    {
+      "input": "{\"allowMachLookup\":[\"a*b\"]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"allowMachLookup\":[\"*a\"]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"allowMachLookup\":[\"**\"]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"allowMachLookup\":[\"\"]}",
+      "success": true,
+      "output": "{\"allowMachLookup\":[\"\"]}"
+    },
+    {
+      "input": "{\"httpProxyPort\":8080,\"socksProxyPort\":1080}",
+      "success": true,
+      "output": "{\"httpProxyPort\":8080,\"socksProxyPort\":1080}"
+    },
+    {
+      "input": "{\"httpProxyPort\":1.5,\"socksProxyPort\":-1}",
+      "success": true,
+      "output": "{\"httpProxyPort\":1.5,\"socksProxyPort\":-1}"
+    },
+    {
+      "input": "{\"httpProxyPort\":\"8080\"}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"tlsTerminate\":{\"caCertPath\":\"/a.pem\",\"caKeyPath\":\"/a.key\"}}",
+      "success": true,
+      "output": "{\"tlsTerminate\":{\"caCertPath\":\"/a.pem\",\"caKeyPath\":\"/a.key\"}}"
+    },
+    {
+      "input": "{\"tlsTerminate\":{\"caCertPath\":\"\"}}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"tlsTerminate\":{}}",
+      "success": true,
+      "output": "{\"tlsTerminate\":{}}"
+    },
+    {
+      "input": "{\"tlsTerminate\":null}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"allowedDomains\":[\"a\"],\"extra\":{\"nested\":true},\"httpProxyPort\":1}",
+      "success": true,
+      "output": "{\"allowedDomains\":[\"a\"],\"httpProxyPort\":1}"
+    },
+    {
+      "input": "{\"socksProxyPort\":2,\"httpProxyPort\":1,\"allowedDomains\":[],\"deniedDomains\":[\"b\"]}",
+      "success": true,
+      "output": "{\"allowedDomains\":[],\"deniedDomains\":[\"b\"],\"httpProxyPort\":1,\"socksProxyPort\":2}"
+    }
+  ],
+  "filesystem": [
+    {
+      "input": null,
+      "success": true,
+      "output": null
+    },
+    {
+      "input": "null",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "1",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "\"x\"",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "true",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "[]",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "[\"a\"]",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{}",
+      "success": true,
+      "output": "{}"
+    },
+    {
+      "input": "{\"unknownKey\":1}",
+      "success": true,
+      "output": "{}"
+    },
+    {
+      "input": "{\"allowWrite\":[\"/tmp\"],\"denyWrite\":[\"/etc\"],\"denyRead\":[\"/root\"],\"allowRead\":[\"/usr\"]}",
+      "success": true,
+      "output": "{\"allowWrite\":[\"/tmp\"],\"denyWrite\":[\"/etc\"],\"denyRead\":[\"/root\"],\"allowRead\":[\"/usr\"]}"
+    },
+    {
+      "input": "{\"allowWrite\":[1]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"denyRead\":\"x\"}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"allowManagedReadPathsOnly\":true,\"disabled\":false}",
+      "success": true,
+      "output": "{\"allowManagedReadPathsOnly\":true,\"disabled\":false}"
+    },
+    {
+      "input": "{\"disabled\":\"no\"}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"disabled\":true,\"extra\":1,\"allowRead\":[]}",
+      "success": true,
+      "output": "{\"allowRead\":[],\"disabled\":true}"
+    },
+    {
+      "input": "{\"allowRead\":[\"/a\"],\"allowWrite\":[\"/b\"],\"extra\":[1,2]}",
+      "success": true,
+      "output": "{\"allowWrite\":[\"/b\"],\"allowRead\":[\"/a\"]}"
+    }
+  ],
+  "credentials": [
+    {
+      "input": null,
+      "success": true,
+      "output": null
+    },
+    {
+      "input": "null",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "1",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "\"x\"",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "true",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "[]",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "[\"a\"]",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{}",
+      "success": true,
+      "output": "{}"
+    },
+    {
+      "input": "{\"unknownKey\":1}",
+      "success": true,
+      "output": "{}"
+    },
+    {
+      "input": "{\"files\":[]}",
+      "success": true,
+      "output": "{\"files\":[]}"
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\"}]}",
+      "success": true,
+      "output": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\"}]}"
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"mask\"}]}",
+      "success": true,
+      "output": "{\"files\":[{\"path\":\"/a\",\"mode\":\"mask\"}]}"
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a/\",\"mode\":\"mask\"}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a/\",\"mode\":\"deny\"}]}",
+      "success": true,
+      "output": "{\"files\":[{\"path\":\"/a/\",\"mode\":\"deny\"}]}"
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"\",\"mode\":\"deny\"}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"other\"}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\",\"extract\":1,\"onExtractNoMatch\":\"x\",\"decode\":\"x\",\"maskClaims\":[1],\"maskDuplicates\":\"y\",\"injectHosts\":[1]}]}",
+      "success": true,
+      "output": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\"}]}"
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\",\"extract\":\"a\",\"onExtractNoMatch\":\"warn\",\"decode\":\"jwt\",\"maskClaims\":[\"a\"],\"maskDuplicates\":true,\"injectHosts\":[\"h\"]}]}",
+      "success": true,
+      "output": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\",\"extract\":\"a\",\"onExtractNoMatch\":\"warn\",\"decode\":\"jwt\",\"maskClaims\":[\"a\"],\"maskDuplicates\":true,\"injectHosts\":[\"h\"]}]}"
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"mask\",\"extract\":\"a\",\"onExtractNoMatch\":\"error\",\"decode\":\"jwt\",\"maskClaims\":[\"a\"],\"maskDuplicates\":true,\"injectHosts\":[\"h\"]}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"mask\",\"extract\":\"a\"}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"mask\",\"extract\":\"a\",\"onExtractNoMatch\":\"bogus\"}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"mask\",\"maskClaims\":[1]}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"mode\":\"deny\"}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\"}]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[\"/a\"]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[null]}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":\"x\"}",
+      "success": false,
+      "output": null
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\",\"unknown\":1}]}",
+      "success": true,
+      "output": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\"}]}"
+    },
+    {
+      "input": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\"},{\"path\":\"/b\",\"mode\":\"mask\"}],\"extra\":true}",
+      "success": true,
+      "output": "{\"files\":[{\"path\":\"/a\",\"mode\":\"deny\"},{\"path\":\"/b\",\"mode\":\"mask\"}]}"
+    }
+  ]
+}

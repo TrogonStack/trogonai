@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Regenerate protobuf bindings"
+#MISE depends=["proto:generate"]
+set -euo pipefail

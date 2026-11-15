@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Lint proto sources"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+exec buf lint
