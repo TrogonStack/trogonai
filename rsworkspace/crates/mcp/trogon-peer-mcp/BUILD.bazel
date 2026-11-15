@@ -5,6 +5,7 @@ workspace_crate(
 
     integration_tests = {'error_contract': {},
      'model_tools': {},
-     'prompt_hook': {'compile_data': ['//plugins/claude/peer:hooks/hooks.json']}},
+     'prompt_hook': {'compile_data': ['//plugins/claude/peer:hooks/hooks.json']},
+     'runtime_config': {}},
     compile_data = ['//plugins/claude/peer:hooks'],
 )
