@@ -2531,6 +2531,16 @@ pub(crate) const KEY_READ: u32 = 0x2_0019;
 pub(crate) const ERROR_SUCCESS: i32 = 0;
 #[cfg(windows)]
 pub(crate) const ERROR_MORE_DATA: i32 = 234;
+/// `ComputerNamePhysicalDnsHostname`, the name `socket.gethostname()` asks `GetComputerNameExW` for.
+#[cfg(windows)]
+pub(crate) const COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME: i32 = 5;
+/// `MAX_COMPUTERNAME_LENGTH`: CPython's first `GetComputerNameExW` buffer holds one unit more.
+#[cfg(windows)]
+pub(crate) const MAX_COMPUTERNAME_LENGTH: u32 = 15;
+/// The buffer `socket_gethostname` (CPython 3.12.16 `Modules/socketmodule.c`) hands `gethostname`, which may fill all
+/// of it but the last byte.
+#[cfg(unix)]
+pub(crate) const GETHOSTNAME_BUFFER: usize = 1024;
 /// `LCMAP_LOWERCASE`.
 #[cfg(windows)]
 pub(crate) const LCMAP_LOWERCASE: u32 = 0x100;

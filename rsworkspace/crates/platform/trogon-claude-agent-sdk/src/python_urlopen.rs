@@ -344,8 +344,8 @@ trait LocalNameLookups {
     /// The IPv4 addresses of `host`, in the order the resolver answers them.
     fn addresses(&self, host: &PythonString) -> Result<Vec<Ipv4Addr>, LookupError>;
 
-    /// The host name, or `None` when the system cannot answer it.
-    fn hostname(&self) -> Option<PythonString>;
+    /// The host name, or the error `socket.gethostname()` raises.
+    fn hostname(&self) -> Result<PythonString, LookupError>;
 }
 
 /// The resolver and host name of this machine.
@@ -356,7 +356,7 @@ impl LocalNameLookups for SystemLookups {
         ipv4_addresses(host)
     }
 
-    fn hostname(&self) -> Option<PythonString> {
+    fn hostname(&self) -> Result<PythonString, LookupError> {
         hostname()
     }
 }
@@ -377,13 +377,12 @@ fn local_names() -> Result<&'static [String], LookupError> {
 
 /// The body of `FileHandler.get_names` once `names` is unset: `gethostbyname_ex('localhost')[2]` followed by
 /// `gethostbyname_ex(gethostname())[2]`, duplicates kept as tuple concatenation keeps them, or
-/// `(gethostbyname('localhost'),)` when either raises `gaierror`. Any other error propagates.
+/// `(gethostbyname('localhost'),)` when either lookup raises `gaierror`. Any other error, the `OSError` of
+/// `gethostname` among them, propagates.
 fn get_names(lookups: &impl LocalNameLookups) -> Result<Vec<String>, LookupError> {
     let localhost = PythonString::from("localhost");
     let all = lookups.addresses(&localhost).and_then(|mut names| {
-        if let Some(name) = lookups.hostname() {
-            names.extend(lookups.addresses(&name)?);
-        }
+        names.extend(lookups.addresses(&lookups.hostname()?)?);
         Ok(names)
     });
     match all {

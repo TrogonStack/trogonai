@@ -54,7 +54,7 @@ unsafe extern "system" {
 
 /// `PyErr_SetFromWindowsErr(GetLastError())`: the `OSError` for the last error of the thread, with the message the
 /// system holds for it.
-fn last_error() -> RemoteSchemaError {
+pub(crate) fn last_error() -> RemoteSchemaError {
     // SAFETY: the call only reads the last error of the calling thread.
     let code = unsafe { GetLastError() };
     let mut buffer: *mut u16 = std::ptr::null_mut();

@@ -575,10 +575,10 @@ fn ipv4_addresses_answer_each_address_once() {
     ));
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
-fn hostname_answers_on_unix() {
-    assert!(hostname().is_some_and(|name| !name.is_empty()));
+fn hostname_answers_on_unix_and_windows() {
+    assert!(hostname().is_ok_and(|name| !name.is_empty()));
 }
 
 #[test]

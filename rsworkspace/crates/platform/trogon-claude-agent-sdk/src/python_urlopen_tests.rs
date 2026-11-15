@@ -694,7 +694,8 @@ enum Lookup {
     Os,
 }
 
-/// Scripted `get_names` lookups that record each host they are asked for.
+/// Scripted `get_names` lookups that record each host they are asked for; without a host name `gethostname` raises
+/// `OSError`.
 struct ScriptedLookups {
     hostname: Option<&'static str>,
     answers: &'static [(&'static str, Lookup)],
@@ -727,8 +728,10 @@ impl LocalNameLookups for ScriptedLookups {
         }
     }
 
-    fn hostname(&self) -> Option<PythonString> {
-        self.hostname.map(PythonString::from)
+    fn hostname(&self) -> Result<PythonString, LookupError> {
+        self.hostname
+            .map(PythonString::from)
+            .ok_or_else(|| LookupError::Os(io::Error::other("gethostname failed")))
     }
 }
 
@@ -743,7 +746,8 @@ const PRIVATE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
 // - `('127.0.0.1', '10.0.0.2', '127.0.0.1')`, asking `['localhost', 'box']`;
 // - `('127.0.0.1',)` when `box` raises `gaierror`, asking `['localhost', 'box', 'localhost']`;
 // - `gaierror` when both raise it, asking `['localhost', 'localhost']`;
-// - `OSError` when `box` raises it, asking `['localhost', 'box']`.
+// - `OSError` when `box` raises it, asking `['localhost', 'box']`;
+// - `OSError` when `gethostname` raises it, asking `['localhost']`.
 #[test]
 fn get_names_keeps_duplicates_and_falls_back_only_on_gaierror() {
     let lookups = ScriptedLookups::new(
@@ -764,7 +768,7 @@ fn get_names_keeps_duplicates_and_falls_back_only_on_gaierror() {
     assert_eq!(*lookups.asked.borrow(), ["localhost", "box"]);
 
     let lookups = ScriptedLookups::new(None, &[("localhost", Lookup::Addresses(&[LOOPBACK]))]);
-    assert_eq!(get_names(&lookups).ok(), Some(vec!["127.0.0.1".to_owned()]));
+    assert!(matches!(get_names(&lookups), Err(LookupError::Os(_))));
     assert_eq!(*lookups.asked.borrow(), ["localhost"]);
 
     let lookups = ScriptedLookups::new(

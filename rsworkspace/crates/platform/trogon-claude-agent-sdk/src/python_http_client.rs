@@ -10,12 +10,18 @@
 //! proxy, and an HTTPS request first opens the `CONNECT` tunnel `HTTPConnection._tunnel` sets up.
 
 use crate::RemoteSchemaError;
+#[cfg(unix)]
+use crate::constants::GETHOSTNAME_BUFFER;
+#[cfg(windows)]
+use crate::constants::{COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME, ERROR_MORE_DATA, MAX_COMPUTERNAME_LENGTH};
 use crate::constants::{HTTP_CLIENT_MAX_LINE, MAX_HEADERS, MAX_INTERIM_RESPONSES, READ_SIZE_OVERFLOW, USER_AGENT};
 use crate::python_idna;
 use crate::python_json::{is_python_whitespace, python_repr};
 use crate::python_re::py_repr;
 use crate::python_string::PythonString;
 use crate::python_urllib::UrlText;
+#[cfg(windows)]
+use crate::python_urlopen_registry::{from_utf16, last_error};
 use crate::python_urlopen_text::{
     PythonInt, ReadSize, bytes_repr, encode_text, latin1, os_error_class, os_error_text, parse_hex_bytes, parse_int,
 };
@@ -157,8 +163,14 @@ pub(crate) enum LookupError {
     Idna(String),
     /// A `socket.gaierror`: the code and `gai_strerror`.
     Gai(i32, String),
-    /// `EAI_SYSTEM`, raised as the `OSError` of `errno`.
+    /// `EAI_SYSTEM`, raised as the `OSError` of `errno`, or the `OSError` of a failed `gethostname`.
     Os(io::Error),
+    /// The `OSError` `PyErr_SetFromWindowsErr` raises when `GetComputerNameExW` fails, in its class and text.
+    #[cfg(windows)]
+    Windows(RemoteSchemaError),
+    /// The `AttributeError` of reading `socket.gethostname` from a `socket` module built without it.
+    #[cfg(not(any(unix, windows)))]
+    NoGethostname,
 }
 
 impl LookupError {
@@ -168,6 +180,10 @@ impl LookupError {
             Self::Idna(text) => failure("UnicodeError", text),
             Self::Gai(code, text) => url_error(&format!("[Errno {code}] {text}")),
             Self::Os(error) => url_error(&os_error_text(&error, None)),
+            #[cfg(windows)]
+            Self::Windows(error) => url_error(error.text()),
+            #[cfg(not(any(unix, windows)))]
+            Self::NoGethostname => no_gethostname(),
         }
     }
 
@@ -177,8 +193,18 @@ impl LookupError {
             Self::Idna(text) => failure("UnicodeError", text),
             Self::Gai(code, text) => failure("gaierror", format!("[Errno {code}] {text}")),
             Self::Os(error) => failure(os_error_class(&error), os_error_text(&error, None)),
+            #[cfg(windows)]
+            Self::Windows(error) => error,
+            #[cfg(not(any(unix, windows)))]
+            Self::NoGethostname => no_gethostname(),
         }
     }
+}
+
+/// `socket.gethostname`, read from a `socket` module built without it.
+#[cfg(not(any(unix, windows)))]
+fn no_gethostname() -> RemoteSchemaError {
+    failure("AttributeError", "module 'socket' has no attribute 'gethostname'")
 }
 
 /// `host.encode('idna')`, as the ASCII text of the encoded name, or the `UnicodeError` the codec raises.
@@ -298,23 +324,62 @@ pub(crate) fn ipv4_addresses<T: UrlText + ?Sized>(host: &T) -> Result<Vec<Ipv4Ad
     Ok(found)
 }
 
-/// `socket.gethostname()`, decoded as the file system encoding with surrogate escapes, or `None` when the system
-/// cannot answer it.
+/// `socket.gethostname()` as `socket_gethostname` in CPython 3.12.16 `Modules/socketmodule.c` runs it: `gethostname`
+/// into a buffer whose last byte stays NUL, decoded as the file system encoding with surrogate escapes, or the
+/// `OSError` of `errno` that `set_error` raises when it fails.
 #[cfg(unix)]
-pub(crate) fn hostname() -> Option<PythonString> {
-    let mut buffer = [0u8; 256];
-    // SAFETY: the buffer is writable for its whole length, which is the size passed.
-    let code = unsafe { libc::gethostname(buffer.as_mut_ptr().cast::<libc::c_char>(), buffer.len()) };
-    (code == 0).then(|| {
-        let end = buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len());
-        PythonString::decode_surrogateescape(buffer.get(..end).unwrap_or_default())
-    })
+pub(crate) fn hostname() -> Result<PythonString, LookupError> {
+    let mut buffer = [0u8; GETHOSTNAME_BUFFER];
+    // SAFETY: the buffer is writable for its whole length, which is one byte more than the size passed.
+    let code = unsafe { libc::gethostname(buffer.as_mut_ptr().cast::<libc::c_char>(), buffer.len() - 1) };
+    (code >= 0)
+        .then_some(())
+        .ok_or_else(io::Error::last_os_error)
+        .map_err(LookupError::Os)?;
+    let end = buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len());
+    Ok(PythonString::decode_surrogateescape(
+        buffer.get(..end).unwrap_or_default(),
+    ))
 }
 
-/// `socket.gethostname()`, or `None` when the system cannot answer it.
-#[cfg(not(unix))]
-pub(crate) fn hostname() -> Option<PythonString> {
-    None
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetComputerNameExW(name_type: i32, buffer: *mut u16, size: *mut u32) -> i32;
+    fn GetLastError() -> u32;
+}
+
+/// `socket.gethostname()` on Windows, as `socket_gethostname` in CPython 3.12.16 `Modules/socketmodule.c` runs it:
+/// `GetComputerNameExW(ComputerNamePhysicalDnsHostname)` into a buffer of
+/// `MAX_COMPUTERNAME_LENGTH + 1` units, then into one of the size it asks for when that is too small, decoded as
+/// `PyUnicode_FromWideChar` decodes it, or the `OSError` `PyErr_SetFromWindowsErr` raises when a call fails.
+#[cfg(windows)]
+pub(crate) fn hostname() -> Result<PythonString, LookupError> {
+    let mut size = MAX_COMPUTERNAME_LENGTH + 1;
+    let mut buffer = vec![0_u16; size as usize];
+    // SAFETY: `buffer` holds `size` units, which is the size passed alongside its pointer.
+    if unsafe { GetComputerNameExW(COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME, buffer.as_mut_ptr(), &raw mut size) } != 0 {
+        return Ok(from_utf16(buffer.get(..size as usize).unwrap_or_default()));
+    }
+    // SAFETY: the call only reads the last error of the calling thread.
+    if unsafe { GetLastError() } != ERROR_MORE_DATA.unsigned_abs() {
+        return Err(LookupError::Windows(last_error()));
+    }
+    if size == 0 {
+        return Ok(PythonString::default());
+    }
+    buffer = vec![0_u16; size as usize];
+    // SAFETY: `buffer` holds `size` units, the size the first call asked for, passed alongside its pointer.
+    if unsafe { GetComputerNameExW(COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME, buffer.as_mut_ptr(), &raw mut size) } == 0 {
+        return Err(LookupError::Windows(last_error()));
+    }
+    Ok(from_utf16(buffer.get(..size as usize).unwrap_or_default()))
+}
+
+/// `socket.gethostname()`, which CPython 3.12.16 `Modules/socketmodule.c` only defines under `HAVE_GETHOSTNAME`.
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn hostname() -> Result<PythonString, LookupError> {
+    Err(LookupError::NoGethostname)
 }
 
 /// `socket.create_connection((host, port))`: each address in turn, raising the error of the last one, wrapped in the

@@ -22,7 +22,7 @@ use crate::python_urlopen_text::bytes_repr;
 mod windows;
 
 #[cfg(windows)]
-pub(crate) use windows::InternetSettingsKey;
+pub(crate) use windows::{InternetSettingsKey, last_error};
 
 /// The Python object `winreg.QueryValueEx` answers for a value.
 #[derive(Clone, Debug, Eq, PartialEq)]
