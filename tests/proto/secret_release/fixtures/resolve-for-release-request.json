@@ -199,6 +199,22 @@
       ]
     },
     {
+      "name": "request rejects a header name with a token character a record name does not hold",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "header": "x-api!key"
+          }
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
       "name": "request rejects an overlong header name",
       "template": "request",
       "patch": [
@@ -441,6 +457,20 @@
       ]
     },
     {
+      "name": "request rejects a correlation id with an equals sign",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/correlationId/value",
+          "value": "use=1"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
       "name": "request rejects a requester key that is not an xkey",
       "template": "request",
       "patch": [
@@ -486,6 +516,19 @@
       ]
     },
     {
+      "name": "request accepts a header name with every token character a record name holds",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "header": "X-Api+Key.v1_~"
+          }
+        }
+      ]
+    },
+    {
       "name": "request releases into a query parameter",
       "template": "request",
       "patch": [
@@ -494,6 +537,19 @@
           "path": "/location",
           "value": {
             "queryParameter": "api_key"
+          }
+        }
+      ]
+    },
+    {
+      "name": "request accepts a query parameter name with a tilde",
+      "template": "request",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/location",
+          "value": {
+            "queryParameter": "api~key"
           }
         }
       ]
@@ -556,13 +612,13 @@
       ]
     },
     {
-      "name": "request accepts a correlation id with punctuation",
+      "name": "request accepts a correlation id with every character a record name holds",
       "template": "request",
       "patch": [
         {
           "op": "replace",
           "path": "/correlationId/value",
-          "value": "req:7f3a/b=c~1"
+          "value": "Req.7f3a_trace:b/c@d+e~f[1]-Z9"
         }
       ]
     }

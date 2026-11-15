@@ -28,7 +28,9 @@ mod state;
 mod unspecified_enum_kind;
 
 pub use constants::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
-pub use credential_event_subject_resolver::{CredentialEventSubjectResolver, credential_event_subject};
+pub use credential_event_subject_resolver::{
+    CredentialEventSubjectResolver, credential_event_subject, credential_project_token,
+};
 pub use credential_event_subject_resolver_error::CredentialEventSubjectResolverError;
 pub use credential_evolve_error::CredentialEvolveError;
 pub use credential_field_invalid_error::CredentialFieldInvalidError;

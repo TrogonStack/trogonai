@@ -41,5 +41,12 @@ pub mod audit_actor {
                 >,
             >,
         ),
+        Service(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::audit_actor::ServiceActorView<
+                    'a,
+                >,
+            >,
+        ),
     }
 }

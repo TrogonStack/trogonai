@@ -30,6 +30,26 @@ fn refuses_non_ascii() {
 }
 
 #[test]
+fn refuses_every_visible_character_an_audit_record_name_does_not_hold() {
+    let refused = ('!'..='~').filter(|ch| !ch.is_ascii_alphanumeric() && !"._:/@+~[]-".contains(*ch));
+
+    for ch in refused {
+        assert_eq!(
+            AuditCorrelationId::new(format!("use{ch}1")),
+            Err(AuditCorrelationIdError::InvalidCharacter(ch)),
+            "{ch:?}"
+        );
+    }
+}
+
+#[test]
+fn accepts_every_character_an_audit_record_name_holds() {
+    let id = "Use.7f3a_trace:b/c@d+e~f[1]-Z9";
+
+    assert_eq!(AuditCorrelationId::new(id).unwrap().as_str(), id);
+}
+
+#[test]
 fn refuses_an_id_past_the_bound() {
     let id = "a".repeat(MAX_AUDIT_CORRELATION_ID_LEN + 1);
 

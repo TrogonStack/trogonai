@@ -21,7 +21,7 @@ pub struct CredentialEventSubjectResolver {
 
 impl CredentialEventSubjectResolver {
     pub fn for_owner(owner_id: &CredentialOwnerId) -> Result<Self, CredentialEventSubjectResolverError> {
-        let token = owner_subject_token(owner_id)?;
+        let token = credential_project_token(owner_id)?;
         let scope = SubjectScope::new(format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.{token}"))
             .map_err(|source| CredentialEventSubjectResolverError::BuildScope { source })?;
         Ok(Self {
@@ -54,11 +54,14 @@ pub fn credential_event_subject(
     CredentialEventSubjectResolver::for_owner(stream_id.owner_id())?.subject_for(stream_id)
 }
 
-/// The project token of a credential event subject.
+/// The project token of a credential event subject, and of any other subject
+/// that names the credential's project.
 ///
 /// Owner ids may carry dots, which would split the token, and never carry
 /// `~`, so the substitution cannot make two projects share a subtree.
-fn owner_subject_token(owner_id: &CredentialOwnerId) -> Result<NatsToken, CredentialEventSubjectResolverError> {
+pub fn credential_project_token(
+    owner_id: &CredentialOwnerId,
+) -> Result<NatsToken, CredentialEventSubjectResolverError> {
     NatsToken::new(owner_id.as_str().replace('.', "~"))
         .map_err(|source| CredentialEventSubjectResolverError::BuildSubjectToken { source })
 }
