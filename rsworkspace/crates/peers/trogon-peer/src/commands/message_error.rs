@@ -1,4 +1,4 @@
-use super::{HeartbeatError, state::EvolveError};
+use super::{evolve_error::EvolveError, heartbeat_error::HeartbeatError};
 use trogonai_proto::peers::v1alpha1 as proto;
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum MessageError {

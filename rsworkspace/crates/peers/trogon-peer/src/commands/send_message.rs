@@ -16,6 +16,21 @@ pub struct SendMessage {
     pub(crate) now: DateTime<Utc>,
 }
 impl SendMessage {
+    pub fn owner(&self) -> &TrustedPeerOwner {
+        &self.owner
+    }
+    pub fn attachment(&self) -> &AttachmentRef {
+        &self.attachment
+    }
+    pub fn recipient(&self) -> &PeerId {
+        &self.recipient
+    }
+    pub fn collaboration(&self) -> &CollaborationRef {
+        &self.collaboration
+    }
+    pub fn content(&self) -> &TrustedContent {
+        &self.content
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         owner: TrustedPeerOwner,

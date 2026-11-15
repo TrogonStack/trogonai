@@ -11,6 +11,12 @@ pub struct DisposeMessage {
     pub(crate) now: DateTime<Utc>,
 }
 impl DisposeMessage {
+    pub fn evidence(&self) -> &AcceptedMessage {
+        &self.evidence
+    }
+    pub fn disposition(&self) -> TerminalDisposition {
+        self.disposition
+    }
     pub fn new(evidence: AcceptedMessage, disposition: TerminalDisposition, now: DateTime<Utc>) -> Self {
         Self {
             evidence,

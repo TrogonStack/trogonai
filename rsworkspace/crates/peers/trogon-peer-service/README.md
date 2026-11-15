@@ -34,5 +34,19 @@ irrelevant to ownership or attachment authority. Longer-lived histories need an
 authorized checkpoint or read-model contract; widening the bound or silently
 skipping unknown events does not provide that contract.
 
+## Sealed-content collection
+
+`ContentSeal` implementations must durably track every sealed candidate for
+retention-aware collection, including candidates created for retries and sends
+that do not return an acceptance receipt. Collection belongs to the content
+backend and may reclaim a candidate only when authoritative message state
+confirms that it is unreferenced. It must preserve referenced candidates and
+bindings whose acceptance remains uncertain; a failed send or append error alone
+does not establish absence of a reference.
+
+This is a backend contract; this crate implements no content collector or
+collection schedule. Authorized privacy erasure remains a separate backend
+responsibility.
+
 Attachment renewal, presence queries, messaging, and network serving are separate
 integration work at this layer.
