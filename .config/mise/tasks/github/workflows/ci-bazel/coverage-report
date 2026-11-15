@@ -7,7 +7,7 @@ The coverage gate compares Cobertura reports whose file names resolve under the
 files left out are the ones `cargo cov` leaves out: the generated sources named
 by the `--ignore-filename-regex` of its alias in rsworkspace/.cargo/config.toml,
 and cargo llvm-cov's default exclusion of tests, examples and benches
-directories.
+directories and of `tests.rs` and `*_tests.rs` test modules.
 """
 
 import os
@@ -20,7 +20,7 @@ from xml.etree import ElementTree as ET
 
 WORKSPACE = "rsworkspace"
 # cargo llvm-cov adds this to every --ignore-filename-regex unless told not to.
-DEFAULT_IGNORE = r"/(tests|examples|benches)/"
+DEFAULT_IGNORE = r"/(tests|examples|benches)/|/(tests\.rs|[0-9a-zA-Z_-]+[_-]tests\.rs)$"
 
 
 def cargo_cov_ignore(root):
