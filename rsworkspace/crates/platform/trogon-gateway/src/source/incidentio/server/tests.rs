@@ -7,16 +7,16 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{CredentialIdentity, CredentialOwnerId, CredentialScope};
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
-use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -61,12 +61,14 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: String) -> Route
     let integration_id = SourceIntegrationId::new("primary").unwrap();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Incidentio,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Incidentio,
+                    integration_id.clone(),
+                ),
+                CredentialKind::SigningSecret,
             ),
-            CredentialKind::SigningSecret,
             trogon_std::SecretString::new(secret).unwrap(),
         )
         .await
@@ -74,7 +76,7 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: String) -> Route
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
 
     runtime_router(

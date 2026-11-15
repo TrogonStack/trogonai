@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Run clippy on every rsworkspace target with all features"
-#MISE dir="rsworkspace"
-set -euo pipefail
-
-exec cargo clippy --keep-going --all-targets --all-features

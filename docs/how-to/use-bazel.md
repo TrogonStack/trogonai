@@ -65,6 +65,7 @@ Useful direct target labels include:
 | `//goworkspace/internal/spirepolicy:spirepolicy_test` | Existing CEL policy tests |
 | `//proto/trogonai/scheduler/schedules/v1:schedule_status_descriptor` | Protobuf descriptor set |
 | `//proto/trogonai/scheduler/schedules/v1:schedule_status_wit` | Generated WIT artifact |
+| `//.github:actionlint_test` | actionlint over every GitHub workflow |
 
 The generator test launcher stages the original scheduler fixture sources and
 snapshots as runfiles. Its scoped Buf module contains only those dependency-free
