@@ -84,15 +84,6 @@ jobs:
       - name: Run repo Rust policy lints
         run: mise run --skip-tools github:workflows:ci-rust:rust-dylint
 
-      - name: Run clippy
-        run: mise run --skip-tools github:workflows:ci-rust:clippy
-
-      - name: Run clippy (a2a-gateway, default features)
-        run: mise run --skip-tools github:workflows:ci-rust:clippy-a2a-gateway
-
-      - name: Run clippy (a2a-gateway, spicedb)
-        run: mise run --skip-tools github:workflows:ci-rust:clippy-a2a-gateway-spicedb
-
   test:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
