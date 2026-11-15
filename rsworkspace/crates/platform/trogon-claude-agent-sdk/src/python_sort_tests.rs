@@ -341,6 +341,12 @@ fn dict_items_compare_their_values_one_check_deeper() {
     ];
     assert_eq!(sorted_within(&equal_dicts, 2), Ok(vec![0, 1]));
     assert_eq!(sorted_within(&equal_dicts, 1), Err(SortError::Recursion));
+    let shared_values = [
+        list(vec![dict(vec![("a", int(1))]), int(2)]),
+        list(vec![dict(vec![("a", int(1))]), int(1)]),
+    ];
+    assert_eq!(sorted_within(&shared_values, 1), Ok(vec![1, 0]));
+    assert_eq!(sorted_within(&shared_values, 0), Err(SortError::Recursion));
     let other_keys = [
         list(vec![dict(vec![("a", int(1))]), int(1)]),
         list(vec![dict(vec![("b", int(1))]), int(2)]),

@@ -1375,6 +1375,19 @@ fn draft3_keywords_and_unevaluated_walks_match_jsonschema() {
             json!("a"),
             Outcome::Valid,
         ),
+        // `not` asks `is_valid`, whose first error stops the draft 3 keyword a `$schema` evolves into.
+        (
+            Draft::Draft202012,
+            json!({"not": {"$schema": "http://json-schema.org/draft-03/schema#", "disallow": "string"}}),
+            json!("a"),
+            Outcome::Valid,
+        ),
+        (
+            Draft::Draft202012,
+            json!({"not": {"$schema": "http://json-schema.org/draft-03/schema#", "extends": [{"type": "string"}]}}),
+            json!(1),
+            Outcome::Valid,
+        ),
         (
             Draft::Draft202012,
             json!({"allOf": [true], "unevaluatedItems": false}),

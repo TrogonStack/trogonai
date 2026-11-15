@@ -109,12 +109,6 @@ pub(super) enum RefError {
     Other(PythonString),
 }
 
-impl From<String> for RefError {
-    fn from(text: String) -> Self {
-        Self::Other(text.into())
-    }
-}
-
 impl From<PythonString> for RefError {
     fn from(text: PythonString) -> Self {
         Self::Other(text)
@@ -622,7 +616,8 @@ impl<'s> Registry<'s> {
         let Some(resource) = self.resource_at(&trim_hashes(uri), at)? else {
             return Err(RefError::Other(py_repr(uri).into()));
         };
-        if let Some(canonical) = id_of(resource.contents, resource.draft)?
+        // `Registry.crawl` above already ran `resource.id()` on every resource here and raised what it raises.
+        if let Some(canonical) = id_of(resource.contents, resource.draft).map_err(PythonString::from)?
             && let Some(found) = self.anchor_at(&canonical, name, all)?
         {
             return Ok((found, all));

@@ -450,7 +450,7 @@ fn lone_surrogates_match_and_fail_as_python_does() -> TestResult {
 /// points, sets wide enough for a `BIGCHARSET`, references inside alternations and look-behinds.
 #[test]
 fn sets_flags_and_references_search_as_cpython_does() {
-    let cases: [(&str, &str, Result<bool, &str>); 18] = [
+    let cases: [(&str, &str, Result<bool, &str>); 24] = [
         ("(a)(?:\\1b|\\1c)", "aac", Ok(true)),
         ("(a)(?:\\1b|\\1c)", "aad", Ok(false)),
         (
@@ -473,6 +473,12 @@ fn sets_flags_and_references_search_as_cpython_does() {
         ("[\u{100}\u{102}\u{104}]", "\u{102}", Ok(true)),
         ("[\u{100}\u{102}\u{104}]", "\u{101}", Ok(false)),
         ("(?i)[ace]", "C", Ok(true)),
+        ("(?i)[sx]", "\u{17f}", Ok(true)),
+        ("(?i)[r-t]", "\u{17f}", Ok(true)),
+        ("(?i)[^s]", "\u{17f}", Ok(false)),
+        ("(?i)[^s]", "x", Ok(true)),
+        ("(?i)(?-im:a)", "A", Ok(false)),
+        ("(?i)(?-im:a)", "a", Ok(true)),
     ];
     for (pattern, text, expected) in cases {
         assert_eq!(
