@@ -195,7 +195,7 @@ fn replay_rejects_absent_or_unhandled_event_cases() {
         Err(EvolveError::MissingEvent)
     );
     let unsupported = proto::PeerEvent {
-        event: Some(PeerEventCase::from(proto::PeerDetached::default())),
+        event: Some(PeerEventCase::from(proto::PeerBatchPrepared::default())),
     };
     assert_eq!(
         evolve(initial_state(), &unsupported),
