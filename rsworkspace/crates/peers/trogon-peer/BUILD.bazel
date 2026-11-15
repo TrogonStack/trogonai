@@ -6,6 +6,7 @@ workspace_crate(
         "creation_precondition": {},
         "enrollment": {},
         "enrollment_timestamp": {},
+        "heartbeat": {},
         "validation": {},
     },
 )
