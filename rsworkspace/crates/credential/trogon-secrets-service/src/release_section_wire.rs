@@ -12,4 +12,5 @@ pub(crate) struct ReleaseSectionWire {
     pub(crate) xkey_seed: Option<toml::Value>,
     pub(crate) credential_stream: Option<String>,
     pub(crate) admission_limit: Option<usize>,
+    pub(crate) invalidation_stream_replicas: Option<usize>,
 }

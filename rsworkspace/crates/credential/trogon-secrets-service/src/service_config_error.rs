@@ -34,6 +34,8 @@ pub enum ServiceConfigError {
         #[source]
         source: ParseIntError,
     },
+    #[error("{setting} must be at least one")]
+    Zero { setting: ConfigSetting },
     #[error("{setting} must be a reference, env://NAME or file:///path, written as a string")]
     SecretNotAString { setting: ConfigSetting },
     #[error("{setting} is not a usable reference")]

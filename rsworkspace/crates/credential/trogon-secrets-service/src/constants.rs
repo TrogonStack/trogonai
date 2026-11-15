@@ -104,3 +104,8 @@ pub(crate) const INVALIDATION_DUPLICATE_WINDOW: Duration = Duration::from_secs(1
 /// notice, a 128 character owner and the longest sequence, fits with its
 /// headers several times over, and anything larger is not a notice.
 pub(crate) const INVALIDATION_MAX_MESSAGE_SIZE: i32 = 1024;
+
+/// The replicas the invalidation stream must keep when the operator sets no
+/// count: the three of a production cluster, which survives losing one node.
+/// A single node deployment sets one.
+pub(crate) const DEFAULT_INVALIDATION_STREAM_REPLICAS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(2);

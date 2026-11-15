@@ -46,6 +46,10 @@ fn a_setting_reads_as_its_file_key_and_the_variable_that_overrides_it() {
             ConfigSetting::AdmissionLimit,
             "release.admission_limit (TROGON_SECRETS_ADMISSION_LIMIT)",
         ),
+        (
+            ConfigSetting::InvalidationStreamReplicas,
+            "release.invalidation_stream_replicas (TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS)",
+        ),
         (ConfigSetting::AuditTenant, "audit.tenant (TROGON_SECRETS_AUDIT_TENANT)"),
         (
             ConfigSetting::AuditProject,
