@@ -97,8 +97,7 @@ async fn new_session_methods_preserve_structured_runner_errors() {
             let encoded = crate::wire::encode_agent_error(
                 crate::wire::response_id_from_request_headers(&headers),
                 &Error::new(-32042, "backend refusal").data(json!({"retryable":false})),
-            )
-            .unwrap();
+            );
             (encoded.headers, encoded.body)
         });
         let error = session_call(&bridge, &method, "s1").await.unwrap_err();

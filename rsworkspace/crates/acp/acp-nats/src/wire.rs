@@ -86,14 +86,13 @@ pub fn encode_success<Res: Serialize>(id: ResponseId, result: &Res) -> Result<En
 }
 
 /// Encode an agent error response (complete body; code projected to `Jsonrpc-Error-Code`).
-pub fn encode_agent_error(id: ResponseId, error: &agent_client_protocol::Error) -> Result<Encoded, WireError> {
-    encode(&Message::Error {
+pub fn encode_agent_error(id: ResponseId, error: &agent_client_protocol::Error) -> Encoded {
+    Encoded::from(&Message::Error {
         id,
         code: i32::from(error.code),
         message: error.message.clone(),
         data: error.data.clone(),
     })
-    .map_err(WireError::from)
 }
 
 /// Decode a JSON-RPC response into a typed result or structured agent error.

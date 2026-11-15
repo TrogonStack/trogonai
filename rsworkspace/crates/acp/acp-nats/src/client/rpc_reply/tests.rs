@@ -17,7 +17,7 @@ fn encode_success_sets_jsonrpc_id_header() {
 #[test]
 fn encode_agent_error_sets_error_code_header() {
     let error = Error::new(ErrorCode::INVALID_PARAMS, "test message");
-    let encoded = encode_agent_error_for_test(ResponseId::Number(1), &error).unwrap();
+    let encoded = encode_agent_error_for_test(ResponseId::Number(1), &error);
     assert_eq!(
         encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
         "-32602"
@@ -28,7 +28,7 @@ fn encode_agent_error_sets_error_code_header() {
 #[test]
 fn encode_agent_error_null_id() {
     let error = Error::new(ErrorCode::INTERNAL_ERROR, "Internal error");
-    let encoded = encode_agent_error_for_test(ResponseId::Null, &error).unwrap();
+    let encoded = encode_agent_error_for_test(ResponseId::Null, &error);
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ID).is_none());
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
 }

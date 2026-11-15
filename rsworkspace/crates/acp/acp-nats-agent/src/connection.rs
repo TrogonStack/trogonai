@@ -471,7 +471,7 @@ where
                 format!("Failed to deserialize request: {e}"),
             );
             let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &error)?;
+            let encoded = encode_agent_error(id, &error);
             let _ = reply_wire(nats, reply_to, encoded).await;
             return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
                 "{e}"
@@ -486,7 +486,7 @@ where
             reply_wire(nats, reply_to, encoded).await
         }
         Err(err) => {
-            let encoded = encode_agent_error(response_id, &err)?;
+            let encoded = encode_agent_error(response_id, &err);
             reply_wire(nats, reply_to, encoded).await
         }
     }
@@ -547,7 +547,7 @@ where
                 format!("Failed to deserialize request: {e}"),
             );
             let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &error)?;
+            let encoded = encode_agent_error(id, &error);
             let _ = reply_wire(nats, reply_to, encoded).await;
             return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
                 "{e}"
@@ -571,7 +571,7 @@ where
                         reply_wire(nats, reply_to, encoded).await
                     }
                     Err(err) => {
-                        let encoded = encode_agent_error(response_id, &err)?;
+                        let encoded = encode_agent_error(response_id, &err);
                         reply_wire(nats, reply_to, encoded).await
                     }
                 };

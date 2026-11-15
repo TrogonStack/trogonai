@@ -79,7 +79,7 @@ impl Fixture {
         let id = acp_nats::wire::response_id_from_request_headers(request.headers.as_ref().expect("request headers"));
         let encoded = match result {
             Ok(value) => acp_nats::wire::encode_success(id, &value),
-            Err(error) => acp_nats::wire::encode_agent_error(id, &error),
+            Err(error) => Ok(acp_nats::wire::encode_agent_error(id, &error)),
         }
         .expect("agent response");
         self.client
@@ -101,7 +101,7 @@ impl Fixture {
         let id = acp_nats::wire::response_id_from_request_headers(request.headers.as_ref().expect("request headers"));
         let encoded = match result {
             Ok(value) => acp_nats::wire::encode_success(id, &value),
-            Err(error) => acp_nats::wire::encode_agent_error(id, &error),
+            Err(error) => Ok(acp_nats::wire::encode_agent_error(id, &error)),
         }
         .expect("agent response");
         self.js
