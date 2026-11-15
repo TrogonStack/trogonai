@@ -266,3 +266,25 @@ fn detach_requires_enrollment_history_before_it_can_retire_a_fence() {
         .when(command("old_connector", 1, now))
         .then_error(DetachError::MissingEnrollment);
 }
+
+#[test]
+fn detach_binding_fences_a_missing_history_and_rejects_an_unrepresentable_service_time() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let command = command("old_connector", 1, start);
+    assert_eq!(command.owner(), identity().owner());
+    assert_eq!(command.attachment(), &reference("old_connector", 1));
+    assert_eq!(command.stream_id(), command.attachment().peer_id());
+    assert_eq!(command.now(), start);
+    TestCase::<Detach>::new()
+        .given_no_history()
+        .when(command)
+        .then_error(DetachError::MissingEnrollment);
+    TestCase::<Detach>::new()
+        .given_state(state(start))
+        .when(Detach::new(
+            identity().owner().clone(),
+            reference("old_connector", 1),
+            DateTime::<Utc>::MAX_UTC,
+        ))
+        .then_error(DetachError::TimestampRange);
+}
