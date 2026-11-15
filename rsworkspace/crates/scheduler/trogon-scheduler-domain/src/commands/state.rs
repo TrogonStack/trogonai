@@ -8,7 +8,14 @@ pub struct ScheduleState(state_v1::State);
 
 impl Default for ScheduleState {
     fn default() -> Self {
-        Self(initial_state())
+        Self(state_v1::State {
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_MISSING)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
+            completed: None,
+        })
     }
 }
 
@@ -89,17 +96,6 @@ pub enum EvolveError {
     MissingOccurrenceSequence,
     #[error("protobuf state '{value}' is unknown")]
     UnknownStateValue { value: i32 },
-}
-
-pub fn initial_state() -> state_v1::State {
-    state_v1::State {
-        state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_MISSING)),
-        last_occurrence_at: MessageField::default(),
-        last_occurrence_sequence: None,
-        schedule: MessageField::default(),
-        pending_occurrence_at: MessageField::default(),
-        completed: None,
-    }
 }
 
 pub fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Result<state_v1::State, EvolveError> {
