@@ -10,6 +10,11 @@
 //! clock are all ports, so the NATS service that wires them is the only place
 //! that talks to a bus or to OpenBao.
 //!
+//! [`JetStreamCredentialStates`] is the stream-backed [`CredentialStateRead`]:
+//! each read folds one credential's subject of the credential event stream up
+//! to the event it ended on when the read started, with no snapshot in
+//! between, so a revocation committed before the read is never missed.
+//!
 //! Every denial answers [`CredentialReleaseError::Denied`] whatever the reason, so a
 //! requester cannot tell an unknown tenant from a refusing policy. The
 //! [`DenialReason`] goes to the audit record and the logs only.
@@ -32,6 +37,7 @@ mod denial_record;
 mod fixtures;
 #[cfg(any(test, feature = "test-support"))]
 mod in_memory_credential_states;
+mod jetstream_credential_states;
 mod owner_holding;
 #[cfg(any(test, feature = "test-support"))]
 mod recording_release_audit;
@@ -63,6 +69,7 @@ pub use denial_reason::DenialReason;
 pub use denial_record::DenialRecord;
 #[cfg(any(test, feature = "test-support"))]
 pub use in_memory_credential_states::InMemoryCredentialStates;
+pub use jetstream_credential_states::JetStreamCredentialStates;
 pub use owner_holding::OwnerHolding;
 #[cfg(any(test, feature = "test-support"))]
 pub use recording_release_audit::RecordingReleaseAudit;

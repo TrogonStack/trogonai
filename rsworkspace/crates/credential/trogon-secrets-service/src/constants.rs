@@ -11,3 +11,6 @@ pub const RELEASE_TTL_BOUND: Duration = Duration::from_secs(300);
 /// Only a bundle of several values has generations to commit; a release of one
 /// value has none, which the wire contract spells as zero.
 pub const UNBUNDLED_GENERATION: u64 = 0;
+
+/// Why a credential state read that found its bound gone answers nothing.
+pub(crate) const BOUND_VANISHED: &str = "the last event of the credential's subject was removed during the read";
