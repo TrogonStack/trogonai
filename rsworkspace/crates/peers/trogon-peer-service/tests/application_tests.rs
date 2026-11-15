@@ -2242,6 +2242,43 @@ async fn catalog_membership_cannot_advertise_a_peer_from_another_collaboration()
     Ok(())
 }
 
+#[tokio::test]
+async fn contending_preparers_return_the_same_winner_and_track_the_losing_cache_record() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("key", "one winner").await?;
+    *f.store
+        .append_barrier
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)? =
+        Some(std::sync::Arc::new(tokio::sync::Barrier::new(2)));
+    let left = f.app();
+    let right = f.app();
+    let (left, right) = tokio::join!(
+        left.prepare_batch(&f.bob, f.prepare()),
+        right.prepare_batch(&f.bob, f.prepare())
+    );
+    let left = left?;
+    let right = right?;
+    assert_eq!(left, right);
+    assert_eq!(
+        f.cache
+            .records
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .len(),
+        2
+    );
+    assert_eq!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .len(),
+        1
+    );
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum MalformedHistoryField {
     MissingCollaboration,
@@ -3969,5 +4006,77 @@ async fn roster_emits_ready_new_attachments_and_skips_expired_members_on_each_ca
             .is_empty()
     );
     assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
+
+#[derive(Clone)]
+struct SharedBatchId(trogon_peer::BatchId);
+
+impl trogon_peer_service::BatchIdGenerator for SharedBatchId {
+    fn batch_id(&self) -> Result<trogon_peer::BatchId, PeerPortError> {
+        Ok(self.0.clone())
+    }
+}
+
+#[tokio::test]
+async fn contending_preparers_with_the_same_cache_key_never_orphan_the_winner() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("shared_key", "retain the winning presentation").await?;
+    let ids = SharedBatchId(trogon_peer::BatchId::new("shared_batch")?);
+    let app = || {
+        trogon_peer_service::PeerApplication::new(
+            f.store.clone(),
+            f.policy.clone(),
+            f.clock.clone(),
+            f.content.clone(),
+            f.cache.clone(),
+            ids.clone(),
+            f.catalog.clone(),
+        )
+    };
+    *f.store
+        .append_barrier
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)? =
+        Some(std::sync::Arc::new(tokio::sync::Barrier::new(2)));
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let left = app();
+    let right = app();
+    let (left, right) = tokio::join!(
+        left.prepare_batch(&f.bob, f.prepare()),
+        right.prepare_batch(&f.bob, f.prepare())
+    );
+    let left = left?;
+    let right = right?;
+    assert_eq!(left, right);
+    assert_eq!(left.batch.batch_id.as_deref(), Some("shared_batch"));
+    assert_eq!(
+        left.messages[0].text.as_deref(),
+        Some("retain the winning presentation")
+    );
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends + 2);
+    assert_eq!(
+        f.cache
+            .records
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .len(),
+        1
+    );
+    let recipient = PeerId::parse(
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    assert_eq!(f.history(&recipient).await?.batches.len(), 1);
+    assert_eq!(app().prepare_batch(&f.bob, f.prepare()).await?, left);
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .is_empty(),
+        "the durable winner's shared cache key must not be marked orphan"
+    );
     Ok(())
 }

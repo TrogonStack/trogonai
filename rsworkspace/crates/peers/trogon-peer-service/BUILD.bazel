@@ -6,6 +6,9 @@ workspace_crate(
         "command_grants": {},
         "content_binding_value": {},
         "enrollment": {},
+        "message_contention": {},
+        "message_frontier_clock": {},
         "message_history_admission": {},
+        "message_history_fence": {},
     },
 )
