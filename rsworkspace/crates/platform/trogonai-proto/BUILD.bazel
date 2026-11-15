@@ -1,24 +1,9 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogonai-proto",
-    crate_features = [
-        "audit",
-        "chrono",
-        "decider",
-        "gateway",
-        "grpc-nats-micro",
-        "model-access",
-        "policy",
-        "peers",
-        "runtime-host",
-        "runtime-snapshot",
-        "schedules",
-    ],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider",
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-    ],
+
+
+
     integration_tests = {
         "peer_semantic_fingerprint_contract": {},
         "recipient_receipt_sender": {},

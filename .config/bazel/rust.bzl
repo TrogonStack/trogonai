@@ -63,7 +63,8 @@ def _target_srcs(root):
     """A target's root file plus the module directory beside it."""
     if root.endswith("/main.rs"):
         return native.glob([root.rpartition("/")[0] + "/**/*.rs"])
-    return [root] + native.glob([root.removesuffix(".rs") + "/**/*.rs"], allow_empty = True)
+    support = native.glob(["tests/support/**/*.rs"], allow_empty = True) if root.startswith("tests/") else []
+    return _dedupe([root] + native.glob([root.removesuffix(".rs") + "/**/*.rs"], allow_empty = True) + support)
 
 def _dedupe(items):
     return {item: True for item in items}.keys()
@@ -81,8 +82,7 @@ def workspace_crate(
         binaries = {},
         integration_tests = {},
         examples = {},
-        feature_variants = {},
-        **legacy):
+        feature_variants = {}):
     """Declares the library, binaries, tests, doctests, and examples Cargo builds for this package.
 
     Dependencies, features, and targets come from Cargo. The arguments carry only
@@ -111,9 +111,6 @@ def workspace_crate(
     relative to the crate, or labels when they start with `//`, `:`, or `@`.
     `{package}` in a `rustc_env` value becomes the crate's Bazel package path.
     """
-    # Accept legacy generated BUILD metadata while deriving the canonical values from Cargo.
-    _ = legacy
-
     package = native.package_name()
     crate = CRATES.get(package)
     if crate == None:
