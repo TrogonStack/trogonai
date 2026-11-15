@@ -39,8 +39,9 @@ jobs:
       - name: Install automation test tools
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
-          install_args: python node github:rhysd/actionlint
+          install_args: python node
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
+      # actionlint and the runs-on fallback test run in Bazel.
       - name: Validate workflow selection and canary helpers
         run: mise run --skip-tools github:workflows:ci-automation:verify

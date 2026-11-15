@@ -138,8 +138,8 @@ jobs:
         with:
           install: false
 
-      # Stored apart from the cargo gate's baseline, so each gate compares
-      # against its own measurements while both run.
+      # Bazel measures coverage differently from cargo llvm-cov, so its baseline
+      # lives on its own storage branch.
       - name: Check coverage baseline
         id: baseline
         if: ${{ env.COVERAGE_FORK != 'true' }}

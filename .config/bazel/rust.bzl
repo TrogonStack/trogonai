@@ -3,7 +3,7 @@
 `workspace_crate()` looks its package up in `CRATES`, which the cargo_workspace
 module extension reads from `cargo metadata`, so a crate's BUILD.bazel holds no
 dependency, feature, or target lists. Bazel builds each crate with all of its
-features, as the Cargo CI test run does, plus any feature sets the crate lists
+features, as `cargo test --all-features` does, plus any feature sets the crate lists
 in `feature_variants`.
 
 What Cargo cannot express, such as test tags, skipped tests, and extra files,
