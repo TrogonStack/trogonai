@@ -15,7 +15,8 @@ use std::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use trogon_claude_agent_sdk::{
-    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, Error, Prompt, SandboxSettings, SettingsInput, SettingsLoadCause,
+    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, Error, Prompt, SandboxSettings, SettingsInput,
+    SettingsLoadCauseError,
     adapters::{NativeFileSystem, RuntimeAdapters, SpawnProcess},
     query_with_adapters,
     test_support::FixedEnvironment,
@@ -196,7 +197,7 @@ fn raised(error: Option<Error>, started: usize) -> Value {
         Some(Error::SettingsLoad(error)) => error,
         other => return Value::String(format!("not a settings load error: {other:?}")),
     };
-    let SettingsLoadCause::UnicodeDecode(cause) = error.cause() else {
+    let SettingsLoadCauseError::UnicodeDecode(cause) = error.cause() else {
         return Value::String(format!("not a decode error: {:?}", error.cause()));
     };
     serde_json::json!([

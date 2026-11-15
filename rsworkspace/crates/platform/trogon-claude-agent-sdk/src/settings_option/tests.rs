@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     ArgvStyle, ClaudeAgentOptions, Error, ExtraArgument, ManagedSettingsDelivery, PluginDelivery, SandboxSettings,
-    Settings, SettingsInput, SettingsLoadCause, UnicodeDecodeReason, adapters::ReadFile, argv::build_with,
+    Settings, SettingsInput, SettingsLoadCauseError, UnicodeDecodeReason, adapters::ReadFile, argv::build_with,
     python_c_stack::PythonCStack,
 };
 
@@ -662,8 +662,8 @@ fn load_cause(name: &str, contents: &[u8]) -> String {
     files.contents = contents.to_vec();
     match build_with(&python_sandboxed(name), None, &files, PythonCStack::MODULE) {
         Err(Error::SettingsLoad(error)) => match error.cause() {
-            SettingsLoadCause::Os(_) => "OSError".to_owned(),
-            SettingsLoadCause::UnicodeDecode(cause) => format!(
+            SettingsLoadCauseError::Os(_) => "OSError".to_owned(),
+            SettingsLoadCauseError::UnicodeDecode(cause) => format!(
                 "UnicodeDecodeError {} {:?} {} {} {:?}",
                 cause.encoding(),
                 cause.object(),
@@ -671,9 +671,9 @@ fn load_cause(name: &str, contents: &[u8]) -> String {
                 cause.end(),
                 cause.reason()
             ),
-            SettingsLoadCause::JsonDecode(_) => "JSONDecodeError".to_owned(),
-            SettingsLoadCause::Integer(_) => "ValueError".to_owned(),
-            SettingsLoadCause::Type(_) => "TypeError".to_owned(),
+            SettingsLoadCauseError::JsonDecode(_) => "JSONDecodeError".to_owned(),
+            SettingsLoadCauseError::Integer(_) => "ValueError".to_owned(),
+            SettingsLoadCauseError::Type(_) => "TypeError".to_owned(),
         },
         Err(error) => format!("not a settings load error: {error}"),
         Ok(_) => "loaded".to_owned(),

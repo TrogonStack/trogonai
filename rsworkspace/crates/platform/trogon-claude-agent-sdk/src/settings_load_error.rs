@@ -8,7 +8,7 @@ use crate::{
 /// The exception Python `_build_settings_value` caught and raised again: the `__cause__` of its
 /// `CLIConnectionError`. `Display` is `str()` of that exception.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum SettingsLoadCause {
+pub enum SettingsLoadCauseError {
     /// An `OSError` opening or reading the settings file, holding its `str()`.
     #[error("{0}")]
     Os(String),
@@ -36,16 +36,16 @@ pub enum SettingsLoadCause {
 #[error("Failed to load settings: {cause}")]
 pub struct SettingsLoadError {
     #[source]
-    cause: SettingsLoadCause,
+    cause: SettingsLoadCauseError,
 }
 
 impl SettingsLoadError {
-    pub(crate) fn new(cause: SettingsLoadCause) -> Self {
+    pub(crate) fn new(cause: SettingsLoadCauseError) -> Self {
         Self { cause }
     }
 
     /// The exception Python caught, whose `str()` follows `Failed to load settings: ` in the message.
-    pub fn cause(&self) -> &SettingsLoadCause {
+    pub fn cause(&self) -> &SettingsLoadCauseError {
         &self.cause
     }
 }

@@ -534,7 +534,7 @@ pub use setting_source::SettingSource;
 pub use settings_dialect::SettingsDialect;
 pub use settings_input::SettingsInput;
 pub use settings_json::js_stringify;
-pub use settings_load_error::{SettingsLoadCause, SettingsLoadError};
+pub use settings_load_error::{SettingsLoadCauseError, SettingsLoadError};
 pub use settings_resolve::{
     filter_escalating_default_mode, resolve_python_settings, resolve_python_settings_with,
     resolve_python_settings_with_state, resolve_settings, resolve_settings_in_dialect,

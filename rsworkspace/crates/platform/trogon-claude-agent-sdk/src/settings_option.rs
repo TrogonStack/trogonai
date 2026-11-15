@@ -15,8 +15,8 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use crate::{
-    ClaudeAgentOptions, Error, ManagedSettingsDelivery, OptionError, SandboxSettings, SettingsInput, SettingsLoadCause,
-    SettingsLoadError,
+    ClaudeAgentOptions, Error, ManagedSettingsDelivery, OptionError, SandboxSettings, SettingsInput,
+    SettingsLoadCauseError, SettingsLoadError,
     adapters::ReadFile,
     constants::{
         SANDBOX_FORBIDDEN_KEYS, SANDBOX_MERGED_LISTS, SANDBOX_PROXY_PORTS, SANDBOX_REPLACED_OBJECTS,
@@ -350,7 +350,7 @@ where
     let Some(sandbox) = &options.sandbox else {
         return Ok(settings.filter(|text| !text.is_empty()));
     };
-    let failed = |cause: SettingsLoadCause| -> Error { SettingsLoadError::new(cause).into() };
+    let failed = |cause: SettingsLoadCauseError| -> Error { SettingsLoadError::new(cause).into() };
     let sandbox = PythonJsonValue::from(&Value::Object(sandbox_object(sandbox)?));
     let mut document = PythonJsonValue::Object(IndexMap::new());
     if let Some(settings) = settings {
@@ -361,18 +361,22 @@ where
             let path = python_join(options.cwd.as_deref(), &trimmed);
             let bytes = files
                 .read_file(&path)
-                .map_err(|error| failed(SettingsLoadCause::Os(python_os_error(&error, &path))))?;
-            read_text_utf8_sig(&bytes).map_err(|error| failed(SettingsLoadCause::UnicodeDecode(error)))?
+                .map_err(|error| failed(SettingsLoadCauseError::Os(python_os_error(&error, &path))))?;
+            read_text_utf8_sig(&bytes).map_err(|error| failed(SettingsLoadCauseError::UnicodeDecode(error)))?
         };
         document = loads_text(&text, stack.json_depth()).map_err(|error| match error {
             PythonJsonError::Recursion(_) => OptionError::new(error.to_string()).into(),
-            PythonJsonError::Decode(error) => failed(SettingsLoadCause::JsonDecode(error)),
-            PythonJsonError::Integer(error) => failed(SettingsLoadCause::Integer(error)),
+            PythonJsonError::Decode(error) => failed(SettingsLoadCauseError::JsonDecode(error)),
+            PythonJsonError::Integer(error) => failed(SettingsLoadCauseError::Integer(error)),
         })?;
     }
     let mut map = match &mut document {
         PythonJsonValue::Object(map) => std::mem::take(map),
-        other => return Err(failed(SettingsLoadCause::Type(python_type_error(other).to_owned()))),
+        other => {
+            return Err(failed(SettingsLoadCauseError::Type(
+                python_type_error(other).to_owned(),
+            )));
+        }
     };
     map.insert("sandbox".into(), sandbox);
     let document = PythonJsonValue::Object(map);
