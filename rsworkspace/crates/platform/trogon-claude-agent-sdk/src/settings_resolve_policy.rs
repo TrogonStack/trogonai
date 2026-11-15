@@ -273,25 +273,12 @@ fn read_file_tier<H: SettingsHost>(
     }
     let machine_holds = mdm.mdm.has_policy_content || mdm.mdm.load_state == LoadState::DidNotLoad;
     if mdm.wsl_inherits {
-        let windows = wsl_managed_directory();
-        let windows_keeps_held = if held.is_empty() {
-            None
-        } else {
-            Some(
-                machine_holds
-                    || read_managed_directory(
-                        host,
-                        Some(&windows),
-                        &[],
-                        &mut |document: &TierRead, _: Rewritable<'_>| document.settings.clone(),
-                        reader,
-                    )?
-                    .lo(),
-            )
-        };
-        let windows_held: &[TierRead] = if windows_keeps_held == Some(true) { held } else { &[] };
-        let windows_side = read_managed_directory(host, Some(&windows), windows_held, filter, reader)?;
-        if windows_keeps_held.unwrap_or_else(|| windows_side.lo() || machine_holds) {
+        // Upstream also hands the held documents to the Windows side when it keeps them, but no evaluation that
+        // inherits the Windows settings holds any: an organization session inherits them only while the kernel says
+        // WSL (`Gc`), and in that same evaluation `GP` settles the WSL registry tool as writable by nobody (`_X(!0)`),
+        // so `_E` holds no registry document; a re-read replaces the whole evaluation, never one of the two.
+        let windows_side = read_managed_directory(host, Some(&wsl_managed_directory()), &[], filter, reader)?;
+        if windows_side.lo() || machine_holds {
             return Ok(windows_side);
         }
         let mut local_tier = read_managed_directory(host, Some(&local), held, filter, reader)?;
@@ -968,12 +955,13 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
     } else {
         let mut merged = SettingsMap::new();
         let parent_part = slice.clone().unwrap_or_default();
-        if let Some(error) = reader.merge_admin(&mut merged, &parent_part).rejection() {
-            return Err(error);
-        }
         let kept = admin.as_ref().map(|admin| omit(admin, &released)).unwrap_or_default();
-        if let Some(error) = reader.merge_admin(&mut merged, &kept).rejection() {
-            return Err(error);
+        // Upstream merges the parent's slice and the admin settings in one lodash merge
+        // (`On({}, a ?? {}, $n(i ?? {}, g), ao)`), which stops at the first source it runs out of stack on.
+        for part in [&parent_part, &kept] {
+            if let Some(error) = reader.merge_admin(&mut merged, part).rejection() {
+                return Err(error);
+            }
         }
         if let Some(slice) = &slice {
             for key in ["availableModelsMatch"] {
