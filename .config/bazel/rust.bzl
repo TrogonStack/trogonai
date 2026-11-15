@@ -81,7 +81,8 @@ def workspace_crate(
         binaries = {},
         integration_tests = {},
         examples = {},
-        feature_variants = {}):
+        feature_variants = {},
+        **legacy):
     """Declares the library, binaries, tests, doctests, and examples Cargo builds for this package.
 
     Dependencies, features, and targets come from Cargo. The arguments carry only
@@ -110,6 +111,9 @@ def workspace_crate(
     relative to the crate, or labels when they start with `//`, `:`, or `@`.
     `{package}` in a `rustc_env` value becomes the crate's Bazel package path.
     """
+    # Accept legacy generated BUILD metadata while deriving the canonical values from Cargo.
+    _ = legacy
+
     package = native.package_name()
     crate = CRATES.get(package)
     if crate == None:
