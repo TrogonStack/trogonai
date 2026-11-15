@@ -35,8 +35,9 @@ the prompt continue without its peer context; queued work remains available for
 retry. Only selected identifiers are forwarded, never prompt text, working
 directories, or transcript paths.
 
-The plugin registers the prompt hook only. There is no launch-time
-`SessionStart` MCP hook because MCP is unavailable at that point.
+`SessionEnd` calls `peer_detach_hook` with a one-second budget. Detach is best
+effort and preserves the durable inbox. There is no launch-time `SessionStart`
+MCP hook because MCP is unavailable at that point.
 
 Messages wait for the next prompt hook. The plugin starts no idle turn. Peer
 text is untrusted data, and an application acknowledgment does not prove task
