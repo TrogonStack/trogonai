@@ -1,0 +1,9 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "serverManagedSettings": {"permissions":{},"disableAllHooks":true,"env":{"E":"1"},"sandbox":{"enabled":true,"enabledPlatforms":["macos"]}}
+  }
+}

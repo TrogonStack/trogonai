@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Build the decider components the sim fixtures and wasm decider checks load"
+#MISE depends=["artifacts:wasm-components"]
+set -euo pipefail

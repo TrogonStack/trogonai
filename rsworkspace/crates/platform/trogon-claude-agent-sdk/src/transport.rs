@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use crate::{Error, JsonObject};
+use crate::{Error, JsonObject, McpWireIds};
 
 /// Raw I/O with a Claude Code process or service, the Rust form of Python's `Transport` abstract class.
 ///
@@ -34,14 +34,35 @@ pub trait Transport: Send + 'static {
     /// from [`Transport::close`]; the driver turns it into the same result error upstream raises.
     fn read_message(&mut self) -> impl Future<Output = Result<Option<JsonObject>, Error>> + Send;
 
+    /// The `mcp_message` ids of the object [`Transport::read_message`] returned last, as the line spelled them.
+    ///
+    /// Python reads ids with `json.loads`, so an id can be an integer of any size, which a `JsonObject` cannot
+    /// hold. A transport that reads lines can scan each one with [`crate::McpWireScan`], parse
+    /// `McpWireScan::frame`, and return `McpWireScan::into_ids` here. The default reports none, so a message keeps
+    /// the ids its `JsonObject` holds.
+    fn take_wire_ids(&mut self) -> Option<McpWireIds> {
+        None
+    }
+
     /// Python `close`: release the connection and clean up. It must bound its own waits.
     fn close(&mut self) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Python `is_ready`: whether the transport can still be written to.
     fn is_ready(&self) -> bool;
 
+    /// Whether the driver may hand [`Transport::write`] another document. The default is
+    /// [`Transport::is_ready`]. A transport whose `write` waits for its own connection, as the TypeScript SSE
+    /// transport awaits its first readiness, accepts writes before it is ready, and only stops once it closes.
+    fn accepts_writes(&self) -> bool {
+        self.is_ready()
+    }
+
     /// Python `end_input`: no more documents will be written (stdin is closed for a process).
     fn end_input(&mut self) -> impl Future<Output = Result<(), Error>> + Send;
+
+    /// TypeScript `transport.expectControlResponse?.(id)`: called with the id of each control request before it is
+    /// written, so a transport that filters inbound frames can tell which answers to expect. The default ignores it.
+    fn expect_control_response(&mut self, _request_id: &str) {}
 
     /// TypeScript `SpawnedProcess.kill` and `abortController.abort()`: stop the peer now, without waiting for it
     /// to finish. Called before [`Transport::close`] when the run ends on an error or an abort. The default does

@@ -34,7 +34,7 @@ use crate::{
 #[derive(Debug, thiserror::Error)]
 pub enum SessionMutationError {
     #[error("invalid session id: {0}")]
-    InvalidSessionId(String),
+    InvalidSessionIdError(String),
     #[error("invalid message id: {0}")]
     InvalidMessageId(String),
     #[error("title must be non-empty")]
@@ -56,6 +56,12 @@ pub enum SessionMutationError {
     /// The TypeScript chain rebuild threw on malformed compaction metadata.
     #[error("session transcript could not be linked")]
     Messages(#[source] MessagesError),
+    /// TypeScript `Ute` kept changing the text for ten rounds; the payload is the first 100 UTF-16 units of the input.
+    #[error("Unicode sanitization reached maximum iterations (10) for input: {0}")]
+    UnicodeSanitization(String),
+    /// No home directory for the config directory, where Python raises `RuntimeError`.
+    #[error(transparent)]
+    HomeDirectory(#[from] crate::HomeDirectoryError),
 }
 
 impl From<ForkTsError> for SessionMutationError {
@@ -403,7 +409,7 @@ impl SessionFiles {
 }
 
 fn checked_session_id(session_id: &str) -> Result<&str, SessionMutationError> {
-    valid_uuid(session_id).ok_or_else(|| SessionMutationError::InvalidSessionId(session_id.to_owned()))
+    valid_uuid(session_id).ok_or_else(|| SessionMutationError::InvalidSessionIdError(session_id.to_owned()))
 }
 
 fn not_found(session_id: &str, directory: Option<&Path>) -> SessionMutationError {
@@ -468,6 +474,44 @@ pub(crate) fn sanitize_unicode(value: &str) -> String {
         }
     }
     current
+}
+
+/// TypeScript `Ute`: ASCII passes through; anything else is NFKC-normalized and stripped of format, private-use and
+/// unassigned characters (`Lte`) for ten rounds at most. Reaching the tenth round is an error even when the text has
+/// settled by then, as upstream.
+pub(crate) fn sanitize_unicode_ts(value: &str) -> Result<String, SessionMutationError> {
+    if value.is_ascii() {
+        return Ok(value.to_owned());
+    }
+    let mut current = value.to_owned();
+    let mut previous = String::new();
+    let mut rounds = 0;
+    while current != previous && rounds < 10 {
+        previous = current;
+        current = strip_unassigned(&previous.nfkc().collect::<String>());
+        rounds += 1;
+    }
+    if rounds >= 10 {
+        let units: Vec<u16> = value.encode_utf16().take(100).collect();
+        return Err(SessionMutationError::UnicodeSanitization(String::from_utf16_lossy(
+            &units,
+        )));
+    }
+    Ok(current)
+}
+
+/// TypeScript `Lte`: drops `\p{Cf}`, `\p{Co}` and `\p{Cn}` plus the bidi, zero-width and private-use ranges.
+fn strip_unassigned(text: &str) -> String {
+    text.chars()
+        .filter(|c| {
+            !matches!(
+                get_general_category(*c),
+                GeneralCategory::Format | GeneralCategory::PrivateUse | GeneralCategory::Unassigned
+            ) && !matches!(*c,
+                '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}'
+                | '\u{e000}'..='\u{f8ff}')
+        })
+        .collect()
 }
 
 /// Python `str.splitlines()`, which also breaks on `\r`, vertical tab, form feed, the information separators,
@@ -723,36 +767,23 @@ pub(crate) fn build_fork_lines(
     Ok((forked_session_id, lines))
 }
 
-fn environment_files() -> Option<SessionFiles> {
-    SessionFiles::from_environment()
-}
-
-fn unresolved(session_id: &str) -> SessionMutationError {
-    SessionMutationError::NotFound {
-        session_id: session_id.to_owned(),
-        directory: None,
-    }
+fn environment_files() -> Result<SessionFiles, SessionMutationError> {
+    Ok(SessionFiles::from_environment()?)
 }
 
 /// [`SessionFiles::rename_session`] over the environment's config directory.
 pub fn rename_session(session_id: &str, title: &str, directory: Option<&Path>) -> Result<(), SessionMutationError> {
-    environment_files()
-        .ok_or_else(|| unresolved(session_id))?
-        .rename_session(session_id, title, directory)
+    environment_files()?.rename_session(session_id, title, directory)
 }
 
 /// [`SessionFiles::tag_session`] over the environment's config directory.
 pub fn tag_session(session_id: &str, tag: Option<&str>, directory: Option<&Path>) -> Result<(), SessionMutationError> {
-    environment_files()
-        .ok_or_else(|| unresolved(session_id))?
-        .tag_session(session_id, tag, directory)
+    environment_files()?.tag_session(session_id, tag, directory)
 }
 
 /// [`SessionFiles::delete_session`] over the environment's config directory.
 pub fn delete_session(session_id: &str, directory: Option<&Path>) -> Result<(), SessionMutationError> {
-    environment_files()
-        .ok_or_else(|| unresolved(session_id))?
-        .delete_session(session_id, directory)
+    environment_files()?.delete_session(session_id, directory)
 }
 
 /// [`SessionFiles::fork_session`] over the environment's config directory.
@@ -762,10 +793,5 @@ pub fn fork_session(
     up_to_message_id: Option<&str>,
     title: Option<&str>,
 ) -> Result<ForkSessionResult, SessionMutationError> {
-    environment_files().ok_or_else(|| unresolved(session_id))?.fork_session(
-        session_id,
-        directory,
-        up_to_message_id,
-        title,
-    )
+    environment_files()?.fork_session(session_id, directory, up_to_message_id, title)
 }

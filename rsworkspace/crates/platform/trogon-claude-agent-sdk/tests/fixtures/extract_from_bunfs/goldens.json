@@ -1,0 +1,1207 @@
+{
+  "source": "extractFromBunfs.js",
+  "hash": "910b1eae503c8208",
+  "big_hash": "866d320b1bcc0bb5",
+  "cases": [
+    {
+      "id": "fresh_extraction",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude-agent-sdk-{hash}"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "second_call_reuses_the_copy",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 2,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude",
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "tampered_copy_with_the_same_length_is_replaced",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude",
+          "content": "clbude-binary-bytes\n"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 493,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "tampered_copy_with_another_length_is_replaced",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude",
+          "content": "short"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 493,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "hard_linked_copy_is_replaced",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/elsewhere",
+          "content": "claude-binary-bytes\n"
+        },
+        {
+          "op": "mkdir",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}"
+        },
+        {
+          "op": "link",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude",
+          "target": "{root}/elsewhere"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        },
+        "{root}/elsewhere": {
+          "kind": "file",
+          "mode": 420,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "symlinked_copy_is_replaced",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/elsewhere",
+          "content": "claude-binary-bytes\n"
+        },
+        {
+          "op": "mkdir",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}"
+        },
+        {
+          "op": "symlink",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude",
+          "target": "{root}/elsewhere"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        },
+        "{root}/elsewhere": {
+          "kind": "file",
+          "mode": 420,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "loose_extraction_root_is_tightened",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "mkdir",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}",
+          "mode": 493
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude-agent-sdk-{hash}"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "embedded_name_is_kept",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude.exe",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude.exe",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude.exe"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude.exe": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "content_over_one_chunk_is_compared_in_full",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "@big",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 2,
+      "hash": "866d320b1bcc0bb5",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude",
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        }
+      }
+    },
+    {
+      "id": "content_over_one_chunk_with_a_late_difference_is_replaced",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "@big",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude",
+          "content": "@big_late"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "866d320b1bcc0bb5",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 493,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        }
+      }
+    },
+    {
+      "id": "missing_embedded_file",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "/$bunfs/root/definitely-missing",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "/$bunfs/root/definitely-missing"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: ENOENT: no such file or directory, open '/$bunfs/root/definitely-missing'. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {}
+    },
+    {
+      "id": "missing_embedded_file_with_the_windows_marker",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "B:\\~BUN\\root\\claude.exe",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "B:\\~BUN\\root\\claude.exe"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: ENOENT: no such file or directory, open 'B:\\~BUN\\root\\claude.exe'. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {}
+    },
+    {
+      "id": "embedded_directory",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs",
+      "setup": [
+        {
+          "op": "mkdir",
+          "path": "{root}/$bunfs"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/$bunfs"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: EISDIR: illegal operation on a directory, read. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {}
+    },
+    {
+      "id": "temp_directory_is_a_file",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/tmp",
+          "content": "file"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/$bunfs/root/claude"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: ENOTDIR: not a directory, mkdir '{root}/tmp/claude-agent-sdk-{uid}'. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {}
+    },
+    {
+      "id": "extraction_root_is_a_symlink",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "mkdir",
+          "path": "{root}/real-root"
+        },
+        {
+          "op": "symlink",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}",
+          "target": "{root}/real-root"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/$bunfs/root/claude"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: Temp directory {root}/tmp/claude-agent-sdk-{uid} is not a directory (may be an attacker-planted symlink). Refusing to use it.. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {}
+    },
+    {
+      "id": "extraction_root_owned_by_another_uid",
+      "platform": "linux",
+      "uid": "fake",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/$bunfs/root/claude"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: Temp directory {root}/tmp/claude-agent-sdk-{fake_uid} is owned by uid {uid}, expected {fake_uid}. Refusing to use it \u2014 another user may have pre-created it.. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {}
+    },
+    {
+      "id": "hash_directory_is_a_symlink",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "mkdir",
+          "path": "{root}/real-hash"
+        },
+        {
+          "op": "mkdir",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}"
+        },
+        {
+          "op": "symlink",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}",
+          "target": "{root}/real-hash"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/$bunfs/root/claude"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: The claude-agent-sdk-<hash> folder under the temp directory is a symlink or not a directory, possibly planted; delete it and restart. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {}
+    },
+    {
+      "id": "rename_onto_a_directory",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude/inner",
+          "content": "x"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/$bunfs/root/claude"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: EISDIR: illegal operation on a directory, rename '{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude.tmp.{pid}.{random}' -> '{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude'. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 493,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        }
+      }
+    },
+    {
+      "id": "windows_platform_extracts_without_uid",
+      "platform": "win32",
+      "uid": "none",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude-agent-sdk-{hash}"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "windows_platform_reuses_the_copy",
+      "platform": "win32",
+      "uid": "none",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 2,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude",
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "windows_platform_replaces_a_tampered_copy",
+      "platform": "win32",
+      "uid": "none",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude",
+          "content": "short"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "windows_platform_replaces_a_symlinked_copy",
+      "platform": "win32",
+      "uid": "none",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/elsewhere",
+          "content": "claude-binary-bytes\n"
+        },
+        {
+          "op": "mkdir",
+          "path": "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}"
+        },
+        {
+          "op": "symlink",
+          "path": "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude",
+          "target": "{root}/elsewhere"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        },
+        "{root}/elsewhere": {
+          "kind": "file",
+          "mode": 420,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "windows_platform_with_a_uid_keeps_the_plain_root_name",
+      "platform": "win32",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude-agent-sdk-{hash}"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "windows_platform_ignores_a_temp_directory_that_is_a_file",
+      "platform": "win32",
+      "uid": "none",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [
+        {
+          "op": "write",
+          "path": "{root}/tmp",
+          "content": "file"
+        }
+      ],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/$bunfs/root/claude"
+      ],
+      "warnings": [
+        "[claude-agent-sdk] Failed to extract CLI from $bunfs: ENOTDIR: not a directory, mkdir '{root}/tmp/claude-agent-sdk/claude-agent-sdk-{hash}'. Child processes cannot access $bunfs paths \u2014 the CLI will likely fail to start."
+      ],
+      "files": {}
+    },
+    {
+      "id": "os_temp_directory_on_linux",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "",
+        "TMPDIR": "{root}/tmp"
+      },
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": "claude-binary-bytes\n"
+        }
+      }
+    },
+    {
+      "id": "passes_a_plain_path_through",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "claude-binary-bytes\n",
+      "embedded": "/usr/local/bin/claude",
+      "setup": [],
+      "env": {},
+      "calls": 1,
+      "hash": "910b1eae503c8208",
+      "returns": [
+        "/usr/local/bin/claude"
+      ],
+      "warnings": [],
+      "files": {}
+    }
+  ],
+  "joins": [
+    {
+      "parts": [],
+      "posix": ".",
+      "win32": "."
+    },
+    {
+      "parts": [
+        "x"
+      ],
+      "posix": "x",
+      "win32": "x"
+    },
+    {
+      "parts": [
+        "/a/.."
+      ],
+      "posix": "/",
+      "win32": "\\"
+    },
+    {
+      "parts": [
+        "a/..",
+        "/"
+      ],
+      "posix": "./",
+      "win32": ".\\"
+    },
+    {
+      "parts": [
+        "a/.."
+      ],
+      "posix": ".",
+      "win32": "."
+    },
+    {
+      "parts": [
+        "/"
+      ],
+      "posix": "/",
+      "win32": "\\"
+    },
+    {
+      "parts": [
+        "\\"
+      ],
+      "posix": "\\",
+      "win32": "\\"
+    },
+    {
+      "parts": [
+        "C:"
+      ],
+      "posix": "C:",
+      "win32": "C:."
+    },
+    {
+      "parts": [
+        "//server//share//dir"
+      ],
+      "posix": "/server/share/dir",
+      "win32": "\\\\server\\share\\dir"
+    },
+    {
+      "parts": [
+        "\\\\server\\share\\"
+      ],
+      "posix": "\\\\server\\share\\",
+      "win32": "\\\\server\\share\\"
+    },
+    {
+      "parts": [
+        "\\\\server\\\\"
+      ],
+      "posix": "\\\\server\\\\",
+      "win32": "\\server\\"
+    },
+    {
+      "parts": [
+        ""
+      ],
+      "posix": ".",
+      "win32": "."
+    },
+    {
+      "parts": [
+        "/tmp",
+        "claude-agent-sdk-501"
+      ],
+      "posix": "/tmp/claude-agent-sdk-501",
+      "win32": "\\tmp\\claude-agent-sdk-501"
+    },
+    {
+      "parts": [
+        "/tmp/",
+        "claude-agent-sdk-501"
+      ],
+      "posix": "/tmp/claude-agent-sdk-501",
+      "win32": "\\tmp\\claude-agent-sdk-501"
+    },
+    {
+      "parts": [
+        "/a//b/",
+        "c"
+      ],
+      "posix": "/a/b/c",
+      "win32": "\\a\\b\\c"
+    },
+    {
+      "parts": [
+        "/a/./b/../c",
+        "d"
+      ],
+      "posix": "/a/c/d",
+      "win32": "\\a\\c\\d"
+    },
+    {
+      "parts": [
+        "a",
+        "..",
+        "..",
+        "b"
+      ],
+      "posix": "../b",
+      "win32": "..\\b"
+    },
+    {
+      "parts": [
+        "/..",
+        "x"
+      ],
+      "posix": "/x",
+      "win32": "\\x"
+    },
+    {
+      "parts": [
+        "",
+        "x"
+      ],
+      "posix": "x",
+      "win32": "x"
+    },
+    {
+      "parts": [
+        "x",
+        ""
+      ],
+      "posix": "x",
+      "win32": "x"
+    },
+    {
+      "parts": [
+        ".",
+        "."
+      ],
+      "posix": ".",
+      "win32": "."
+    },
+    {
+      "parts": [
+        "a/",
+        ""
+      ],
+      "posix": "a/",
+      "win32": "a\\"
+    },
+    {
+      "parts": [
+        "C:\\Users\\me\\AppData\\Local\\Temp",
+        "claude-agent-sdk"
+      ],
+      "posix": "C:\\Users\\me\\AppData\\Local\\Temp/claude-agent-sdk",
+      "win32": "C:\\Users\\me\\AppData\\Local\\Temp\\claude-agent-sdk"
+    },
+    {
+      "parts": [
+        "C:/Temp/",
+        "claude-agent-sdk",
+        "x"
+      ],
+      "posix": "C:/Temp/claude-agent-sdk/x",
+      "win32": "C:\\Temp\\claude-agent-sdk\\x"
+    },
+    {
+      "parts": [
+        "C:",
+        "x"
+      ],
+      "posix": "C:/x",
+      "win32": "C:\\x"
+    },
+    {
+      "parts": [
+        "C:\\",
+        "..",
+        "x"
+      ],
+      "posix": "x",
+      "win32": "C:\\x"
+    },
+    {
+      "parts": [
+        "\\\\server\\share\\dir",
+        "x"
+      ],
+      "posix": "\\\\server\\share\\dir/x",
+      "win32": "\\\\server\\share\\dir\\x"
+    },
+    {
+      "parts": [
+        "\\\\server\\share",
+        "x"
+      ],
+      "posix": "\\\\server\\share/x",
+      "win32": "\\\\server\\share\\x"
+    },
+    {
+      "parts": [
+        "\\\\server",
+        "x"
+      ],
+      "posix": "\\\\server/x",
+      "win32": "\\\\server\\x\\"
+    },
+    {
+      "parts": [
+        "//server/share/",
+        "..",
+        "y"
+      ],
+      "posix": "/server/y",
+      "win32": "\\\\server\\share\\y"
+    },
+    {
+      "parts": [
+        "\\\\",
+        "x"
+      ],
+      "posix": "\\\\/x",
+      "win32": "\\x"
+    },
+    {
+      "parts": [
+        "\\\\\\a",
+        "b"
+      ],
+      "posix": "\\\\\\a/b",
+      "win32": "\\a\\b"
+    },
+    {
+      "parts": [
+        "\\a\\b",
+        "..",
+        "..",
+        "..",
+        "c"
+      ],
+      "posix": "../../c",
+      "win32": "\\c"
+    },
+    {
+      "parts": [
+        "a\\b",
+        "..",
+        "..",
+        "..",
+        "c"
+      ],
+      "posix": "../../c",
+      "win32": "..\\c"
+    },
+    {
+      "parts": [
+        "C:a",
+        "..",
+        "..",
+        "b"
+      ],
+      "posix": "../b",
+      "win32": "C:..\\b"
+    },
+    {
+      "parts": [
+        "/",
+        "x"
+      ],
+      "posix": "/x",
+      "win32": "\\x"
+    },
+    {
+      "parts": [
+        "\\",
+        "x"
+      ],
+      "posix": "\\/x",
+      "win32": "\\x"
+    },
+    {
+      "parts": [
+        "x/y/",
+        ""
+      ],
+      "posix": "x/y/",
+      "win32": "x\\y\\"
+    },
+    {
+      "parts": [
+        "x\\y\\",
+        ""
+      ],
+      "posix": "x\\y\\",
+      "win32": "x\\y\\"
+    }
+  ],
+  "errors": {
+    "EACCES": "permission denied",
+    "EBUSY": "resource busy or locked",
+    "EEXIST": "file already exists",
+    "EINVAL": "invalid argument",
+    "EIO": "i/o error",
+    "EISDIR": "illegal operation on a directory",
+    "ELOOP": "too many symbolic links encountered",
+    "EMFILE": "too many open files",
+    "ENAMETOOLONG": "name too long",
+    "ENOENT": "no such file or directory",
+    "ENOMEM": "not enough memory",
+    "ENOSPC": "no space left on device",
+    "ENOTDIR": "not a directory",
+    "ENOTEMPTY": "directory not empty",
+    "EPERM": "operation not permitted",
+    "EROFS": "read-only file system",
+    "EXDEV": "cross-device link not permitted"
+  }
+}
