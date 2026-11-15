@@ -2279,6 +2279,24 @@ async fn contending_preparers_return_the_same_winner_and_track_the_losing_cache_
     Ok(())
 }
 
+#[tokio::test]
+async fn lost_append_reply_keeps_the_possibly_winning_presentation_out_of_orphan_collection() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("key", "durable winner").await?;
+    f.store.lose_append_reply.store(true, Ordering::SeqCst);
+    assert!(f.app().prepare_batch(&f.bob, f.prepare()).await.is_err());
+    assert!(
+        f.cache
+            .orphans
+            .lock()
+            .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+            .is_empty()
+    );
+    let replay = f.app().prepare_batch(&f.bob, f.prepare()).await?;
+    assert_eq!(replay.messages[0].text.as_deref(), Some("durable winner"));
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum MalformedHistoryField {
     MissingCollaboration,
