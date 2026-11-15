@@ -43,7 +43,8 @@ fn mcp_tool_input_schema_preserves_json_and_validates_arguments() -> Result<(), 
         "$defs":{"text":{"type":"string"}},
         "x-extension":{"nested":[1,null]},
     });
-    let schema = McpToolInputSchema::new(serde_json::from_value(original.clone())?)?;
+    let schema = McpToolInputSchema::new(serde_json::from_value(original.clone())?);
+    assert!(McpToolInputSchema::validated(serde_json::from_value(original.clone())?).is_ok());
     assert_eq!(serde_json::to_value(schema.as_json())?, original);
     assert!(schema.is_valid(&json!({"value":"accepted"})));
     assert!(!schema.is_valid(&json!({"value":1})));
@@ -54,7 +55,7 @@ fn mcp_tool_input_schema_preserves_json_and_validates_arguments() -> Result<(), 
 }
 
 #[test]
-fn mcp_tool_input_schema_rejects_non_object_declarations() -> Result<(), Box<dyn std::error::Error>> {
+fn validated_mcp_tool_input_schema_rejects_non_object_declarations() -> Result<(), Box<dyn std::error::Error>> {
     for schema in [
         json!({}),
         json!({"type":"string"}),
@@ -62,26 +63,28 @@ fn mcp_tool_input_schema_rejects_non_object_declarations() -> Result<(), Box<dyn
         json!({"type":["object","null"]}),
     ] {
         assert!(matches!(
-            McpToolInputSchema::new(serde_json::from_value(schema)?),
+            McpToolInputSchema::validated(serde_json::from_value(schema.clone())?),
             Err(McpToolInputSchemaError::NotObject)
         ));
+        let accepted = McpToolInputSchema::new(serde_json::from_value(schema.clone())?);
+        assert_eq!(serde_json::to_value(accepted.as_json())?, schema);
     }
     Ok(())
 }
 
 #[test]
-fn mcp_tool_input_schema_rejects_malformed_schema() -> Result<(), Box<dyn std::error::Error>> {
+fn validated_mcp_tool_input_schema_rejects_malformed_schema() -> Result<(), Box<dyn std::error::Error>> {
     assert!(matches!(
-        McpToolInputSchema::new(serde_json::from_value(json!({"type":"object","properties":42}))?),
+        McpToolInputSchema::validated(serde_json::from_value(json!({"type":"object","properties":42}))?),
         Err(McpToolInputSchemaError::Schema(OutputSchemaError::Invalid(_)))
     ));
     Ok(())
 }
 
 #[test]
-fn mcp_tool_input_schema_rejects_external_references() -> Result<(), Box<dyn std::error::Error>> {
+fn validated_mcp_tool_input_schema_rejects_external_references() -> Result<(), Box<dyn std::error::Error>> {
     assert!(matches!(
-        McpToolInputSchema::new(serde_json::from_value(json!({
+        McpToolInputSchema::validated(serde_json::from_value(json!({
             "type":"object",
             "properties":{"value":{"$ref":"https://example.com/schema"}},
         }))?),
@@ -92,8 +95,21 @@ fn mcp_tool_input_schema_rejects_external_references() -> Result<(), Box<dyn std
 
 #[test]
 fn output_schema_retains_its_general_schema_contract() -> Result<(), Box<dyn std::error::Error>> {
-    let schema = OutputSchema::new(serde_json::from_value(json!({"type":"string"}))?)?;
+    let schema = OutputSchema::new(serde_json::from_value(json!({"type":"string"}))?);
     assert!(schema.is_valid(&json!("accepted")));
     assert!(!schema.is_valid(&json!({})));
+    Ok(())
+}
+
+#[test]
+fn output_schemas_with_external_references_are_kept_like_both_upstream_sdks() -> Result<(), Box<dyn std::error::Error>>
+{
+    let declared = json!({"type":"object","properties":{"value":{"$ref":"https://example.com/schema"}}});
+    let schema = OutputSchema::new(serde_json::from_value(declared.clone())?);
+    assert_eq!(serde_json::to_value(schema.as_json())?, declared);
+    assert!(matches!(
+        OutputSchema::validated(serde_json::from_value(declared)?),
+        Err(OutputSchemaError::ExternalReference)
+    ));
     Ok(())
 }

@@ -1,5 +1,10 @@
-#[derive(Clone)]
-pub struct McpUrl(url::Url);
+/// An external MCP server endpoint, stored and sent verbatim like both upstream SDKs do.
+///
+/// `McpUrl::from` keeps any text. `McpUrl::validated` is an opt-in check that neither upstream SDK
+/// performs: it refuses non-HTTP(S) schemes, embedded credentials and fragments, and still keeps the
+/// original text unchanged.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct McpUrl(String);
 
 #[derive(Debug, thiserror::Error)]
 pub enum McpUrlError {
@@ -14,21 +19,34 @@ pub enum McpUrlError {
 }
 
 impl McpUrl {
-    pub fn new(value: &str) -> Result<Self, McpUrlError> {
-        let value = url::Url::parse(value)?;
-        if !matches!(value.scheme(), "http" | "https") {
+    pub fn validated(value: &str) -> Result<Self, McpUrlError> {
+        let parsed = url::Url::parse(value)?;
+        if !matches!(parsed.scheme(), "http" | "https") {
             return Err(McpUrlError::Scheme);
         }
-        if !value.username().is_empty() || value.password().is_some() {
+        if !parsed.username().is_empty() || parsed.password().is_some() {
             return Err(McpUrlError::Credentials);
         }
-        if value.fragment().is_some() {
+        if parsed.fragment().is_some() {
             return Err(McpUrlError::Fragment);
         }
-        Ok(Self(value))
+        Ok(Self(value.to_owned()))
     }
+
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        &self.0
+    }
+}
+
+impl From<String> for McpUrl {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for McpUrl {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
     }
 }
 

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Build tsworkspace"
+#MISE depends=["build:web"]
+set -euo pipefail

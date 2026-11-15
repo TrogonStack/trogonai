@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "Hydro verification is experimental and disabled in CI." >&2
+    exit 2
+fi
+
+workspace="${BUILD_WORKSPACE_DIRECTORY:-${MISE_PROJECT_ROOT:-}}"
+if [[ -z "$workspace" ]]; then
+    echo "Run Hydro verification through mise or bazel run from the repository." >&2
+    exit 2
+fi
+
+exec env -u RUSTUP_TOOLCHAIN mise -C "$workspace/projects/hydro-verification" exec -- \
+    cargo test --locked --test decisions -- --nocapture "$@"

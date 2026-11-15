@@ -12,8 +12,23 @@ pub enum SessionError {
     MissingConfigDirectory,
     #[error("session configuration path is unsafe")]
     UnsafeConfigPath,
-    #[error("session store load timed out")]
-    LoadTimeout,
+    /// A store call exceeded the load timeout. The text is upstream's, e.g. `SessionStore.load() timed out after 60000ms
+    /// for session <id>`.
+    #[error("{0}")]
+    LoadTimeout(String),
+    /// A store call failed while a resume was materialized under the Python dialect, worded like Python's
+    /// `_with_timeout`: `<call> failed during resume materialization: <error>`, where `<error>` is the backend's own
+    /// message.
+    #[error("{call} failed during resume materialization: {}", python_str(source))]
+    ResumeStore {
+        call: String,
+        #[source]
+        source: SessionStoreError,
+    },
+    #[error("CLAUDE_CODE_CUSTOM_OAUTH_URL is not an approved endpoint.")]
+    UnapprovedOauthEndpoint,
+    #[error("Options.continue with sessionStore requires store.listSessions to be implemented")]
+    ContinueRequiresList,
     #[error("session resume exceeds the configured entry limit")]
     EntryLimit,
     #[error("session resume exceeds the configured byte limit")]
@@ -28,4 +43,14 @@ pub enum SessionError {
     MirrorFlushTimeout,
     #[error("transcript mirror worker stopped")]
     MirrorStopped,
+}
+
+/// `str(e)` of the exception a Python store raises: the backend's own message, and the empty text of the
+/// `NotImplementedError` an optional method the store leaves out raises.
+fn python_str(error: &SessionStoreError) -> String {
+    match error {
+        SessionStoreError::Backend(source) => source.to_string(),
+        SessionStoreError::Unsupported(_) => String::new(),
+        other => other.to_string(),
+    }
 }

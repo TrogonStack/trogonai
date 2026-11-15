@@ -72,7 +72,7 @@ function failed(result) {
 
 test('push compares real before/head commits and keeps the canary fix selective', (t) => {
   const f = fixture(t); const before = f.git('rev-parse', 'HEAD');
-  f.write('.config/mise/tasks/github-actions/canary-is-branch-tip', 'change');
+  f.write('.config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip', 'change');
   f.write('buf.gen.yaml', 'change');
   const after = f.commit();
   const result = f.run('push', { before, after });

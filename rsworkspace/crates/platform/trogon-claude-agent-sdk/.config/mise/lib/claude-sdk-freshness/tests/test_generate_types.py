@@ -167,6 +167,141 @@ class GenerateTypesTests(unittest.TestCase):
         self.assertIn("pub enum All {", output)
         self.assertNotIn("pub enum Result", output)
 
+    def generate_from(self, declarations: str, roots: list[str], **extra) -> subprocess.CompletedProcess:
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        result = self.run_generator(self.package(declarations), self.config(roots, **extra), Path(out.name))
+        result.output = (Path(out.name) / "generated.rs").read_text(encoding="utf-8") if result.returncode == 0 else ""
+        return result
+
+    TAGGED = '''
+import type { Foreign } from "other";
+export type Kind = "unknown" | "known" | null;
+export interface Base { type: "base"; payload: Foreign; kind: Kind }
+export interface Sub { type: "system"; subtype: "init"; first: Base["payload"]; maybe?: string }
+export interface Replay { type: "system"; subtype: "init"; isReplay: true; first: string }
+export interface Other { type: "system"; subtype: "other" | "more"; size: Sub["maybe"] }
+export type Message = Base | Sub | Replay | Other;
+'''
+
+    def test_foreign_types_take_the_configured_wire_shape(self):
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "object"}, tagged={"Message": ["type", "subtype", "isReplay"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pub payload: serde_json::Map<String, serde_json::Value>,", result.output)
+        self.assertNotIn("pub struct Foreign", result.output)
+
+    def test_indexed_access_resolves_to_the_named_property(self):
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "string"}, tagged={"Message": ["type", "subtype", "isReplay"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pub first: String,", result.output)
+        # An optional property read through an index can be absent, so it is nullable.
+        self.assertIn("pub size: Option<String>,", result.output)
+
+    def test_nullable_aliases_and_a_listed_unknown_value_keep_the_fallback_variant(self):
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "string"}, tagged={"Message": ["type", "subtype", "isReplay"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pub type Kind = Option<KindValue>;", result.output)
+        self.assertIn("    UnknownValue,", result.output)
+        self.assertIn('Self::UnknownValue => "unknown",', result.output)
+        self.assertIn("Unknown(String),", result.output)
+
+    def test_tagged_unions_dispatch_on_literal_tags_before_shape(self):
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "string"}, tagged={"Message": ["type", "subtype", "isReplay"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = result.output
+        self.assertIn('pub const TAGS: &\'static [&\'static str] = &["type", "subtype", "isReplay"];', output)
+        self.assertIn('super::support::tag_str(value, "type", &["system"]) && super::support::tag_str(value, "subtype", &["init"]) && super::support::tag_bool(value, "isReplay", &[true])', output)
+        self.assertIn('super::support::tag_str(value, "subtype", &["other", "more"])', output)
+        self.assertIn("super::support::keep_most_specific(&mut best, 3,", output)
+        self.assertIn("None => Self::Unknown(value),", output)
+
+    def test_tagged_unions_reject_members_that_pin_no_tag(self):
+        declarations = self.TAGGED + "export type Loose = Base | { other: string };\n"
+        result = self.generate_from(declarations, ["Loose"], foreign={"Foreign": "string"}, tagged={"Loose": ["type"]})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must list named members only", result.stderr)
+        result = self.generate_from(self.TAGGED, ["Message"], foreign={"Foreign": "unsupported"})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unsupported shape", result.stderr)
+
+    def test_an_inline_property_union_dispatches_on_its_configured_tag(self):
+        declarations = self.TAGGED + "export interface Holder { specific?: Base | Other }\n"
+        result = self.generate_from(declarations, ["Holder"], foreign={"Foreign": "string"}, tagged={"HolderSpecific": ["type"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('super::support::tag_str(value, "type", &["base"])', result.output)
+        self.assertIn("super::support::keep_most_specific(&mut best, 1,", result.output)
+        result = self.generate_from(declarations, ["Holder"], foreign={"Foreign": "string"}, tagged={"HolderSpecifc": ["type"]})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("tagged names HolderSpecifc, which is not a union emitted for", result.stderr)
+
+    INTERSECTED = '''
+export interface Base { id: string; agent?: string }
+export type Event = Base & { kind: "event"; agent: string; size?: number };
+export type Clash = Base & { id: number };
+/** The names. */
+export declare const NAMES: readonly ["a", "b-c"];
+export declare const BAD: readonly [1, 2];
+'''
+
+    def test_intersections_merge_their_members_and_a_required_redeclaration_wins(self):
+        result = self.generate_from(self.INTERSECTED, ["Event"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "pub struct Event {\n    pub id: String,\n    pub agent: String,\n    pub kind: EventKind,\n    pub size: Option<serde_json::Number>,",
+            result.output,
+        )
+        result = self.generate_from(self.INTERSECTED, ["Clash"])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Intersection declares id with two types", result.stderr)
+
+    def test_readonly_string_tuple_constants_become_rust_arrays(self):
+        result = self.generate_from(self.INTERSECTED, ["NAMES"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('/// The names.\npub const NAMES: [&str; 2] = ["a", "b-c"];', result.output)
+        result = self.generate_from(self.INTERSECTED, ["BAD"])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Constant BAD lists something other than a string literal", result.stderr)
+
+    def test_fixture_synthesis_merges_intersection_members(self):
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        config = self.config(["Event"], fixtures={"output": "fixtures.json", "roots": ["Event"]})
+        result = subprocess.run(
+            ["node", str(LIB / "synthesize_fixtures.mjs"), "--typescript-package", str(self.package(self.INTERSECTED)), "--config", str(config), "--out-root", out.name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fixtures = json.loads((Path(out.name) / "fixtures.json").read_text(encoding="utf-8"))
+        self.assertEqual(fixtures, {"Event": [{"id": "text", "agent": "text", "kind": "event", "size": 3}]})
+
+    def test_fixture_synthesis_samples_foreign_names_and_indexed_access(self):
+        declarations = '''
+import type { Outside } from "elsewhere";
+export interface Holder { mode: "a" | "b"; count: number }
+export interface Carrier { id: ID; body: Outside; part: Outside["part"]; mode: Holder["mode"] }
+'''
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        config = self.config(
+            ["Carrier"],
+            foreign={"ID": "string", "Outside": "object"},
+            fixtures={"output": "fixtures.json", "roots": ["Carrier"]},
+        )
+        result = subprocess.run(
+            ["node", str(LIB / "synthesize_fixtures.mjs"), "--typescript-package", str(self.package(declarations)), "--config", str(config), "--out-root", out.name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fixtures = json.loads((Path(out.name) / "fixtures.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            fixtures,
+            {"Carrier": [{"id": "text", "body": {"foreign": "object"}, "part": {"any": ["thing", None]}, "mode": "a"}]},
+        )
+
     def test_unsupported_declarations_fail_instead_of_guessing(self):
         for declarations in ("export interface Bad { run(): void }", "export type Bad = Foo<string>;", "export interface Bad { x: Missing }"):
             out = tempfile.TemporaryDirectory()

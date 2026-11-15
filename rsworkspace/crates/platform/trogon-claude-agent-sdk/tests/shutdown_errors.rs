@@ -3,7 +3,9 @@
 use std::{error::Error as StdError, path::PathBuf, time::Duration};
 
 use tokio::time::timeout;
-use trogon_claude_agent_sdk::{ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, Error, Message, Prompt, Timeout};
+use trogon_claude_agent_sdk::{
+    ArgvStyle, ClaudeAgentOptions, ClaudeSdkClient, Error, Message, MessageDecoding, Prompt, Timeout,
+};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -14,15 +16,19 @@ fn options(mode: &str, style: ArgvStyle) -> Result<ClaudeAgentOptions, Box<dyn S
         argv_style: style,
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_millis(500))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_millis(500)));
     options.env.insert("LLVM_PROFILE_FILE".into(), "/dev/null".into());
     Ok(options)
 }
 
 /// Drives one prompt to the first error, or to the end of the stream when there is none.
 async fn terminal_error(mode: &str, style: ArgvStyle) -> Result<(Vec<Message>, Option<Error>), Box<dyn StdError>> {
-    let mut client = ClaudeSdkClient::connect(options(mode, style)?).await?;
+    terminal_error_with(options(mode, style)?).await
+}
+
+async fn terminal_error_with(options: ClaudeAgentOptions) -> Result<(Vec<Message>, Option<Error>), Box<dyn StdError>> {
+    let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("go")).await?;
     client.finish_input().await?;
     let collected = timeout(Duration::from_secs(10), async {
@@ -123,7 +129,9 @@ async fn e03_json_decode_error_carries_the_line_and_the_original_error() -> Test
         return Err(std::io::Error::other("expected a JSON decode error").into());
     };
     assert_eq!(decode.line(), "{\"type\": oops");
-    assert!(decode.original_error().is_syntax());
+    assert!(
+        matches!(decode.original_error(), trogon_claude_agent_sdk::JsonDecodeSourceError::Json(error) if error.is_syntax())
+    );
     assert_eq!(
         Error::from(decode).to_string(),
         "Failed to decode JSON: {\"type\": oops..."
@@ -134,7 +142,9 @@ async fn e03_json_decode_error_carries_the_line_and_the_original_error() -> Test
 #[tokio::test]
 async fn e04_message_parse_error_carries_the_raw_data() -> TestResult {
     for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
-        let (_, error) = terminal_error("malformed", style).await?;
+        let mut python = options("malformed", style)?;
+        python.message_decoding = MessageDecoding::Python;
+        let (_, error) = terminal_error_with(python).await?;
         let Some(Error::MessageParse(parse)) = error else {
             return Err(
                 std::io::Error::other(format!("{style:?}: expected a message parse error, got {error:?}")).into(),
@@ -142,7 +152,22 @@ async fn e04_message_parse_error_carries_the_raw_data() -> TestResult {
         };
         let data = parse.data().ok_or_else(|| std::io::Error::other("missing data"))?;
         assert_eq!(data.get("type"), Some(&serde_json::json!("assistant")));
-        assert!(!parse.message().is_empty());
+        assert_eq!(parse.message(), "Missing required field in assistant message: 'model'");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn typescript_decoding_yields_a_known_message_it_cannot_type() -> TestResult {
+    for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
+        let (messages, error) = terminal_error("malformed", style).await?;
+        assert!(!matches!(error, Some(Error::MessageParse(_))), "{style:?}: {error:?}");
+        assert!(
+            messages
+                .iter()
+                .any(|message| matches!(message, Message::Unknown { kind, .. } if kind == "assistant")),
+            "{style:?}"
+        );
     }
     Ok(())
 }
@@ -152,7 +177,8 @@ async fn t14_a_write_after_stdin_closed_is_not_ready_or_terminated() -> TestResu
     let client = ClaudeSdkClient::connect(options("normal", ArgvStyle::Python)?).await?;
     client.send_prompt(Prompt::from("go")).await?;
     client.finish_input().await?;
-    // Once the result settled the run, stdin is closed; the CLI then exits cleanly and the run stops.
+    // With nothing bidirectional configured, finishing the input closes stdin at once; the CLI then exits cleanly
+    // and the run stops.
     let error = timeout(Duration::from_secs(10), async {
         loop {
             match client.send_prompt(Prompt::from("late")).await {
@@ -265,6 +291,12 @@ async fn t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_direc
         error.to_string(),
         "Claude Code not found at: /nonexistent-claude-sdk-test/claude"
     );
+    assert_eq!(
+        error.typescript_message().as_deref(),
+        Some(
+            "Claude Code native binary not found at /nonexistent-claude-sdk-test/claude. Please ensure Claude Code is installed via native installer or specify a valid path with options.pathToClaudeCodeExecutable."
+        )
+    );
 
     let mut missing_cwd = options("normal", ArgvStyle::Python)?;
     missing_cwd.cwd = Some(PathBuf::from("/nonexistent-claude-sdk-test/cwd"));
@@ -304,7 +336,9 @@ async fn abort_stops_the_process_and_ends_the_run_with_an_abort_error() -> TestR
 #[tokio::test]
 async fn t14_ending_input_after_the_run_failed_is_a_no_op_for_both_styles() -> TestResult {
     for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
-        let mut client = ClaudeSdkClient::connect(options("malformed", style)?).await?;
+        let mut options = options("malformed", style)?;
+        options.message_decoding = MessageDecoding::Python;
+        let mut client = ClaudeSdkClient::connect(options).await?;
         client.send_prompt(Prompt::from("go")).await?;
         let error = timeout(Duration::from_secs(10), async {
             loop {
@@ -320,5 +354,118 @@ async fn t14_ending_input_after_the_run_failed_is_a_no_op_for_both_styles() -> T
         client.finish_input().await?;
         let _ = client.disconnect().await;
     }
+    Ok(())
+}
+
+/// Reads to the end of the run: `None` when it ends cleanly, otherwise its error.
+async fn run_end(client: &mut ClaudeSdkClient) -> Result<Option<Error>, Box<dyn StdError>> {
+    let end = timeout(Duration::from_secs(10), async {
+        loop {
+            match client.next_message().await {
+                Ok(Some(_)) => {}
+                Ok(None) => return None,
+                Err(error) => return Some(error),
+            }
+        }
+    })
+    .await?;
+    Ok(end)
+}
+
+#[tokio::test]
+async fn cancelling_the_abort_controller_stops_the_process_like_typescript() -> TestResult {
+    let controller = trogon_claude_agent_sdk::CancellationToken::new();
+    let mut options = options("blocked-stdin", ArgvStyle::TypeScript)?;
+    options.abort_controller = Some(controller.clone());
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    controller.cancel();
+    let error = run_end(&mut client).await?;
+    let Some(Error::Aborted(aborted)) = error else {
+        return Err(std::io::Error::other(format!("expected an abort error, got {error:?}")).into());
+    };
+    assert_eq!(aborted.message(), "Claude Code process aborted by user");
+    let late = client.send_prompt(Prompt::from("late")).await;
+    assert!(
+        matches!(&late, Err(Error::Aborted(aborted)) if aborted.message() == "Operation aborted"),
+        "{late:?}"
+    );
+    let _ = client.disconnect().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_abort_controller_cancelled_before_connect_fails_the_connection() -> TestResult {
+    let controller = trogon_claude_agent_sdk::CancellationToken::new();
+    controller.cancel();
+    let mut options = options("normal", ArgvStyle::TypeScript)?;
+    options.abort_controller = Some(controller);
+    let error = timeout(Duration::from_secs(10), ClaudeSdkClient::connect(options))
+        .await?
+        .err()
+        .ok_or_else(|| std::io::Error::other("connect succeeded under an aborted controller"))?;
+    let Error::Aborted(aborted) = &error else {
+        return Err(std::io::Error::other(format!("expected an abort error, got {error:?}")).into());
+    };
+    assert_eq!(aborted.message(), "Claude Code process aborted by user");
+    Ok(())
+}
+
+#[tokio::test]
+async fn abort_cancels_the_supplied_controller() -> TestResult {
+    let controller = trogon_claude_agent_sdk::CancellationToken::new();
+    let mut options = options("blocked-stdin", ArgvStyle::TypeScript)?;
+    options.abort_controller = Some(controller.clone());
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.abort().await?;
+    assert!(controller.is_cancelled());
+    assert!(matches!(run_end(&mut client).await?, Some(Error::Aborted(_))));
+    let _ = client.disconnect().await;
+    Ok(())
+}
+
+/// Closes while an interrupt waits for an answer the fixture never sends; returns what the interrupt got.
+async fn close_with_a_waiting_control(style: ArgvStyle) -> Result<Error, Box<dyn StdError>> {
+    let controller = trogon_claude_agent_sdk::CancellationToken::new();
+    let mut options = options("control-timeout", style)?;
+    options.abort_controller = Some(controller.clone());
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    let handle = client.handle();
+    let waiting = tokio::spawn(async move { handle.interrupt().await });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    client.close();
+    // Idempotent, from the owner or a handle.
+    client.close();
+    client.handle().close();
+    let error = timeout(Duration::from_secs(5), waiting)
+        .await??
+        .err()
+        .ok_or_else(|| std::io::Error::other("the interrupt was answered"))?;
+    assert!(run_end(&mut client).await?.is_none(), "{style:?}");
+    // Closing does not abort the caller's controller.
+    assert!(!controller.is_cancelled(), "{style:?}");
+    client.disconnect().await?;
+    Ok(error)
+}
+
+#[tokio::test]
+async fn close_rejects_a_waiting_control_like_typescript_and_ends_the_run_cleanly() -> TestResult {
+    let error = close_with_a_waiting_control(ArgvStyle::TypeScript).await?;
+    assert!(matches!(error, Error::QueryClosed), "{error:?}");
+    assert_eq!(error.to_string(), "Query closed before response received");
+    Ok(())
+}
+
+#[tokio::test]
+async fn close_leaves_a_waiting_control_to_its_timeout_like_python() -> TestResult {
+    let error = close_with_a_waiting_control(ArgvStyle::Python).await?;
+    assert!(
+        matches!(
+            error,
+            Error::ControlTimeout {
+                operation: trogon_claude_agent_sdk::ControlOperation::Interrupt
+            }
+        ),
+        "{error:?}"
+    );
     Ok(())
 }
