@@ -266,6 +266,7 @@ fn jsonschema_uniq_matches_the_documented_examples() -> TestResult {
     assert!(!uniq(&items("[[1], \"a\", [1]]")?));
     assert!(uniq(&items("[[1], [true]]")?));
     assert!(!uniq(&items("[{\"a\": 1}, {\"a\": 1}]")?));
+    assert!(!uniq(&items("[[{\"a\": 1}], [{\"a\": 1}]]")?));
     Ok(())
 }
 
@@ -439,6 +440,8 @@ fn ints_outside_i128_compare_and_sort_as_python_ints() -> TestResult {
     let below = big("-170141183460469231731687303715884105729")?;
     assert!(py_eq(&two_pow_200, &PyValue::Float(2_f64.powi(200))));
     assert!(!py_eq(&two_pow_127, &int(i128::MAX)));
+    assert!(py_eq(&two_pow_200, &two_pow_200.clone()));
+    assert!(!py_eq(&two_pow_127, &two_pow_200));
     assert_eq!(py_lt(&int(i128::MAX), &two_pow_127), Ok(true));
     assert_eq!(py_lt(&below, &int(i128::MIN)), Ok(true));
     assert_eq!(py_lt(&two_pow_127, &two_pow_200), Ok(true));

@@ -314,6 +314,60 @@ fn every_frame_decodes_routes_and_drops_containers_nested_past_the_native_stack(
             MessageDecoding::TypeScript,
             true,
         ),
+        (
+            r#"{"type":"assistant","message":{"model":"m","content":[]},"a":DEEP}"#.to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            r#"{"type":"user","message":{"content":"hi"},"a":DEEP}"#.to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,
+                "num_turns":1,"session_id":"s","a":DEEP}"#
+                .to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            r#"{"type":"stream_event","uuid":"u","session_id":"s","event":{"a":DEEP}}"#.to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","a":DEEP},"uuid":"u","session_id":"s"}"#
+                .to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            r#"{"type":"conversation_reset","new_conversation_id":"c","uuid":"u","session_id":"s","a":DEEP}"#
+                .to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            r#"{"type":"future","payload":DEEP}"#.to_owned(),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            request(r#"{"subtype":"oauth_token_refresh","kind":DEEP}"#),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            request(r#"{"subtype":"host_auth_token_refresh","status":DEEP}"#),
+            MessageDecoding::TypeScript,
+            true,
+        ),
+        (
+            request(r#"{"subtype":"remote_control_work_secret","session_id":DEEP}"#),
+            MessageDecoding::TypeScript,
+            true,
+        ),
     ];
     // A failed assertion would unwind through the recursive drop of the deep values, so each case is checked
     // only after its values are dropped without recursion.

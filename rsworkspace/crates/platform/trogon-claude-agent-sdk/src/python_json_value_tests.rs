@@ -2,10 +2,11 @@
 
 use serde_json::json;
 
-use super::{ExactInteger, PythonJsonValue, PythonNumber, python_json_dumps};
+use super::{ExactInteger, PythonJsonObject, PythonJsonValue, PythonNumber, python_json_dumps};
 use crate::python_c_stack::PythonCStack;
 use crate::python_json_error::{ExactIntegerError, JsonDecodeErrorKind, PythonJsonError};
 use crate::python_json_load::{drop_python_deep, python_json_loads};
+use crate::python_string::PythonString;
 
 fn round_trip(text: &str) -> String {
     python_json_dumps(&python_json_loads(text).unwrap())
@@ -243,4 +244,21 @@ fn nested_serde_json_values_convert_in_order() {
         python_json_dumps(&PythonJsonValue::from(&deep)),
         format!("{}null{}", "[".repeat(1000), "]".repeat(1000))
     );
+}
+
+#[test]
+fn a_bool_converts_to_the_value_json_dumps_writes_for_it() {
+    assert_eq!(python_json_dumps(&PythonJsonValue::from(true)), "true");
+    assert_eq!(python_json_dumps(&PythonJsonValue::from(false)), "false");
+}
+
+#[test]
+fn only_an_object_lends_its_members_for_writing() {
+    let mut object = PythonJsonValue::Object(PythonJsonObject::new());
+    if let Some(members) = object.as_object_mut() {
+        members.insert(PythonString::from("a"), PythonJsonValue::Null);
+    }
+    assert_eq!(python_json_dumps(&object), "{\"a\": null}");
+    assert!(PythonJsonValue::Null.as_object_mut().is_none());
+    assert!(PythonJsonValue::Array(Vec::new()).as_object_mut().is_none());
 }

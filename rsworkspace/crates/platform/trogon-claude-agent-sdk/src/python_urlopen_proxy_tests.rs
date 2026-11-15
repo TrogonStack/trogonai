@@ -371,3 +371,15 @@ fn credentials_that_do_not_encode_raise_the_unicode_encode_error() -> TestResult
     );
     Ok(())
 }
+
+/// With no proxy variable set and no system settings, `getproxies()` is empty and `proxy_bypass(host)` is false.
+#[test]
+fn without_proxy_variables_or_system_settings_nothing_is_proxied_or_bypassed() {
+    let environment = Ordered(vec![(OsString::from("HOME"), OsString::from("/h"))]);
+    let system = NoSystemProxies;
+    assert_eq!(Proxies::from_platform(&environment, &system), Proxies::default());
+    assert_eq!(
+        Proxies::bypass_on_platform(&environment, &system, &PythonString::from("h")),
+        Ok(false)
+    );
+}

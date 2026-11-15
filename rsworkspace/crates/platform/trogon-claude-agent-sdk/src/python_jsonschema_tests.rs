@@ -764,14 +764,17 @@ fn an_anchor_is_found_under_the_canonical_id_of_the_resource_a_uri_names() -> Te
         draft: Draft::Draft202012,
     };
     let documents = referencing::Documents::default();
+    let specifications = referencing::SPECIFICATIONS
+        .as_ref()
+        .map_err(|error| shown(error.clone()))?;
     let registry = Registry::new(
+        specifications,
         "urn:alias".into(),
         root,
         &NoRetrieval,
         &documents,
         HashSecret::default(),
-    )
-    .map_err(shown)?;
+    );
     let resolved = Resolver::new("urn:alias".into())
         .lookup(&registry, &py(json!("#a")))
         .map_err(|error| shown(error.raw()))?;
@@ -798,6 +801,21 @@ fn value_operations_raise_what_cpython_raises() {
         Err("object of type 'int' has no len()".to_owned())
     );
     assert_eq!(ops::len(&py(json!("日本"))), Ok(2));
+    assert_eq!(ops::len(&py(json!({"a": 1, "b": 2}))), Ok(2));
+    assert_eq!(
+        ops::compare(&py(json!(1)), ops::Op::Le, &py(json!("a"))),
+        Err("'<=' not supported between instances of 'int' and 'str'".to_owned())
+    );
+    for (value, truthy) in [
+        (json!(""), false),
+        (json!("a"), true),
+        (json!([]), false),
+        (json!([1]), true),
+        (json!({}), false),
+        (json!({"a": 1}), true),
+    ] {
+        assert_eq!(ops::truthy(&py(value)), truthy);
+    }
     assert_eq!(
         ops::join_patterns(&py(json!(["a", 5]))),
         Err("sequence item 1: expected str instance, int found".to_owned())
@@ -857,6 +875,10 @@ fn pointer_indexes_parse_like_python_int() {
     assert_eq!(
         ops::parse_int("1_"),
         Err("invalid literal for int() with base 10: '1_'".to_owned())
+    );
+    assert_eq!(
+        ops::parse_int("\u{e9}"),
+        Err("invalid literal for int() with base 10: '\u{e9}'".to_owned())
     );
     assert_eq!(
         ops::parse_int(&"1".repeat(4301)),
@@ -1145,7 +1167,11 @@ fn every_first_execution_site_has_a_bit_of_its_own() {
 fn held_c_recursion_checks_add_up_and_first_executions_pay_once_a_process() -> TestResult {
     let schema = py(json!({}));
     let documents = referencing::Documents::default();
+    let specifications = referencing::SPECIFICATIONS
+        .as_ref()
+        .map_err(|error| shown(error.clone()))?;
     let registry = Registry::new(
+        specifications,
         PythonString::new(),
         Resource {
             contents: &schema,
@@ -1154,8 +1180,7 @@ fn held_c_recursion_checks_add_up_and_first_executions_pay_once_a_process() -> T
         &NoRetrieval,
         &documents,
         HashSecret::default(),
-    )
-    .map_err(shown)?;
+    );
     let engine = Engine {
         registry,
         budget: Budget::default(),
@@ -1314,4 +1339,195 @@ fn replay_surrogate_cases(
         }
     }
     Ok((cases.len(), seeds.len()))
+}
+
+/// Outcomes `jsonschema` 4.26 gives for the draft 3 keywords and the `unevaluated*` walks, each through
+/// `best_match(cls(schema).iter_errors(instance))`, or `str(exc)` for what it raises.
+#[test]
+fn draft3_keywords_and_unevaluated_walks_match_jsonschema() {
+    let unevaluated_items = "Unevaluated items are not allowed (1 was unexpected)";
+    let unevaluated_a = "Unevaluated properties are not allowed ('a' was unexpected)";
+    let unevaluated_b = "Unevaluated properties are not allowed ('b' was unexpected)";
+    let invalid = |message: &str| Outcome::Invalid(message.to_owned());
+    let raised = |text: &str| Outcome::Raised(text.into());
+    let cases = [
+        (
+            Draft::Draft3,
+            json!({"disallow": "string"}),
+            json!("a"),
+            invalid("'string' is disallowed for 'a'"),
+        ),
+        (
+            Draft::Draft3,
+            json!({"disallow": ["string", {"type": "integer"}]}),
+            json!(1),
+            invalid("{'type': 'integer'} is disallowed for 1"),
+        ),
+        (
+            Draft::Draft3,
+            json!({"extends": [{"type": "string"}, {"minimum": 3}]}),
+            json!(1),
+            invalid("1 is not of type 'string'"),
+        ),
+        (
+            Draft::Draft3,
+            json!({"extends": [{"type": "string"}]}),
+            json!("a"),
+            Outcome::Valid,
+        ),
+        (
+            Draft::Draft202012,
+            json!({"allOf": [true], "unevaluatedItems": false}),
+            json!([1]),
+            invalid(unevaluated_items),
+        ),
+        (
+            Draft::Draft202012,
+            json!({"allOf": [true], "unevaluatedProperties": false}),
+            json!({"a": 1}),
+            invalid(unevaluated_a),
+        ),
+        (
+            Draft::Draft201909,
+            json!({"allOf": [true], "unevaluatedItems": false}),
+            json!([1]),
+            invalid(unevaluated_items),
+        ),
+        (
+            Draft::Draft201909,
+            json!({"allOf": [true], "unevaluatedProperties": false}),
+            json!({"a": 1}),
+            invalid(unevaluated_a),
+        ),
+        (
+            Draft::Draft202012,
+            json!({"unevaluatedItems": false, "allOf": [{"$ref": "#/nope"}]}),
+            json!([1]),
+            raised(
+                "PointerToNowhere: '/nope' does not exist within {'unevaluatedItems': False, 'allOf': [{'$ref': \
+                 '#/nope'}]}",
+            ),
+        ),
+        (
+            Draft::Draft201909,
+            json!({"unevaluatedItems": false, "allOf": [{"$ref": "#/nope"}]}),
+            json!([1]),
+            raised(
+                "PointerToNowhere: '/nope' does not exist within {'unevaluatedItems': False, 'allOf': [{'$ref': \
+                 '#/nope'}]}",
+            ),
+        ),
+        (
+            Draft::Draft201909,
+            json!({"unevaluatedProperties": false, "allOf": [{"$ref": "#/nope"}]}),
+            json!({"a": 1}),
+            raised(
+                "PointerToNowhere: '/nope' does not exist within {'unevaluatedProperties': False, 'allOf': [{'$ref': \
+                 '#/nope'}]}",
+            ),
+        ),
+        (
+            Draft::Draft202012,
+            json!({"unevaluatedItems": false, "$ref": "#/nope"}),
+            json!([1]),
+            raised("'/nope' does not exist within {'unevaluatedItems': False, '$ref': '#/nope'}"),
+        ),
+        (
+            Draft::Draft202012,
+            json!({"x": "ab", "$ref": "#/x/0/0"}),
+            json!(1),
+            raised("'str' object has no attribute 'items'"),
+        ),
+        (
+            Draft::Draft202012,
+            json!({"x": "ab", "$ref": "#/x/0/1"}),
+            json!(1),
+            raised("PointerToNowhere: '/x/0/1' does not exist within {'x': 'ab', '$ref': '#/x/0/1'}"),
+        ),
+        (
+            Draft::Draft201909,
+            json!({"items": {"unevaluatedItems": false, "allOf": [{"$recursiveRef": "#"}]}}),
+            json!([[1]]),
+            Outcome::Valid,
+        ),
+        (
+            Draft::Draft201909,
+            json!({"items": [true], "additionalItems": {"unevaluatedItems": false, "$recursiveRef": "#"}}),
+            json!([0, [1, 2]]),
+            Outcome::Valid,
+        ),
+        (
+            Draft::Draft201909,
+            json!({
+                "properties": {"a": true},
+                "additionalProperties": {"unevaluatedProperties": false, "allOf": [{"$recursiveRef": "#"}]},
+            }),
+            json!({"x": {"a": 1, "b": 2}}),
+            invalid(unevaluated_b),
+        ),
+        (
+            Draft::Draft201909,
+            json!({
+                "properties": {"a": true},
+                "additionalProperties": {"unevaluatedProperties": false, "$recursiveRef": "#"},
+            }),
+            json!({"x": {"a": 1, "b": 2}}),
+            invalid(unevaluated_b),
+        ),
+        (
+            Draft::Draft201909,
+            json!({
+                "properties": {"a": true},
+                "additionalProperties": {"unevaluatedProperties": false, "$recursiveRef": "#"},
+            }),
+            json!({"x": {"a": 1}}),
+            Outcome::Valid,
+        ),
+        (
+            Draft::Draft202012,
+            json!({"if": true, "unevaluatedProperties": false}),
+            json!({"a": 1}),
+            invalid(unevaluated_a),
+        ),
+        (
+            Draft::Draft201909,
+            json!({"additionalProperties": 5, "unevaluatedProperties": false}),
+            json!({"a": 1}),
+            invalid(unevaluated_a),
+        ),
+    ];
+    for (draft, schema, instance, expected) in cases {
+        let shown = schema.to_string();
+        assert_eq!(
+            best_match(draft, &py(schema), &py(instance)),
+            expected,
+            "{} {shown}",
+            class_name(draft)
+        );
+    }
+}
+
+/// A retrieved document whose `$id` is no string fails the anchor lookup the way `Resource.id()` fails in
+/// `referencing`, as `jsonschema` 4.26 raises it with the document served over HTTP.
+#[test]
+fn an_anchor_in_a_retrieved_document_with_a_non_string_id_raises_its_attribute_error() {
+    let retriever = RecordedDocuments(HashMap::from([("http://h/s".to_owned(), br#"{"$id": 5}"#.to_vec())]));
+    assert_eq!(
+        best_match_retrieving(
+            Draft::Draft202012,
+            &py(json!({"$ref": "http://h/s#a"})),
+            &py(json!(1)),
+            &retriever
+        ),
+        Outcome::Raised("'int' object has no attribute 'rstrip'".into())
+    );
+    assert_eq!(
+        best_match_retrieving(
+            Draft::Draft202012,
+            &py(json!({"$ref": "http://h/s"})),
+            &py(json!(1)),
+            &retriever
+        ),
+        Outcome::Valid
+    );
 }

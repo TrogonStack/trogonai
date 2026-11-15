@@ -1414,3 +1414,21 @@ fn python_dialect_meets_the_recursion_limit_of_nested_patterns_like_jsonschema_i
     assert_eq!(replay_deep_python_tool_calls(RECURSION_REGEX)?, (76, 76));
     Ok(())
 }
+
+/// A TypeScript dialect server answers a Python runtime with what it answers the TypeScript one, as Python holds it.
+#[tokio::test]
+async fn a_typescript_dialect_server_answers_python_requests_as_it_answers_typescript_ones() -> TestResult {
+    let server = LocalMcpServer::from(LocalMcpServerOptions::new(McpServerName::from("typescript")));
+    let ping = object(json!({"jsonrpc":"2.0","id":1,"method":"ping"}))?;
+    let typescript = server
+        .open_session()
+        .request(ping.clone(), CancellationToken::new())
+        .await?;
+    let python = server
+        .open_session()
+        .request_python(ping, CancellationToken::new())
+        .await?;
+    assert!(typescript.is_some());
+    assert_eq!(python, typescript.map(python_object));
+    Ok(())
+}

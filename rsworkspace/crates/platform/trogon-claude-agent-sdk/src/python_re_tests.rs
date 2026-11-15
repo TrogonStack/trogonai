@@ -446,3 +446,41 @@ fn lone_surrogates_match_and_fail_as_python_does() -> TestResult {
 // Lines that no test can reach, and why:
 // - the `_ => false` arms of `charset`, `count` and `run` match an opcode the compiler never emits;
 // - `Fold::Off` branches that CPython never takes with a fold-only opcode are kept for exhaustive matching.
+
+/// CPython 3.12 `re.search` verdicts, or `str(re.error)`, for flag groups, sets that fold past the first 256 code
+/// points, sets wide enough for a `BIGCHARSET`, references inside alternations and look-behinds.
+#[test]
+fn sets_flags_and_references_search_as_cpython_does() {
+    let cases: [(&str, &str, Result<bool, &str>); 18] = [
+        ("(a)(?:\\1b|\\1c)", "aac", Ok(true)),
+        ("(a)(?:\\1b|\\1c)", "aad", Ok(false)),
+        (
+            "(a(?<=(?(1)b)))",
+            "",
+            Err("cannot refer to an open group at position 11"),
+        ),
+        ("(?i1)", "", Err("missing -, : or ) at position 3")),
+        ("(?-iz:)", "", Err("unknown flag at position 4")),
+        ("(?-i1:)", "", Err("missing : at position 4")),
+        ("(?", "", Err("unexpected end of pattern at position 2")),
+        ("(?i)[kx]", "\u{212a}", Ok(true)),
+        ("(?i)[j-l]", "\u{212a}", Ok(true)),
+        ("(?i)[1\u{10400}]", "\u{10428}", Ok(true)),
+        ("(?i)[a\u{1f600}]", "\u{1f600}", Ok(true)),
+        ("(?i)[^k]", "\u{212a}", Ok(false)),
+        ("(?i)[^k]", "x", Ok(true)),
+        ("(?<=a{4294967294}a{4294967294})", "", Err("looks too much behind")),
+        ("(?i)[\u{10400}-\u{10427}]", "\u{10428}", Ok(true)),
+        ("[\u{100}\u{102}\u{104}]", "\u{102}", Ok(true)),
+        ("[\u{100}\u{102}\u{104}]", "\u{101}", Ok(false)),
+        ("(?i)[ace]", "C", Ok(true)),
+    ];
+    for (pattern, text, expected) in cases {
+        assert_eq!(
+            search(pattern, text, MODULE_BUDGET),
+            expected.map_err(str::to_owned),
+            "{}",
+            py_repr(pattern)
+        );
+    }
+}

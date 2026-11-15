@@ -450,3 +450,31 @@ fn truncated_text_names_the_bytes_the_close_cut() {
         "'utf-8' codec can't decode bytes in position 0-2: unexpected end of data"
     );
 }
+
+/// A stream whose first read a signal interrupts.
+struct InterruptedOnce<'a> {
+    interrupted: bool,
+    rest: &'a [u8],
+}
+
+impl Read for InterruptedOnce<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if !self.interrupted {
+            self.interrupted = true;
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        self.rest.read(buffer)
+    }
+}
+
+/// CPython retries a `recv` a signal interrupts (PEP 475), so `ftplib` reads what arrives after the signal.
+#[test]
+fn a_recv_a_signal_interrupts_is_retried() {
+    let mut buffer = [0; 4];
+    let stream = InterruptedOnce {
+        interrupted: false,
+        rest: b"ok",
+    };
+    assert_eq!(recv(stream, &mut buffer).ok(), Some(2));
+    assert_eq!(buffer.get(..2), Some(&b"ok"[..]));
+}

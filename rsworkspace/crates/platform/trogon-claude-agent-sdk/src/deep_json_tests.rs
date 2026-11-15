@@ -189,7 +189,7 @@ fn a_malformed_deep_message_fails_as_the_recursive_parser_does_where_a_python_re
     let corrupt = format!(r#"{{"v": {}1 2{}}}"#, "[".repeat(depth), "]".repeat(depth));
     let unbounded = crate::large_stack::on_large_stack(
         &[PARSE_STACK],
-        || parse_unbounded(corrupt.as_bytes()).err().map(|error| error.to_string()),
+        || unbounded_error(corrupt.as_bytes()).map(|error| error.to_string()),
         || None,
         None,
     );
@@ -663,4 +663,26 @@ fn content_blocks_as_deep_as_the_python_reader_reads_clone_destructure_and_drop_
         })?;
     }
     Ok(())
+}
+
+#[test]
+fn the_holders_read_write_compare_print_and_give_back_the_json_they_hold() {
+    let object = JsonObject::from_iter([("a".to_owned(), Value::from(1))]);
+    let mut held = DeepJsonObject::from(object.clone());
+    held.insert("b".to_owned(), Value::Null);
+    let mut expected = object;
+    expected.insert("b".to_owned(), Value::Null);
+    assert_eq!(held, expected);
+    assert_eq!(held, DeepJsonObject::from(expected.clone()));
+    assert_eq!(format!("{held:?}"), format!("{expected:?}"));
+    assert_eq!(held.clone().into_object(), expected);
+    assert_eq!(JsonObject::from(held), expected);
+
+    let mut value = DeepJsonValue::from(Value::from(1));
+    *value = Value::from(2);
+    assert_eq!(value.as_value(), &Value::from(2));
+    assert_eq!(value, DeepJsonValue::from(Value::from(2)));
+    assert_eq!(format!("{value:?}"), format!("{:?}", Value::from(2)));
+    assert_eq!(value.clone().into_value(), Value::from(2));
+    assert_eq!(Value::from(value), Value::from(2));
 }

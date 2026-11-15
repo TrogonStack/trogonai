@@ -1233,6 +1233,22 @@ async fn callback_timeout_cancels_signal_and_returns_deny() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_callback_that_answers_within_the_callback_timeout_keeps_its_answer() -> TestResult {
+    let mut configured = options()?;
+    configured.limits.callback_timeout = Some(Timeout::new(Duration::from_secs(30)));
+    configured.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        PermissionDecision::allow()
+    }));
+    let (client, mut cli) = connect(configured).await?;
+    cli.send(json!({"type":"control_request","request_id":"permission","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
+    let response = cli.read().await?;
+    assert_eq!(response["response"]["subtype"], "success");
+    assert_eq!(response["response"]["response"]["behavior"], "allow");
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn callback_capacity_is_bounded_and_cancellation_preserves_control_progress() -> TestResult {
     let started = Arc::new(tokio::sync::Notify::new());
     let observed = started.clone();

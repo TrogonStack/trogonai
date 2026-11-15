@@ -210,6 +210,7 @@ fn magnitudes_compute_exactly() {
     assert_eq!(two_pow_128.shr(127), Magnitude::from(2));
     assert_eq!(two_pow_128.shr(129), Magnitude::from(0));
     assert!(Magnitude::from_decimal("0").is_zero());
+    assert_eq!(Magnitude::from(0).trailing_zeros(), 0);
     assert_eq!(Magnitude::from_decimal("4294967296"), Magnitude::from(1_u128 << 32));
     let ten_pow_400 = Magnitude::from_decimal(&format!("1{}", "0".repeat(400)));
     let five_pow_400 = ten_pow_400.shr(400);
@@ -228,6 +229,7 @@ fn magnitudes_compute_exactly() {
 fn ints_outside_i128_order_against_ints_and_floats_exactly() -> TestResult {
     let int = |digits: &str| digits.parse::<ExactInteger>();
     assert_eq!(int_cmp(&int("-5")?, &int("3")?), Ordering::Less);
+    assert_eq!(int_cmp(&int("1")?, &int("-1")?), Ordering::Greater);
     assert_eq!(int_cmp(&int("-10")?, &int("-9")?), Ordering::Less);
     assert_eq!(int_cmp(&int("100")?, &int("99")?), Ordering::Greater);
     assert_eq!(int_cmp(&int("42")?, &int("42")?), Ordering::Equal);

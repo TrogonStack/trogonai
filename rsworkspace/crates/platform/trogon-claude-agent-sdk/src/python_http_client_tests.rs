@@ -1020,3 +1020,43 @@ fn get_opens_no_tunnel_to_an_empty_host() -> TestResult {
     assert_eq!(served(server)?, vec![latin1(&request_head(Some(":443"), "/s", None)?)]);
     Ok(())
 }
+
+/// Outside the `except OSError` of `urlopen`, a failed lookup raises the codec's `UnicodeError`, the
+/// `socket.gaierror` with its code, or the `OSError` subclass of `errno`, none of them wrapped in `URLError`.
+#[test]
+fn a_failed_lookup_raised_outside_urlopen_is_not_wrapped_in_urlerror() {
+    assert_eq!(
+        LookupError::Idna("label empty or too long".to_owned()).into_raised(),
+        RemoteSchemaError::new("UnicodeError", "label empty or too long")
+    );
+    assert_eq!(
+        LookupError::Gai(-2, "Name or service not known".to_owned()).into_raised(),
+        RemoteSchemaError::new("gaierror", "[Errno -2] Name or service not known")
+    );
+    let refused = || io::Error::from(io::ErrorKind::ConnectionRefused);
+    assert_eq!(
+        LookupError::Os(refused()).into_raised(),
+        RemoteSchemaError::new("ConnectionRefusedError", os_error_text(&refused(), None))
+    );
+}
+
+/// `getaddrinfo` keeps the IPv4 and IPv6 entries in their order and skips an entry of any other family.
+#[cfg(unix)]
+#[test]
+fn lookup_entries_of_other_families_are_skipped() {
+    // SAFETY: an all-zero `addrinfo` and `sockaddr_in` are valid values: no address and no next entry.
+    let mut other: libc::addrinfo = unsafe { std::mem::zeroed() };
+    other.ai_family = libc::AF_UNIX;
+    // SAFETY: as above.
+    let mut address: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    address.sin_port = 80_u16.to_be();
+    address.sin_addr.s_addr = u32::from(Ipv4Addr::LOCALHOST).to_be();
+    // SAFETY: as above.
+    let mut ipv4: libc::addrinfo = unsafe { std::mem::zeroed() };
+    ipv4.ai_family = libc::AF_INET;
+    ipv4.ai_addr = (&raw mut address).cast::<libc::sockaddr>();
+    ipv4.ai_next = &raw mut other;
+    // SAFETY: both entries and the address live through the call, and the `AF_INET` entry points at a `sockaddr_in`.
+    let addresses = unsafe { socket_addresses(&raw const ipv4) };
+    assert_eq!(addresses, vec![SocketAddr::from((Ipv4Addr::LOCALHOST, 80))]);
+}

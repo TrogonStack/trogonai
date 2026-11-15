@@ -63,6 +63,7 @@ fn a_request_id_beyond_64_bits_is_the_integer_python_read() -> Result<(), Box<dy
     let id = message.get("id").ok_or("missing id")?;
     assert_eq!(repr_json(id), "123456789012345678901234567890");
     assert_eq!(json_type_name(id), "int");
+    assert_eq!(type_name(&Value::from(id)), "int");
     assert_eq!(
         repr_json(&serde_json::Value::Object(message)),
         "{'jsonrpc': '2.0', 'id': 123456789012345678901234567890, 'method': 'ping'}"

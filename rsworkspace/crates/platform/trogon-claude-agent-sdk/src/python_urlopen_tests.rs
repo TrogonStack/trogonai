@@ -1023,3 +1023,89 @@ fn split_type_lowers_the_scheme_as_cpython_3_12_does() -> TestResult {
     }
     Ok(())
 }
+
+/// An opener whose proxies and `proxy_bypass` read `variables`, with `tls` as the HTTPS context.
+fn proxied_outcome(variables: &[(&str, String)], url: &str, tls: Option<&UrlopenTls>) -> Outcome {
+    let environment = FixedEnvironment {
+        directory: PathBuf::new(),
+        variables: variables
+            .iter()
+            .map(|(name, value)| ((*name).into(), value.clone().into()))
+            .collect(),
+    };
+    let context = || tls.ok_or_else(|| url_error("no TLS context in this test"));
+    read_outcome(
+        Opener {
+            proxies: &Proxies::from_environment(&environment),
+            environment: &environment,
+            system: &crate::python_urlopen_proxy::NoSystemProxies,
+            tls: &context,
+        }
+        .urlopen(url),
+    )
+}
+
+/// A proxy URL with no host leaves the request without one, which `do_open` refuses: for HTTP as the proxy the
+/// request goes to, for HTTPS as the tunnel's host, whichever scheme the proxy names (CPython 3.12).
+#[test]
+fn a_proxy_with_no_host_leaves_the_request_with_none() -> TestResult {
+    let tls = UrlopenTls::new(None)?;
+    let no_host = || Outcome::Open(url_error("no host given"));
+    let cases = [
+        ("http_proxy", "http://", "http://h/x"),
+        ("https_proxy", "https://", "https://h/x"),
+        ("https_proxy", "http://", "https://h/x"),
+        ("ftp_proxy", "http://", "ftp://h/x"),
+    ];
+    for (name, proxy, url) in cases {
+        assert_eq!(
+            proxied_outcome(&[(name, proxy.to_owned())], url, Some(&tls)),
+            no_host(),
+            "{name}={proxy} {url}"
+        );
+    }
+    Ok(())
+}
+
+/// `default_proxy` with a scheme sends an FTP request through the opener again as an HTTP request to the proxy,
+/// which `default_open` answers, as CPython 3.12 does.
+#[test]
+fn default_proxy_answers_the_request_it_restarts() -> TestResult {
+    let proxy = AnswerServer::serve(PROXY_OK.to_vec())?;
+    let variables = [("default_proxy", format!("http://127.0.0.1:{}", proxy.port))];
+    assert_eq!(
+        proxied_outcome(&variables, "ftp://h/a.json", None),
+        Outcome::Body(b"{\"proxy\": true}".to_vec())
+    );
+    assert_eq!(
+        proxy.heads()?,
+        vec![
+            "GET ftp://h/a.json HTTP/1.1\r\nAccept-Encoding: identity\r\nHost: h\r\nUser-Agent: python-jsonschema \
+             (deprecated $ref resolution)\r\nConnection: close"
+                .to_owned()
+        ]
+    );
+    Ok(())
+}
+
+/// The media type `mimetypes.guess_type` reads off a `data` URL in CPython 3.12: up to the first `;`, or
+/// `text/plain` when it holds a `=` or no `/`, surrogates and all.
+#[test]
+fn guess_type_reads_the_media_type_of_a_data_url() {
+    let cases: [(&[u8], &[u8]); 6] = [
+        (b"data:text/html;charset=x,body", b"text/html"),
+        (b"data:a=b,x", b"text/plain"),
+        (b"data:plain,x", b"text/plain"),
+        (b"data:te\xed\xb3\xbfxt/html,x", b"te\xed\xb3\xbfxt/html"),
+        (b"data:x/y=z,1", b"text/plain"),
+        (b"data:,x", b"text/plain"),
+    ];
+    for (selector, media_type) in cases {
+        assert_eq!(
+            guess_type(&PythonString::from_encoded(selector.to_vec())),
+            Ok(Some(PythonString::from_encoded(media_type.to_vec()))),
+            "{}",
+            latin1(selector)
+        );
+    }
+}

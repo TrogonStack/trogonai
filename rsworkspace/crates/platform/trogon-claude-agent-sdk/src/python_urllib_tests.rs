@@ -125,7 +125,19 @@ fn joins_follow_cpython() {
     ];
     for (base, url, expected) in cases {
         assert_eq!(urljoin(base, url).as_deref(), Ok(expected), "{base} + {url}");
+        assert_eq!(
+            urljoin(&base.to_owned(), &url.to_owned()).as_deref(),
+            Ok(expected),
+            "{base} + {url}"
+        );
     }
+}
+
+#[test]
+fn urlunparse_puts_the_params_back_after_a_semicolon() -> Result<(), String> {
+    let parsed = urlparse("http://a/p;x?q#f", "")?;
+    assert_eq!(urlunparse(&parsed, "f"), "http://a/p;x?q#f");
+    Ok(())
 }
 
 #[test]
