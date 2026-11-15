@@ -91,6 +91,17 @@ fn fields<T: serde::de::DeserializeOwned>(object: &JsonObject) -> Option<T> {
     serde_json::from_value(Value::Object(data)).ok()
 }
 
+/// A count `JSON.parse` may have rounded past `u64::MAX`, which then reads as `u64::MAX` rather than failing the
+/// message.
+fn javascript_count<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+    let number = Option::<serde_json::Number>::deserialize(deserializer)?;
+    let saturated = |number: &serde_json::Number| number.as_f64().filter(|float| *float >= u64::MAX as f64);
+    number
+        .map(|number| (number.as_u64().or_else(|| saturated(&number).map(|_| u64::MAX)), number))
+        .map(|(count, number)| count.ok_or_else(|| serde::de::Error::custom(number)))
+        .transpose()
+}
+
 /// Python `_parse_origin`: an object with a string `kind`, anything else is absent.
 fn origin(value: Option<Value>) -> Option<MessageOrigin> {
     value.and_then(|value| serde_json::from_value(value).ok())
@@ -167,6 +178,7 @@ struct ResultWire {
     deferred_tool_use: Option<JsonObject>,
     api_error_status: Option<u16>,
     result_index: Option<u64>,
+    #[serde(default, deserialize_with = "javascript_count")]
     queued_turn_count: Option<u64>,
     #[serde(flatten)]
     additional_fields: JsonObject,

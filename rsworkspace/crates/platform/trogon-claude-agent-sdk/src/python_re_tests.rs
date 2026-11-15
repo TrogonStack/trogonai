@@ -12,10 +12,6 @@ fn error_text(error: PythonString) -> String {
     error.into_string().unwrap_or_else(|error| format!("{error:?}"))
 }
 
-fn search_inline(pattern: &str, text: &str, budget: usize) -> Result<bool, String> {
-    super::search_inline(&pattern.into(), &text.into(), budget).map_err(error_text)
-}
-
 fn search(pattern: &str, text: &str, budget: usize) -> Result<bool, String> {
     super::search(&pattern.into(), &text.into(), budget).map_err(error_text)
 }
@@ -81,7 +77,7 @@ fn replays_every_python_search_case() -> TestResult {
         let (pattern, text) = (text_of(case, "pattern")?, text_of(case, "text")?);
         let want = expected(case)?;
         errors += usize::from(want.is_err());
-        let got = search_inline(pattern, text, MODULE_BUDGET);
+        let got = search(pattern, text, MODULE_BUDGET);
         if got != want {
             mismatches.push(format!("{pattern:?} on {text:?}: got {got:?}, want {want:?}"));
         }
@@ -238,12 +234,9 @@ fn repeat_kinds_carry_their_constant_names() {
 #[test]
 fn nesting_past_the_parser_frame_limit_is_a_recursion_error() {
     let shallow = format!("{}a{}", "(".repeat(400), ")".repeat(400));
-    assert_eq!(search_inline(&shallow, "a", MODULE_BUDGET), Ok(true));
+    assert_eq!(search(&shallow, "a", MODULE_BUDGET), Ok(true));
     let deep = format!("{}a{}", "(".repeat(700), ")".repeat(700));
-    assert_eq!(
-        search_inline(&deep, "a", MODULE_BUDGET),
-        Err(RECURSION_ERROR.to_owned())
-    );
+    assert_eq!(search(&deep, "a", MODULE_BUDGET), Err(RECURSION_ERROR.to_owned()));
 }
 
 /// The deepest frame below `re.compile` each pattern reaches, measured with a CPython 3.12 profile hook: the
