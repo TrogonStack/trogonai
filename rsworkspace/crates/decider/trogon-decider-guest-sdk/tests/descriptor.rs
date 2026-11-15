@@ -61,8 +61,16 @@ impl<P> From<P> for DeclaredCommand<P> {
 
 struct PausedEvent(v1::SchedulePaused);
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct DeclaredState(v1::SchedulePaused);
+
+impl Default for DeclaredState {
+    fn default() -> Self {
+        Self(v1::SchedulePaused {
+            schedule_id: "initial".to_string(),
+        })
+    }
+}
 
 impl Evolve<PausedEvent> for DeclaredState {
     type Error = Infallible;
@@ -172,6 +180,15 @@ fn exported_session_restores_and_encodes_state_payload() {
     assert_eq!(initial.snapshot(), Some(snapshot.clone()));
     let restored = Session::new(Some(snapshot.clone()));
     assert_eq!(restored.snapshot(), Some(snapshot));
+
+    let empty_payload_frame = b"\x0a\x10fixture-state/v1\x12\x00".to_vec();
+    let empty_state_snapshot =
+        trogon_decider_guest_sdk::encode_current(&v1::SchedulePaused::default(), "fixture-state/v1");
+    assert_ne!(initial.snapshot(), Some(empty_state_snapshot.clone()));
+    assert_eq!(
+        Session::new(Some(empty_payload_frame)).snapshot(),
+        Some(empty_state_snapshot)
+    );
 
     let state = DeclaredState(v1::SchedulePaused {
         schedule_id: "restored".to_string(),

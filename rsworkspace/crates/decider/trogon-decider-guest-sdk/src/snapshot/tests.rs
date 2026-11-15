@@ -34,7 +34,7 @@ fn absent_snapshot_uses_state_default_and_present_snapshot_restores_state() {
 }
 
 #[test]
-fn present_empty_state_does_not_fall_back_to_state_default() {
+fn present_empty_state_restores_the_empty_protobuf_payload() {
     let restored = load_or_initial::<State>(Some(b"\x0a\x02v1\x12\x00".to_vec()), "v1");
     assert_eq!(restored, State::default());
 }
