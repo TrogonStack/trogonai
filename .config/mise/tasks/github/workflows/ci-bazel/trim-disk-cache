@@ -12,8 +12,15 @@ deadline=$((SECONDS + 300))
 
 [[ -d "$cache" ]] || exit 0
 
+# Bazel deletes entries while this measures the cache, so du failed on files
+# it had listed but could no longer stat. find skips those races and still
+# fails on any other error.
+cache_size() {
+  find "$cache" -ignore_readdir_race -type f -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }'
+}
+
 while :; do
-  size=$(du -sb "$cache" | cut -f1)
+  size=$(cache_size)
   if ((size <= limit)); then
     echo "Bazel disk cache is ${size} bytes."
     exit 0

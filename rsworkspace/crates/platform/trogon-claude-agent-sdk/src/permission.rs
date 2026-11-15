@@ -125,6 +125,11 @@ pub enum PermissionDecision {
     AnsweredOutOfBand,
     /// The handler failed: both SDKs answer with an error response carrying this message.
     Failed { message: String },
+    /// Any other object a TypeScript `canUseTool` resolves to, written as returned: its keys keep their order, the
+    /// request's `toolUseID` takes the place of one it carries (or drops it when the request had none), and nothing
+    /// is checked, so a field the typed variants cannot express reaches the CLI. Python rejects the value with the
+    /// `TypeError` response it gives a `dict`.
+    Raw(JsonObject),
 }
 
 impl PermissionDecision {
