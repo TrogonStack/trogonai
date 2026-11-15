@@ -585,6 +585,24 @@ Reusing the id with different bytes is a typed conflict. Tool dispatch identity
 and child Session or external delegation identity are durable before external
 dispatch.
 
+Each delegation also retains a `DelegationBindingRef`: the case-sensitive
+declaration binding name and the exact parent Session plan digest. The
+coordinator checks that digest against the parent's admitted plan and resolves
+the name there. A target Agent or external destination is not a substitute for
+this identity: distinct declarations may resolve to the same target. The
+reference supplies no current authorization, and replay never resolves it from
+the Agent's latest configuration.
+
+Before a child dispatch is acknowledged, its `ChildSessionCreation` retains the
+exact canonical child plan bytes and digest, checkout reference, and optional
+candidate reference. Repair copies these inputs instead of resolving them
+again. Work contracts and input references stay in that plan; this adds no
+parallel work-input schema or use of `variables_schema`. The child still needs
+current target lifecycle and policy admission before execution. The
+[child-session saga](./0035-session-store-decider-aggregate.md)
+defines comparison with an already-existing child and refusal on conflicting
+or unverifiable creation evidence.
+
 Exactly-once external tool execution is never assumed. A tool must honor the
 stable dispatch identity or support outcome reconciliation. If a crash leaves
 a non-idempotent outcome indeterminate, recovery records ToolOutcomeUnknown

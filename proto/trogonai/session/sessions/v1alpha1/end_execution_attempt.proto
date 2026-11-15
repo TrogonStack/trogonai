@@ -9,7 +9,8 @@ import "trogonai/session/sessions/v1alpha1/execution_attempt_ended.proto";
 // EndExecutionAttempt releases the session from an attempt, recording
 // [ExecutionAttemptEnded].
 //
-// Write precondition At: one outcome per attempt.
+// Write precondition At: one known, nonzero outcome per attempt. This ends the
+// attempt only; it does not close the Session or imply a child-terminal result.
 message EndExecutionAttempt {
   string session_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -19,7 +20,13 @@ message EndExecutionAttempt {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  AttemptOutcome outcome = 3 [features.field_presence = LEGACY_REQUIRED];
+  AttemptOutcome outcome = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   string detail = 4;
   google.protobuf.Timestamp ended_at = 5 [features.field_presence = LEGACY_REQUIRED];
 }

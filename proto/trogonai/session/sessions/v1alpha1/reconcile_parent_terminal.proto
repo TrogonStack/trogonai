@@ -12,7 +12,14 @@ import "trogonai/session/sessions/v1alpha1/parent_terminated.proto";
 //
 // Write precondition At on the child: a no-op if the child is already terminal.
 // The cancellation reason is derived by the aggregate, not carried here.
+// Parent and child ids differ, and the cause must be known and nonzero.
 message ReconcileParentTerminal {
+  option (buf.validate.message).cel = {
+    id: "reconcile_parent_terminal.distinct_parent"
+    message: "parent session must differ from child session"
+    expression: "this.session_id != this.parent_session_id"
+  };
+
   // The child session being reconciled.
   string session_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -22,7 +29,13 @@ message ReconcileParentTerminal {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  ParentTerminalCause cause = 3 [features.field_presence = LEGACY_REQUIRED];
+  ParentTerminalCause cause = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // The parent event that triggered this reconcile, so a redelivery is
   // recognisable as the same observation.
   string triggering_event_id = 4 [

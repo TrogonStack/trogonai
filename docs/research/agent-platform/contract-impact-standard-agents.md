@@ -10,7 +10,9 @@ Upstream is pinned at
 **Recommendation:** keep Standard Agents as a candidate concrete registered
 implementation, and use its precise behavioral contracts to review our
 adapters. Adopting its agent/thread model as the platform model would require
-new decisions. No integration or schema change is proposed as already agreed.
+new decisions. The [prepared contract refinements](#prepared-contract-refinements)
+address narrow delegation and recovery gaps identified below; they do not
+select a Standard Agents runtime or change the platform's Session lifecycle.
 
 ## Evidence boundary
 
@@ -229,6 +231,30 @@ module linkage, bridged functions, value marshaling and cancellation behavior
 required by `runCode`. Installed package execution is a separate trust boundary
 from nested sandboxed code execution. Reusing one engine name is not a proof
 that these contracts match.
+
+## Prepared contract refinements
+
+The draft Session schemas now carry a `DelegationBindingRef` through child and
+external dispatch, child linkage and the write-side fold. It binds the declared
+relationship name to the exact parent execution-plan digest, preserving
+distinct aliases that resolve to the same target.
+
+Child dispatch also retains `ChildSessionCreation`: the canonical child plan
+bytes and digest, checkout and optional candidate. Recovery must use those
+original inputs. An existing child counts as a duplicate only after its
+verified original creation evidence matches; stream existence alone is
+insufficient. Draft [ADR#0035](../../adr/0035-session-store-decider-aggregate.md)
+records the cross-record verification and current-admission obligations.
+
+Message-local constraints reject missing or empty new evidence, self-links in
+the affected lineage messages, unknown lifecycle values and mixed child/external
+delegation state. The Session delegation contract fixtures exercise those
+constraints through the shared validator. They do not prove
+runtime recovery, source authenticity, digest agreement or authorization.
+
+These changes remain within unpromoted draft packages. Persistent conversation
+ownership, reusable child instances, handoffs, parent-hook authority and managed
+model integration still require their own decisions and implementation.
 
 ## Research priorities and acceptance evidence
 

@@ -5,6 +5,8 @@ package trogonai.session.sessions.state.v1alpha1;
 import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
 import "trogonai/session/sessions/v1alpha1/checkpoint.proto";
+import "trogonai/session/sessions/v1alpha1/child_session_creation.proto";
+import "trogonai/session/sessions/v1alpha1/delegation_binding_ref.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 import "trogonai/session/sessions/v1alpha1/operation_reserved.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
@@ -117,6 +119,9 @@ message RecoveryOrigin {
   uint32 omitted_count = 6 [features.field_presence = LEGACY_REQUIRED];
 }
 
+// ParentLink retains the exact acknowledged declaration binding and known,
+// nonzero cascade policy for child reconciliation. Neither is re-resolved from
+// current Agent configuration during replay or snapshot restoration.
 message ParentLink {
   string parent_session_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -124,7 +129,13 @@ message ParentLink {
   ];
   // The parent's own ordinal of the dispatch that created this session.
   trogonai.session.sessions.v1alpha1.SessionOrdinal parent_dispatched_at = 2 [features.field_presence = LEGACY_REQUIRED];
-  trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // The parent-side operation this session was dispatched under.
   string operation_id = 4 [
     features.field_presence = LEGACY_REQUIRED,
@@ -136,8 +147,16 @@ message ParentLink {
   bool history_invalidated = 6 [features.field_presence = LEGACY_REQUIRED];
   // Set once the lineage is detached, making the detach idempotent per id.
   string detach_operation_id = 7;
+  trogonai.session.sessions.v1alpha1.DelegationBindingRef delegate_binding = 8 [(buf.validate.field).required = true];
 }
 
+// Delegation retains write-side dispatch identity for conflict detection and
+// reconciliation. The kind is known and nonzero. Child delegations require a
+// known, nonzero cascade policy and exact creation inputs, and cannot carry an
+// external reference. External delegations cannot carry child fields. The
+// reconciler needs child_creation after a snapshot to retry the original
+// creation and compare an existing child's evidence; these are immutable
+// command inputs, not a display projection or a separate work-input blob.
 message Delegation {
   option (buf.validate.message).cel = {
     id: "delegation.child_session_id_set_for_child_session"
@@ -149,20 +168,46 @@ message Delegation {
     message: "delegate_reference is set for DELEGATION_KIND_EXTERNAL"
     expression: "this.kind != trogonai.session.sessions.state.v1alpha1.DelegationKind.DELEGATION_KIND_EXTERNAL || this.delegate_reference != ''"
   };
+  option (buf.validate.message).cel = {
+    id: "delegation.child_fields_required"
+    message: "child delegation requires cascade policy and child_creation"
+    expression: "this.kind != trogonai.session.sessions.state.v1alpha1.DelegationKind.DELEGATION_KIND_CHILD_SESSION || (has(this.cascade_policy) && has(this.child_creation))"
+  };
+  option (buf.validate.message).cel = {
+    id: "delegation.child_external_reference_absent"
+    message: "child delegation cannot carry external delegate reference"
+    expression: "this.kind != trogonai.session.sessions.state.v1alpha1.DelegationKind.DELEGATION_KIND_CHILD_SESSION || !has(this.delegate_reference)"
+  };
+  option (buf.validate.message).cel = {
+    id: "delegation.external_child_fields_absent"
+    message: "external delegation cannot carry child session fields"
+    expression: "this.kind != trogonai.session.sessions.state.v1alpha1.DelegationKind.DELEGATION_KIND_EXTERNAL || (!has(this.child_session_id) && !has(this.cascade_policy) && !has(this.child_creation))"
+  };
 
   string operation_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  DelegationKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
+  DelegationKind kind = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // Set for DELEGATION_KIND_CHILD_SESSION.
   string child_session_id = 3;
-  trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 4;
+  trogonai.session.sessions.v1alpha1.CascadePolicy cascade_policy = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
   // Set for DELEGATION_KIND_EXTERNAL.
   string delegate_reference = 5;
   trogonai.session.sessions.v1alpha1.SessionOrdinal dispatched_at = 6 [features.field_presence = LEGACY_REQUIRED];
   // Set once the child is detached, making the detach idempotent per id.
   string detach_operation_id = 7;
+  trogonai.session.sessions.v1alpha1.DelegationBindingRef delegate_binding = 8 [(buf.validate.field).required = true];
+  trogonai.session.sessions.v1alpha1.ChildSessionCreation child_creation = 9;
 }
 
 enum DelegationKind {

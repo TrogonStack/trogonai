@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+
+// DelegationBindingRef identifies the selected declaration in the parent's
+// immutable plan, preserving aliases that resolve to the same delegate. The
+// binding name is case-sensitive and nonempty; its parent plan digest must
+// contain nonempty algorithm and value fields. Admission verifies the digest
+// and resolves the name in that exact plan. The reference grants no authority.
+message DelegationBindingRef {
+  option (buf.validate.message).cel = {
+    id: "delegation_binding_ref.plan_digest_nonempty"
+    message: "parent execution plan digest must have nonempty algorithm and value"
+    expression: "!has(this.parent_execution_plan_digest) || (this.parent_execution_plan_digest.algorithm != '' && this.parent_execution_plan_digest.value.size() > 0)"
+  };
+
+  string binding_name = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.min_len = 1
+  ];
+  Digest parent_execution_plan_digest = 2 [(buf.validate.field).required = true];
+}

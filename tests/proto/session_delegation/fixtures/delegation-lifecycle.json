@@ -7,7 +7,28 @@
         "operationId": "operation-example",
         "childSessionId": "child-example",
         "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
-        "turnId": "turn-example"
+        "turnId": "turn-example",
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "childCreation": {
+          "executionPlan": {
+            "planBytes": "AQ==",
+            "planDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "checkoutRef": {
+            "checkoutId": "checkout-example",
+            "uri": "git+ssh://example.test/team/project",
+            "revision": "revision-example"
+          }
+        }
       }
     },
     "child-dispatch-event": {
@@ -17,7 +38,28 @@
         "operationId": "operation-example",
         "childSessionId": "child-example",
         "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
-        "turnId": "turn-example"
+        "turnId": "turn-example",
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "childCreation": {
+          "executionPlan": {
+            "planBytes": "AQ==",
+            "planDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "checkoutRef": {
+            "checkoutId": "checkout-example",
+            "uri": "git+ssh://example.test/team/project",
+            "revision": "revision-example"
+          }
+        }
       }
     },
     "external-dispatch-command": {
@@ -33,7 +75,14 @@
           "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         },
         "correlationId": "correlation-example",
-        "turnId": "turn-example"
+        "turnId": "turn-example",
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
       }
     },
     "external-dispatch-event": {
@@ -49,7 +98,14 @@
           "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         },
         "correlationId": "correlation-example",
-        "turnId": "turn-example"
+        "turnId": "turn-example",
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
       }
     },
     "child-create-command": {
@@ -73,7 +129,14 @@
           "value": "3"
         },
         "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
-        "operationId": "operation-example"
+        "operationId": "operation-example",
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
       }
     },
     "parent-linked-event": {
@@ -85,7 +148,14 @@
           "value": "3"
         },
         "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
-        "operationId": "operation-example"
+        "operationId": "operation-example",
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
       }
     },
     "parent-link-state": {
@@ -98,7 +168,14 @@
         "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
         "operationId": "operation-example",
         "parentTerminated": false,
-        "historyInvalidated": false
+        "historyInvalidated": false,
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
       }
     },
     "child-delegation-state": {
@@ -110,6 +187,27 @@
         "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
         "dispatchedAt": {
           "value": "3"
+        },
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "childCreation": {
+          "executionPlan": {
+            "planBytes": "AQ==",
+            "planDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          },
+          "checkoutRef": {
+            "checkoutId": "checkout-example",
+            "uri": "git+ssh://example.test/team/project",
+            "revision": "revision-example"
+          }
         }
       }
     },
@@ -121,6 +219,13 @@
         "delegateReference": "delegate-example",
         "dispatchedAt": {
           "value": "3"
+        },
+        "delegateBinding": {
+          "bindingName": "calendar",
+          "parentExecutionPlanDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
         }
       }
     },
@@ -159,6 +264,59 @@
         "cause": "PARENT_TERMINAL_CAUSE_CLOSED",
         "triggeringEventId": "event-example"
       }
+    },
+    "binding-ref": {
+      "type": "trogonai.session.sessions.v1alpha1.DelegationBindingRef",
+      "payload": {
+        "bindingName": "calendar",
+        "parentExecutionPlanDigest": {
+          "algorithm": "sha256",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        }
+      }
+    },
+    "child-creation": {
+      "type": "trogonai.session.sessions.v1alpha1.ChildSessionCreation",
+      "payload": {
+        "executionPlan": {
+          "planBytes": "AQ==",
+          "planDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "checkoutRef": {
+          "checkoutId": "checkout-example",
+          "uri": "git+ssh://example.test/team/project",
+          "revision": "revision-example"
+        }
+      }
+    },
+    "child-creation-with-candidate": {
+      "type": "trogonai.session.sessions.v1alpha1.ChildSessionCreation",
+      "payload": {
+        "executionPlan": {
+          "planBytes": "AQ==",
+          "planDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        },
+        "checkoutRef": {
+          "checkoutId": "checkout-example",
+          "uri": "git+ssh://example.test/team/project",
+          "revision": "revision-example"
+        },
+        "candidateRef": {
+          "candidateId": {
+            "value": "candidate-example"
+          },
+          "contentDigest": {
+            "algorithm": "sha256",
+            "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
+      }
     }
   },
   "cases": [
@@ -167,6 +325,12 @@
       "template": "child-dispatch-command",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -174,6 +338,12 @@
       "template": "child-dispatch-event",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -181,6 +351,12 @@
       "template": "external-dispatch-command",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -188,6 +364,12 @@
       "template": "external-dispatch-event",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -195,6 +377,12 @@
       "template": "child-create-command",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -202,6 +390,12 @@
       "template": "parent-linked-event",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -209,6 +403,12 @@
       "template": "parent-link-state",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -216,6 +416,12 @@
       "template": "child-delegation-state",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -223,6 +429,12 @@
       "template": "external-delegation-state",
       "violations": [
         "delegate_binding"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/delegateBinding"
+        }
       ]
     },
     {
@@ -230,6 +442,12 @@
       "template": "child-dispatch-command",
       "violations": [
         "child_creation"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/childCreation"
+        }
       ]
     },
     {
@@ -237,6 +455,12 @@
       "template": "child-dispatch-event",
       "violations": [
         "child_creation"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/childCreation"
+        }
       ]
     },
     {
@@ -244,6 +468,12 @@
       "template": "child-delegation-state",
       "violations": [
         "child_creation"
+      ],
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/childCreation"
+        }
       ]
     },
     {
@@ -341,7 +571,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "cascade_policy: must not be in list [0]"
       ]
     },
     {
@@ -355,7 +585,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "cascade_policy: value must be one of the defined enum values"
       ]
     },
     {
@@ -369,7 +599,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "cascade_policy: must not be in list [0]"
       ]
     },
     {
@@ -383,7 +613,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "cascade_policy: value must be one of the defined enum values"
       ]
     },
     {
@@ -397,7 +627,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "cascade_policy: must not be in list [0]"
       ]
     },
     {
@@ -411,7 +641,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "cascade_policy: value must be one of the defined enum values"
       ]
     },
     {
@@ -425,7 +655,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "cascade_policy: must not be in list [0]"
       ]
     },
     {
@@ -439,7 +669,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "cascade_policy: value must be one of the defined enum values"
       ]
     },
     {
@@ -453,7 +683,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "cascade_policy: must not be in list [0]"
       ]
     },
     {
@@ -467,7 +697,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "cascade_policy: value must be one of the defined enum values"
       ]
     },
     {
@@ -481,7 +711,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "cascade_policy: must not be in list [0]"
       ]
     },
     {
@@ -495,7 +725,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "cascade_policy: value must be one of the defined enum values"
       ]
     },
     {
@@ -509,7 +739,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "kind: must not be in list [0]"
       ]
     },
     {
@@ -523,7 +753,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "kind: value must be one of the defined enum values"
       ]
     },
     {
@@ -537,7 +767,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "kind: must not be in list [0]"
       ]
     },
     {
@@ -551,7 +781,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "kind: value must be one of the defined enum values"
       ]
     },
     {
@@ -611,7 +841,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "outcome: must not be in list [0]"
       ]
     },
     {
@@ -625,7 +855,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "outcome: value must be one of the defined enum values"
       ]
     },
     {
@@ -643,7 +873,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "outcome: must not be in list [0]"
       ]
     },
     {
@@ -657,7 +887,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "outcome: value must be one of the defined enum values"
       ]
     },
     {
@@ -675,7 +905,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "cause: must not be in list [0]"
       ]
     },
     {
@@ -689,7 +919,7 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "cause: value must be one of the defined enum values"
       ]
     },
     {
@@ -707,7 +937,7 @@
         }
       ],
       "violations": [
-        "enum.not_in"
+        "cause: must not be in list [0]"
       ]
     },
     {
@@ -721,7 +951,733 @@
         }
       ],
       "violations": [
-        "enum.defined_only"
+        "cause: value must be one of the defined enum values"
+      ]
+    },
+    {
+      "name": "child-dispatch-command-accepts-complete-evidence",
+      "template": "child-dispatch-command"
+    },
+    {
+      "name": "child-dispatch-event-accepts-complete-evidence",
+      "template": "child-dispatch-event"
+    },
+    {
+      "name": "external-dispatch-command-accepts-complete-evidence",
+      "template": "external-dispatch-command"
+    },
+    {
+      "name": "external-dispatch-event-accepts-complete-evidence",
+      "template": "external-dispatch-event"
+    },
+    {
+      "name": "child-create-command-accepts-complete-evidence",
+      "template": "child-create-command"
+    },
+    {
+      "name": "parent-linked-event-accepts-complete-evidence",
+      "template": "parent-linked-event"
+    },
+    {
+      "name": "parent-link-state-accepts-complete-evidence",
+      "template": "parent-link-state"
+    },
+    {
+      "name": "child-delegation-state-accepts-complete-evidence",
+      "template": "child-delegation-state"
+    },
+    {
+      "name": "external-delegation-state-accepts-complete-evidence",
+      "template": "external-delegation-state"
+    },
+    {
+      "name": "binding-ref-accepts-plan-scoped-name",
+      "template": "binding-ref"
+    },
+    {
+      "name": "binding-ref-preserves-distinct-alias",
+      "template": "binding-ref",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindingName",
+          "value": "work_calendar"
+        }
+      ]
+    },
+    {
+      "name": "binding-ref-does-not-restrict-digest-algorithm",
+      "template": "binding-ref",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/parentExecutionPlanDigest/algorithm",
+          "value": "blake3"
+        }
+      ]
+    },
+    {
+      "name": "binding-ref-rejects-missing-name",
+      "template": "binding-ref",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/bindingName"
+        }
+      ],
+      "violations": [
+        "binding_name"
+      ]
+    },
+    {
+      "name": "binding-ref-rejects-empty-name",
+      "template": "binding-ref",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "binding-ref-rejects-missing-parent-plan-digest",
+      "template": "binding-ref",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/parentExecutionPlanDigest"
+        }
+      ],
+      "violations": [
+        "parent_execution_plan_digest"
+      ]
+    },
+    {
+      "name": "binding-ref-rejects-empty-digest-algorithm",
+      "template": "binding-ref",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/parentExecutionPlanDigest/algorithm",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "parent execution plan digest must have nonempty algorithm and value"
+      ]
+    },
+    {
+      "name": "binding-ref-rejects-empty-digest-value",
+      "template": "binding-ref",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/parentExecutionPlanDigest/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "parent execution plan digest must have nonempty algorithm and value"
+      ]
+    },
+    {
+      "name": "child-creation-accepts-exact-plan-and-checkout",
+      "template": "child-creation"
+    },
+    {
+      "name": "child-creation-accepts-candidate-projection",
+      "template": "child-creation-with-candidate"
+    },
+    {
+      "name": "child-creation-rejects-missing-plan",
+      "template": "child-creation",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/executionPlan"
+        }
+      ],
+      "violations": [
+        "execution_plan"
+      ]
+    },
+    {
+      "name": "child-creation-rejects-missing-checkout",
+      "template": "child-creation",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/checkoutRef"
+        }
+      ],
+      "violations": [
+        "checkout_ref"
+      ]
+    },
+    {
+      "name": "child-creation-rejects-empty-plan-bytes",
+      "template": "child-creation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/executionPlan/planBytes",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child execution plan must have nonempty bytes and digest material"
+      ]
+    },
+    {
+      "name": "child-creation-rejects-empty-plan-digest-algorithm",
+      "template": "child-creation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/executionPlan/planDigest/algorithm",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child execution plan must have nonempty bytes and digest material"
+      ]
+    },
+    {
+      "name": "child-creation-rejects-empty-candidate-digest-algorithm",
+      "template": "child-creation-with-candidate",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/candidateRef/contentDigest/algorithm",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child candidate digest must have nonempty algorithm and value"
+      ]
+    },
+    {
+      "name": "child-creation-rejects-empty-plan-digest-value",
+      "template": "child-creation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/executionPlan/planDigest/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child execution plan must have nonempty bytes and digest material"
+      ]
+    },
+    {
+      "name": "child-creation-rejects-empty-candidate-digest-value",
+      "template": "child-creation-with-candidate",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/candidateRef/contentDigest/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child candidate digest must have nonempty algorithm and value"
+      ]
+    },
+    {
+      "name": "child-creation-rejects-empty-candidate-id",
+      "template": "child-creation-with-candidate",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/candidateRef/candidateId/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "child-dispatch-command-rejects-nested-empty-binding-name",
+      "template": "child-dispatch-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "child-dispatch-event-rejects-nested-empty-binding-name",
+      "template": "child-dispatch-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "external-dispatch-command-rejects-nested-empty-binding-name",
+      "template": "external-dispatch-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "external-dispatch-event-rejects-nested-empty-binding-name",
+      "template": "external-dispatch-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "child-create-command-rejects-nested-empty-binding-name",
+      "template": "child-create-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "parent-linked-event-rejects-nested-empty-binding-name",
+      "template": "parent-linked-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "parent-link-state-rejects-nested-empty-binding-name",
+      "template": "parent-link-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-nested-empty-binding-name",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "external-delegation-state-rejects-nested-empty-binding-name",
+      "template": "external-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/delegateBinding/bindingName",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "must be at least 1 characters"
+      ]
+    },
+    {
+      "name": "child-dispatch-command-accepts-independent-child",
+      "template": "child-dispatch-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_INDEPENDENT"
+        }
+      ]
+    },
+    {
+      "name": "child-dispatch-command-rejects-nested-empty-child-plan",
+      "template": "child-dispatch-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/childCreation/executionPlan/planBytes",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child execution plan must have nonempty bytes and digest material"
+      ]
+    },
+    {
+      "name": "child-dispatch-command-accepts-retained-candidate",
+      "template": "child-dispatch-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/childCreation",
+          "value": {
+            "executionPlan": {
+              "planBytes": "AQ==",
+              "planDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "checkoutRef": {
+              "checkoutId": "checkout-example",
+              "uri": "git+ssh://example.test/team/project",
+              "revision": "revision-example"
+            },
+            "candidateRef": {
+              "candidateId": {
+                "value": "candidate-example"
+              },
+              "contentDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "child-dispatch-event-accepts-independent-child",
+      "template": "child-dispatch-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_INDEPENDENT"
+        }
+      ]
+    },
+    {
+      "name": "child-dispatch-event-rejects-nested-empty-child-plan",
+      "template": "child-dispatch-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/childCreation/executionPlan/planBytes",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child execution plan must have nonempty bytes and digest material"
+      ]
+    },
+    {
+      "name": "child-dispatch-event-accepts-retained-candidate",
+      "template": "child-dispatch-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/childCreation",
+          "value": {
+            "executionPlan": {
+              "planBytes": "AQ==",
+              "planDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "checkoutRef": {
+              "checkoutId": "checkout-example",
+              "uri": "git+ssh://example.test/team/project",
+              "revision": "revision-example"
+            },
+            "candidateRef": {
+              "candidateId": {
+                "value": "candidate-example"
+              },
+              "contentDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "child-delegation-state-accepts-independent-child",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cascadePolicy",
+          "value": "CASCADE_POLICY_INDEPENDENT"
+        }
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-nested-empty-child-plan",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/childCreation/executionPlan/planBytes",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child execution plan must have nonempty bytes and digest material"
+      ]
+    },
+    {
+      "name": "child-delegation-state-accepts-retained-candidate",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/childCreation",
+          "value": {
+            "executionPlan": {
+              "planBytes": "AQ==",
+              "planDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "checkoutRef": {
+              "checkoutId": "checkout-example",
+              "uri": "git+ssh://example.test/team/project",
+              "revision": "revision-example"
+            },
+            "candidateRef": {
+              "candidateId": {
+                "value": "candidate-example"
+              },
+              "contentDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-missing-cascade",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/cascadePolicy"
+        }
+      ],
+      "violations": [
+        "child delegation requires cascade policy and child_creation"
+      ]
+    },
+    {
+      "name": "child-delegation-state-rejects-explicit-empty-external-reference",
+      "template": "child-delegation-state",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/delegateReference",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "child delegation cannot carry external delegate reference"
+      ]
+    },
+    {
+      "name": "external-delegation-state-rejects-retained-child-creation",
+      "template": "external-delegation-state",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/childCreation",
+          "value": {
+            "executionPlan": {
+              "planBytes": "AQ==",
+              "planDigest": {
+                "algorithm": "sha256",
+                "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+              }
+            },
+            "checkoutRef": {
+              "checkoutId": "checkout-example",
+              "uri": "git+ssh://example.test/team/project",
+              "revision": "revision-example"
+            }
+          }
+        }
+      ],
+      "violations": [
+        "external delegation cannot carry child session fields"
+      ]
+    },
+    {
+      "name": "external-delegation-state-rejects-explicit-empty-child-id",
+      "template": "external-delegation-state",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/childSessionId",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "external delegation cannot carry child session fields"
+      ]
+    },
+    {
+      "name": "end-attempt-command-accepts-cancelled-outcome",
+      "template": "end-attempt-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": "ATTEMPT_OUTCOME_CANCELLED"
+        }
+      ]
+    },
+    {
+      "name": "end-attempt-command-accepts-terminated-outcome",
+      "template": "end-attempt-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": "ATTEMPT_OUTCOME_TERMINATED"
+        }
+      ]
+    },
+    {
+      "name": "attempt-ended-event-accepts-cancelled-outcome",
+      "template": "attempt-ended-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": "ATTEMPT_OUTCOME_CANCELLED"
+        }
+      ]
+    },
+    {
+      "name": "attempt-ended-event-accepts-terminated-outcome",
+      "template": "attempt-ended-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": "ATTEMPT_OUTCOME_TERMINATED"
+        }
+      ]
+    },
+    {
+      "name": "parent-terminated-event-accepts-cancelled-parent",
+      "template": "parent-terminated-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": "PARENT_TERMINAL_CAUSE_CANCELLED"
+        }
+      ]
+    },
+    {
+      "name": "parent-terminated-event-accepts-failed-parent",
+      "template": "parent-terminated-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": "PARENT_TERMINAL_CAUSE_FAILED"
+        }
+      ]
+    },
+    {
+      "name": "parent-terminated-event-accepts-hidden-parent",
+      "template": "parent-terminated-event",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": "PARENT_TERMINAL_CAUSE_HIDDEN"
+        }
+      ]
+    },
+    {
+      "name": "reconcile-parent-terminal-command-accepts-cancelled-parent",
+      "template": "reconcile-parent-terminal-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": "PARENT_TERMINAL_CAUSE_CANCELLED"
+        }
+      ]
+    },
+    {
+      "name": "reconcile-parent-terminal-command-accepts-failed-parent",
+      "template": "reconcile-parent-terminal-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": "PARENT_TERMINAL_CAUSE_FAILED"
+        }
+      ]
+    },
+    {
+      "name": "reconcile-parent-terminal-command-accepts-hidden-parent",
+      "template": "reconcile-parent-terminal-command",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/cause",
+          "value": "PARENT_TERMINAL_CAUSE_HIDDEN"
+        }
       ]
     }
   ]

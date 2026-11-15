@@ -9,8 +9,16 @@ import "buf/validate/validate.proto";
 // atomic [ParentTerminated, SessionCancelled] batch (ADR#0035 facet 6). It is
 // strictly for parent-terminal causes -- rewind cascade uses
 // ParentHistoryInvalidated instead, never this event. It is an
-// invariant-bearing transition (WRITE_PRECONDITION = At).
+// invariant-bearing transition (WRITE_PRECONDITION = At). Parent and child ids
+// differ, and the cause is a known, nonzero Session-terminal marker, never an
+// execution-attempt outcome.
 message ParentTerminated {
+  option (buf.validate.message).cel = {
+    id: "parent_terminated.distinct_parent"
+    message: "parent session must differ from child session"
+    expression: "this.session_id != this.parent_session_id"
+  };
+
   string session_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
@@ -20,7 +28,13 @@ message ParentTerminated {
     (buf.validate.field).string.min_len = 1
   ];
   // Which parent-terminal marker triggered this cascade.
-  ParentTerminalCause cause = 3 [features.field_presence = LEGACY_REQUIRED];
+  ParentTerminalCause cause = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // Event id of the parent's terminal marker that triggered this cascade, for
   // audit traceability back to the exact triggering fact.
   string triggering_event_id = 4 [
