@@ -8,6 +8,7 @@ license = "Apache-2.0"
 workspace = true
 
 [dependencies]
+buffa-types = { workspace = true }
 schemars = "=1.2.1"
 rmcp = { workspace = true }
 serde = { workspace = true }
