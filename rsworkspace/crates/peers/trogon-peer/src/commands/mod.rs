@@ -12,7 +12,7 @@ mod attach;
 pub use attach::{Attach, AttachError};
 
 mod heartbeat;
-pub use heartbeat::{Heartbeat, HeartbeatError};
+pub use heartbeat::{Heartbeat, HeartbeatError, guard_live_attachment};
 
 mod detach;
 pub use detach::{Detach, DetachError};
