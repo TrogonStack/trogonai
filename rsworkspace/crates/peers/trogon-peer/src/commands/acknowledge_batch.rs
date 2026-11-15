@@ -11,6 +11,15 @@ pub struct AcknowledgeBatch {
     now: DateTime<Utc>,
 }
 impl AcknowledgeBatch {
+    pub fn owner(&self) -> &TrustedPeerOwner {
+        &self.owner
+    }
+    pub fn attachment(&self) -> &AttachmentRef {
+        &self.attachment
+    }
+    pub fn batch_id(&self) -> &BatchId {
+        &self.batch_id
+    }
     pub fn new(owner: TrustedPeerOwner, attachment: AttachmentRef, batch_id: BatchId, now: DateTime<Utc>) -> Self {
         Self {
             owner,
