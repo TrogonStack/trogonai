@@ -1,7 +1,7 @@
+use trogon_credential_domain::{CredentialFailureReason, CredentialKey};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialFailureReason, CredentialKey};
 use super::proto::{decode_pending_write_state, write_failed_to_proto};
 use super::state::{CredentialDecideError, CredentialEvolveError};
 

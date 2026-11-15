@@ -1,11 +1,9 @@
+use trogon_credential_domain::{CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use trogon_decider_runtime::{Event, EventId, Headers, ReadFrom, Snapshot, StreamPosition, StreamWritePrecondition};
 use trogon_nats::test_support::JetStreamTestServer;
 use uuid::Uuid;
 
 use super::*;
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind,
-};
 
 fn stream_id(owner_id: &str) -> CredentialKey {
     let owner = CredentialOwnerId::new(owner_id).unwrap();

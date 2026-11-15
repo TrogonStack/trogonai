@@ -2,16 +2,14 @@ use std::borrow::Cow;
 use std::fmt;
 
 use buffa::{EnumValue, MessageField, ProtoBox};
-use trogonai_proto::gateway::credentials::{CredentialEventCase, state_v1, v1};
-
-use super::domain::{
+use trogon_credential_domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialFailureReason, CredentialFailureReasonError,
     CredentialFingerprint, CredentialFingerprintError, CredentialId, CredentialIdError, CredentialIdentity,
     CredentialIdentityVersion, CredentialKey, CredentialKind, CredentialMetadata, CredentialOwnerId,
     CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
-    CredentialVersionError, SourceKind,
+    CredentialVersionError, SourceIntegrationId, SourceIntegrationIdError, SourceKind,
 };
-use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
+use trogonai_proto::gateway::credentials::{CredentialEventCase, state_v1, v1};
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum CredentialProtoDecodeError {

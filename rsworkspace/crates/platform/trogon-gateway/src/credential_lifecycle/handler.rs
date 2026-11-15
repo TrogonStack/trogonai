@@ -6,9 +6,17 @@ use std::sync::OnceLock;
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
+use trogon_credential_domain::{
+    CredentialDestroyReason, CredentialDestroyReasonError, CredentialFailureReason, CredentialId, CredentialIdentity,
+    CredentialKey, CredentialRef, CredentialVersion, SourceKind,
+};
 use trogon_decider_runtime::{
     CommandError, CommandExecution, EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite,
     StreamAppend, StreamPosition, StreamRead, TokioSnapshotTaskScheduler,
+};
+use trogon_secret_store::{
+    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
 };
 use trogon_semconv::{attribute, metric};
 use trogon_std::SecretString;
@@ -16,25 +24,17 @@ use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, Credenti
 
 use super::constants::CREDENTIAL_LOCK_STRIPES;
 use crate::constants::METER_NAME;
-use crate::credential::commands::domain::{
-    CredentialDestroyReason, CredentialDestroyReasonError, CredentialId, CredentialIdentity, CredentialKey,
-    CredentialRef, CredentialVersion, SourceKind,
-};
 use crate::credential::commands::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
     decode_message_field, decode_pending_write_state, decode_revoked_state,
 };
 use crate::credential::{
     ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, CredentialDecideError,
-    CredentialEvolveError, CredentialFailureReason, RecordCredentialDestroyFailure, RecordCredentialRotationFailure,
+    CredentialEvolveError, RecordCredentialDestroyFailure, RecordCredentialRotationFailure,
     RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation, RequestCredentialWrite,
     RevokeCredential, evolve_stream, initial_state,
 };
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
-use crate::secret_store::{
-    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate,
-};
 
 type ExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
     CredentialDecideError,

@@ -2,28 +2,28 @@ use axum::http::StatusCode;
 use buffa::MessageField;
 use std::sync::{Arc, Mutex};
 
-use crate::credential::commands::domain::{
-    AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint,
-    CredentialIdentity, CredentialIdentityVersion, CredentialMetadata, CredentialScope, CredentialStatus,
-    CredentialVersion, InjectionLocation, InjectionLocations, RuntimeServiceId,
-};
 use crate::credential::commands::proto::{
     activated_to_proto, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, identity_to_proto,
     revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
     write_requested_to_proto,
 };
 use crate::credential::stream::credential_event_subject;
-use crate::secret_store::{
-    MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
-    SecretStoreRevoke, SecretStoreRotate, SecretVerifier,
-};
 use chrono::Utc;
+use trogon_credential_domain::{
+    AllowedHosts, AllowedRuntimeServices, CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint,
+    CredentialIdentity, CredentialIdentityVersion, CredentialMetadata, CredentialScope, CredentialStatus,
+    CredentialVersion, InjectionLocation, InjectionLocations, RuntimeServiceId,
+};
 use trogon_decider_nats::{StreamSubject, append_stream};
 use trogon_decider_runtime::{
     Event, EventData, EventDecode, EventEncode, EventId, EventType, Headers, ReadFrom, ReadStreamRequest,
     ReadStreamResponse, StreamEvent, StreamPosition, StreamRead,
 };
 use trogon_nats::jetstream::MockJetStreamPublishMessage;
+use trogon_secret_store::{
+    MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
+    SecretStoreRevoke, SecretStoreRotate, SecretVerifier,
+};
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use uuid::Uuid;
 

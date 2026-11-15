@@ -2,6 +2,11 @@ use std::sync::Mutex;
 
 use buffa::{Message as _, MessageField};
 use chrono::Utc;
+use trogon_credential_domain::{
+    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialIdentity,
+    CredentialIdentityVersion, CredentialKey, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef,
+    CredentialScope, CredentialStatus, CredentialVersion, SourceIntegrationId, SourceKind,
+};
 use trogon_decider::testing::TestCase;
 use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, CommandSnapshotPolicy, EventData,
@@ -11,11 +16,6 @@ use trogon_decider_runtime::{
 };
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1 as proto};
 
-use super::domain::{
-    CredentialDestroyReason, CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialIdentity,
-    CredentialIdentityVersion, CredentialKey, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef,
-    CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
-};
 use super::proto::{
     CredentialFieldInvalidError, CredentialProtoDecodeError, activated_to_proto, active_state_to_proto,
     decode_active_state, decode_pending_write_state, decode_write_requested, destroy_failed_to_proto,
@@ -30,7 +30,6 @@ use super::{
     RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
     RequestCredentialWrite, RevokeCredential,
 };
-use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Debug, thiserror::Error)]
 #[error("credential test stream store rejected the append")]

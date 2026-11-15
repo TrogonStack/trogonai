@@ -1,5 +1,6 @@
+use trogon_credential_domain::{CredentialIdentity, CredentialKind, CredentialScope, SourceKind};
+
 use super::*;
-use crate::credential::commands::domain::{CredentialIdentity, CredentialKind, CredentialScope, SourceKind};
 
 fn owner(raw: &str) -> CredentialOwnerId {
     CredentialOwnerId::new(raw).unwrap()

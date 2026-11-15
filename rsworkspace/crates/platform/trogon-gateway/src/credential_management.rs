@@ -15,7 +15,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::warn;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKey, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
+    CredentialStatus, CredentialVersion, SourceIntegrationId, SourceKind,
+};
 use trogon_decider_runtime::{CommandError, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
+use trogon_secret_store::{
+    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
+};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1};
 
@@ -30,10 +38,6 @@ use self::idempotency::{
     CredentialCommandIdempotencyStore, CredentialCommandIdempotencyStoreError, IdempotencyDecision, IdempotencyKey,
     IdempotencyScope, RequestFingerprint,
 };
-use crate::credential::commands::domain::{
-    CredentialIdentity, CredentialKey, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
-    CredentialStatus, CredentialVersion, SourceKind,
-};
 use crate::credential::commands::proto::{
     decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
     decode_message_field, decode_revoked_state,
@@ -47,11 +51,6 @@ use crate::credential_lifecycle::recovery_worker::{
 };
 #[cfg(test)]
 use crate::credential_runtime_projection::RuntimeCredentialRegistry;
-use crate::secret_store::{
-    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate,
-};
-use crate::source_integration_id::SourceIntegrationId;
 
 type HmacSha256 = Hmac<Sha256>;
 

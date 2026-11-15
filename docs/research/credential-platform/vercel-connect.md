@@ -772,8 +772,8 @@ Conflating them hides the new architectural layer this post introduces.
 - [ADR#0074: Credential Platform Extraction Boundary](../../adr/0074-credential-platform-extraction-boundary.md)
 - [Credential platform specification](./credential-platform-spec.md)
 - [Secret store context](./secret-store.md)
-- `SecretStore` traits: `rsworkspace/crates/platform/trogon-gateway/src/secret_store/traits.rs`
-- OpenBao adapter: `rsworkspace/crates/platform/trogon-gateway/src/secret_store/openbao_secret_store.rs`
+- `SecretStore` traits: `rsworkspace/crates/credential/trogon-secret-store/src/traits.rs`
+- OpenBao adapter: `rsworkspace/crates/credential/trogon-secret-store/src/openbao_secret_store.rs`
 - Runtime credential projection and cache: `rsworkspace/crates/platform/trogon-gateway/src/credential/processor/runtime_projection.rs`
 - Gateway OpenBao bootstrap: `rsworkspace/crates/platform/trogon-gateway/src/main.rs`
 - `SecretString`: `rsworkspace/crates/platform/trogon-std/src/secret_string.rs`

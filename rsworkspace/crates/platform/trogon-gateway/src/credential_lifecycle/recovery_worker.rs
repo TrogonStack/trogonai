@@ -9,6 +9,7 @@ use bytes::Bytes;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use tracing::{error, info, warn};
+use trogon_credential_domain::{CredentialKey, CredentialVersion};
 use trogon_decider_runtime::{
     EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite, StreamAppend, StreamEvent, StreamRead,
 };
@@ -17,6 +18,7 @@ use trogon_nats::jetstream::{
     JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
     is_create_key_value_already_exists,
 };
+use trogon_secret_store::{SecretStoreError, SecretStoreMetadata};
 use trogon_semconv::{attribute, metric};
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialEventPayloadError, state_v1, v1};
@@ -30,11 +32,9 @@ use super::handler::{
     activation_recovery_command,
 };
 use crate::constants::METER_NAME;
-use crate::credential::commands::domain::{CredentialKey, CredentialVersion};
 use crate::credential::commands::proto::{CredentialProtoDecodeError, decode_destroyed, event_key};
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::{CredentialEvolveError, evolve_stream, initial_state};
-use crate::secret_store::{SecretStoreError, SecretStoreMetadata};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct CredentialRecoveryReport {

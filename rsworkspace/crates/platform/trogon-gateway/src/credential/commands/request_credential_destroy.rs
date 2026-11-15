@@ -1,7 +1,7 @@
+use trogon_credential_domain::{CredentialDestroyReason, CredentialKey, CredentialRef};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialDestroyReason, CredentialKey, CredentialRef};
 use super::proto::{
     decode_cleanup_failed_state, decode_destroyed_state, decode_revoked_state, destroy_requested_to_proto,
 };
