@@ -310,7 +310,7 @@ impl NodeStack {
     /// merge.
     ///
     /// A managed settings document's reader has 999552 and 999840 for the same two passes when the sources are
-    /// evaluated, its copy 999824, the merge into its folder 960112 and the merge of the admin settings 961920: 1952
+    /// evaluated, its copy 999824, the merge into its folder 959824 and the merge of the admin settings 961920: 1952
     /// nested objects or a root object holding 3123 nested arrays, 1784 nested arrays, 1249 levels and 1251 levels.
     /// The evaluation of the policy origin has 1000704, 1001120, 1000952 and 961152 (1954 objects, 1250 levels), and
     /// the one that asks whether the machine policy loaded 1001728, 1002080, 1002064 and 961824 (1956 objects, 1788
@@ -368,7 +368,7 @@ impl NodeStack {
                 walk: 999_552,
                 clone: 999_840,
                 copy: 999_824,
-                folder_merge: 960_112,
+                folder_merge: 959_824,
             },
             origin: PassBudgets {
                 walk: 1_000_704,
@@ -399,7 +399,7 @@ impl NodeStack {
     /// arrays for the reader, 1565 nested arrays for the copy, and 1307 levels around `null` for a merge.
     ///
     /// A managed settings document's reader has 999992 and 1000312 for the same two passes when the sources are
-    /// evaluated, its copy 1000608, the merge into its folder 960624 and the merge of the admin settings 962320: 1644
+    /// evaluated, its copy 1000608, the merge into its folder 960320 and the merge of the admin settings 962320: 1644
     /// nested objects or a root object holding 3289 nested arrays, 1562 nested arrays, 1304 levels and 1306 levels.
     /// The evaluation of the policy origin has 1001072, 1001528, 1001688 and 961584 (1646 objects, 1305 levels), and
     /// the one that asks whether the machine policy loaded 1002288, 1002440, 1002528 and 962256 (1648 objects, 1565
@@ -460,7 +460,7 @@ impl NodeStack {
                 walk: 999_992,
                 clone: 1_000_312,
                 copy: 1_000_608,
-                folder_merge: 960_624,
+                folder_merge: 960_320,
             },
             origin: PassBudgets {
                 walk: 1_001_072,
