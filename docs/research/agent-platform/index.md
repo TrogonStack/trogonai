@@ -37,6 +37,9 @@ and evidence rules behind each product dossier remain reproducible.
 - [OpenAI Agents SDK](./products/openai-agents-sdk.md)
 - [OpenClaw](./products/openclaw.md)
 - [OpenComputer](./products/opencomputer.md)
+- [Standard Agents](./products/standard-agents.md), a later version-pinned study
+  of its portable package and runtime specification, with a
+  [primary-source ledger](./sources/standard-agents.md)
 - [Vercel](./products/vercel.md)
 
 ## Contract impact
@@ -45,6 +48,9 @@ and evidence rules behind each product dossier remain reproducible.
   the dossier findings read back against `proto/trogonai/agents/agents/v1alpha1`
   and `proto/trogonai/session/sessions/v1alpha1`. Analysis only; every
   proposed change is gated on an ADR.
+- [Contract impact: Standard Agents 0.2.0](./contract-impact-standard-agents.md),
+  a later comparison with the inspected platform checkout, separating executable
+  infrastructure, draft contracts, semantic mismatches and adoption evidence.
 
 ## Synthesis
 
