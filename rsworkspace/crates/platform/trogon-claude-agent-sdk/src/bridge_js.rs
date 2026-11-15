@@ -4,11 +4,14 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
+use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::bridge_unicode::{is_forbidden, is_mark, is_punctuation, is_space};
 
-const DETAIL_LIMIT: usize = 1024;
+mod constants;
+
+use constants::DETAIL_LIMIT;
 
 static ESCAPE_CODES: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[\]PX^_][^\x1b\x07]*(?:\x07|\x1b\\)").ok()
@@ -219,6 +222,30 @@ fn is_stripped(c: char) -> bool {
     ) || (c != ' ' && get_general_category(c) == GeneralCategory::SpaceSeparator)
         || c == '\u{2800}'
         || is_default_ignorable(c)
+}
+
+/// The `Default_Ignorable_Code_Point` property.
+fn is_default_ignorable(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{34f}'
+            | '\u{61c}'
+            | '\u{115f}'..='\u{1160}'
+            | '\u{17b4}'..='\u{17b5}'
+            | '\u{180b}'..='\u{180f}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{3164}'
+            | '\u{fe00}'..='\u{fe0f}'
+            | '\u{feff}'
+            | '\u{ffa0}'
+            | '\u{fff0}'..='\u{fff8}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0000}'..='\u{e0fff}'
+    )
 }
 
 fn collapse_spaces(text: &str) -> String {

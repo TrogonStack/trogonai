@@ -6,9 +6,11 @@ use super::*;
 /// (`.config/mise/lib/claude-sdk-freshness/bridge_create_session_platform_goldens.mjs` writes the goldens).
 const GOLDENS: &str = include_str!("../tests/fixtures/bridge_create_session/flavor.json");
 
-fn answer(flavor: Flavor, call: &[Value]) -> Value {
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+fn answer(flavor: Flavor, call: &[Value]) -> Result<Value, String> {
     let arg = |index: usize| call.get(index).and_then(Value::as_str).unwrap_or_default();
-    match arg(0) {
+    Ok(match arg(0) {
         "sep" => Value::String(flavor.sep().to_string()),
         "rooted" => Value::Bool(flavor.rooted(arg(1))),
         "rootLen" => Value::from(flavor.root_len(arg(1))),
@@ -24,12 +26,12 @@ fn answer(flavor: Flavor, call: &[Value]) -> Value {
         "join" => Value::String(flavor.join(arg(1), arg(2))),
         "resolve" => Value::String(flavor.resolve(arg(1), arg(2))),
         "resolveAlone" => Value::String(flavor.resolve_alone(arg(1))),
-        other => panic!("unknown operation {other}"),
-    }
+        other => return Err(format!("unknown operation {other}")),
+    })
 }
 
 #[test]
-fn answers_path_syntax_like_the_upstream_helpers() {
+fn answers_path_syntax_like_the_upstream_helpers() -> TestResult {
     let cases: Vec<Value> = serde_json::from_str(GOLDENS).unwrap_or_default();
     assert_eq!(cases.len(), 2);
     for case in &cases {
@@ -44,7 +46,8 @@ fn answers_path_syntax_like_the_upstream_helpers() {
         assert_eq!(calls.len(), expected.len());
         for (call, want) in calls.iter().zip(&expected) {
             let call = call.as_array().map(Vec::as_slice).unwrap_or_default();
-            assert_eq!(answer(flavor, call), *want, "{} {call:?}", case["name"]);
+            assert_eq!(answer(flavor, call)?, *want, "{} {call:?}", case["name"]);
         }
     }
+    Ok(())
 }

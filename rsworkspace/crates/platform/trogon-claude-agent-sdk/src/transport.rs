@@ -50,6 +50,13 @@ pub trait Transport: Send + 'static {
     /// Python `is_ready`: whether the transport can still be written to.
     fn is_ready(&self) -> bool;
 
+    /// Whether the driver may hand [`Transport::write`] another document. The default is
+    /// [`Transport::is_ready`]. A transport whose `write` waits for its own connection, as the TypeScript SSE
+    /// transport awaits its first readiness, accepts writes before it is ready, and only stops once it closes.
+    fn accepts_writes(&self) -> bool {
+        self.is_ready()
+    }
+
     /// Python `end_input`: no more documents will be written (stdin is closed for a process).
     fn end_input(&mut self) -> impl Future<Output = Result<(), Error>> + Send;
 

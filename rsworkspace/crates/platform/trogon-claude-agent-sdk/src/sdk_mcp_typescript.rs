@@ -5,9 +5,12 @@ use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error}
 use crate::{
     CallbackError, CancellationToken, JsonObject, McpToolRequest, SdkTool, SdkTools,
     constants::{self, SUPPORTED_PROTOCOL_VERSIONS},
-    sdk_mcp_zod::{self, Input},
+    sdk_mcp_js::stringify_primitive,
+    sdk_mcp_regexp, sdk_mcp_zod,
+    sdk_mcp_zod_run::Input,
     settings_json::js_stringify_pretty,
 };
+use jsonschema::{Keyword, ValidationError, paths::Location};
 use serde_json::Value;
 
 pub(crate) async fn request(
@@ -109,11 +112,10 @@ async fn dispatch(
     signal: CancellationToken,
 ) -> Result<JsonObject, McpServerError> {
     let tools = state.tools.as_ref().filter(|tools| !tools.is_empty());
-    let registered = match (method, tools) {
-        ("initialize" | "ping", _) => true,
-        ("tools/list" | "tools/call", Some(_)) => true,
-        _ => false,
-    };
+    let registered = matches!(
+        (method, tools),
+        ("initialize" | "ping", _) | ("tools/list" | "tools/call", Some(_))
+    );
     if !registered {
         return Ok(error(id, -32601, "Method not found".into()));
     }
@@ -223,13 +225,117 @@ fn list_tools(state: &ServerState, tools: &SdkTools) -> Vec<Value> {
         .collect()
 }
 
-fn listed_tool(state: &ServerState, tool: &SdkTool) -> JsonObject {
+/// The input schema as `tools/list` advertises it: draft-07 unless the tool declares its own `$schema`.
+fn listed_input_schema(tool: &SdkTool) -> JsonObject {
     let declared = tool.input_schema().as_json();
     let mut input_schema = JsonObject::new();
     if !declared.contains_key("$schema") {
         input_schema.insert("$schema".into(), constants::MCP_TS_JSON_SCHEMA_DRAFT_07.into());
     }
     input_schema.extend(declared.iter().map(|(key, value)| (key.clone(), value.clone())));
+    input_schema
+}
+
+/// The listed input schema compiled for the call check. `McpServer` checks the arguments with zod alone, where
+/// a `pattern` is an ECMAScript `RegExp`; the `jsonschema` regex engine rejects ECMAScript syntax such as a
+/// named backreference, and the draft-07 meta-schema asserts `format: regex` on every `pattern`. So each
+/// `pattern` moves to a keyword that runs the ECMAScript engine, and the rest compiles as before.
+fn call_validator(schema: &JsonObject) -> Result<jsonschema::Validator, String> {
+    jsonschema::options()
+        .with_keyword(constants::ECMA_PATTERN, ecma_pattern)
+        .build(&Value::Object(ecma_patterns(schema)))
+        .map_err(|error| error.to_string())
+}
+
+/// `schema` with each string `pattern` in a schema position renamed to `constants::ECMA_PATTERN`, keys in order.
+fn ecma_patterns(schema: &JsonObject) -> JsonObject {
+    fn subschema(value: &Value) -> Value {
+        match value {
+            Value::Object(schema) => Value::Object(ecma_patterns(schema)),
+            other => other.clone(),
+        }
+    }
+    schema
+        .iter()
+        .map(|(key, value)| {
+            let value = match (key.as_str(), value) {
+                (
+                    "properties" | "patternProperties" | "definitions" | "$defs" | "dependentSchemas" | "dependencies",
+                    Value::Object(named),
+                ) => Value::Object(
+                    named
+                        .iter()
+                        .map(|(name, value)| (name.clone(), subschema(value)))
+                        .collect(),
+                ),
+                ("allOf" | "anyOf" | "oneOf" | "prefixItems" | "items", Value::Array(schemas)) => {
+                    Value::Array(schemas.iter().map(subschema).collect())
+                }
+                (
+                    "additionalItems"
+                    | "additionalProperties"
+                    | "contains"
+                    | "contentSchema"
+                    | "else"
+                    | "if"
+                    | "items"
+                    | "not"
+                    | "propertyNames"
+                    | "then"
+                    | "unevaluatedItems"
+                    | "unevaluatedProperties",
+                    value,
+                ) => subschema(value),
+                (_, value) => value.clone(),
+            };
+            let key = if key == "pattern" && value.is_string() {
+                constants::ECMA_PATTERN.to_owned()
+            } else {
+                key.clone()
+            };
+            (key, value)
+        })
+        .collect()
+}
+
+/// A `pattern` as zod's `.regex` checks it. One the ECMAScript engine cannot compile under these flags checks
+/// nothing, as zod's string node does.
+struct EcmaPattern {
+    regex: Option<regress::Regex>,
+    flags: String,
+}
+
+impl<'i> Keyword<'i> for EcmaPattern {
+    fn validate(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
+        if self.is_valid(instance) {
+            Ok(())
+        } else {
+            Err(ValidationError::custom("does not match the pattern"))
+        }
+    }
+
+    fn is_valid(&self, instance: &'i Value) -> bool {
+        match (&self.regex, instance.as_str()) {
+            (Some(regex), Some(text)) => sdk_mcp_regexp::test(regex, text, &self.flags),
+            _ => true,
+        }
+    }
+}
+
+fn ecma_pattern<'a>(
+    parent: &'a JsonObject,
+    value: &'a Value,
+    _location: Location,
+) -> Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>> {
+    let flags = sdk_mcp_zod::regexp_flags(parent, parent.get("format").and_then(Value::as_str));
+    let regex = value
+        .as_str()
+        .and_then(|source| sdk_mcp_regexp::compile(source, &flags).ok());
+    Ok(Box::new(EcmaPattern { regex, flags }))
+}
+
+fn listed_tool(state: &ServerState, tool: &SdkTool) -> JsonObject {
+    let input_schema = listed_input_schema(tool);
     let mut listed = JsonObject::from_iter([
         ("name".into(), tool.name().as_str().into()),
         ("description".into(), tool.description().into()),
@@ -272,11 +378,13 @@ async fn call_tool(
     let Some(tool) = state.tools.as_ref().and_then(|tools| tools.get(name)) else {
         return Ok(Ok(tool_error(format!("MCP error -32602: Tool {name} not found"))));
     };
-    let schema = tool.input_schema();
-    if let Some(error) = schema.compile_error() {
-        return Ok(Ok(tool_error(error.to_owned())));
-    }
-    let Ok(prepared) = tool.validation().prepare(schema.as_json()) else {
+    let declared = tool.input_schema();
+    // Compiled under the draft the listing advertises, so a draft-07 tuple (`items` as a list) compiles.
+    let schema = match call_validator(&listed_input_schema(tool)) {
+        Ok(schema) => schema,
+        Err(error) => return Ok(Ok(tool_error(error))),
+    };
+    let Ok(prepared) = tool.validation().prepare(declared.as_json()) else {
         return Ok(Ok(tool_error(format!(
             "MCP error -32602: Tool {name} has a validation choice outside its input schema"
         ))));
@@ -285,7 +393,7 @@ async fn call_tool(
         .parse(arguments.map_or(Input::Undefined, Input::Json));
     let mut issues = parsed.issues;
     if issues.is_empty()
-        && sdk_mcp_zod::has_unmodeled(schema.as_json())
+        && sdk_mcp_zod::has_unmodeled(declared.as_json())
         && !schema.is_valid(arguments.unwrap_or(&Value::Null))
     {
         issues.push(custom(Vec::new()));
@@ -567,6 +675,22 @@ fn invalid_type(expected: &str, at: Vec<Value>, value: Option<&Value>) -> JsonOb
             "message".into(),
             format!("Invalid input: expected {expected}, received {}", received(value)).into(),
         ),
+    ])
+}
+
+fn invalid_value(values: Vec<Value>, at: Vec<Value>) -> JsonObject {
+    let message = match values.as_slice() {
+        [only] => format!("Invalid input: expected {}", stringify_primitive(only)),
+        _ => format!(
+            "Invalid option: expected one of {}",
+            values.iter().map(stringify_primitive).collect::<Vec<_>>().join("|")
+        ),
+    };
+    JsonObject::from_iter([
+        ("code".into(), "invalid_value".into()),
+        ("values".into(), Value::Array(values)),
+        ("path".into(), Value::Array(at)),
+        ("message".into(), message.into()),
     ])
 }
 

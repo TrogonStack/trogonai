@@ -31,10 +31,16 @@ fn frames(value: &Value) -> Result<Vec<SseFrame>, String> {
         .collect()
 }
 
-fn chunk_bytes(chunk: &Value) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+/// Feeds one recorded chunk the way the oracle did: a `text` chunk was pushed as a string, which skips the decoder
+/// (so a leading byte order mark stays), and a `hex` chunk as bytes.
+fn push_chunk(parser: &mut SseParser, chunk: &Value) -> Result<Vec<SseFrame>, Box<dyn std::error::Error>> {
     if let Some(text) = chunk.get("text").and_then(Value::as_str) {
-        return Ok(text.as_bytes().to_vec());
+        return Ok(parser.push_str(text));
     }
+    Ok(parser.push(&chunk_bytes(chunk)?))
+}
+
+fn chunk_bytes(chunk: &Value) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let hex = field(chunk, "hex")?.as_str().ok_or("hex is not text")?;
     (0..hex.len())
         .step_by(2)
@@ -57,7 +63,7 @@ fn every_chunking_dispatches_the_frames_the_browser_parser_dispatched() -> TestR
         let steps = field(case, "steps")?.as_array().ok_or("steps are not a list")?;
         let mut parser = SseParser::new();
         for (chunk, step) in chunks.iter().zip(steps) {
-            let got = parser.push(&chunk_bytes(chunk)?);
+            let got = push_chunk(&mut parser, chunk)?;
             assert_eq!(got, frames(field(step, "frames")?)?, "frames of {case}");
             assert_eq!(
                 u64::try_from(parser.pending_chars())?,

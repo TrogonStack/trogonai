@@ -69,7 +69,12 @@ globalThis.fetch = async (...args) => {
     throw error;
   }
 };
-const bridge = await import(pathToFileURL(bridgePath).href);
+// The bundle is loaded from a copy that also exports `YPe`, the queued notification schema, because it is built from
+// the bundle's schema library and cannot be lifted as text.
+const bundleCopy = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-worker-bundle-'));
+fs.writeFileSync(path.join(bundleCopy, 'bridge.mjs'), `${source}\nexport { YPe as __YPe };\n`);
+const bridge = await import(pathToFileURL(path.join(bundleCopy, 'bridge.mjs')).href);
+fs.rmSync(bundleCopy, { recursive: true, force: true });
 
 // ---- pure tables, read from the bundle source ----
 const between = (from, to) => {
@@ -78,7 +83,7 @@ const between = (from, to) => {
   if (start < 0 || end < 0) throw new Error(`bundle layout changed around ${from}`);
   return source.slice(start, end);
 };
-const evaluate = (code, names) => new Function(`${code}\nreturn {${names.join(',')}};`)();
+const evaluate = (code, names, scope = {}) => new Function(...Object.keys(scope), `${code}\nreturn {${names.join(',')}};`)(...Object.values(scope));
 const heartbeatTable = evaluate(between('var e5={},I5=', 'function Wn('), ['I5', 't5', 'L5', 'P5', 'N5', 'P2e', 'N2e', 'n5', 'M2e', 'U2e', 'r5', 'F2e', 'o5', 's5']);
 const closeTable = evaluate(between('var rHe=10,U5=', 'async function uHe('), ['rHe', 'U5', 'oHe', 'sHe', 'iHe', 'aHe', 'Au', 'cHe']);
 const uploadTable = evaluate(between('var dHe=1e4', 'function ZA('), ['dHe', 'pHe', 'l5', 'fHe', 'd5']);
@@ -114,10 +119,9 @@ const tokenExpiry = evaluate(`const Zt=(e)=>JSON.parse(e);${between('function V1
 const jwt = (claims) => `h.${Buffer.from(typeof claims === 'string' ? claims : JSON.stringify(claims)).toString('base64url')}.s`;
 
 // The inbound router `J4` (what `onInboundMessage`, `onPermissionResponse`, the control dispatch and the cancel hook
-// are fed from) read from the bundle with the logging and telemetry calls and the notification parser stubbed. The
-// notification parser needs the bundle's schema library, so the queued_notification success path is recorded through
-// the real session instead (stream section).
-const routerHarness = evaluate(`const Zt=(e)=>JSON.parse(e);const A=()=>{},we=()=>{},le=()=>{},ie=()=>{},X=(e)=>String(e);const XPe=()=>{};${between('function H4(', 'Ee();class $4')}${between('function Y4(', 'var Kb=')}${between('class If{', 'var YPe=')}${between('function X4(', 'var NPe=')}`, ['J4', 'If']);
+// are fed from) read from the bundle with the logging and telemetry calls stubbed. The queued notification check
+// `ZPe` and parser `XPe` are read from the bundle too, and `XPe` validates with the bundle's own `YPe` schema.
+const routerHarness = evaluate(`const Zt=(e)=>JSON.parse(e);const A=()=>{},we=()=>{},le=()=>{},ie=()=>{},X=(e)=>String(e);${between('function H4(', 'Ee();class $4')}${between('function Y4(', 'Ne();var yEt=')}${between('class If{', 'var YPe=')}${between('function XPe(', 'ne();Sn();Ee();var s$=')}${between('function X4(', 'var NPe=')}`, ['J4', 'If'], { YPe: bridge.__YPe });
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const routed = (lines, { echo = [], buffer = false } = {}) => {
   const { J4, If } = routerHarness;
@@ -1336,7 +1340,7 @@ if (existing === null) {
   for (const mode of ['heartbeat_during_upload', 'events_while_a_batch_is_open']) goldens.concurrency.push(await concurrencyCase(mode));
   for (const base of ['not a url', '', '/relative']) goldens.invalid_url.push(await invalidUrlCase(base));
 } else {
-  for (const key of ['pure', 'control', 'network', 'fetch_failures']) goldens[key] = existing[key];
+  for (const key of ['pure', 'control', 'network', 'fetch_failures']) if (key !== sectionOnly) goldens[key] = existing[key];
   if (sectionOnly === 'concurrency') for (const mode of ['heartbeat_during_upload', 'events_while_a_batch_is_open']) goldens.concurrency.push(await concurrencyCase(mode));
   else goldens.concurrency = existing.concurrency ?? [];
   if (sectionOnly === 'invalid_url') for (const base of ['not a url', '', '/relative']) goldens.invalid_url.push(await invalidUrlCase(base));

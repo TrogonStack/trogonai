@@ -1,4 +1,10 @@
-use std::{ffi::OsString, path::PathBuf, sync::Arc};
+use std::{
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use crate::constants::SCRIPT_EXTENSIONS;
 
 /// How the CLI argument list is spelled. The CLI accepts both spellings for every flag.
 ///
@@ -11,6 +17,23 @@ pub enum ArgvStyle {
     #[default]
     TypeScript,
     Python,
+}
+
+/// TypeScript's `endsWith` test is case-sensitive and works on the whole path string; Python has no script
+/// runtime, so its dialect keeps the lenient extension check.
+pub(crate) fn is_script(path: &Path, style: ArgvStyle) -> bool {
+    match style {
+        ArgvStyle::TypeScript => {
+            let path = path.to_string_lossy();
+            SCRIPT_EXTENSIONS
+                .iter()
+                .any(|extension| path.ends_with(&format!(".{extension}")))
+        }
+        ArgvStyle::Python => path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|extension| SCRIPT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())),
+    }
 }
 
 /// How the child environment is assembled.

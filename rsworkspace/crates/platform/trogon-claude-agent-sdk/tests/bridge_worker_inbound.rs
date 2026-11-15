@@ -1,8 +1,6 @@
 //! Replays the recorded inbound router tables (`pure.inbound` and `pure.uuid_set` of the goldens, written by
-//! `.config/mise/lib/claude-sdk-freshness/bridge_worker_goldens.mjs` from the bundle's own `J4` and `If`) through
-//! [`InboundRouter`] and [`UuidSet`]. The queued notification that does parse is recorded through the real session
-//! (`stream` section, replayed by `bridge_worker_stream.rs`) because the notification parser needs the bundle's schema
-//! library.
+//! `.config/mise/lib/claude-sdk-freshness/bridge_worker_goldens.mjs` from the bundle's own `J4`, `ZPe`, `XPe` and
+//! `If`, with `XPe` validating through the bundle's own `YPe` schema) through [`InboundRouter`] and [`UuidSet`].
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{INBOUND_DEDUP_CAPACITY, Inbound, InboundRouter, UuidSet};

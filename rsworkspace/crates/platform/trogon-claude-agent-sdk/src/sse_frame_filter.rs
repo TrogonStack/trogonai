@@ -13,15 +13,9 @@ use crate::{
     sse_worker_markers::{has_malformed_user_content, is_worker_output_user},
 };
 
-const ISSUED_CAP: usize = 500;
-const EXPECTED_CAP: usize = 1024;
-const PREFIX: &str = "[BrowserSSETransport]";
-const STRIPPED_RESPONSE_KEYS: [&str; 4] = [
-    "pending_user_dialog_requests",
-    "pending_permission_requests",
-    "pending_elicitation_requests",
-    "error_code",
-];
+mod constants;
+
+use constants::{EXPECTED_CAP, ISSUED_CAP, PREFIX, STRIPPED_RESPONSE_KEYS};
 
 /// What the filter makes of a frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -218,11 +212,11 @@ impl SseFrameFilter {
                     }
                 }
             }
-            Some(kind @ ("client_event" | "ephemeral_event")) => {
-                if self.handle_payload(kind, cursor, data, &mut events).is_err() {
-                    let text = format!("{PREFIX} Dropping unparseable {kind} frame");
-                    self.drop_frame(&mut events, SseDropCategory::UnparseableFrame, SseLogLevel::Debug, text);
-                }
+            Some(kind @ ("client_event" | "ephemeral_event"))
+                if self.handle_payload(kind, cursor, data, &mut events).is_err() =>
+            {
+                let text = format!("{PREFIX} Dropping unparseable {kind} frame");
+                self.drop_frame(&mut events, SseDropCategory::UnparseableFrame, SseLogLevel::Debug, text);
             }
             _ => {}
         }

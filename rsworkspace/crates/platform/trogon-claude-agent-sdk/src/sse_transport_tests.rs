@@ -20,6 +20,7 @@ use tokio::{
 };
 
 use super::*;
+use crate::SseDeliveryUpdate;
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -458,50 +459,193 @@ async fn replays(name: &str) -> TestResult {
     Ok(())
 }
 
-macro_rules! replayed {
-    ($($test:ident => $case:literal,)*) => {
-        const REPLAYED: &[&str] = &[$($case),*];
-        $(
-            #[tokio::test]
-            async fn $test() -> TestResult {
-                replays($case).await
-            }
-        )*
-    };
+const REPLAYED: &[&str] = &[
+    "session",
+    "delivery_handlers_throw",
+    "stream_permanent_401",
+    "stream_permanent_403",
+    "stream_permanent_404",
+    "stream_permanent_without_reason",
+    "stream_retries_after_a_server_error",
+    "reconnect_budget_exhausted",
+    "stream_reset_reconnects_from_the_cursor",
+    "stream_end_reconnects",
+    "liveness_timeout_reconnects",
+    "connect_timeout_reconnects",
+    "suspend_and_resume",
+    "a_write_resumes_a_suspended_stream",
+    "expecting_a_response_resumes_a_suspended_stream",
+    "post_waits_for_retry_after",
+    "post_is_dropped_after_three_failures",
+    "post_permanent_failure_fails_the_transport",
+    "post_permanent_failure_without_reason",
+    "post_that_never_answers_times_out",
+    "post_to_an_unreachable_server_is_retried",
+    "abort_before_connecting",
+    "abort_while_running",
+    "close_before_connecting",
+    "write_after_close",
+    "stream_url_that_does_not_parse",
+    "stream_server_that_is_unreachable",
+    "header_name_that_is_invalid",
+    "header_value_that_is_invalid",
+    "the_queue_holds_a_thousand_lines",
+    "the_stream_closing_ends_a_read",
+];
+
+#[tokio::test]
+async fn a_session_matches_the_recorded_transport() -> TestResult {
+    replays("session").await
 }
 
-replayed! {
-    a_session_matches_the_recorded_transport => "session",
-    handlers_that_throw_do_not_stop_the_stream => "delivery_handlers_throw",
-    a_401_on_the_stream_is_permanent => "stream_permanent_401",
-    a_403_on_the_stream_is_permanent => "stream_permanent_403",
-    a_404_on_the_stream_is_permanent => "stream_permanent_404",
-    a_permanent_stream_error_without_a_reason => "stream_permanent_without_reason",
-    a_server_error_on_the_stream_is_retried => "stream_retries_after_a_server_error",
-    the_reconnect_budget_runs_out => "reconnect_budget_exhausted",
-    a_reset_stream_reconnects_from_the_cursor => "stream_reset_reconnects_from_the_cursor",
-    an_ended_stream_reconnects => "stream_end_reconnects",
-    a_silent_stream_is_reconnected => "liveness_timeout_reconnects",
-    a_stream_that_never_answers_is_reconnected => "connect_timeout_reconnects",
-    suspending_and_resuming_the_stream => "suspend_and_resume",
-    a_write_resumes_a_suspended_stream => "a_write_resumes_a_suspended_stream",
-    expecting_a_response_resumes_a_suspended_stream => "expecting_a_response_resumes_a_suspended_stream",
-    a_failed_write_waits_for_retry_after => "post_waits_for_retry_after",
-    a_write_is_dropped_after_three_failures => "post_is_dropped_after_three_failures",
-    a_permanent_write_failure_fails_the_transport => "post_permanent_failure_fails_the_transport",
-    a_permanent_write_failure_without_a_reason => "post_permanent_failure_without_reason",
-    a_write_that_never_answers_times_out => "post_that_never_answers_times_out",
-    a_write_to_an_unreachable_server_is_retried => "post_to_an_unreachable_server_is_retried",
-    aborting_before_connecting => "abort_before_connecting",
-    aborting_while_running => "abort_while_running",
-    closing_before_connecting => "close_before_connecting",
-    writing_after_closing => "write_after_close",
-    a_stream_url_that_does_not_parse => "stream_url_that_does_not_parse",
-    a_stream_server_that_is_unreachable => "stream_server_that_is_unreachable",
-    a_header_name_that_is_invalid => "header_name_that_is_invalid",
-    a_header_value_that_is_invalid => "header_value_that_is_invalid",
-    the_queue_holds_a_thousand_lines => "the_queue_holds_a_thousand_lines",
-    closing_ends_a_read => "the_stream_closing_ends_a_read",
+#[tokio::test]
+async fn handlers_that_throw_do_not_stop_the_stream() -> TestResult {
+    replays("delivery_handlers_throw").await
+}
+
+#[tokio::test]
+async fn a_401_on_the_stream_is_permanent() -> TestResult {
+    replays("stream_permanent_401").await
+}
+
+#[tokio::test]
+async fn a_403_on_the_stream_is_permanent() -> TestResult {
+    replays("stream_permanent_403").await
+}
+
+#[tokio::test]
+async fn a_404_on_the_stream_is_permanent() -> TestResult {
+    replays("stream_permanent_404").await
+}
+
+#[tokio::test]
+async fn a_permanent_stream_error_without_a_reason() -> TestResult {
+    replays("stream_permanent_without_reason").await
+}
+
+#[tokio::test]
+async fn a_server_error_on_the_stream_is_retried() -> TestResult {
+    replays("stream_retries_after_a_server_error").await
+}
+
+#[tokio::test]
+async fn the_reconnect_budget_runs_out() -> TestResult {
+    replays("reconnect_budget_exhausted").await
+}
+
+#[tokio::test]
+async fn a_reset_stream_reconnects_from_the_cursor() -> TestResult {
+    replays("stream_reset_reconnects_from_the_cursor").await
+}
+
+#[tokio::test]
+async fn an_ended_stream_reconnects() -> TestResult {
+    replays("stream_end_reconnects").await
+}
+
+#[tokio::test]
+async fn a_silent_stream_is_reconnected() -> TestResult {
+    replays("liveness_timeout_reconnects").await
+}
+
+#[tokio::test]
+async fn a_stream_that_never_answers_is_reconnected() -> TestResult {
+    replays("connect_timeout_reconnects").await
+}
+
+#[tokio::test]
+async fn suspending_and_resuming_the_stream() -> TestResult {
+    replays("suspend_and_resume").await
+}
+
+#[tokio::test]
+async fn a_write_resumes_a_suspended_stream() -> TestResult {
+    replays("a_write_resumes_a_suspended_stream").await
+}
+
+#[tokio::test]
+async fn expecting_a_response_resumes_a_suspended_stream() -> TestResult {
+    replays("expecting_a_response_resumes_a_suspended_stream").await
+}
+
+#[tokio::test]
+async fn a_failed_write_waits_for_retry_after() -> TestResult {
+    replays("post_waits_for_retry_after").await
+}
+
+#[tokio::test]
+async fn a_write_is_dropped_after_three_failures() -> TestResult {
+    replays("post_is_dropped_after_three_failures").await
+}
+
+#[tokio::test]
+async fn a_permanent_write_failure_fails_the_transport() -> TestResult {
+    replays("post_permanent_failure_fails_the_transport").await
+}
+
+#[tokio::test]
+async fn a_permanent_write_failure_without_a_reason() -> TestResult {
+    replays("post_permanent_failure_without_reason").await
+}
+
+#[tokio::test]
+async fn a_write_that_never_answers_times_out() -> TestResult {
+    replays("post_that_never_answers_times_out").await
+}
+
+#[tokio::test]
+async fn a_write_to_an_unreachable_server_is_retried() -> TestResult {
+    replays("post_to_an_unreachable_server_is_retried").await
+}
+
+#[tokio::test]
+async fn aborting_before_connecting() -> TestResult {
+    replays("abort_before_connecting").await
+}
+
+#[tokio::test]
+async fn aborting_while_running() -> TestResult {
+    replays("abort_while_running").await
+}
+
+#[tokio::test]
+async fn closing_before_connecting() -> TestResult {
+    replays("close_before_connecting").await
+}
+
+#[tokio::test]
+async fn writing_after_closing() -> TestResult {
+    replays("write_after_close").await
+}
+
+#[tokio::test]
+async fn a_stream_url_that_does_not_parse() -> TestResult {
+    replays("stream_url_that_does_not_parse").await
+}
+
+#[tokio::test]
+async fn a_stream_server_that_is_unreachable() -> TestResult {
+    replays("stream_server_that_is_unreachable").await
+}
+
+#[tokio::test]
+async fn a_header_name_that_is_invalid() -> TestResult {
+    replays("header_name_that_is_invalid").await
+}
+
+#[tokio::test]
+async fn a_header_value_that_is_invalid() -> TestResult {
+    replays("header_value_that_is_invalid").await
+}
+
+#[tokio::test]
+async fn the_queue_holds_a_thousand_lines() -> TestResult {
+    replays("the_queue_holds_a_thousand_lines").await
+}
+
+#[tokio::test]
+async fn closing_ends_a_read() -> TestResult {
+    replays("the_stream_closing_ends_a_read").await
 }
 
 #[test]

@@ -26,7 +26,7 @@ pub enum SandboxConfigSchema {
 /// The schema rejected the value.
 #[derive(Debug, Error, Eq, PartialEq)]
 #[error("{0} rejected the value")]
-pub struct SandboxConfigRejected(pub SandboxConfigSchema);
+pub struct SandboxConfigRejectedError(pub SandboxConfigSchema);
 
 impl SandboxConfigSchema {
     /// Every schema, in declaration order.
@@ -60,11 +60,11 @@ impl SandboxConfigSchema {
     ///
     /// # Errors
     ///
-    /// Returns [`SandboxConfigRejected`] when the schema rejects the value.
-    pub fn parse(self, value: Option<&Value>) -> Result<Option<Value>, SandboxConfigRejected> {
+    /// Returns [`SandboxConfigRejectedError`] when the schema rejects the value.
+    pub fn parse(self, value: Option<&Value>) -> Result<Option<Value>, SandboxConfigRejectedError> {
         schema()
             .and_then(|schema| schema.root_output(self.root(), value))
-            .ok_or(SandboxConfigRejected(self))
+            .ok_or(SandboxConfigRejectedError(self))
     }
 }
 

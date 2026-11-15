@@ -8,6 +8,7 @@ use crate::{
     Error,
     adapters::{EnvironmentVariable, ReadMetadata},
     bundled_cli::find_bundled_cli,
+    cli_not_found_error::CliNotFoundError,
     environment_plan::Inherited,
     home_directory::{HomeDirectoryError, Platform, python_home, python_join},
 };
@@ -27,19 +28,6 @@ impl From<CliDiscoveryError> for Error {
             CliDiscoveryError::NotFound(error) => Self::CliNotFound(error),
             CliDiscoveryError::Home(error) => Self::HomeDirectory(error),
         }
-    }
-}
-
-/// No Claude Code executable was found on `PATH` or in the well-known install locations.
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("{message}")]
-pub struct CliNotFoundError {
-    message: &'static str,
-}
-
-impl CliNotFoundError {
-    pub fn message(&self) -> &'static str {
-        self.message
     }
 }
 

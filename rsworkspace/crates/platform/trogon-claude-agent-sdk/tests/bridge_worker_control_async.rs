@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 use tokio::task::JoinHandle;
 use trogon_claude_agent_sdk::{
-    AsyncControl, AsyncControlCallbacks, CallbackResult, CancellationToken, ControlCallbacks, ControlReply,
+    AsyncControl, AsyncControlCallbacks, BridgeControlReply, CallbackResult, CancellationToken, ControlCallbacks,
     ControlSession, HostError, HostFuture, ModelVerdict, PendingControl, SIDE_QUESTION_DEADLINE, SideQuestionContext,
     answer_control_request, background_tasks_disabled,
 };
@@ -195,6 +195,8 @@ struct Session {
     callbacks: ControlCallbacks,
     version: Option<String>,
     tasks: Vec<JoinHandle<()>>,
+    /// Where the attach path queues the replies the dispatcher builds on the spot.
+    written: Log,
 }
 
 impl Session {
@@ -211,9 +213,12 @@ impl Session {
             pending_prompts: &[],
         };
         let task = match answer_control_request(frame, &session, &mut self.callbacks) {
-            ControlReply::Frame(_) => None,
-            ControlReply::Deferred(work) => self.control.start(frame, work),
-            ControlReply::Pending(pending) => Some(self.control.finish_pending(frame, pending)),
+            BridgeControlReply::Frame(reply) => {
+                push(&self.written, reply);
+                None
+            }
+            BridgeControlReply::Deferred(work) => self.control.start(frame, work),
+            BridgeControlReply::Pending(pending) => Some(self.control.finish_pending(frame, pending)),
         };
         self.tasks.extend(task.map(tokio::spawn));
     }
@@ -249,6 +254,7 @@ async fn host_promises_are_answered_as_the_recorded_session_answered() -> TestRe
             callbacks: host.control,
             version: case["version"].as_str().map(str::to_owned),
             tasks: Vec::new(),
+            written: Arc::clone(&written),
         };
         session.deliver(&case["request"]);
         let_tasks_run().await;
@@ -264,15 +270,20 @@ async fn host_promises_are_answered_as_the_recorded_session_answered() -> TestRe
         }
         let mut expected = case["frames"].as_array().ok_or("no frames")?.clone();
         for frame in &mut expected {
-            if frame["type"] == "control_response" {
-                if let Some(frame) = frame.as_object_mut() {
-                    frame.shift_remove("uuid");
-                }
+            if frame["type"] == "control_response"
+                && let Some(frame) = frame.as_object_mut()
+            {
+                frame.shift_remove("uuid");
             }
         }
+        // The recorder keeps only the `control_response` and `system` payloads the session posted.
+        let posted: Vec<Value> = snapshot(&written)
+            .into_iter()
+            .filter(|frame| frame["type"] == "control_response" || frame["type"] == "system")
+            .collect();
         assert_eq!(
             serde_json::to_string(&expected)?,
-            serde_json::to_string(&snapshot(&written))?,
+            serde_json::to_string(&posted)?,
             "{name}"
         );
         let mut calls = snapshot(&host.calls);

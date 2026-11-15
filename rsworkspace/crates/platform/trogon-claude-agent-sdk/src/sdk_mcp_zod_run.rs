@@ -8,10 +8,11 @@ use crate::{
         trim, utf16_length,
     },
     sdk_mcp_regexp,
-    sdk_mcp_zod::{Affix, ArrayNode, Bound, Node, NumberNode, ObjectMode, ObjectNode, StringCheck, StringNode},
+    sdk_mcp_zod::{Affix, ArrayNode, Bound, Node, NumberNode, ObjectMode, ObjectNode, Parsed, StringCheck, StringNode},
     sdk_mcp_zod_issue::{Issue, aborted},
 };
 use serde_json::Value;
+use std::cmp::Ordering;
 use std::collections::HashSet;
 
 /// A JavaScript value the parse reads: JSON, `undefined`, or the function an absent key named like a member of
@@ -128,6 +129,17 @@ fn reports(issues: &[Issue]) -> Value {
     Value::Array(issues.iter().map(|issue| Value::Object(issue.report())).collect())
 }
 
+impl Node {
+    /// `schema.safeParse(input)`.
+    pub(crate) fn parse(&self, input: Input<'_>) -> Parsed {
+        let outcome = run(self, input);
+        Parsed {
+            issues: outcome.issues.iter().map(Issue::report).collect(),
+            value: outcome.value.into_json(),
+        }
+    }
+}
+
 pub(crate) fn run(node: &Node, input: Input<'_>) -> Outcome {
     match node {
         Node::Any => Outcome::pass(input),
@@ -214,7 +226,7 @@ fn strictly_equal(value: &Value, input: Input<'_>) -> bool {
 /// the discriminator.
 fn discriminated(key: &str, options: &[(Vec<Value>, Node)], input: Input<'_>) -> Outcome {
     let Input::Json(Value::Object(map)) = input else {
-        return Outcome::fail(type_issue("object", input), input);
+        return Outcome::fail(Issue::invalid_type_code_first("object", received(input)), input);
     };
     let tag = lookup(map, key);
     match options
@@ -345,7 +357,7 @@ fn length_check(
     match kind {
         StringCheckKind::Minimum => {
             if let Some(bound) = min
-                && !(measured >= bound.value)
+                && measured.partial_cmp(&bound.value).is_none_or(Ordering::is_lt)
             {
                 issues.push(Issue::new(
                     [
@@ -360,7 +372,7 @@ fn length_check(
         }
         StringCheckKind::Maximum => {
             if let Some(bound) = max
-                && !(measured <= bound.value)
+                && measured.partial_cmp(&bound.value).is_none_or(Ordering::is_gt)
             {
                 issues.push(Issue::new(
                     [
@@ -423,7 +435,10 @@ fn format_check(node: &StringNode, text: &str, issues: &mut Vec<Issue>, value: &
                         ("origin", "string".into()),
                         ("code", "invalid_format".into()),
                         ("format", format.as_str().into()),
-                        ("pattern", format!("/{source}/{flags}").into()),
+                        (
+                            "pattern",
+                            format!("/{source}/{}", sdk_mcp_regexp::canonical_flags(flags)).into(),
+                        ),
                     ],
                     true,
                 ));
@@ -432,7 +447,8 @@ fn format_check(node: &StringNode, text: &str, issues: &mut Vec<Issue>, value: &
         StringCheck::Url => {
             let trimmed = trim(text);
             if url::Url::parse(trimmed).is_ok() {
-                *value = Out::Json(Value::from(trimmed));
+                // `$ZodURL` hands back the trimmed text without the tabs and line breaks the URL parser skips.
+                *value = Out::Json(Value::from(trimmed.replace(['\t', '\n', '\r'], "")));
             } else {
                 issues.push(Issue::new(
                     [("code", "invalid_format".into()), ("format", "url".into())],
@@ -551,25 +567,25 @@ fn numeric(node: &NumberNode, input: Input<'_>) -> Outcome {
     };
     if let Some(bound) = &node.min
         && !aborted(&issues)
-        && !(value >= bound.value)
+        && value.partial_cmp(&bound.value).is_none_or(Ordering::is_lt)
     {
         issues.push(small(bound, true));
     }
     if let Some(bound) = &node.exclusive_min
         && !aborted(&issues)
-        && !(value > bound.value)
+        && value.partial_cmp(&bound.value).is_none_or(Ordering::is_le)
     {
         issues.push(small(bound, false));
     }
     if let Some(bound) = &node.max
         && !aborted(&issues)
-        && !(value <= bound.value)
+        && value.partial_cmp(&bound.value).is_none_or(Ordering::is_gt)
     {
         issues.push(big(bound, true));
     }
     if let Some(bound) = &node.exclusive_max
         && !aborted(&issues)
-        && !(value < bound.value)
+        && value.partial_cmp(&bound.value).is_none_or(Ordering::is_ge)
     {
         issues.push(big(bound, false));
     }
@@ -683,9 +699,9 @@ fn object(node: &ObjectNode, input: Input<'_>) -> Outcome {
     let mut out = JsonObject::new();
     for (key, child, required) in &node.properties {
         let result = run(child, lookup(map, key));
-        if *required && !has(map, key) {
+        if *required && !node.author && !has(map, key) {
             if result.issues.is_empty() {
-                issues.push(Issue::invalid_type("nonoptional", "undefined").at(Value::from(key.as_str())));
+                issues.push(Issue::invalid_type_code_first("nonoptional", "undefined").at(Value::from(key.as_str())));
             } else {
                 issues.extend(prefixed(result.issues, &Value::from(key.as_str())));
             }

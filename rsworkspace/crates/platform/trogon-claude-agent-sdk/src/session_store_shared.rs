@@ -80,7 +80,7 @@ pub(crate) fn main_key(project: SessionProjectKey, session_id: &str) -> SessionK
 }
 
 pub(crate) fn invalid_session(session_id: &str) -> SessionStoreHelperError {
-    SessionMutationError::InvalidSessionId(session_id.to_owned()).into()
+    SessionMutationError::InvalidSessionIdError(session_id.to_owned()).into()
 }
 
 pub(crate) fn not_found(session_id: &str) -> SessionStoreHelperError {

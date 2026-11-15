@@ -302,7 +302,7 @@
       "ended": true
     },
     "m_ceiling_zero_ts_turn": {
-      "stdin_closed_after": "requires_action",
+      "stdin_closed_after": "never",
       "cli_sent": [
         "running",
         "A",
@@ -320,7 +320,7 @@
       "ended": false
     },
     "m_ceiling_zero_ts_stream": {
-      "stdin_closed_after": "requires_action",
+      "stdin_closed_after": "never",
       "cli_sent": [
         "running",
         "A",
@@ -374,7 +374,7 @@
       "ended": true
     },
     "m_ceiling_zero_py": {
-      "stdin_closed_after": "requires_action",
+      "stdin_closed_after": "never",
       "cli_sent": [
         "running",
         "A",
@@ -392,7 +392,7 @@
       "ended": false
     },
     "m_ceiling_exponent_py": {
-      "stdin_closed_after": "requires_action",
+      "stdin_closed_after": "never",
       "cli_sent": [
         "running",
         "A",

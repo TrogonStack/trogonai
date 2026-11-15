@@ -11,11 +11,12 @@ use tokio::net::{TcpListener, TcpStream};
 use trogon_claude_agent_sdk::{
     AUTH_FAILURES_BEFORE_EXIT, ClientEvent, DEFAULT_HEARTBEAT_INTERVAL_MS, DeliveryStatus,
     HEARTBEAT_INTERVAL_CEILING_MS, HEARTBEAT_INTERVAL_FLOOR_MS, HEARTBEAT_TIMEOUT_CEILING_MS,
-    HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS, InitError, InitFailure, InvalidSessionId, MismatchReason,
-    NOT_FOUND_BEFORE_EXIT, NonOrigin403, POST_TIMEOUT_FLOOR_MS, RegisterFailure, RequestFailure, RequestOutcome,
-    RequiresActionDetails, SHRINK_FROM_BYTES, SensitiveString, SessionState, StatusClass, TokioPacing, WorkerClient,
-    WorkerConfig, WorkerPacing, classify_status, external_metadata_patch, heartbeat_timeout, lane_for_path,
-    refusal_source, retry_after_ms, session_url, token_expiry, upload_timeout,
+    HEARTBEAT_TIMEOUT_FLOOR_MS, HEARTBEAT_TIMEOUT_MARGIN_MS, InitError, InitFailureError, InvalidSessionIdError,
+    MAX_BATCH_EVENTS, MAX_QUEUE_EVENTS, MismatchReason, NOT_FOUND_BEFORE_EXIT, NonOrigin403, POST_TIMEOUT_FLOOR_MS,
+    RegisterFailureError, RequestFailure, RequestOutcome, RequiresActionDetails, SHRINK_FROM_BYTES, SensitiveString,
+    SessionState, StatusClass, TokioPacing, WorkerClient, WorkerConfig, WorkerPacing, classify_status,
+    external_metadata_patch, heartbeat_timeout, lane_for_path, refusal_source, retry_after_ms, session_url,
+    token_expiry, upload_timeout,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -657,6 +658,8 @@ async fn report_deliveries(
         if let Err(reason) = worker.pump_deliveries(Some(1)).await {
             return Ok(Err(reason));
         }
+        // The handle's close says goodbye before it drops what is queued, as the recorded close did.
+        worker.goodbye().await;
         worker.close_queue();
         worker.close_deliveries();
     }
@@ -1072,7 +1075,7 @@ fn invalid_session_ids_are_refused() {
             ..config("http://h", "tok")
         },
     );
-    assert_eq!(refused.err(), Some(InvalidSessionId));
+    assert_eq!(refused.err(), Some(InvalidSessionIdError));
 }
 
 #[test]
@@ -1099,7 +1102,7 @@ async fn init_backs_off_between_attempts_and_then_gives_up() -> TestResult {
     let (base, log) = serve(None, vec![json!({"status": 500, "headers": [], "body": ""})], vec![]).await?;
     let pacing = Recorded::new(0.0);
     let worker = client(&base, pacing.clone())?;
-    let failure = InitFailure {
+    let failure = InitFailureError {
         reason: "worker_register_failed",
         http_status: Some(500),
         no_answer: false,
@@ -1137,7 +1140,7 @@ async fn init_reports_that_nobody_answered() -> TestResult {
     let worker = client(&closed_port().await?, Recorded::new(0.0))?;
     assert_eq!(
         worker.initialize(1).await,
-        Err(InitError::Failed(InitFailure {
+        Err(InitError::Failed(InitFailureError {
             reason: "worker_register_failed",
             http_status: None,
             no_answer: true,
@@ -1211,7 +1214,7 @@ async fn requests_that_cannot_be_made_do_not_reach_the_service() -> TestResult {
     )?;
     let outcome = bad_token.report_metadata(&Map::new()).await;
     assert_eq!(outcome, Ok(Some(type_error())));
-    let mut relative = client("", Recorded::new(0.0))?;
+    let relative = client("", Recorded::new(0.0))?;
     assert_eq!(relative.heartbeat().await, Ok(type_error()));
     let refused = client(&closed_port().await?, Recorded::new(0.0))?;
     assert_eq!(refused.heartbeat().await, Ok(type_error()));
@@ -1242,7 +1245,7 @@ async fn a_silent_service_times_the_request_out() -> TestResult {
     let (base, _) = serve(Some(json!("hang")), vec![], vec![json!("hang")]).await?;
     let worker = client(&base, Recorded::new(0.0))?;
     let failure = worker.register_worker().await.err().ok_or("expected a failure")?;
-    assert_eq!(failure, RegisterFailure::TimedOut);
+    assert_eq!(failure, RegisterFailureError::TimedOut);
     assert_eq!(failure.to_string(), "timeout of 10000ms exceeded");
     assert_eq!(failure.code(), Some("ECONNABORTED"));
     let outcome = worker.heartbeat().await;
@@ -1333,5 +1336,357 @@ async fn requires_action_details_ride_along_and_always_send() -> TestResult {
     assert_eq!(captured.len(), 3);
     assert_eq!(captured[1].body, want);
     assert_eq!(captured[2].body, want);
+    Ok(())
+}
+
+fn object(value: Value) -> Map<String, Value> {
+    value.as_object().cloned().unwrap_or_default()
+}
+
+fn header<'a>(request: &'a Captured, name: &str) -> Option<&'a str> {
+    request
+        .headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+fn bodies(log: &Log) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
+    let captured = log.lock().map_err(|_| "poisoned log")?;
+    let parsed = captured
+        .iter()
+        .map(|request| serde_json::from_str(&request.body))
+        .collect::<Result<Vec<Value>, _>>()?;
+    Ok(parsed)
+}
+
+fn upload_event(uuid: &str, ephemeral: bool) -> ClientEvent {
+    ClientEvent {
+        payload: object(json!({"type": "assistant", "uuid": uuid})),
+        historical: false,
+        ephemeral,
+    }
+}
+
+#[tokio::test]
+async fn metadata_the_record_already_holds_is_left_out_the_first_time() -> TestResult {
+    let (base, log) = serve(None, vec![], vec![]).await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    worker.set_record_at_start(Some(object(json!({
+        "last_served_model": "m",
+        "permission_mode": "plan",
+        "context_usage": {"used": 1, "parts": [1, 2.0]},
+        "rate_limit_info": null
+    }))));
+    let model = object(json!({"last_served_model": "m"}));
+    assert_eq!(worker.report_metadata(&model).await, Ok(None));
+    assert!(
+        matches!(
+            worker.report_metadata(&model).await,
+            Ok(Some(RequestOutcome::Accepted(_)))
+        ),
+        "a key is left out only the first time it is reported"
+    );
+    let mixed = object(json!({
+        "context_usage": {"parts": [1.0, 2], "used": 1},
+        "permission_mode": "default",
+        "task": "x",
+        "is_ultraplan_mode": true
+    }));
+    assert!(matches!(
+        worker.report_metadata(&mixed).await,
+        Ok(Some(RequestOutcome::Accepted(_)))
+    ));
+    assert!(
+        !worker.submit_metadata(&object(json!({"rate_limit_info": null}))),
+        "a null matches the null the record holds"
+    );
+    assert_eq!(
+        bodies(&log)?,
+        vec![
+            json!({"worker_epoch": 0, "external_metadata": {"last_served_model": "m"}}),
+            json!({"worker_epoch": 0, "external_metadata": {"permission_mode": "default", "task": "x", "is_ultraplan_mode": true}}),
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_queue_closed_to_new_patches_sends_what_it_holds_and_reports_the_drop() -> TestResult {
+    let (base, log) = serve(None, vec![], vec![]).await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    worker.set_reply_degraded(true);
+    assert!(worker.submit_state(SessionState::Running, None));
+    worker.close_queue_to_new_patches();
+    assert!(worker.submit_metadata(&object(json!({"task": "x"}))));
+    assert_eq!(worker.flush().await, Ok(false));
+    let sent = bodies(&log)?;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["worker_status"], json!("running"));
+    assert_eq!(sent[0]["internal_metadata"], json!({"reply_degraded": true}));
+    assert_eq!(worker.dropped_state_patches(), 0);
+    assert_eq!(worker.dropped_owed_metadata_patches(), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_conflict_after_the_close_drops_the_patch_and_counts_the_owed_metadata() -> TestResult {
+    let conflict = json!({"status": 409, "headers": [], "body": ""});
+    let (base, log) = serve(None, vec![conflict], vec![]).await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    assert!(worker.submit_metadata(&object(json!({"task": "x"}))));
+    worker.close_queue();
+    assert_eq!(worker.flush().await, Ok(false));
+    assert_eq!(worker.dropped_state_patches(), 1);
+    assert_eq!(worker.dropped_owed_metadata_patches(), 1);
+    assert_eq!(log.lock().map_err(|_| "poisoned log")?.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_conflict_after_the_close_lets_live_view_rows_go() -> TestResult {
+    let uploads = Uploads {
+        events: vec![json!({"status": 409, "headers": [], "body": ""})],
+        deliveries: vec![],
+    };
+    let record = json!({"status": 200, "headers": [], "body": "{}"});
+    let (base, log) = serve_record(None, vec![], vec![], vec![], record, Duration::ZERO, uploads).await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    worker
+        .submit_events(vec![upload_event("u1", true)])
+        .await
+        .map_err(|reason| reason.as_str())?;
+    worker.close_queue();
+    assert_eq!(worker.flush_events().await, Ok(true));
+    assert_eq!(worker.dropped_durable_event_batches(), 0);
+    assert_eq!(log.lock().map_err(|_| "poisoned log")?.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_refused_batch_resends_its_durable_rows_and_retries_them_after_a_failure() -> TestResult {
+    let answer = |status: u16| json!({"status": status, "headers": [], "body": "{}"});
+    let uploads = Uploads {
+        events: vec![answer(400), answer(500), answer(200)],
+        deliveries: vec![],
+    };
+    let record = json!({"status": 200, "headers": [], "body": "{}"});
+    let (base, log) = serve_record(None, vec![], vec![], vec![], record, Duration::ZERO, uploads).await?;
+    let pacing = Recorded::new(0.0);
+    let worker = client(&base, pacing.clone())?;
+    worker
+        .submit_events(vec![upload_event("d", false), upload_event("e", true)])
+        .await
+        .map_err(|reason| reason.as_str())?;
+    assert_eq!(worker.flush_events().await, Ok(true));
+    assert_eq!(pacing.delays(), vec![Duration::from_millis(500)]);
+    assert_eq!(worker.dropped_durable_event_batches(), 0);
+    let sent = bodies(&log)?;
+    assert_eq!(sent.len(), 3);
+    assert_eq!(sent[0]["events"].as_array().map(Vec::len), Some(2));
+    for retry in &sent[1..] {
+        assert_eq!(
+            retry["events"],
+            json!([{"payload": {"type": "assistant", "uuid": "d"}}]),
+            "only the durable row is sent again"
+        );
+    }
+    let captured = log.lock().map_err(|_| "poisoned log")?;
+    let attempts: Vec<Option<&str>> = captured
+        .iter()
+        .map(|request| header(request, "x-ccr-upload-attempt"))
+        .collect();
+    assert_eq!(attempts, vec![Some("first"), Some("resend"), Some("resend")]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_full_delivery_queue_sends_before_it_takes_more_and_counts_a_refused_batch() -> TestResult {
+    let uploads = Uploads {
+        events: vec![],
+        deliveries: vec![ok_response(), json!({"status": 400, "headers": [], "body": ""})],
+    };
+    let record = json!({"status": 200, "headers": [], "body": "{}"});
+    let (base, log) = serve_record(None, vec![], vec![], vec![], record, Duration::ZERO, uploads).await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    for n in 0..65 {
+        worker
+            .report_delivery(&format!("e{n}"), DeliveryStatus::Received)
+            .await
+            .map_err(|reason| reason.as_str())?;
+    }
+    assert_eq!(worker.pump_deliveries(None).await, Ok(true));
+    assert_eq!(worker.dropped_delivery_ack_batches(), 1);
+    let sizes: Vec<Option<usize>> = bodies(&log)?
+        .iter()
+        .map(|body| body["updates"].as_array().map(Vec::len))
+        .collect();
+    assert_eq!(sizes, vec![Some(1), Some(64)]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_conflict_on_the_record_read_ends_init_before_it_registers() -> TestResult {
+    let record = json!({"status": 409, "headers": [], "body": ""});
+    let (base, log) = serve_record(None, vec![], vec![], vec![], record, Duration::ZERO, Uploads::default()).await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    assert_eq!(
+        worker.initialize(3).await,
+        Err(InitError::Mismatch(MismatchReason::EpochConflict))
+    );
+    assert!(log.lock().map_err(|_| "poisoned log")?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_record_read_that_fails_leaves_the_record_unknown() -> TestResult {
+    let retried: Vec<Duration> = [500, 1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]
+        .into_iter()
+        .map(Duration::from_millis)
+        .collect();
+    let cases = [
+        (json!({"status": 400, "headers": [], "body": ""}), Vec::new()),
+        (
+            json!({"status": 200, "headers": [], "body": "not json"}),
+            retried.clone(),
+        ),
+        (json!({"status": 500, "headers": [], "body": ""}), retried),
+    ];
+    for (record, delays) in cases {
+        let (base, log) = serve_record(
+            None,
+            vec![],
+            vec![],
+            vec![],
+            record.clone(),
+            Duration::ZERO,
+            Uploads::default(),
+        )
+        .await?;
+        let pacing = Recorded::new(0.0);
+        let worker = client(&base, pacing.clone())?;
+        assert_eq!(worker.initialize(3).await, Ok(()), "{record}");
+        assert_eq!(pacing.delays(), delays, "{record}");
+        assert_eq!(log.lock().map_err(|_| "poisoned log")?.len(), 1, "{record}");
+        assert!(
+            matches!(
+                worker.report_metadata(&object(json!({"last_served_model": "m"}))).await,
+                Ok(Some(RequestOutcome::Accepted(_)))
+            ),
+            "{record}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_conflict_read_while_the_registration_retries_still_ends_init() -> TestResult {
+    let record = json!({"status": 409, "headers": [], "body": ""});
+    let failure = json!({"status": 500, "headers": [], "body": ""});
+    let (base, log) = serve_record(
+        None,
+        vec![failure, ok_response()],
+        vec![],
+        vec![],
+        record,
+        Duration::from_millis(50),
+        Uploads::default(),
+    )
+    .await?;
+    let worker = WorkerClient::new(http()?, TokioPacing, config(&base, "tok"))?;
+    worker.set_init_state_get_ordering_bound(Duration::from_millis(1));
+    assert_eq!(
+        worker.initialize(3).await,
+        Err(InitError::Mismatch(MismatchReason::EpochConflict))
+    );
+    assert_eq!(log.lock().map_err(|_| "poisoned log")?.len(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_record_read_still_pending_at_registration_is_abandoned() -> TestResult {
+    let record = json!({
+        "status": 200,
+        "headers": [],
+        "body": "{\"worker\":{\"external_metadata\":{\"last_served_model\":\"m\"}}}"
+    });
+    let (base, log) = serve_record(
+        None,
+        vec![],
+        vec![],
+        vec![],
+        record,
+        Duration::from_secs(5),
+        Uploads::default(),
+    )
+    .await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    worker.set_init_state_get_ordering_bound(Duration::from_millis(1));
+    assert_eq!(worker.initialize(3).await, Ok(()));
+    assert!(
+        matches!(
+            worker.report_metadata(&object(json!({"last_served_model": "m"}))).await,
+            Ok(Some(RequestOutcome::Accepted(_)))
+        ),
+        "the record is unknown, so nothing is left out"
+    );
+    assert_eq!(log.lock().map_err(|_| "poisoned log")?.len(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_token_that_cannot_be_a_header_reads_no_record_and_never_registers() -> TestResult {
+    let pacing = Recorded::new(0.0);
+    let worker = WorkerClient::new(reqwest::Client::new(), pacing.clone(), config("http://h", "a\u{100}"))?;
+    assert_eq!(
+        worker.initialize(1).await,
+        Err(InitError::Failed(InitFailureError {
+            reason: "worker_register_failed",
+            http_status: None,
+            no_answer: true,
+        }))
+    );
+    assert_eq!(pacing.delays().len(), 9);
+    Ok(())
+}
+
+#[tokio::test]
+async fn register_worker_drops_line_breaks_from_the_token() -> TestResult {
+    let (base, log) = serve(None, vec![], vec![]).await?;
+    let worker = WorkerClient::new(http()?, Recorded::new(0.0), config(&base, "t\nok"))?;
+    assert_eq!(worker.register_worker().await, Ok(1));
+    let captured = log.lock().map_err(|_| "poisoned log")?;
+    assert_eq!(captured.len(), 1);
+    assert_eq!(header(&captured[0], "authorization"), Some("Bearer tok"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_new_session_ticket_replaces_the_one_held() -> TestResult {
+    let ticket = |value: &str| json!({"status": 200, "headers": [["x-ccr-ticket-session", value]], "body": "{}"});
+    let (base, log) = serve(None, vec![], vec![ticket("t1"), ticket("t2")]).await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    worker.heartbeat().await.map_err(|reason| reason.as_str())?;
+    worker.heartbeat().await.map_err(|reason| reason.as_str())?;
+    assert_eq!(worker.session_ticket().as_deref(), Some("t2"));
+    let captured = log.lock().map_err(|_| "poisoned log")?;
+    assert_eq!(captured.len(), 2);
+    assert_eq!(header(&captured[0], "x-ccr-ticket-session"), None);
+    assert_eq!(header(&captured[1], "x-ccr-ticket-session"), Some("t1"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_full_event_queue_sends_a_batch_before_it_takes_more() -> TestResult {
+    let (base, log) = serve(None, vec![], vec![]).await?;
+    let worker = client(&base, Recorded::new(0.0))?;
+    let events: Vec<ClientEvent> = (0..=MAX_QUEUE_EVENTS)
+        .map(|n| upload_event(&format!("u{n}"), false))
+        .collect();
+    worker.submit_events(events).await.map_err(|reason| reason.as_str())?;
+    let sent = bodies(&log)?;
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["events"].as_array().map(Vec::len), Some(MAX_BATCH_EVENTS));
+    assert_eq!(worker.close_events(false), MAX_QUEUE_EVENTS + 1 - MAX_BATCH_EVENTS);
     Ok(())
 }

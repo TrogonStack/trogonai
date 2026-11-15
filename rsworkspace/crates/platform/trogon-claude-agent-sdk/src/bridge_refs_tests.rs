@@ -5,6 +5,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::*;
+use crate::bridge_gitdir::read_limited;
 
 const GUESS_GOLDENS: &str = include_str!("../tests/fixtures/bridge_create_session/guesses.json");
 
