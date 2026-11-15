@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/peer_batch.proto";
+
+message AcknowledgeBatchResponse {
+  PeerBatch batch = 1;
+}

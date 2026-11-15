@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+// A connector must hold the current generation; possession of these fields alone
+// grants no authority without the authenticated subject principal.
+message AttachmentRef {
+  string peer_id = 1;
+  string connector_id = 2;
+  uint64 generation = 3;
+}

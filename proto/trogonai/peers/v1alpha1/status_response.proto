@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/peers/v1alpha1/message_metadata.proto";
+import "trogonai/peers/v1alpha1/message_status.proto";
+
+message StatusResponse {
+  MessageMetadata message = 1;
+  MessageStatus status = 2;
+  google.protobuf.Timestamp observed_at = 3;
+}

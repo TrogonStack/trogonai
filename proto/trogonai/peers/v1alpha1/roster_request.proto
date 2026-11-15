@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/attachment_ref.proto";
+
+message RosterRequest {
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
+  uint32 page_size = 2;
+  string page_token = 3;
+}

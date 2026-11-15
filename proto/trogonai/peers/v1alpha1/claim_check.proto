@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/digest.proto";
+
+message StorageLocator {
+  string value = 1;
+}
+
+// The locator travels with the digest used to verify stored bytes before use.
+message ClaimCheck {
+  StorageLocator storage_ref = 1;
+  Digest digest = 2;
+}

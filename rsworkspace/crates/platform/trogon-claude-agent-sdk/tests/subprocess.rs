@@ -809,15 +809,15 @@ async fn python_style_reports_the_terminated_process_for_a_handle_that_outlived_
 #[cfg(unix)]
 #[tokio::test]
 async fn initialization_timeout_reaps_process() -> TestResult {
-    let directory = tempfile::tempdir()?;
-    let marker = directory.path().join("pid");
     let mut options = options("init-timeout")?;
-    options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
     options.limits.initialize_timeout =
         trogon_claude_agent_sdk::InitializeTimeout::Fixed(Timeout::new(Duration::from_millis(100)));
     // TypeScript hands the client out before initialize is answered, so the timeout rejects the initialization
     // result and ends the run.
     let client = ClaudeSdkClient::connect(options).await?;
+    let pid = client
+        .process_id()
+        .ok_or_else(|| std::io::Error::other("missing pid"))?;
     let rejected = client.handle().initialization_result().await;
     assert!(matches!(
         &rejected,
@@ -830,7 +830,6 @@ async fn initialization_timeout_reaps_process() -> TestResult {
             operation: ControlOperation::Initialize
         })
     ));
-    let pid: u32 = std::fs::read_to_string(marker)?.parse()?;
     assert_reaped(pid).await?;
     Ok(())
 }

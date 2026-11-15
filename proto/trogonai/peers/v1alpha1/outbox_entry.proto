@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/message_metadata.proto";
+import "trogonai/peers/v1alpha1/recipient_receipt.proto";
+
+// The key and semantic digest survive body expiry. An exact retry returns the
+// original message and timestamps. A changed semantic request conflicts.
+message OutboxEntry {
+  string idempotency_key = 1;
+  bytes semantic_digest = 2;
+  MessageMetadata message = 3;
+  RecipientReceipt settlement = 4;
+}

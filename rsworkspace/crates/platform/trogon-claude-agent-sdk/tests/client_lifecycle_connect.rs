@@ -36,13 +36,22 @@ const RESULT: &str = r#"{"type":"result","subtype":"success","is_error":false,"d
 
 /// Answers each control request with `{}` unless its subtype is `silent`, answers each user line with a result,
 /// and records every line written to stdin.
-async fn serve(process: ScriptedProcessHarness, silent: &'static [&'static str]) -> Result<Vec<Value>, std::io::Error> {
+async fn serve(
+    process: ScriptedProcessHarness,
+    silent: &'static [&'static str],
+    mut interrupted: Option<tokio::sync::oneshot::Sender<()>>,
+) -> Result<Vec<Value>, std::io::Error> {
     let mut lines = BufReader::new(process.stdin).lines();
     let mut stdout = process.stdout;
     let stderr = process.stderr;
     let mut written = Vec::new();
     while let Some(line) = lines.next_line().await? {
         let request: Value = serde_json::from_str(&line)?;
+        if request["request"]["subtype"] == "interrupt"
+            && let Some(interrupted) = interrupted.take()
+        {
+            let _ = interrupted.send(());
+        }
         let reply = match request["type"].as_str() {
             Some("control_request") if !silent.iter().any(|subtype| request["request"]["subtype"] == *subtype) => {
                 Some(serde_json::to_string(&json!({"type":"control_response","response":{
@@ -69,8 +78,17 @@ fn unconnected(
     configure: impl FnOnce(&mut ClaudeAgentOptions),
     silent: &'static [&'static str],
 ) -> (Unconnected, Server) {
+    unconnected_observed(style, configure, silent, None)
+}
+
+fn unconnected_observed(
+    style: ArgvStyle,
+    configure: impl FnOnce(&mut ClaudeAgentOptions),
+    silent: &'static [&'static str],
+    interrupted: Option<tokio::sync::oneshot::Sender<()>>,
+) -> (Unconnected, Server) {
     let (process, harness) = ScriptedProcessSpawner::new();
-    let server = tokio::spawn(serve(harness, silent));
+    let server = tokio::spawn(serve(harness, silent, interrupted));
     let mut options = ClaudeAgentOptions {
         cli_path: Some("claude".into()),
         argv_style: style,
@@ -86,6 +104,38 @@ fn unconnected(
         filesystem: NativeFileSystem,
     });
     (client, server)
+}
+
+async fn close_then_cancel_pending_python_control(deadline: Option<Timeout>) -> TestResult {
+    let (observed, received) = tokio::sync::oneshot::channel();
+    let (client, server) = unconnected_observed(
+        ArgvStyle::Python,
+        |options| options.limits.control_timeout = deadline,
+        &["interrupt"],
+        Some(observed),
+    );
+    let client = client.connect(ConnectPrompt::Empty).await?;
+    let handle = client.handle();
+    let waiting = tokio::spawn(async move { handle.interrupt().await });
+    received.await?;
+    client.disconnect().await?;
+    server.await??;
+    tokio::task::yield_now().await;
+    assert!(!waiting.is_finished(), "Python close must leave the caller waiting");
+    waiting.abort();
+    assert!(waiting.await.is_err_and(|error| error.is_cancelled()));
+    tokio::task::yield_now().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_close_keeps_an_unbounded_control_pending_until_the_caller_cancels() -> TestResult {
+    close_then_cancel_pending_python_control(None).await
+}
+
+#[tokio::test]
+async fn python_close_keeps_a_timed_control_pending_when_the_caller_cancels_before_its_deadline() -> TestResult {
+    close_then_cancel_pending_python_control(Some(Timeout::new(Duration::from_secs(60)))).await
 }
 
 /// The user lines the scripted CLI received, after checking that initialize came first.

@@ -166,6 +166,17 @@ test('selection always runs with conservative fallback defaults', async () => {
   assert.equal((await evaluate(checkout.with['fetch-depth'], { github: { event_name: 'push' } })).coerceString(), '0');
 });
 
+test('CodeQL preserves the baseline configuration set for each selected language', async () => {
+  const matrix = workflows.codeql.jobs.analyze.strategy.matrix.language;
+  const baseline = ['go', 'javascript-typescript', 'rust'];
+  for (const language of baseline) {
+    const context = { needs: { changes: { outputs: { changes: JSON.stringify([language]) } } } };
+    const actual = Array.isArray(matrix) ? matrix
+      : (await evaluate(matrix, context)).values().map((item) => item.coerceString());
+    assert.deepEqual(actual, baseline, `${language} changes retain every baseline configuration`);
+  }
+});
+
 test('empty CodeQL matrices are skipped and selected build modes are preserved', async () => {
   const job = workflows.codeql.jobs.analyze;
   const init = job.steps.find((step) => step.name === 'Initialize CodeQL');
@@ -174,8 +185,7 @@ test('empty CodeQL matrices are skipped and selected build modes are preserved',
   for (const [language, expected] of [['go', 'autobuild'], ['rust', 'none'], ['javascript-typescript', 'none']]) {
     assert.equal((await evaluate(init.with['build-mode'], { matrix: { language } })).coerceString(), expected);
   }
-  const value = await evaluate(job.strategy.matrix.language, { needs: { changes: { outputs: { changes: '' } } } });
-  assert.deepEqual(value.values().map((item) => item.coerceString()), ['go', 'javascript-typescript', 'rust']);
+  assert.deepEqual(job.strategy.matrix.language, ['go', 'javascript-typescript', 'rust']);
 });
 
 function runResult(workflow, step, env) {

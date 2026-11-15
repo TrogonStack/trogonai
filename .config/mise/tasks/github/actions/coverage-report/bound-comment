@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Prepare the bounded coverage report comment"
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+exec python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/comment.py"

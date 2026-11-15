@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/peer_presence.proto";
+
+// Every row is authorized at query time and has its own liveness observation.
+message RosterResponse {
+  repeated PeerPresence peers = 1;
+  string next_page_token = 2;
+}

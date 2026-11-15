@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/peer_attachment.proto";
+
+// Attachment replacement contends with sends and recipient batch decisions on
+// the same guarded peer stream. It does not create a new inbox.
+message PeerAttached {
+  PeerAttachment attachment = 1;
+}

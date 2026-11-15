@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.peers.state.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/peers/v1alpha1/inbox_entry.proto";
+import "trogonai/peers/v1alpha1/outbox_entry.proto";
+import "trogonai/peers/v1alpha1/peer_attachment.proto";
+import "trogonai/peers/v1alpha1/peer_availability.proto";
+import "trogonai/peers/v1alpha1/peer_batch.proto";
+import "trogonai/peers/v1alpha1/peer_condition.proto";
+import "trogonai/peers/v1alpha1/peer_enrollment.proto";
+import "trogonai/peers/v1alpha1/recipient_receipt.proto";
+
+// Authoritative state folded from one guarded peer stream. Body bytes are
+// stored separately so erasure does not rewrite communication history.
+message PeerState {
+  trogonai.peers.v1alpha1.PeerEnrollment enrollment = 1;
+  trogonai.peers.v1alpha1.PeerAttachment attachment = 2;
+  trogonai.peers.v1alpha1.PeerAvailability availability = 3;
+  trogonai.peers.v1alpha1.PeerCondition condition = 4;
+  google.protobuf.Timestamp active_at = 5;
+  repeated trogonai.peers.v1alpha1.OutboxEntry outbox = 6;
+  repeated trogonai.peers.v1alpha1.InboxEntry inbox = 7;
+  repeated trogonai.peers.v1alpha1.PeerBatch batches = 8;
+  repeated trogonai.peers.v1alpha1.RecipientReceipt dispositions = 9;
+  uint64 next_intake_ordinal = 10;
+}

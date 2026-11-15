@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/peers/v1alpha1/attachment_ref.proto";
+import "trogonai/peers/v1alpha1/peer_availability.proto";
+import "trogonai/peers/v1alpha1/peer_condition.proto";
+
+message HeartbeatRequest {
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
+  PeerAvailability availability = 2;
+  PeerCondition condition = 3;
+  // Reported activity is an observation and cannot extend a connector lease.
+  google.protobuf.Timestamp active_at = 4;
+}
