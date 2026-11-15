@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+#MISE description="Convert the Bazel coverage report into rsworkspace/coverage-bazel.xml for the coverage gate"
+"""Write the combined Bazel LCOV report as Cobertura XML relative to rsworkspace.
+
+The coverage gate compares Cobertura reports whose file names resolve under the
+`source-root` it is given, so every name is made relative to rsworkspace. The
+files left out are the ones `cargo cov` leaves out: the generated sources named
+by the `--ignore-filename-regex` of its alias in rsworkspace/.cargo/config.toml,
+and cargo llvm-cov's default exclusion of tests, examples and benches
+directories and of `tests.rs` and `*_tests.rs` test modules.
+"""
+
+import os
+import re
+import sys
+import tomllib
+from collections import defaultdict
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+WORKSPACE = "rsworkspace"
+# cargo llvm-cov adds this to every --ignore-filename-regex unless told not to.
+DEFAULT_IGNORE = r"/(tests|examples|benches)/|/(tests\.rs|[0-9a-zA-Z_-]+[_-]tests\.rs)$"
+
+
+def cargo_cov_ignore(root):
+    config = tomllib.loads((root / WORKSPACE / ".cargo/config.toml").read_text())
+    arguments = config["alias"]["cov"]
+    return arguments[arguments.index("--ignore-filename-regex") + 1]
+
+
+def workspace_path(source):
+    """Return the path relative to rsworkspace, or None for anything outside it."""
+    marker = "/execroot/_main/"
+    if marker in source:
+        source = source.split(marker, 1)[1]
+    source = source.removeprefix("./")
+    if not source.startswith(WORKSPACE + "/"):
+        return None
+    return source.removeprefix(WORKSPACE + "/")
+
+
+def read_lcov(path):
+    hits = defaultdict(lambda: defaultdict(int))
+    current = None
+    for line in path.read_text().splitlines():
+        if line.startswith("SF:"):
+            current = hits[line[3:]]
+        elif line.startswith("DA:") and current is not None:
+            number, count = line[3:].split(",")[:2]
+            current[int(number)] += int(count)
+        elif line == "end_of_record":
+            current = None
+    return hits
+
+
+def rate(covered, valid):
+    return f"{covered / valid:.6f}" if valid else "1"
+
+
+def main():
+    root = Path(os.environ.get("MISE_PROJECT_ROOT") or os.getcwd())
+    report = root / (sys.argv[1] if len(sys.argv) > 1 else "bazel-out/_coverage/_coverage_report.dat")
+    output = root / (sys.argv[2] if len(sys.argv) > 2 else f"{WORKSPACE}/coverage-bazel.xml")
+    ignore = re.compile(f"{cargo_cov_ignore(root)}|{DEFAULT_IGNORE}")
+
+    files = defaultdict(lambda: defaultdict(int))
+    for source, lines in read_lcov(report).items():
+        relative = workspace_path(source)
+        # Sources outside the checkout (Bazel generated files) have nothing the
+        # gate can read, and cargo llvm-cov leaves its target directory out too.
+        if relative is None or ignore.search(f"/{WORKSPACE}/{relative}") or not (root / WORKSPACE / relative).is_file():
+            continue
+        for number, count in lines.items():
+            files[relative][number] += count
+    if not files:
+        sys.exit(f"{report} has no coverage for {WORKSPACE} sources")
+
+    total_valid = sum(len(lines) for lines in files.values())
+    total_covered = sum(1 for lines in files.values() for count in lines.values() if count)
+    coverage = ET.Element("coverage", {
+        "line-rate": rate(total_covered, total_valid),
+        "branch-rate": "0",
+        "lines-covered": str(total_covered),
+        "lines-valid": str(total_valid),
+        "branches-covered": "0",
+        "branches-valid": "0",
+        "complexity": "0",
+        "version": "0",
+        "timestamp": "0",
+    })
+    ET.SubElement(ET.SubElement(coverage, "sources"), "source").text = WORKSPACE
+    package = ET.SubElement(ET.SubElement(coverage, "packages"), "package", {
+        "name": WORKSPACE,
+        "line-rate": rate(total_covered, total_valid),
+        "branch-rate": "0",
+        "complexity": "0",
+    })
+    classes = ET.SubElement(package, "classes")
+    for relative in sorted(files):
+        lines = files[relative]
+        covered = sum(1 for count in lines.values() if count)
+        node = ET.SubElement(classes, "class", {
+            "name": relative,
+            "filename": relative,
+            "line-rate": rate(covered, len(lines)),
+            "branch-rate": "0",
+            "complexity": "0",
+        })
+        ET.SubElement(node, "methods")
+        line_nodes = ET.SubElement(node, "lines")
+        for number in sorted(lines):
+            ET.SubElement(line_nodes, "line", {"number": str(number), "hits": str(lines[number]), "branch": "false"})
+    output.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(coverage).write(output, encoding="utf-8", xml_declaration=True)
+    print(f"{output}: {len(files)} files, {total_covered}/{total_valid} lines covered ({100 * total_covered / total_valid:.2f}%)")
+
+
+if __name__ == "__main__":
+    main()

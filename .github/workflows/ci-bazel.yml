@@ -41,8 +41,19 @@ jobs:
           restore-keys: |
             bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-
 
-      - name: Test Bazel targets
+      - name: Test Bazel targets with coverage
         run: mise run --skip-tools github:workflows:ci-bazel:test
+
+      - name: Convert coverage report
+        run: mise run --skip-tools github:workflows:ci-bazel:coverage-report
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-coverage
+          path: rsworkspace/coverage-bazel.xml
+          if-no-files-found: error
+          retention-days: 7
 
       # Bazel skips printing a failing test's output once it passes 1 MiB, so
       # the full logs are kept where a failure can still be read.
@@ -74,11 +85,87 @@ jobs:
             ${{ runner.temp }}/bazel-repository-cache
           key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
 
+  # The gate writes to the storage branch and comments on the pull request, so
+  # it runs apart from verify, which keeps a read-only token.
+  coverage:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # A fork pull request gets a read-only token whatever the job asks for, so
+      # it can neither read and write the storage branch nor comment. It checks
+      # only the threshold.
+      COVERAGE_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    steps:
+      # The action reads the measured sources and the baseline's from history.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download coverage report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bazel-coverage
+          path: rsworkspace
+
+      # Kept in step with the action below, whose helper records the baseline.
+      - name: Checkout coverage tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: TrogonStack/github-actions
+          ref: 8d32cdde455b381daffbea5133a0319f374989ee
+          path: .coverage-tools
+          sparse-checkout: actions/coverage-report
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+
+      # Stored apart from the cargo gate's baseline, so each gate compares
+      # against its own measurements while both run.
+      - name: Check coverage baseline
+        id: baseline
+        if: ${{ env.COVERAGE_FORK != 'true' }}
+        run: mise run --skip-tools github:workflows:ci-bazel:coverage-baseline
+        env:
+          COVERAGE_STORAGE: _xml_coverage_reports_bazel
+          COVERAGE_REPORT: rsworkspace/coverage-bazel.xml
+          COVERAGE_TOOLS: .coverage-tools/actions/coverage-report
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Coverage report and gate
+        uses: TrogonStack/github-actions/actions/coverage-report@8d32cdde455b381daffbea5133a0319f374989ee
+        with:
+          path: rsworkspace/coverage-bazel.xml
+          source-root: rsworkspace
+          threshold: 95
+          fail: true
+          publish: ${{ env.COVERAGE_FORK != 'true' }}
+          diff: ${{ steps.baseline.outputs.ready == 'true' }}
+          skip-diff-storage: ${{ steps.baseline.outputs.ready != 'true' }}
+          diff-branch: main
+          diff-storage: _xml_coverage_reports_bazel
+          # Pull requests are the gate. main only records its baseline, which the
+          # action stores only after the gate passes, so failing here once would
+          # keep main red until coverage returned to the stale baseline.
+          uncovered-statements-increase-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          new-uncovered-statements-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          coverage-rate-reduction-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          togglable-report: true
+          report-low-coverage-only: true
+
   result:
     # Branch rules require this job instead of verify, because a job named
     # verify also exists in other workflows and a cancelled run skips it.
     name: Bazel result
-    needs: [verify]
+    needs: [verify, coverage]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -97,5 +184,5 @@ jobs:
         env:
           SELECTION_RESULT: success
           SELECTED: 'true'
-          JOB_RESULTS: ${{ needs.verify.result }}
+          JOB_RESULTS: ${{ needs.verify.result }} ${{ needs.coverage.result }}
         run: mise run --skip-tools github:workflows:ci-bazel:result
