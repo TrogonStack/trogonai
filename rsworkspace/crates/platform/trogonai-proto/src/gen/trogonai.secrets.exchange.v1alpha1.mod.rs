@@ -8,6 +8,9 @@ include!("trogonai.secrets.exchange.v1alpha1.credential_address.rs");
 include!("trogonai.secrets.exchange.v1alpha1.resolve.rs");
 include!("trogonai.secrets.exchange.v1alpha1.identity.rs");
 include!("trogonai.secrets.exchange.v1alpha1.issuance.rs");
+include!("trogonai.secrets.exchange.v1alpha1.key_wrapping.rs");
+include!("trogonai.secrets.exchange.v1alpha1.key_wrapping_wire.rs");
+include!("trogonai.secrets.exchange.v1alpha1.key_wrapping_evidence.rs");
 include!("trogonai.secrets.exchange.v1alpha1.material.rs");
 include!("trogonai.secrets.exchange.v1alpha1.refresh.rs");
 include!("trogonai.secrets.exchange.v1alpha1.release.rs");
@@ -38,6 +41,9 @@ pub mod __buffa {
         include!("trogonai.secrets.exchange.v1alpha1.resolve.__view.rs");
         include!("trogonai.secrets.exchange.v1alpha1.identity.__view.rs");
         include!("trogonai.secrets.exchange.v1alpha1.issuance.__view.rs");
+        include!("trogonai.secrets.exchange.v1alpha1.key_wrapping.__view.rs");
+        include!("trogonai.secrets.exchange.v1alpha1.key_wrapping_wire.__view.rs");
+        include!("trogonai.secrets.exchange.v1alpha1.key_wrapping_evidence.__view.rs");
         include!("trogonai.secrets.exchange.v1alpha1.material.__view.rs");
         include!("trogonai.secrets.exchange.v1alpha1.refresh.__view.rs");
         include!("trogonai.secrets.exchange.v1alpha1.release.__view.rs");
@@ -51,6 +57,10 @@ pub mod __buffa {
             include!("trogonai.secrets.exchange.v1alpha1.resolve.__view_oneof.rs");
             include!("trogonai.secrets.exchange.v1alpha1.identity.__view_oneof.rs");
             include!("trogonai.secrets.exchange.v1alpha1.issuance.__view_oneof.rs");
+            include!("trogonai.secrets.exchange.v1alpha1.key_wrapping.__view_oneof.rs");
+            include!(
+                "trogonai.secrets.exchange.v1alpha1.key_wrapping_wire.__view_oneof.rs"
+            );
             include!("trogonai.secrets.exchange.v1alpha1.material.__view_oneof.rs");
             include!("trogonai.secrets.exchange.v1alpha1.refresh.__view_oneof.rs");
             include!("trogonai.secrets.exchange.v1alpha1.release.__view_oneof.rs");
@@ -65,6 +75,8 @@ pub mod __buffa {
         include!("trogonai.secrets.exchange.v1alpha1.resolve.__oneof.rs");
         include!("trogonai.secrets.exchange.v1alpha1.identity.__oneof.rs");
         include!("trogonai.secrets.exchange.v1alpha1.issuance.__oneof.rs");
+        include!("trogonai.secrets.exchange.v1alpha1.key_wrapping.__oneof.rs");
+        include!("trogonai.secrets.exchange.v1alpha1.key_wrapping_wire.__oneof.rs");
         include!("trogonai.secrets.exchange.v1alpha1.material.__oneof.rs");
         include!("trogonai.secrets.exchange.v1alpha1.refresh.__oneof.rs");
         include!("trogonai.secrets.exchange.v1alpha1.release.__oneof.rs");
@@ -102,6 +114,24 @@ pub mod __buffa {
         reg.register_json_any(super::__ENSURE_PROVIDER_ACCESS_REQUEST_JSON_ANY);
         reg.register_json_any(super::__ENSURE_PROVIDER_ACCESS_RESPONSE_JSON_ANY);
         reg.register_json_any(super::__PROVIDER_ACCESS_FAILURE_JSON_ANY);
+        reg.register_json_any(super::__DEK_JSON_ANY);
+        reg.register_json_any(super::__WRAPPED_DEK_JSON_ANY);
+        reg.register_json_any(super::__KEY_WRAPPING_RESOURCE_TYPE_ID_JSON_ANY);
+        reg.register_json_any(super::__KEY_WRAPPING_RESOURCE_ID_JSON_ANY);
+        reg.register_json_any(super::__KEY_WRAPPING_RESOURCE_REF_JSON_ANY);
+        reg.register_json_any(super::__AUTHENTICATED_BINDING_JSON_ANY);
+        reg.register_json_any(super::__KEY_WRAPPING_TARGET_JSON_ANY);
+        reg.register_json_any(super::__KEY_WRAPPING_CONTEXT_JSON_ANY);
+        reg.register_json_any(super::__KEY_WRAPPING_FAILURE_JSON_ANY);
+        reg.register_json_any(super::__WRAP_DEK_REQUEST_JSON_ANY);
+        reg.register_json_any(super::__WRAP_DEK_INPUT_JSON_ANY);
+        reg.register_json_any(super::__WRAP_DEK_RESPONSE_JSON_ANY);
+        reg.register_json_any(super::__WRAP_DEK_OUTPUT_JSON_ANY);
+        reg.register_json_any(super::__UNWRAP_DEK_REQUEST_JSON_ANY);
+        reg.register_json_any(super::__UNWRAP_DEK_INPUT_JSON_ANY);
+        reg.register_json_any(super::__UNWRAP_DEK_RESPONSE_JSON_ANY);
+        reg.register_json_any(super::__UNWRAP_DEK_OUTPUT_JSON_ANY);
+        reg.register_json_any(super::__KEY_WRAPPING_REPLY_EVIDENCE_JSON_ANY);
         reg.register_json_any(super::__SUBMIT_MATERIAL_REQUEST_JSON_ANY);
         reg.register_json_any(super::__SUBMIT_MATERIAL_RESPONSE_JSON_ANY);
         reg.register_json_any(super::__DESTROY_REQUEST_JSON_ANY);
@@ -247,6 +277,78 @@ pub use self::__buffa::view::EnsureProviderAccessResponseOwnedView;
 pub use self::__buffa::view::ProviderAccessFailureView;
 #[doc(inline)]
 pub use self::__buffa::view::ProviderAccessFailureOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::DekView;
+#[doc(inline)]
+pub use self::__buffa::view::DekOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::WrappedDekView;
+#[doc(inline)]
+pub use self::__buffa::view::WrappedDekOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingResourceTypeIdView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingResourceTypeIdOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingResourceIdView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingResourceIdOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingResourceRefView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingResourceRefOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::AuthenticatedBindingView;
+#[doc(inline)]
+pub use self::__buffa::view::AuthenticatedBindingOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingTargetView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingTargetOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingContextView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingContextOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingFailureView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingFailureOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::WrapDekRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::WrapDekRequestOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::WrapDekInputView;
+#[doc(inline)]
+pub use self::__buffa::view::WrapDekInputOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::WrapDekResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::WrapDekResponseOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::WrapDekOutputView;
+#[doc(inline)]
+pub use self::__buffa::view::WrapDekOutputOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::UnwrapDekRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::UnwrapDekRequestOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::UnwrapDekInputView;
+#[doc(inline)]
+pub use self::__buffa::view::UnwrapDekInputOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::UnwrapDekResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::UnwrapDekResponseOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::UnwrapDekOutputView;
+#[doc(inline)]
+pub use self::__buffa::view::UnwrapDekOutputOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingReplyEvidenceView;
+#[doc(inline)]
+pub use self::__buffa::view::KeyWrappingReplyEvidenceOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::SubmitMaterialRequestView;
 #[doc(inline)]
