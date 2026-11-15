@@ -1051,3 +1051,50 @@ async fn a_message_nested_past_the_native_stack_is_decoded_routed_and_dropped() 
     drop((result, system));
     fixture.finish().await
 }
+
+/// Python `close()` leaves each unanswered request to run out its own timeout, whatever kind of request it is, and
+/// one sent without a timeout waits until the caller stops waiting, never answering on its own.
+#[tokio::test(start_paused = true)]
+async fn requests_left_at_python_close_run_out_their_own_timeouts() -> Result<(), Box<dyn std::error::Error>> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let (response, initialize) = oneshot::channel();
+    ControlResponder::Initialize { first: true, response }.time_out_at(Some(deadline));
+    let (response, control) = oneshot::channel();
+    ControlResponder::Control {
+        operation: ControlOperation::SetModel,
+        response,
+    }
+    .time_out_at(Some(deadline));
+    assert!(matches!(
+        initialize.await?,
+        Err(Error::ControlTimeout {
+            operation: ControlOperation::Initialize
+        })
+    ));
+    assert!(matches!(
+        control.await?,
+        Err(Error::ControlTimeout {
+            operation: ControlOperation::SetModel
+        })
+    ));
+    assert!(Instant::now() >= deadline);
+
+    let (response, mut raw) = oneshot::channel();
+    ControlResponder::Raw {
+        operation: ControlOperation::Interrupt,
+        response,
+    }
+    .time_out_at(None);
+    tokio::time::advance(Duration::from_secs(86_400)).await;
+    assert!(matches!(raw.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+    drop(raw);
+    let metrics = tokio::runtime::Handle::current().metrics();
+    for _ in 0..8 {
+        if metrics.num_alive_tasks() == 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(metrics.num_alive_tasks(), 0);
+    Ok(())
+}
