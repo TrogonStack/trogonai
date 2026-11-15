@@ -21,10 +21,10 @@ runs:
 
     - name: Install Rust components
       shell: bash
-      run: mise run --skip-tools github-actions:rust-components
+      run: mise run --skip-tools github:actions:setup-rust:rust-components
 
     - name: Install Dylint Rust components
       shell: bash
       env:
         DYLINT_TOOLCHAIN_DIR: ${{ inputs.dylint-toolchain-dir }}
-      run: mise run --skip-tools github-actions:rust-dylint-toolchain
+      run: mise run --skip-tools github:actions:setup-rust:rust-dylint-toolchain

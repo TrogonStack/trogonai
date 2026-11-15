@@ -9,7 +9,9 @@ queries convenient. It is the lifecycle contract for this crate.
 
 The reviewed Python SDK positions `ClaudeSDKClient` for interactive sessions,
 follow-up prompts and interrupts. Its constructor stores configuration;
-`await connect()` starts the transport and initializes the protocol.
+`await connect()` starts the transport and initializes the protocol, and returns once the response arrived.
+`sdk.mjs` returns its `Query` earlier, once the initialize request is written, and so does the TypeScript
+dialect here.
 `async with ClaudeSDKClient(...)` pairs connection with `disconnect()`.
 Python also offers a top-level `query()` async iterator for predetermined
 inputs. Both facades use bidirectional streaming internally.
@@ -40,7 +42,7 @@ and error boundaries.
 | Interactive ownership | Reusable `ClaudeSDKClient` | A streaming `Query` also has controls and streamed input | Reusable `ClaudeSdkClient` owns one CLI process |
 | Readiness | Await `connect()` or enter `async with` | Ordinary `query()` starts asynchronously; `startup()` awaits readiness | Await `connect()` before receiving a client |
 | Simple queries | `query()` async iterator | `query()` returns an async generator with controls | `query()` returns an owned query over the same driver |
-| Cleanup | Await `disconnect()` or leave the context | `Query.close()` starts cleanup; generator return/disposal can await it | Consuming `disconnect().await` observes cleanup and errors |
+| Cleanup | Await `disconnect()` or leave the context | `Query.close()` starts cleanup; generator return/disposal can await it | `close(&self)` starts cleanup while the stream is read; consuming `disconnect().await` observes cleanup and errors |
 
 Rust avoids exposing a usable but disconnected client. The constructor future
 can report startup errors before the caller sends input. Consuming the owner
@@ -54,14 +56,17 @@ ownership, in exchange for a visible readiness and failure boundary.
 SDK-owned public constructor and input settings types use the `Options`
 suffix consistently, whether their fields are required or have defaults.
 This includes `ClaudeAgentOptions`, `SdkToolOptions`, `LocalMcpServerOptions`,
-`McpServerOptions` and `SessionStoreOptions`.
+`McpServerOptions`, `McpStdioServerOptions`, `McpRemoteServerOptions`,
+`McpSdkServerOptions` and `SessionStoreOptions`.
 
 Public constructors that assemble several settings use named fields.
 `SdkTool::from(SdkToolOptions { ... })` identifies the tool name,
 description, input schema and handler at the call site.
 `LocalMcpServer::from(LocalMcpServerOptions { ... })` likewise names its server,
-version and tools. These are required inputs, so a struct literal makes omitted
-fields a compile-time error. The API retains this Options pattern.
+version, tools, instructions, `always_load` and dialect. A struct literal makes
+omitted fields a compile-time error; `LocalMcpServerOptions::new(name)` spells
+out the upstream defaults for the optional ones. The API retains this Options
+pattern.
 
 Scalar text values (`Prompt`, `AgentName`, `ToolRule`, `BuiltinToolName`,
 `ToolName`, `McpToolName`, `McpServerName`, `DialogKind` and the session,
@@ -75,16 +80,20 @@ every registered tool; an unknown tool or a failing handler returns
 `{content, isError: true}` rather than a JSON-RPC error. Permission modes and
 user content blocks pass through unvalidated; an unknown mode is kept in
 `PermissionMode::Unknown`. Other independent input constraints belong to
-value objects with private fields and typed construction errors. Its
-`McpToolInputSchema` compiles the JSON schema and requires the
-top-level `type` to be `object`, preserving local references and rejecting
-external references. Neither value object exposes mutable access to its value.
+value objects with private fields. Its `McpToolInputSchema::new` keeps the JSON
+schema verbatim, as both upstream SDKs do; a schema that does not compile fails
+each call with its error as the tool result. `McpToolInputSchema::validated`
+opts in to requiring a top-level `object` type and rejecting external
+references. Neither value object exposes mutable access to its value.
 `SdkTool::from` assembles its fields infallibly.
 
 Duplicate names are a constraint across the collection of tools.
 `LocalMcpServerOptions.tools` requires `SdkTools`, which validates exact-name
 uniqueness in `SdkTools::new()` and returns a typed `SdkToolsError` identifying
-the repeated `McpToolName`. Case-distinct names remain separate. Its private
+the repeated `McpToolName`, as `createSdkMcpServer` does.
+`SdkTools::with_duplicates()` keeps repeated names for a server that answers
+like the Python `create_sdk_mcp_server`, which lists every definition and calls
+the last one. Case-distinct names remain separate. Its private
 immutable registry preserves that invariant when cloned; callers cannot modify
 the collection after validation. Empty collections use `SdkTools::default()`
 and one tool uses `tool.into()`, both infallibly. `LocalMcpServer::from` then
@@ -97,7 +106,7 @@ for other SDK APIs. Simple value-object constructors retain their single value.
 | --- | --- |
 | Configure | Supply optional cli_path, settings, limits, hooks, permissions and MCP registrations before connecting. |
 | Initialize | Prepare any store-backed resume, spawn the CLI, start the driver and exchange initialization/control messages. |
-| Ready | `connect().await` returns after successful initialization and required blocking-hook checks. No user prompt is required. |
+| Ready | Under the TypeScript dialect `connect().await` returns once the initialize request is queued; the Python dialect returns after the response. Required blocking-hook checks run when the response arrives, and a refusal ends the run. No user prompt is required. |
 | Work | Send input and consume messages while the driver routes controls and callback requests. Reuse the process for subsequent turns. |
 | Finish input | Declare that no further user messages will be sent; allow remaining turns and callback-capable work to settle. |
 | Disconnect | Request shutdown, cancel callbacks, close input, reap the process and finish accepted storage work, reporting the outcome. |
@@ -106,14 +115,22 @@ Initialization may perform configuration, authentication, MCP and CLI startup
 hook work. A connection without a model prompt is not a promise that startup
 has no side effects. Ready means the control protocol is initialized; inspect
 MCP status separately. Startup callbacks can run before `connect()` returns.
-The initialization exchange uses `limits.control_timeout`; startup hooks must
-complete within that configured bound. This is separate from how long a model
-turn may execute.
+The initialization exchange follows `limits.initialize_timeout`. By default it
+waits without a deadline, like TypeScript, unless a hook is set to block on
+failure or managed settings are sent, which arms 660 seconds and reports
+`Error::InitializeNotConfirmed`, or `Error::ManagedSettingsNotConfirmed` when
+only managed settings armed it.
+`InitializeTimeout::Python` reads `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` as Python's
+`int()` does, Unicode digits and whitespace, underscores, the 4300 digit limit
+and float overflow included, and its invalid value error quotes the value as
+Python's `repr` does. The wait has a 60 second floor. This is separate from how
+long a model turn may execute.
 
 The initialization exchange is internal to `connect()`. It configures the
-protocol and checks requested blocking-hook support before returning the
-client. `connection_info()` borrows the cached `ConnectionInfo` reported by that
-exchange; it cannot fail or initialize the process again. The metadata is a
+protocol and checks requested blocking-hook support when the response arrives.
+`initialization_result()` awaits the cached `ConnectionInfo` reported by that
+exchange and fails with `Error::InitializationFailed` when it failed; it does not
+initialize the process again. The metadata is a
 startup snapshot, so later control changes do not update it.
 `ConnectionInfo::as_json()` preserves the original response, including unknown
 fields and the distinction between omitted and explicitly null fields.
@@ -123,9 +140,11 @@ client ends its process. Resuming a conversation uses stored identity and
 transcripts to create another client; it does not resurrect a closed owner.
 `ClientHandle` permits concurrent control and input without extending the
 owner's lifetime. Input sent while a turn runs is written immediately, as both
-upstream SDKs do; outbound frames are not capped by `max_frame_bytes`, which
-bounds inbound frames only. Continue consuming messages while work runs. Queue
-capacity is finite, and a lagging consumer can end the session with
+upstream SDKs do; outbound frames are not capped by `max_buffer_size`, which
+bounds inbound lines only and is unset unless selected, as TypeScript keeps
+every line. Messages queue without a bound by default, like TypeScript.
+`MessageBuffer::Backpressure` stops reading stdout while the buffer is full,
+like Python, and `MessageBuffer::FailWhenFull` ends the session with
 `Error::MessageQueueFull`.
 
 ## Turns, runs and interrupts
@@ -135,7 +154,19 @@ follow-up turns can still belong to the run. The driver tracks reported session
 state, queued input and delegated work before closing stdin for full-run
 completion. Older CLIs without session-state reporting provide weaker evidence;
 the bounded between-turn wait is not a universal model execution timeout. When
-it expires the driver logs a warning and ends the run without an error. Non-JSON
+it expires the driver logs a warning and ends the run without an error. The
+wait is `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, 600 seconds when unset or not a
+number, and zero means no limit; values past 2^31 - 1 milliseconds are clamped.
+`limits.run_end_timeout` picks how it is read. `RunEndTimeout::TypeScript`, the
+default, reads the child environment the SDK builds, so `options.env` when it
+replaces the inherited environment and the process environment otherwise, and
+accepts what the TypeScript parser does: whole numbers in exponent form such as
+`1e3`, `1,000` or `1_000`, and the leading digits of `12abc`.
+`RunEndTimeout::Python`, which `Limits::python()` selects, reads `options.env`
+and then the process environment and accepts what Python's `int()` does:
+surrounding white space, Unicode decimal digits and single underscores between
+digits, while `1e3` and `1,000` are the default. `RunEndTimeout::Fixed` is an
+opt-in wait that ignores the variable. Non-JSON
 stdout lines are skipped with a debug log, a control response for an unknown
 request is ignored, and an unknown session state is kept as unknown.
 
@@ -145,7 +176,10 @@ receive through a result and keep the owner for later input. Exhausting a user
 input stream is distinct from ending the control channel: hooks, permission
 questions and embedded MCP calls may still require replies on stdin.
 `stream_input()` calls `finish_input()` on exhaustion, rejecting further user
-input; finishing input is not an explicit close operation.
+input; finishing input is not an explicit close operation. Under the
+TypeScript dialect a failing `try_stream_input()` stream returns its error and
+leaves stdin open, as a rejecting iterable does upstream; the Python dialect
+logs the failure and finishes input anyway.
 
 `interrupt()` requests that the CLI interrupt current work. It does not close
 the owner or necessarily discard queued input. Inspect the typed receipt and
@@ -161,12 +195,13 @@ structured response. Hooks are not application message-stream handlers.
 Permission, elicitation, dialog and embedded MCP responders use the same
 bidirectional control machinery.
 
-Rust supplies per-request cancellation tokens, callback admission limits and
-timeouts. Once the SDK observes control cancellation, it cancels the matching
-task; identity checks suppress stale replies to reused request IDs. A timeout or
-callback error produces a protocol response rather than inventing success.
-The driver does not wait indefinitely for the application to consume a message
-before servicing controls; overflow is an explicit terminal error. Cancellation
+Rust supplies per-request cancellation tokens; callback admission limits and
+timeouts are opt-in, as neither upstream SDK has them. Once the SDK observes
+control cancellation, it cancels the matching task; identity checks suppress
+stale replies to reused request IDs. A timeout or callback error produces a
+protocol response rather than inventing success. With the default unbounded
+buffer the driver services controls whether or not the application consumes
+messages. Cancellation
 does not roll back an external effect or stop arbitrary blocking work.
 
 Blocking failure policy requires advertised CLI support. When a blocking hook is

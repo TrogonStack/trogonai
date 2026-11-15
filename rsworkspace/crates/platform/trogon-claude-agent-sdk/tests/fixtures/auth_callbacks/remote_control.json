@@ -1,0 +1,286 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323",
+    "python": "claude_agent_sdk 0.2.181"
+  },
+  "scenarios": {
+    "work_secret": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"name\":\"cse_abcd1234\",\"reattach_session_id\":\"cse_abcd1234\",\"work_secret\":\"opaque\"}}"
+      ],
+      "responses": [
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"w1\",\"response\":{\"work_secret\":\"fresh\"}}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"w2\",\"response\":{\"work_secret\":null}}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"w3\",\"error\":\"remote_control_work_secret names a session this host did not attach.\"}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"w4\",\"error\":\"Cannot read properties of undefined (reading 'slice')\"}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"w5\",\"error\":\"Cannot read properties of null (reading 'slice')\"}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"w6\",\"error\":\"t.lastIndexOf is not a function\"}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"w7\",\"error\":\"remote_control_work_secret names a session this host did not attach.\"}}"
+      ],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request",
+        "cli sends remote_control_work_secret w1",
+        "sdk writes success response w1",
+        "cli sends remote_control_work_secret w2",
+        "sdk writes success response w2",
+        "cli sends remote_control_work_secret w3",
+        "cli sends remote_control_work_secret w4",
+        "cli sends remote_control_work_secret w5",
+        "cli sends remote_control_work_secret w6",
+        "cli sends remote_control_work_secret w7",
+        "sdk writes error response w3",
+        "sdk writes error response w4",
+        "sdk writes error response w5",
+        "sdk writes error response w6",
+        "sdk writes error response w7"
+      ],
+      "seen": {
+        "reply": {
+          "bridge_session_id": "cse_abcd1234"
+        },
+        "refreshCalls": [
+          "cse_abcd1234",
+          "cse_abcd1234"
+        ]
+      }
+    },
+    "work_secret_other_session": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"name\":\"cse_9999\",\"reattach_session_id\":\"cse_abcd1234\",\"work_secret\":\"opaque\"}}"
+      ],
+      "responses": [
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"w1\",\"error\":\"refreshWorkSecret callback is not provided.\"}}"
+      ],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request",
+        "cli sends remote_control_work_secret w1",
+        "sdk writes error response w1"
+      ]
+    },
+    "remote_absent_on": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"name\":\"n1\"}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request"
+      ],
+      "seen": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'bridge_session_id')"
+        }
+      }
+    },
+    "remote_absent_off": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":false,\"name\":\"n1\"}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request"
+      ],
+      "seen": {
+        "reply": "__undefined__"
+      }
+    },
+    "remote_null_on": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"name\":\"n1\"}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request"
+      ],
+      "seen": {
+        "error": {
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'bridge_session_id')"
+        }
+      }
+    },
+    "remote_null_off": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":false,\"name\":\"n1\"}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request"
+      ],
+      "seen": {
+        "reply": null
+      }
+    },
+    "remote_empty_on": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"name\":\"n1\"}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request"
+      ],
+      "seen": {
+        "reply": {}
+      }
+    },
+    "remote_empty_off": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":false,\"name\":\"n1\"}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request"
+      ],
+      "seen": {
+        "reply": {}
+      }
+    },
+    "remote_request_bytes": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"name\":\"nm\",\"reattach_session_id\":\"cse_1\",\"keep_session_on_exit\":true,\"work_secret\":\"sec\"}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":false}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"keep_session_on_exit\":false}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "cli answers initialize",
+        "sdk writes remote_control request",
+        "sdk writes remote_control request",
+        "sdk writes remote_control request",
+        "sdk writes remote_control request"
+      ]
+    },
+    "order_remote_control_before_init": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {},
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}",
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"remote_control\",\"enabled\":true,\"name\":\"early\",\"reattach_session_id\":\"cse_early\",\"work_secret\":\"s\"}}"
+      ],
+      "responses": [],
+      "order": [
+        "sdk writes initialize request",
+        "sdk writes remote_control request"
+      ]
+    },
+    "python_unsupported_work_secret": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--system-prompt",
+        "",
+        "--input-format",
+        "stream-json"
+      ],
+      "responses": [
+        "{\"type\": \"control_response\", \"response\": {\"subtype\": \"error\", \"request_id\": \"p3\", \"error\": \"Unsupported control request subtype: remote_control_work_secret\"}}"
+      ]
+    }
+  }
+}

@@ -1,0 +1,130 @@
+{
+ "source": "node v24.13.1 new RegExp",
+ "cases": [
+  [
+   "(",
+   "",
+   "Invalid regular expression: /(/: Unterminated group"
+  ],
+  [
+   ")",
+   "",
+   "Invalid regular expression: /)/: Unmatched ')'"
+  ],
+  [
+   "[",
+   "",
+   "Invalid regular expression: /[/: Unterminated character class"
+  ],
+  [
+   "*",
+   "",
+   "Invalid regular expression: /*/: Nothing to repeat"
+  ],
+  [
+   "a**",
+   "",
+   "Invalid regular expression: /a**/: Nothing to repeat"
+  ],
+  [
+   "\\",
+   "",
+   "Invalid regular expression: /\\/: \\ at end of pattern"
+  ],
+  [
+   "a{2,1}",
+   "",
+   "Invalid regular expression: /a{2,1}/: numbers out of order in {} quantifier"
+  ],
+  [
+   "[b-a]",
+   "",
+   "Invalid regular expression: /[b-a]/: Range out of order in character class"
+  ],
+  [
+   "(?<n>a)(?<n>b)",
+   "",
+   "Invalid regular expression: /(?<n>a)(?<n>b)/: Duplicate capture group name"
+  ],
+  [
+   "(?<1>a)",
+   "",
+   "Invalid regular expression: /(?<1>a)/: Invalid capture group name"
+  ],
+  [
+   "{1}",
+   "u",
+   "Invalid regular expression: /{1}/u: Nothing to repeat"
+  ],
+  [
+   "a{1",
+   "u",
+   "Invalid regular expression: /a{1/u: Incomplete quantifier"
+  ],
+  [
+   "(?",
+   "",
+   "Invalid regular expression: /(?/: Invalid group"
+  ],
+  [
+   "?",
+   "",
+   "Invalid regular expression: /?/: Nothing to repeat"
+  ],
+  [
+   "+a",
+   "",
+   "Invalid regular expression: /+a/: Nothing to repeat"
+  ],
+  [
+   "a{,5}",
+   "u",
+   "Invalid regular expression: /a{,5}/u: Incomplete quantifier"
+  ],
+  [
+   "]",
+   "u",
+   "Invalid regular expression: /]/u: Lone quantifier brackets"
+  ],
+  [
+   "}",
+   "u",
+   "Invalid regular expression: /}/u: Lone quantifier brackets"
+  ],
+  [
+   "[\\d-z]",
+   "u",
+   "Invalid regular expression: /[\\d-z]/u: Invalid character class"
+  ],
+  [
+   "(?i:a)",
+   "",
+   null
+  ],
+  [
+   "a",
+   "gg",
+   "Invalid flags supplied to RegExp constructor 'gg'"
+  ],
+  [
+   "a",
+   "q",
+   "Invalid flags supplied to RegExp constructor 'q'"
+  ],
+  [
+   "a",
+   "uv",
+   "Invalid flags supplied to RegExp constructor 'uv'"
+  ],
+  [
+   "a(",
+   "i",
+   "Invalid regular expression: /a(/i: Unterminated group"
+  ],
+  [
+   "[z-a]",
+   "i",
+   "Invalid regular expression: /[z-a]/i: Range out of order in character class"
+  ]
+ ]
+}

@@ -65,7 +65,7 @@ already state.
 
 No codegen plugin emits validators. No Rust crate takes a validation runtime
 dependency. Adding the dependency and the annotations changes no generated
-output, which `mise run github-actions:assert-proto-generated` proves.
+output, which `mise run github:workflows:ci-proto:assert-proto-generated` proves.
 
 This is the cost of the decision and it is accepted deliberately: an
 annotation looks enforced. A reader who sees `min_len: 1` may assume some

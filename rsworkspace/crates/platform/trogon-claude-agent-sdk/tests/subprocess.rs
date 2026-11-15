@@ -1,13 +1,13 @@
 #![cfg(feature = "test-support")]
 
-use std::{error::Error as StdError, num::NonZeroUsize, sync::Arc, time::Duration};
+use std::{error::Error as StdError, ffi::OsStr, sync::Arc, time::Duration};
 
 use tokio::time::{sleep, timeout};
 use trogon_claude_agent_sdk::{
-    BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, Error, FeatureSupport,
-    FileCheckpointing, InMemorySessionStore, Message, PartialMessages, PermissionDecision, Prompt, QueueCapacity,
-    SessionId, SessionStore, SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet,
-    adapters::SystemClock, query,
+    BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, EndWithoutResult, Error,
+    FeatureSupport, FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages,
+    PermissionDecision, Prompt, QueueCapacity, RunEndTimeout, SessionId, SessionStore, SessionStoreOptions,
+    SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet, adapters::SystemClock, query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -18,8 +18,8 @@ fn options(mode: &str) -> Result<ClaudeAgentOptions, Box<dyn StdError>> {
         model: Some(format!("fixture:{mode}").into()),
         ..ClaudeAgentOptions::default()
     };
-    options.limits.control_timeout = Timeout::new(Duration::from_secs(2))?;
-    options.limits.shutdown_timeout = Timeout::new(Duration::from_millis(200))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_secs(2)));
+    options.limits.shutdown = trogon_claude_agent_sdk::Shutdown::Strict(Timeout::new(Duration::from_millis(200)));
     // The runtime force-kills the fixture on shutdown, possibly while it is writing its coverage
     // profile at exit, which leaves a corrupt profile. The fixture runs no crate code, so its
     // profile is discarded.
@@ -97,10 +97,15 @@ async fn s02_non_json_stdout_lines_are_skipped() -> TestResult {
 }
 
 /// Both upstream SDKs end the run quietly when no idle state follows the last result before the run-end ceiling.
+/// The ceiling only applies while a permission callback keeps the CLI talking; without any bidirectional need both
+/// SDKs close the input at once and the run ends when the CLI exits.
 #[tokio::test]
 async fn s05_a_missing_idle_state_ends_the_run_quietly_at_the_ceiling() -> TestResult {
     let mut options = options("stuck-running")?;
-    options.limits.run_end_timeout = Timeout::new(Duration::from_millis(300))?;
+    options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        std::future::pending::<PermissionDecision>().await
+    }));
+    options.limits.run_end_timeout = RunEndTimeout::Fixed(Timeout::new(Duration::from_millis(300)));
     let mut response = query(Prompt::from("stuck"), options).await?;
     let results = timeout(Duration::from_secs(5), async {
         let mut results = Vec::new();
@@ -123,10 +128,19 @@ async fn w2_file_checkpointing_with_a_session_store_is_refused() -> TestResult {
     options.file_checkpointing = FileCheckpointing::Enabled;
     let store: Arc<dyn SessionStore> = Arc::new(InMemorySessionStore::<SystemClock>::default());
     options.session_store = Some(SessionStoreOptions::from(store));
-    assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::FileCheckpointingWithSessionStore)
-    ));
+    let Err(error @ Error::FileCheckpointingWithSessionStore) = ClaudeSdkClient::connect(options).await else {
+        return Err("file checkpointing with a session store was not refused".into());
+    };
+    assert_eq!(
+        error.to_string(),
+        "enableFileCheckpointing is not yet supported with sessionStore (backup blobs are not mirrored, so rewindFiles() fails after a store-backed resume)."
+    );
+    assert_eq!(
+        error.python_message(),
+        Some(
+            "session_store cannot be combined with enable_file_checkpointing (checkpoints are local-disk only and would diverge from the mirrored transcript)"
+        )
+    );
     Ok(())
 }
 
@@ -157,10 +171,18 @@ async fn st06_continue_conversation_requires_a_store_that_lists_sessions() -> Te
     options.continue_conversation = trogon_claude_agent_sdk::ContinueConversation::Yes;
     let store: Arc<dyn SessionStore> = Arc::new(RequiredOnly);
     options.session_store = Some(SessionStoreOptions::from(store));
-    assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
-        Err(Error::ContinueRequiresListSessions)
-    ));
+    let Err(error @ Error::ContinueRequiresListSessions) = ClaudeSdkClient::connect(options).await else {
+        return Err("continue against a store that cannot list sessions was not refused".into());
+    };
+    assert_eq!(
+        error.to_string(),
+        "Options.continue with sessionStore requires store.listSessions to be implemented"
+    );
+    assert_eq!(
+        error.python_message(),
+        Some("continue_conversation with session_store requires the store to implement list_sessions()")
+    );
+    assert_eq!(Error::InputClosed.python_message(), None);
     Ok(())
 }
 
@@ -208,7 +230,7 @@ async fn known_message_metadata_survives_decoding() -> TestResult {
 #[tokio::test]
 async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
     let mut client = ClaudeSdkClient::connect(options("connection-info")?).await?;
-    let info = client.connection_info();
+    let info = client.handle().initialization_result().await?;
     assert_eq!(info.commands[0]["name"], "review");
     assert_eq!(info.models[0]["value"], "fixture-model");
     assert_eq!(info.agents[0]["name"], "reviewer");
@@ -234,19 +256,30 @@ async fn connected_client_exposes_cached_lossless_metadata() -> TestResult {
         "future_metadata":{"nested":[1,null]},
     });
     assert_eq!(serde_json::to_value(info.as_json())?, raw);
-    assert!(std::ptr::eq(info, client.connection_info()));
+    assert_eq!(client.handle().initialization_result().await?.as_json(), info.as_json());
     client.send_prompt(Prompt::from("after metadata")).await?;
     assert_eq!(read_result(&mut client).await?, "after metadata");
-    assert_eq!(serde_json::to_value(client.connection_info().as_json())?, raw);
+    assert_eq!(
+        serde_json::to_value(client.handle().initialization_result().await?.as_json())?,
+        raw
+    );
     client.disconnect().await?;
 
     let client = ClaudeSdkClient::connect(options("normal")?).await?;
-    assert_eq!(client.connection_info().hooks_applied, FeatureSupport::NotReported);
-    assert_eq!(
-        client.connection_info().hook_on_failure_supported,
-        FeatureSupport::NotReported
-    );
-    assert!(client.connection_info().as_json().is_empty());
+    let info = client.handle().initialization_result().await?;
+    assert_eq!(info.hooks_applied, FeatureSupport::NotReported);
+    assert_eq!(info.hook_on_failure_supported, FeatureSupport::NotReported);
+    assert_eq!(info.as_json(), Some(&serde_json::json!({})));
+    client.disconnect().await?;
+    Ok(())
+}
+
+/// Python `ClaudeSDKClient(options).connect(prompt)`: the native connector spawns the CLI, and the prompt is written
+/// once the connection is up.
+#[tokio::test]
+async fn an_unconnected_client_spawns_the_cli_and_writes_its_prompt() -> TestResult {
+    let mut client = ClaudeSdkClient::new(options("normal")?).connect("hello").await?;
+    assert_eq!(read_result(&mut client).await?, "hello");
     client.disconnect().await?;
     Ok(())
 }
@@ -260,6 +293,24 @@ async fn interactive_client_reuses_one_process_for_multiple_turns() -> TestResul
     client.send_prompt(Prompt::from("two")).await?;
     assert_eq!(read_result(&mut client).await?, "two");
     assert_eq!(client.process_id(), process_id);
+    client.disconnect().await?;
+    Ok(())
+}
+
+/// Python's `_find_cli` takes `<package>/_bundled/claude` before anything else; `bundled_cli_root` names that
+/// directory, and the executable it holds is the one `connect` spawns.
+#[cfg(unix)]
+#[tokio::test]
+async fn connect_spawns_the_bundled_cli_under_the_configured_root() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut options = options("normal")?;
+    let fixture = options.cli_path.take().ok_or("the fixture has a path")?;
+    std::fs::create_dir(root.path().join("_bundled"))?;
+    std::os::unix::fs::symlink(fixture, root.path().join("_bundled/claude"))?;
+    options.bundled_cli_root = Some(root.path().to_path_buf());
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("bundled")).await?;
+    assert_eq!(read_result(&mut client).await?, "bundled");
     client.disconnect().await?;
     Ok(())
 }
@@ -305,10 +356,10 @@ async fn argv_binds_values_and_forwards_cwd() -> TestResult {
 }
 
 #[tokio::test]
-async fn permission_requests_default_to_deny() -> TestResult {
+async fn permission_requests_without_a_handler_get_the_typescript_error() -> TestResult {
     let mut client = ClaudeSdkClient::connect(options("permission")?).await?;
     client.send_prompt(Prompt::from("permission")).await?;
-    assert_eq!(read_result(&mut client).await?, "denied");
+    assert_eq!(read_result(&mut client).await?, "canUseTool callback is not provided.");
     client.disconnect().await?;
     Ok(())
 }
@@ -323,6 +374,7 @@ async fn permission_callback_can_replace_tool_input() -> TestResult {
         PermissionDecision::Allow {
             updated_input: Some(input),
             updated_permissions: None,
+            decision_classification: None,
         }
     }));
     let mut client = ClaudeSdkClient::connect(options).await?;
@@ -377,16 +429,16 @@ async fn pending_callback_does_not_block_interrupt() -> TestResult {
 }
 
 #[tokio::test]
-async fn cancelled_permission_callback_cannot_reply_later() -> TestResult {
+async fn a_cancelled_permission_callback_still_answers_like_the_typescript_sdk() -> TestResult {
     let mut options = options("permission-cancel")?;
-    options.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
-        sleep(Duration::from_millis(100)).await;
+    options.permission_handler = Some(Arc::new(|request: ToolPermissionRequest| async move {
+        request.signal.cancelled().await;
+        sleep(Duration::from_millis(50)).await;
         PermissionDecision::allow()
     }));
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("cancel")).await?;
-    assert_eq!(read_result(&mut client).await?, "cancelled-permission");
-    sleep(Duration::from_millis(150)).await;
+    assert_eq!(read_result(&mut client).await?, "allow");
     client.handle().interrupt().await?;
     client.disconnect().await?;
     Ok(())
@@ -420,8 +472,10 @@ async fn cancelling_a_receive_preserves_partial_frame() -> TestResult {
 }
 
 #[tokio::test]
-async fn malformed_known_frame_is_a_terminal_protocol_error() -> TestResult {
-    let mut client = ClaudeSdkClient::connect(options("malformed")?).await?;
+async fn malformed_known_frame_is_a_terminal_protocol_error_with_python_decoding() -> TestResult {
+    let mut options = options("malformed")?;
+    options.message_decoding = MessageDecoding::Python;
+    let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("malformed")).await?;
     let error = loop {
         match client.next_message().await {
@@ -438,7 +492,8 @@ async fn malformed_known_frame_is_a_terminal_protocol_error() -> TestResult {
 #[tokio::test]
 async fn oversized_frame_is_rejected() -> TestResult {
     let mut options = options("oversized")?;
-    options.limits.max_frame_bytes = NonZeroUsize::new(1024).ok_or_else(|| std::io::Error::other("zero limit"))?;
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    options.limits.max_buffer_size = Some(1024);
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("oversized")).await?;
     let error = loop {
@@ -448,15 +503,45 @@ async fn oversized_frame_is_rejected() -> TestResult {
             Ok(None) => return Err(std::io::Error::other("missing error").into()),
         }
     };
-    assert!(matches!(error, Error::FrameTooLarge { limit: 1024 }));
+    let Error::JsonDecode(decode) = error else {
+        return Err(std::io::Error::other("expected the buffer guard").into());
+    };
+    assert_eq!(decode.line(), "JSON message exceeded maximum buffer size of 1024 bytes");
+    assert!(matches!(
+        decode.original_error(),
+        trogon_claude_agent_sdk::JsonDecodeSourceError::BufferExceeded { limit: 1024, .. }
+    ));
     client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_bad_frame_stops_a_cli_that_is_still_running() -> TestResult {
+    let mut options = options("oversized-live")?;
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    options.limits.max_buffer_size = Some(1024);
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("oversized")).await?;
+    // The fixture sleeps for 30 seconds after the bad frame, so ending well before that means the SDK stopped it.
+    let error = timeout(Duration::from_secs(10), async {
+        loop {
+            match client.next_message().await {
+                Ok(Some(_)) => {}
+                Err(error) => return Ok(error),
+                Ok(None) => return Err(std::io::Error::other("missing error")),
+            }
+        }
+    })
+    .await??;
+    assert!(matches!(error, Error::JsonDecode(_)), "{error:?}");
+    timeout(Duration::from_secs(10), client.disconnect()).await??;
     Ok(())
 }
 
 #[tokio::test]
 async fn process_failure_preserves_status_and_bounded_stderr() -> TestResult {
     let mut options = options("failure")?;
-    options.limits.max_stderr_bytes = NonZeroUsize::new(32).ok_or_else(|| std::io::Error::other("zero limit"))?;
+    options.limits.stderr_tail = 32;
     let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("failure")).await?;
     let error = loop {
@@ -478,16 +563,63 @@ async fn process_failure_preserves_status_and_bounded_stderr() -> TestResult {
 }
 
 #[tokio::test]
+async fn process_failure_message_redacts_secrets_from_the_stderr_tail() -> TestResult {
+    let mut client = ClaudeSdkClient::connect(options("failure-secret")?).await?;
+    client.send_prompt(Prompt::from("failure")).await?;
+    let error = loop {
+        match client.next_message().await {
+            Ok(Some(_)) => {}
+            Err(error) => break error,
+            Ok(None) => return Err(std::io::Error::other("missing error").into()),
+        }
+    };
+    assert_eq!(
+        error.typescript_message().as_deref(),
+        Some("Claude Code process exited with code 7. stderr: rejected key <token> at startup")
+    );
+    client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_keeps_the_stderr_tail_it_opts_into_unredacted() -> TestResult {
+    let mut options = options("failure-secret")?;
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    options.limits.stderr_tail = 1024;
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("failure")).await?;
+    let error = loop {
+        match client.next_message().await {
+            Ok(Some(_)) => {}
+            Err(error) => break error,
+            Ok(None) => return Err(std::io::Error::other("missing error").into()),
+        }
+    };
+    let Error::Process { status, stderr } = error else {
+        return Err(std::io::Error::other("expected process error").into());
+    };
+    assert_eq!(status.code(), Some(7));
+    let secret = format!("sk-{}", "Ab1".repeat(8));
+    assert_eq!(
+        stderr.as_bytes(),
+        format!("rejected key {secret} at startup").as_bytes()
+    );
+    client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn consumer_lag_fails_with_a_bounded_queue() -> TestResult {
     let mut options = options("queue-overflow")?;
-    options.limits.message_queue_capacity = QueueCapacity::new(1)?;
+    options.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
     let mut client = ClaudeSdkClient::connect(options).await?;
     let _ = client.next_message().await?;
     client.send_prompt(Prompt::from("flood")).await?;
-    // The control reply follows the fixture's flood, without consuming the bounded queue.
+    // The control reply follows the fixture's flood, without consuming the bounded queue. When the overflow stops the
+    // run before the interrupt is written, the interrupt fails like any write to a closed transport.
     let fence = timeout(Duration::from_secs(5), client.handle().interrupt()).await?;
     assert!(
-        matches!(&fence, Ok(_) | Err(Error::DriverStopped)),
+        matches!(&fence, Ok(_) | Err(Error::DriverStopped | Error::NotReadyForWriting)),
         "unexpected producer fence outcome: {fence:?}"
     );
     let Some(Message::System(first)) = client.next_message().await? else {
@@ -507,7 +639,7 @@ async fn consumer_lag_fails_with_a_bounded_queue() -> TestResult {
 #[tokio::test]
 async fn missing_control_reply_times_out() -> TestResult {
     let mut options = options("control-timeout")?;
-    options.limits.control_timeout = Timeout::new(Duration::from_millis(100))?;
+    options.limits.control_timeout = Some(Timeout::new(Duration::from_millis(100)));
     let client = ClaudeSdkClient::connect(options).await?;
     assert!(matches!(
         client.handle().interrupt().await,
@@ -525,29 +657,46 @@ async fn missing_control_reply_times_out() -> TestResult {
 }
 
 #[tokio::test]
-async fn malformed_initialization_is_rejected() -> TestResult {
-    for mode in ["init-malformed", "init-malformed-known"] {
-        assert!(matches!(
-            ClaudeSdkClient::connect(options(mode)?).await,
-            Err(Error::Protocol(_) | Error::MessageParse(_))
-        ));
+async fn malformed_initialization_is_accepted_like_upstream() -> TestResult {
+    for (mode, raw) in [
+        ("init-malformed", serde_json::json!(42)),
+        ("init-malformed-known", serde_json::json!({"models":"invalid"})),
+    ] {
+        let client = ClaudeSdkClient::connect(options(mode)?).await?;
+        let info = client.handle().initialization_result().await?;
+        assert!(info.models.is_empty());
+        assert_eq!(info.as_json(), Some(&raw));
+        client.disconnect().await?;
     }
     Ok(())
 }
 
-#[tokio::test]
-async fn successful_process_exit_without_a_result_is_not_success() -> TestResult {
-    let mut client = ClaudeSdkClient::connect(options("no-result")?).await?;
+/// Reads every message after a prompt the CLI exits on with status 0 and never answers with a result.
+async fn read_without_a_result(options: ClaudeAgentOptions) -> Result<Result<(), Error>, Box<dyn StdError>> {
+    let mut client = ClaudeSdkClient::connect(options).await?;
     client.send_prompt(Prompt::from("missing result")).await?;
-    let error = loop {
+    let ended = loop {
         match client.next_message().await {
             Ok(Some(_)) => {}
-            Err(error) => break error,
-            Ok(None) => return Err(std::io::Error::other("missing terminal error").into()),
+            Ok(None) => break Ok(()),
+            Err(error) => break Err(error),
         }
     };
-    assert!(matches!(error, Error::UnexpectedEof));
     client.disconnect().await?;
+    Ok(ended)
+}
+
+/// TypeScript and Python treat only a failed exit as an error, so a clean exit in the middle of a turn ends the
+/// messages; `EndWithoutResult::Fail` keeps `UnexpectedEof` as an opt-in.
+#[tokio::test]
+async fn a_clean_exit_without_a_result_ends_the_messages_unless_the_limit_fails_it() -> TestResult {
+    let ended = read_without_a_result(options("no-result")?).await?;
+    assert!(ended.is_ok(), "{ended:?}");
+
+    let mut failing = options("no-result")?;
+    failing.limits.end_without_result = EndWithoutResult::Fail;
+    let ended = read_without_a_result(failing).await?;
+    assert!(matches!(ended, Err(Error::UnexpectedEof)), "{ended:?}");
     Ok(())
 }
 
@@ -555,7 +704,7 @@ async fn successful_process_exit_without_a_result_is_not_success() -> TestResult
 async fn queue_capacity_rejects_values_that_would_panic() -> TestResult {
     let mut options = options("normal")?;
     match usize::MAX.try_into() {
-        Ok(capacity) => options.limits.message_queue_capacity = capacity,
+        Ok(capacity) => options.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(capacity),
         Err(_) => return Ok(()),
     }
     let outcome = tokio::spawn(ClaudeSdkClient::connect(options)).await;
@@ -569,10 +718,7 @@ async fn queue_capacity_rejects_values_that_would_panic() -> TestResult {
 #[tokio::test]
 async fn timeout_rejects_values_that_would_overflow_an_instant() -> TestResult {
     let mut options = options("normal")?;
-    match Duration::MAX.try_into() {
-        Ok(timeout) => options.limits.control_timeout = timeout,
-        Err(_) => return Ok(()),
-    }
+    options.limits.control_timeout = Some(Timeout::new(Duration::MAX));
     let outcome = ClaudeSdkClient::connect(options).await;
     assert!(
         !matches!(outcome, Err(Error::DriverStopped)),
@@ -667,9 +813,19 @@ async fn initialization_timeout_reaps_process() -> TestResult {
     let marker = directory.path().join("pid");
     let mut options = options("init-timeout")?;
     options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
-    options.limits.control_timeout = Timeout::new(Duration::from_millis(100))?;
+    options.limits.initialize_timeout =
+        trogon_claude_agent_sdk::InitializeTimeout::Fixed(Timeout::new(Duration::from_millis(100)));
+    // TypeScript hands the client out before initialize is answered, so the timeout rejects the initialization
+    // result and ends the run.
+    let client = ClaudeSdkClient::connect(options).await?;
+    let rejected = client.handle().initialization_result().await;
     assert!(matches!(
-        ClaudeSdkClient::connect(options).await,
+        &rejected,
+        Err(Error::InitializationFailed(inner))
+            if matches!(**inner, Error::ControlTimeout { operation: ControlOperation::Initialize })
+    ));
+    assert!(matches!(
+        client.disconnect().await,
         Err(Error::ControlTimeout {
             operation: ControlOperation::Initialize
         })
@@ -686,6 +842,8 @@ async fn cancelling_connect_reaps_the_started_process() -> TestResult {
     let marker = directory.path().join("pid");
     let mut options = options("init-timeout")?;
     options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
+    // Only Python waits for the initialize response inside `connect`, so only there is there something to cancel.
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
     let connect = tokio::spawn(ClaudeSdkClient::connect(options));
     timeout(Duration::from_secs(3), async {
         while !marker.exists() {
@@ -789,5 +947,185 @@ async fn compatibility_stream_event_retains_outer_metadata_separately() -> TestR
             "type":"content_block_delta","delta":{"type":"text_delta","text":"streamed"},"future":{"inside":null}
         })
     );
+    Ok(())
+}
+
+type Recorded<T> = Arc<std::sync::Mutex<Vec<T>>>;
+
+fn recorded<T: Clone>(slot: &Recorded<T>) -> Result<Vec<T>, Box<dyn StdError>> {
+    Ok(slot.lock().map_err(|_| std::io::Error::other("poisoned"))?.clone())
+}
+
+/// A `spawn_claude_code_process` that records what it was given and runs it as the SDK would.
+fn recording_spawner(
+    seen: Recorded<trogon_claude_agent_sdk::SpawnOptions>,
+) -> trogon_claude_agent_sdk::SpawnClaudeCodeProcess {
+    trogon_claude_agent_sdk::SpawnClaudeCodeProcess(Arc::new(move |spawn: trogon_claude_agent_sdk::SpawnOptions| {
+        let mut command = tokio::process::Command::new(&spawn.command);
+        command.args(&spawn.args).env_clear().envs(&spawn.env);
+        if let Some(cwd) = &spawn.cwd {
+            command.current_dir(cwd);
+        }
+        command
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        if let Ok(mut seen) = seen.lock() {
+            seen.push(spawn);
+        }
+        command.spawn()
+    }))
+}
+
+fn spawn_reporter(calls: Recorded<(u32, f64)>) -> trogon_claude_agent_sdk::OnProcessSpawned {
+    trogon_claude_agent_sdk::OnProcessSpawned(Arc::new(
+        move |pid: u32, info: trogon_claude_agent_sdk::ProcessSpawnInfo| {
+            if let Ok(mut calls) = calls.lock() {
+                calls.push((pid, info.spawn_sync_ms));
+            }
+        },
+    ))
+}
+
+#[tokio::test]
+async fn a_custom_spawner_gets_the_full_command_and_its_process_runs_the_query() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let seen = Recorded::default();
+    let calls = Recorded::default();
+    let mut options = options("normal")?;
+    options.cwd = Some(directory.path().to_path_buf());
+    options.env.insert("SPAWN_MARKER".into(), "custom".into());
+    options.spawn_claude_code_process = Some(recording_spawner(seen.clone()));
+    options.on_process_spawned = Some(spawn_reporter(calls.clone()));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("through the spawner")).await?;
+    assert_eq!(read_result(&mut client).await?, "through the spawner");
+    client.disconnect().await?;
+    let seen = recorded(&seen)?;
+    let [spawn] = seen.as_slice() else {
+        return Err(std::io::Error::other(format!("expected one spawn, got {}", seen.len())).into());
+    };
+    assert_eq!(
+        std::path::Path::new(&spawn.command),
+        std::path::absolute(env!("CARGO_BIN_EXE_claude-sdk-fixture"))?
+    );
+    assert!(
+        spawn
+            .args
+            .iter()
+            .any(|arg| arg.to_string_lossy().contains("fixture:normal"))
+    );
+    // TypeScript derives no default debug file for a custom spawner.
+    assert!(
+        !spawn
+            .args
+            .iter()
+            .any(|arg| arg.to_string_lossy().starts_with("--debug-file"))
+    );
+    assert_eq!(spawn.cwd.as_deref(), Some(directory.path()));
+    assert_eq!(
+        spawn.env.get(OsStr::new("SPAWN_MARKER")).map(|value| value.as_os_str()),
+        Some(OsStr::new("custom"))
+    );
+    // The spawner gets the whole child environment, not only the SDK's changes. TypeScript builds it from
+    // `options.env` alone when that is given (`env ? {...env} : {...process.env}`), so the caller's entries arrive
+    // and the inherited `PATH` does not.
+    assert_eq!(
+        spawn
+            .env
+            .get(OsStr::new("LLVM_PROFILE_FILE"))
+            .map(|value| value.as_os_str()),
+        Some(OsStr::new("/dev/null"))
+    );
+    assert_eq!(spawn.env.get(OsStr::new("PATH")), None);
+    assert_eq!(spawn.uid, None);
+    // Closing without an abort leaves the forwarded signal alone, and TypeScript reports no spawn it did not make.
+    assert!(!spawn.signal.is_cancelled());
+    assert!(recorded(&calls)?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failing_custom_spawner_is_a_spawn_error() -> TestResult {
+    let mut options = options("normal")?;
+    options.spawn_claude_code_process = Some(trogon_claude_agent_sdk::SpawnClaudeCodeProcess(Arc::new(
+        |_: trogon_claude_agent_sdk::SpawnOptions| -> std::io::Result<tokio::process::Child> {
+            Err(std::io::Error::from(std::io::ErrorKind::HostUnreachable))
+        },
+    )));
+    let error = ClaudeSdkClient::connect(options)
+        .await
+        .err()
+        .ok_or_else(|| std::io::Error::other("connect succeeded without a process"))?;
+    assert!(
+        matches!(&error, Error::Spawn(source) if source.kind() == std::io::ErrorKind::HostUnreachable),
+        "{error:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_forwarded_signal_is_cancelled_only_once_an_aborted_client_has_closed() -> TestResult {
+    let seen = Recorded::default();
+    let controller = trogon_claude_agent_sdk::CancellationToken::new();
+    let mut options = options("blocked-stdin")?;
+    options.abort_controller = Some(controller.clone());
+    options.spawn_claude_code_process = Some(recording_spawner(seen.clone()));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    let signal = recorded(&seen)?
+        .first()
+        .map(|spawn| spawn.signal.clone())
+        .ok_or_else(|| std::io::Error::other("the spawner was not called"))?;
+    controller.cancel();
+    // The forwarded signal is not the caller's: it waits for the close.
+    assert!(!signal.is_cancelled());
+    let end = timeout(Duration::from_secs(10), async {
+        loop {
+            match client.next_message().await {
+                Ok(Some(_)) => {}
+                Ok(None) => return None,
+                Err(error) => return Some(error),
+            }
+        }
+    })
+    .await?;
+    assert!(matches!(end, Some(Error::Aborted(_))), "{end:?}");
+    let _ = client.disconnect().await;
+    assert!(signal.is_cancelled());
+    Ok(())
+}
+
+#[tokio::test]
+async fn on_process_spawned_reports_the_pid_of_the_sdk_spawn() -> TestResult {
+    let calls = Recorded::default();
+    let mut options = options("normal")?;
+    options.on_process_spawned = Some(spawn_reporter(calls.clone()));
+    let client = ClaudeSdkClient::connect(options).await?;
+    let process_id = client.process_id();
+    client.disconnect().await?;
+    let calls = recorded(&calls)?;
+    let [(pid, spawn_sync_ms)] = calls.as_slice() else {
+        return Err(std::io::Error::other(format!("expected one report, got {}", calls.len())).into());
+    };
+    assert_eq!(Some(*pid), process_id);
+    assert!(spawn_sync_ms.is_finite() && *spawn_sync_ms >= 0.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_panicking_on_process_spawned_does_not_stop_the_query() -> TestResult {
+    let mut options = options("normal")?;
+    options.on_process_spawned = Some(trogon_claude_agent_sdk::OnProcessSpawned(Arc::new(
+        |pid: u32, _: trogon_claude_agent_sdk::ProcessSpawnInfo| {
+            if pid > 0 {
+                std::panic::resume_unwind(Box::new("scripted onProcessSpawned failure"));
+            }
+        },
+    )));
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("still runs")).await?;
+    assert_eq!(read_result(&mut client).await?, "still runs");
+    client.disconnect().await?;
     Ok(())
 }
