@@ -2336,10 +2336,9 @@ impl<'a> Matcher<'a> {
         let (Some(from), Some(to)) = (self.marks[index], self.marks[index + 1]) else {
             return None;
         };
-        if to < from {
-            return None;
-        }
-        let captured = &self.text[from..to];
+        // A group that ends before it starts fails the reference, as `e < p` does in `SRE(match)`: `get` answers
+        // `None` for that range.
+        let captured = self.text.get(from..to)?;
         let candidate = self.text.get(ptr..ptr + captured.len())?;
         let equal = captured.iter().zip(candidate).all(|(&a, &b)| fold(a) == fold(b));
         equal.then_some(ptr + captured.len())
@@ -2672,7 +2671,9 @@ impl<'a> Matcher<'a> {
                     }
                     pc += code[pc] as usize;
                 }
-                OP_ASSERT_NOT => {
+                // `ASSERT_NOT`, the last opcode `_compiler._compile` emits into a match body: `FAILURE` only ends a
+                // `BRANCH`, which reads it as a zero skip, or a set, which `charset` reads.
+                _ => {
                     let back = code[pc + 1] as usize;
                     if ptr >= back {
                         self.ptr = ptr - back;
@@ -2686,8 +2687,6 @@ impl<'a> Matcher<'a> {
                     }
                     pc += code[pc] as usize;
                 }
-                // `FAILURE`, and any opcode the compiler never emits into a match body.
-                _ => return false,
             }
         }
     }

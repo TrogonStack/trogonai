@@ -6,9 +6,10 @@ use crate::test_support::FixedEnvironment;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
-use std::net::{Shutdown, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -684,6 +685,105 @@ fn gethostbyname_answers_the_special_names_and_ipv4_addresses() -> TestResult {
     let cached = local_names().map_err(|_| "the cached names did not resolve")?;
     assert!(std::ptr::eq(names, cached));
     Ok(())
+}
+
+/// What a scripted `gethostbyname_ex` answers for one host.
+enum Lookup {
+    Addresses(&'static [Ipv4Addr]),
+    Gai,
+    Os,
+}
+
+/// Scripted `get_names` lookups that record each host they are asked for.
+struct ScriptedLookups {
+    hostname: Option<&'static str>,
+    answers: &'static [(&'static str, Lookup)],
+    asked: RefCell<Vec<String>>,
+}
+
+impl ScriptedLookups {
+    fn new(hostname: Option<&'static str>, answers: &'static [(&'static str, Lookup)]) -> Self {
+        Self {
+            hostname,
+            answers,
+            asked: RefCell::new(Vec::new()),
+        }
+    }
+}
+
+impl LocalNameLookups for ScriptedLookups {
+    fn addresses(&self, host: &PythonString) -> Result<Vec<Ipv4Addr>, LookupError> {
+        let host = host.to_str_lossy().into_owned();
+        let answer = self
+            .answers
+            .iter()
+            .find(|(name, _)| *name == host)
+            .map(|(_, answer)| answer);
+        self.asked.borrow_mut().push(host);
+        match answer {
+            Some(Lookup::Addresses(addresses)) => Ok(addresses.to_vec()),
+            Some(Lookup::Gai) => Err(LookupError::Gai(-2, "Name or service not known".to_owned())),
+            Some(Lookup::Os) | None => Err(LookupError::Os(io::Error::other("lookup failed"))),
+        }
+    }
+
+    fn hostname(&self) -> Option<PythonString> {
+        self.hostname.map(PythonString::from)
+    }
+}
+
+/// The loopback address the scripted `localhost` answers.
+const LOOPBACK: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
+
+/// A second address the scripted host name answers.
+const PRIVATE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 2);
+
+// CPython 3.12 `FileHandler().get_names()` with `FileHandler.names = None` and `socket.gethostbyname_ex`,
+// `socket.gethostname` and `socket.gethostbyname` replaced by the same scripts answers:
+// - `('127.0.0.1', '10.0.0.2', '127.0.0.1')`, asking `['localhost', 'box']`;
+// - `('127.0.0.1',)` when `box` raises `gaierror`, asking `['localhost', 'box', 'localhost']`;
+// - `gaierror` when both raise it, asking `['localhost', 'localhost']`;
+// - `OSError` when `box` raises it, asking `['localhost', 'box']`.
+#[test]
+fn get_names_keeps_duplicates_and_falls_back_only_on_gaierror() {
+    let lookups = ScriptedLookups::new(
+        Some("box"),
+        &[
+            ("localhost", Lookup::Addresses(&[LOOPBACK])),
+            ("box", Lookup::Addresses(&[PRIVATE, LOOPBACK])),
+        ],
+    );
+    assert_eq!(
+        get_names(&lookups).ok(),
+        Some(vec![
+            "127.0.0.1".to_owned(),
+            "10.0.0.2".to_owned(),
+            "127.0.0.1".to_owned()
+        ])
+    );
+    assert_eq!(*lookups.asked.borrow(), ["localhost", "box"]);
+
+    let lookups = ScriptedLookups::new(None, &[("localhost", Lookup::Addresses(&[LOOPBACK]))]);
+    assert_eq!(get_names(&lookups).ok(), Some(vec!["127.0.0.1".to_owned()]));
+    assert_eq!(*lookups.asked.borrow(), ["localhost"]);
+
+    let lookups = ScriptedLookups::new(
+        Some("box"),
+        &[("localhost", Lookup::Addresses(&[LOOPBACK])), ("box", Lookup::Gai)],
+    );
+    assert_eq!(get_names(&lookups).ok(), Some(vec!["127.0.0.1".to_owned()]));
+    assert_eq!(*lookups.asked.borrow(), ["localhost", "box", "localhost"]);
+
+    let lookups = ScriptedLookups::new(Some("box"), &[("localhost", Lookup::Gai), ("box", Lookup::Gai)]);
+    assert!(matches!(get_names(&lookups), Err(LookupError::Gai(-2, _))));
+    assert_eq!(*lookups.asked.borrow(), ["localhost", "localhost"]);
+
+    let lookups = ScriptedLookups::new(
+        Some("box"),
+        &[("localhost", Lookup::Addresses(&[LOOPBACK])), ("box", Lookup::Os)],
+    );
+    assert!(matches!(get_names(&lookups), Err(LookupError::Os(_))));
+    assert_eq!(*lookups.asked.borrow(), ["localhost", "box"]);
 }
 
 #[test]

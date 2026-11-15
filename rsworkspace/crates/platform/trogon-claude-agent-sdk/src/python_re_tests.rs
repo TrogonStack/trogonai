@@ -444,7 +444,6 @@ fn lone_surrogates_match_and_fail_as_python_does() -> TestResult {
 }
 
 // Lines that no test can reach, and why:
-// - the `_ => false` arms of `charset`, `count` and `run` match an opcode the compiler never emits;
 // - `Fold::Off` branches that CPython never takes with a fold-only opcode are kept for exhaustive matching.
 
 /// CPython 3.12 `re.search` verdicts, or `str(re.error)`, for flag groups, sets that fold past the first 256 code

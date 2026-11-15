@@ -30,6 +30,7 @@ use crate::python_urlopen_text::{
 use crate::python_urlopen_tls::UrlopenTls;
 use crate::remote_schema_error::{failure, python_concat, url_error};
 use std::io::{self, Cursor, Read};
+use std::net::Ipv4Addr;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 #[cfg(windows)]
@@ -327,9 +328,36 @@ fn gethostbyname<T: UrlText + ?Sized>(host: &T) -> Result<String, LookupError> {
     match host.encoded() {
         b"" => Ok("0.0.0.0".to_owned()),
         b"<broadcast>" => Ok("255.255.255.255".to_owned()),
-        _ => Ok(ipv4_addresses(host)?
-            .first()
-            .map_or_else(|| "0.0.0.0".to_owned(), ToString::to_string)),
+        _ => Ok(first_address(&ipv4_addresses(host)?)),
+    }
+}
+
+/// What `gethostbyname` answers for a host that is not special: its first IPv4 address, or the wildcard address.
+fn first_address(addresses: &[Ipv4Addr]) -> String {
+    addresses
+        .first()
+        .map_or_else(|| "0.0.0.0".to_owned(), ToString::to_string)
+}
+
+/// The lookups `FileHandler.get_names` makes: `socket.gethostbyname_ex(host)[2]` and `socket.gethostname()`.
+trait LocalNameLookups {
+    /// The IPv4 addresses of `host`, in the order the resolver answers them.
+    fn addresses(&self, host: &PythonString) -> Result<Vec<Ipv4Addr>, LookupError>;
+
+    /// The host name, or `None` when the system cannot answer it.
+    fn hostname(&self) -> Option<PythonString>;
+}
+
+/// The resolver and host name of this machine.
+struct SystemLookups;
+
+impl LocalNameLookups for SystemLookups {
+    fn addresses(&self, host: &PythonString) -> Result<Vec<Ipv4Addr>, LookupError> {
+        ipv4_addresses(host)
+    }
+
+    fn hostname(&self) -> Option<PythonString> {
+        hostname()
     }
 }
 
@@ -343,17 +371,25 @@ fn local_names() -> Result<&'static [String], LookupError> {
     if let Some(names) = LOCAL_NAMES.get() {
         return Ok(names);
     }
-    let all = ipv4_addresses("localhost").and_then(|mut names| {
-        if let Some(name) = hostname() {
-            names.extend(ipv4_addresses(&name)?);
+    let names = get_names(&SystemLookups)?;
+    Ok(LOCAL_NAMES.get_or_init(|| names))
+}
+
+/// The body of `FileHandler.get_names` once `names` is unset: `gethostbyname_ex('localhost')[2]` followed by
+/// `gethostbyname_ex(gethostname())[2]`, duplicates kept as tuple concatenation keeps them, or
+/// `(gethostbyname('localhost'),)` when either raises `gaierror`. Any other error propagates.
+fn get_names(lookups: &impl LocalNameLookups) -> Result<Vec<String>, LookupError> {
+    let localhost = PythonString::from("localhost");
+    let all = lookups.addresses(&localhost).and_then(|mut names| {
+        if let Some(name) = lookups.hostname() {
+            names.extend(lookups.addresses(&name)?);
         }
         Ok(names)
     });
-    let names = match all {
-        Err(LookupError::Gai(..)) => vec![gethostbyname("localhost")?],
-        other => other?.iter().map(ToString::to_string).collect(),
-    };
-    Ok(LOCAL_NAMES.get_or_init(|| names))
+    match all {
+        Err(LookupError::Gai(..)) => Ok(vec![first_address(&lookups.addresses(&localhost)?)]),
+        other => Ok(other?.iter().map(ToString::to_string).collect()),
+    }
 }
 
 /// The `URLError` `open_local_file` makes of the `OSError` naming `path`.
