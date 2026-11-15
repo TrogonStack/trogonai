@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Fail unless the Bazel verify job succeeded, so branch rules can require a single check"
+#MISE description="Fail unless every Bazel job succeeded, so branch rules can require a single check"
 set -euo pipefail
 
 # shellcheck source=../../../../lib/ci-result.sh

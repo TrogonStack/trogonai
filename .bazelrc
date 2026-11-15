@@ -30,4 +30,18 @@ common:ci --experimental_disk_cache_gc_idle_delay=0s
 # finding instead of the first.
 build:lint --keep_going
 
+# CI runs the tests through `bazel coverage` and builds with this config too,
+# so both commands share one configuration and its cached actions. Only the
+# repository's own Rust crates are instrumented, as `cargo cov` measures only
+# the rsworkspace members.
+build:coverage --collect_code_coverage
+build:coverage --instrumentation_filter=^//rsworkspace[/:]
+build:coverage --combined_report=lcov
+# cargo llvm-cov compiles with these cfgs, and on the nightly toolchain the
+# coverage job uses, `coverage_nightly` turns `#[coverage(off)]` on. Bazel builds
+# with the stable toolchain, which accepts that attribute only in bootstrap mode.
+build:coverage --@rules_rust//rust/settings:extra_rustc_flag=--cfg=coverage
+build:coverage --@rules_rust//rust/settings:extra_rustc_flag=--cfg=coverage_nightly
+build:coverage --action_env=RUSTC_BOOTSTRAP=1
+
 try-import %workspace%/.bazelrc.local
