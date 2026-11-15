@@ -17,5 +17,6 @@ workspace_crate(
      'scoped_store_clone_tests': {},
      'scoped_store_replay_tests': {},
      'scoped_store_tests': {},
-     'store_admission_tests': {}},
+     'store_admission_tests': {},
+     'tenant_account_rpc_tests': {}},
 )
