@@ -52,3 +52,23 @@ pub(crate) const NOT_EXACT_HOST_CHARACTERS: [char; 3] = ['*', '/', ' '];
 /// The length of a NATS curve public key: the `X` prefix and 55 base32
 /// characters.
 pub(crate) const CURVE_KEY_LEN: usize = 56;
+
+/// The component the service's audit records name as their writer's.
+pub(crate) const AUDIT_COMPONENT: &str = "secrets_service";
+
+/// What the audit writer id of one member of the queue group starts with; the
+/// instance the operator names follows it.
+pub(crate) const AUDIT_WRITER_PREFIX: &str = "secrets-service:";
+
+/// How long one attempt to reach a NATS server may take. The connection keeps
+/// dialing in the background after it, and the service refuses to start if
+/// the credential stream cannot be read over it.
+pub(crate) const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long the service waits after OpenBao first refuses its AppRole login
+/// before it asks again. The wait doubles after each refusal (ADR#0023
+/// Decision 3).
+pub(crate) const OPENBAO_LOGIN_RETRY_INITIAL: Duration = Duration::from_secs(1);
+
+/// The longest the service waits between two AppRole logins OpenBao refused.
+pub(crate) const OPENBAO_LOGIN_RETRY_MAX: Duration = Duration::from_secs(30);
