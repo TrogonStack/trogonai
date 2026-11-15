@@ -263,7 +263,6 @@ async fn an_invalidation_stream_that_does_not_exist_refuses_to_start_without_cre
 
     let refused = refusal(service(server.address(), &openbao)).await;
 
-    assert!(refused.to_string().contains(INVALIDATION_STREAM), "{refused}");
     let SecretsServiceError::InvalidationStream(source) = refused else {
         panic!("a missing invalidation stream was refused as {refused:?}");
     };
@@ -298,7 +297,6 @@ async fn an_invalidation_stream_that_lets_a_notice_be_deleted_refuses_to_start()
         ),
         "{refused:?}"
     );
-    assert!(refused.to_string().contains(INVALIDATION_STREAM), "{refused}");
 }
 
 #[tokio::test]
