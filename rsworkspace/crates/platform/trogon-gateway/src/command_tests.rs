@@ -18,10 +18,13 @@ struct EmptyCredentialEventStore {
 #[error("empty credential event store failed")]
 struct EmptyCredentialEventStoreError;
 
-impl StreamRead<str> for EmptyCredentialEventStore {
+impl StreamRead<CredentialKey> for EmptyCredentialEventStore {
     type Error = EmptyCredentialEventStoreError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(
+        &self,
+        request: ReadStreamRequest<'_, CredentialKey>,
+    ) -> Result<ReadStreamResponse, Self::Error> {
         let start = match request.from {
             ReadFrom::Beginning => 1,
             ReadFrom::Position(position) => position.as_u64(),
@@ -30,12 +33,14 @@ impl StreamRead<str> for EmptyCredentialEventStore {
         Ok(ReadStreamResponse {
             current_position: events
                 .iter()
-                .filter(|event| event.stream_id() == request.stream_id)
+                .filter(|event| event.stream_id() == request.stream_id.to_string())
                 .map(|event| event.stream_position)
                 .max(),
             events: events
                 .iter()
-                .filter(|event| event.stream_id() == request.stream_id && event.stream_position.as_u64() >= start)
+                .filter(|event| {
+                    event.stream_id() == request.stream_id.to_string() && event.stream_position.as_u64() >= start
+                })
                 .cloned()
                 .collect(),
         })

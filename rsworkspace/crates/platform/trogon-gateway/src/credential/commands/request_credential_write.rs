@@ -1,41 +1,39 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialId, CredentialKind, CredentialScope};
-use super::proto::write_requested_to_proto;
-use super::state::{CredentialDecideError, CredentialEvolveError};
+use super::domain::{CredentialIdentity, CredentialKey};
+use super::proto::{decode_destroyed_state, decode_write_failed_state, write_requested_to_proto};
+use super::state::{CredentialDecideError, CredentialEvolveError, ensure_recorded_identity};
 
+/// Opens a credential's stream, or reopens it after a failed write or a destroy.
+///
+/// A stream records its identity once, so a reopening write must carry that same
+/// identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialWrite {
-    credential_id: CredentialId,
-    scope: CredentialScope,
-    kind: CredentialKind,
+    stream_id: CredentialKey,
+    identity: CredentialIdentity,
 }
 
 impl RequestCredentialWrite {
-    pub fn new(credential_id: CredentialId, scope: CredentialScope, kind: CredentialKind) -> Self {
+    pub fn new(identity: CredentialIdentity) -> Self {
         Self {
-            credential_id,
-            scope,
-            kind,
+            stream_id: identity.key(),
+            identity,
         }
     }
 
-    pub fn credential_id(&self) -> &CredentialId {
-        &self.credential_id
+    pub fn stream_id(&self) -> &CredentialKey {
+        &self.stream_id
     }
 
-    pub fn scope(&self) -> &CredentialScope {
-        &self.scope
-    }
-
-    pub fn kind(&self) -> CredentialKind {
-        self.kind
+    pub fn identity(&self) -> &CredentialIdentity {
+        &self.identity
     }
 }
 
 impl Decider for RequestCredentialWrite {
-    type StreamId = str;
+    type StreamId = CredentialKey;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
@@ -44,7 +42,7 @@ impl Decider for RequestCredentialWrite {
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.credential_id.as_str()
+        &self.stream_id
     }
 
     fn initial_state() -> Self::State {
@@ -59,23 +57,27 @@ impl Decider for RequestCredentialWrite {
         let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
 
         match current {
-            CredentialStateSnapshotCase::Missing(_)
-            | CredentialStateSnapshotCase::WriteFailed(_)
-            | CredentialStateSnapshotCase::Destroyed(_) => {}
+            CredentialStateSnapshotCase::Missing(_) => {}
+            CredentialStateSnapshotCase::WriteFailed(failed) => {
+                ensure_recorded_identity(&decode_write_failed_state(failed)?.0, &command.identity)?;
+            }
+            CredentialStateSnapshotCase::Destroyed(destroyed) => {
+                ensure_recorded_identity(decode_destroyed_state(destroyed)?.identity(), &command.identity)?;
+            }
             CredentialStateSnapshotCase::Revoked(_) => {
                 return Err(CredentialDecideError::Revoked {
-                    credential_id: command.credential_id.clone(),
+                    credential_id: command.identity.id().clone(),
                 });
             }
             _ => {
                 return Err(CredentialDecideError::AlreadyExists {
-                    credential_id: command.credential_id.clone(),
+                    credential_id: command.identity.id().clone(),
                 });
             }
         }
 
         Ok(Decision::event(v1::CredentialEvent {
-            event: Some(write_requested_to_proto(&command.credential_id, &command.scope, command.kind).into()),
+            event: Some(write_requested_to_proto(&command.identity).into()),
         }))
     }
 }

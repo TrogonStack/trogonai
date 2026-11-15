@@ -1,5 +1,5 @@
 use super::*;
-use crate::credential::commands::domain::{CredentialOwnerId, CredentialRef, CredentialScope, StorageBackend};
+use crate::credential::commands::domain::{CredentialIdentity, CredentialOwnerId, CredentialRef, CredentialScope};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{MockOpenBaoSecretStore, SecretMaterial, SecretStorePut};
 use crate::source::plaid::constants::KEY_ID_LEN_MAX;
@@ -102,12 +102,14 @@ fn primary() -> SourceIntegrationId {
 async fn registry_with_runtime_secret(store: &MockOpenBaoSecretStore) -> RuntimeCredentialRegistry {
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Plaid,
-                primary(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Plaid,
+                    primary(),
+                ),
+                CredentialKind::ClientSecret,
             ),
-            CredentialKind::ClientSecret,
             trogon_std::SecretString::new(RUNTIME_SECRET).unwrap(),
         )
         .await
@@ -115,7 +117,7 @@ async fn registry_with_runtime_secret(store: &MockOpenBaoSecretStore) -> Runtime
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
     registry
 }
@@ -144,7 +146,6 @@ impl SecretStoreGet for UnavailableSecretStore {
 
     async fn get(&self, _: &CredentialRef) -> Result<SecretMaterial, SecretStoreError> {
         Err(SecretStoreError::BackendUnavailable {
-            backend: StorageBackend::OpenBao,
             message: "store is down".to_owned(),
         })
     }

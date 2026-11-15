@@ -292,7 +292,8 @@ snapshot per credential_id, with exactly six cases:
 ```text
 missing            (CredentialMissingState, the initial state)
 pending_write      (PendingCredentialWriteState)
-active             (ActiveCredentialState: metadata + previous_versions[])
+active             (ActiveCredentialState: identity, version, fingerprint,
+                    previous_versions[])
 write_failed       (FailedCredentialWriteState)
 rotation_pending   (RotationPendingCredentialState, wraps an active state)
 revoked            (RevokedCredentialState)
@@ -304,8 +305,8 @@ in full:
 ```text
 missing --WriteRequested--> pending_write
 write_failed --WriteRequested--> pending_write
-  (a new attempt; the event's credential_id must match the failed write,
-  otherwise: CredentialRefMismatch)
+  (a new attempt; the event must carry the recorded identity exactly,
+  otherwise: IdentityMismatch)
   otherwise: WriteRequestedAfterStart
 
 pending_write --WriteFailed--> write_failed
@@ -313,8 +314,6 @@ pending_write --WriteFailed--> write_failed
 
 pending_write --Activated--> active
   otherwise: ActivatedWithoutPendingWrite
-  (the Activated event's own metadata must carry CredentialStatus::Active,
-  otherwise: MetadataNotActive)
 
 active --RotationRequested--> rotation_pending
   otherwise: RotationRequestedWithoutActiveCredential
@@ -332,9 +331,11 @@ active --Revoked--> revoked
   otherwise: RevokedWithoutActiveCredential
 ```
 
-Two additional error variants guard cross-cutting invariants rather than a
-single transition: `CredentialRefMismatch` (an event's ref does not match
-the aggregate it is being applied to) and `RotationVersionNotNewer` (a
+Other error variants guard cross-cutting invariants rather than a single
+transition: `CredentialKeyMismatch` (an event's key does not match the
+identity the aggregate recorded), `VersionMismatch` (an event names a version
+the aggregate does not hold), `EventFromAnotherStream` (an event's key does
+not match the stream it was read from), and `RotationVersionNotNewer` (a
 Rotated event whose version is not strictly newer than the previous one).
 
 `write_failed` is recoverable. A failed secret store write still records a
@@ -1244,33 +1245,40 @@ docs/adr/0052-cloud-kms-production-seal.md.
 ### Path convention (verified in openbao_secret_store.rs)
 
 ```text
-credential_path(owner_id, credential_id)
+credential_path(key)
   = "trogonai/{owner_id}/credentials/{credential_id}"
-
-credential_id (openbao_credential_id())
-  = "openbao:{owner_id}:{scope_key}:{kind}"
-  where scope_key is either the bare source name for a source-scoped
-  credential (e.g. "discord"), or "{source}/{integration_id}" for an
-  integration-scoped one (e.g. "github/primary")
 
 full KV v2 HTTP path
   = "/v1/{mount}/{data|metadata|delete|destroy}/trogonai/{owner_id}/
      credentials/{credential_id}"
 ```
 
+The path is computed from the credential's key, its owner id and credential
+id, and from nothing else. The credential id is a UUIDv5 that the management
+API derives once, when it accepts a write, and the `CredentialWriteRequested`
+event records it with the rest of the identity. The adapter never derives it.
+Identity version 1 hashes `{owner_id}/{scope_key}/{kind}` under the namespace
+`CredentialIdentityVersion` declares, where scope_key is either the bare
+source name for a source-scoped credential (e.g. "discord"), or
+"{source}/{integration_id}" for an integration-scoped one (e.g.
+"github/primary").
+
 Worked example: owner_id "tenant-1", source github, integration "primary",
 kind webhook_secret:
 
 ```text
-credential_id = "openbao:tenant-1:github/primary:webhook_secret"
-path          = "trogonai/tenant-1/credentials/openbao:tenant-1:github/
-                 primary:webhook_secret"
+derivation name = "tenant-1/github/primary/webhook_secret"
+credential_id   = "9d797971-11ef-5d18-8bde-61c54768625b"
+path            = "trogonai/tenant-1/credentials/
+                   9d797971-11ef-5d18-8bde-61c54768625b"
 ```
 
-Note owner_id appears twice in the full path, once as its own segment and
-once embedded inside credential_id; `encode_path_segment` sanitizes each
-occurrence independently, so this duplication is not a correctness problem,
-just a naming quirk worth knowing about when reading raw OpenBao paths.
+No adapter-private path is recorded, because the key already determines the
+path ([ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md)
+Decision 4, Q4 as amended). Data written under the earlier parseable ids is
+not migrated: the renamed `CREDENTIAL_EVENTS` stream and
+`CREDENTIAL_SNAPSHOTS` bucket start empty, and those credentials are created
+again.
 
 The mount defaults to `"secret"` (`OpenBaoMount::default()`), validated to
 ascii alphanumeric plus `-` and `_` and `.`, non-empty.
@@ -1344,7 +1352,9 @@ the recovery worker reads metadata() to recover stuck activations. The
 unbuilt (see RUNTIME_PROJECTION).
 
 DECIDED ([ADR#0046](../../adr/0046-project-anchored-resource-hierarchy.md)): `trogonai/{owner_id}/credentials/{credential_id}` and
-its mount are ratified as-is, with owner_id understood as project id.
+its mount are ratified as-is, with owner_id understood as project id. The
+suffix is the opaque credential id that
+[ADR#0074](../../adr/0074-credential-platform-extraction-boundary.md) Decision 4 introduced.
 Names anchor at the project and never embed the organization above it. See
 docs/adr/0046-project-anchored-resource-hierarchy.md.
 

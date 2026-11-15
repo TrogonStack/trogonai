@@ -2938,19 +2938,32 @@ fn without_a_configured_limit_the_first_conflict_is_the_answer() {
     assert_eq!(runtime.attempts(), 1);
 }
 
+/// The contended store with its failure classification taken away, so the
+/// trait's default decides what each append failure means.
+struct UnclassifiedRuntime(ContendedRuntime);
+
+impl StreamRead<str> for UnclassifiedRuntime {
+    type Error = TestInfraError;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        self.0.read_stream(request).await
+    }
+}
+
+impl StreamAppend<str> for UnclassifiedRuntime {
+    type Error = TestInfraError;
+
+    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+        self.0.append_stream(request).await
+    }
+}
+
 #[test]
 fn a_store_that_never_classified_its_errors_is_never_retried() {
-    let runtime = FakeRuntime {
-        current_position: Some(position(1)),
-        stream_events: vec![stream_event(
-            1,
-            TestEvent::Registered {
-                id: "alpha".to_string(),
-            },
-        )],
-        ..Default::default()
-    };
-    let command = RequiredRegisterCommand::new("alpha");
+    // A command that may be retried, so the store's classification is the
+    // only thing that can stop the retry.
+    let runtime = UnclassifiedRuntime(ContendedRuntime::losing(1));
+    let command = TestCommand::new("alpha", TestAction::Register);
 
     let error = block_on(
         CommandExecution::new(&runtime, &command)
@@ -2964,7 +2977,7 @@ fn a_store_that_never_classified_its_errors_is_never_retried() {
         "unexpected error: {error:?}"
     );
     assert_eq!(
-        runtime.stream_write_preconditions.lock().unwrap().len(),
+        runtime.0.attempts(),
         1,
         "a default classification means fatal, whatever the error happens to be named"
     );

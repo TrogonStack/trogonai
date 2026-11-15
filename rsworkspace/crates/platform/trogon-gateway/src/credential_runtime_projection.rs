@@ -26,20 +26,18 @@ use trogonai_proto::gateway::credentials::{
 
 use crate::constants::METER_NAME;
 use crate::credential::commands::domain::{
-    CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, RuntimeReleaseDeniedError,
-    RuntimeReleasePolicy, RuntimeReleaseRequest, SourceKind,
+    CredentialId, CredentialKey, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
+    RuntimeReleaseDeniedError, RuntimeReleasePolicy, RuntimeReleaseRequest, SourceKind,
 };
 use crate::credential::commands::proto::{
-    CredentialProtoDecodeError, active_credential_ref, decode_cleanup_failed_state, decode_credential_id,
-    decode_credential_metadata, decode_destroy_failed, decode_destroy_requested, decode_destroy_requested_state,
-    decode_destroyed, decode_destroyed_state, decode_message_field, decode_revoked, decode_revoked_state,
-    decode_rotated, decode_rotation_failed, decode_rotation_requested, decode_scope_key, decode_write_failed,
-    decode_write_requested,
+    CredentialProtoDecodeError, active_credential_ref, decode_cleanup_failed_state, decode_destroy_requested_state,
+    decode_destroyed_state, decode_message_field, decode_pending_write_state, decode_revoked_state,
+    decode_write_failed_state, event_key,
 };
 use crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use crate::credential::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
-use crate::credential::stream::{CredentialKey, CredentialSubject};
-use crate::credential::{CredentialEvolveError, evolve, initial_state};
+use crate::credential::stream::credential_event_subject;
+use crate::credential::{CredentialEvolveError, evolve_stream, initial_state};
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -167,21 +165,13 @@ impl RuntimeIntegrationKey {
         }
     }
 
-    pub fn from_credential_ref(credential: &CredentialRef) -> Result<Self, RuntimeProjectionBuildError> {
-        let scope = decode_scope_key(
-            credential.owner_id().clone(),
-            credential.source(),
-            "scope_key",
-            credential.scope_key(),
-        )
-        .map_err(RuntimeProjectionBuildError::InvalidState)?;
-
-        Ok(match scope {
-            CredentialScope::Source { source, .. } => Self::for_source(source),
+    pub fn from_credential_ref(credential: &CredentialRef) -> Self {
+        match credential.scope() {
+            CredentialScope::Source { source, .. } => Self::for_source(*source),
             CredentialScope::Integration {
                 source, integration_id, ..
-            } => Self::new(source, &integration_id),
-        })
+            } => Self::new(*source, integration_id),
+        }
     }
 }
 
@@ -242,19 +232,15 @@ impl RuntimeIntegrationProjection {
         self.version = self.version.max(version);
     }
 
-    pub fn active_from_credential_ref(
-        credential: CredentialRef,
-        version: u64,
-    ) -> Result<Self, RuntimeProjectionBuildError> {
-        let key = RuntimeIntegrationKey::from_credential_ref(&credential)?;
-        Ok(Self {
-            key,
+    pub fn active_from_credential_ref(credential: CredentialRef, version: u64) -> Self {
+        Self {
+            key: RuntimeIntegrationKey::from_credential_ref(&credential),
             owner_id: credential.owner_id().clone(),
             status: RuntimeIntegrationStatus::Active,
             version,
             credentials: BTreeMap::from([(credential.kind(), credential)]),
             release_policy: RuntimeReleasePolicy::default(),
-        })
+        }
     }
 
     pub fn from_credential_state(
@@ -265,14 +251,14 @@ impl RuntimeIntegrationProjection {
             Some(CredentialStateSnapshotCase::Active(active)) => {
                 let credential_ref =
                     active_credential_ref(active).map_err(RuntimeProjectionBuildError::InvalidState)?;
-                active_runtime_projection(credential_ref, version)
+                Ok(Some(Self::active_from_credential_ref(credential_ref, version)))
             }
             Some(CredentialStateSnapshotCase::RotationPending(rotation)) => {
                 let active = decode_message_field("rotation_pending.active", &rotation.active)
                     .map_err(RuntimeProjectionBuildError::InvalidState)?;
                 let credential_ref =
                     active_credential_ref(active).map_err(RuntimeProjectionBuildError::InvalidState)?;
-                active_runtime_projection(credential_ref, version)
+                Ok(Some(Self::active_from_credential_ref(credential_ref, version)))
             }
             None
             | Some(
@@ -310,21 +296,6 @@ impl RuntimeIntegrationProjection {
     fn credential(&self, kind: CredentialKind) -> Option<&CredentialRef> {
         self.credentials.get(&kind)
     }
-}
-
-fn active_runtime_projection(
-    credential: CredentialRef,
-    version: u64,
-) -> Result<Option<RuntimeIntegrationProjection>, RuntimeProjectionBuildError> {
-    let key = RuntimeIntegrationKey::from_credential_ref(&credential)?;
-    Ok(Some(RuntimeIntegrationProjection {
-        key,
-        owner_id: credential.owner_id().clone(),
-        status: RuntimeIntegrationStatus::Active,
-        version,
-        credentials: BTreeMap::from([(credential.kind(), credential)]),
-        release_policy: RuntimeReleasePolicy::default(),
-    }))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -414,6 +385,14 @@ pub enum RuntimeProjectionRefreshError {
         "credential event at stream position {stream_position} on '{stream_id}' cannot be attributed to a credential"
     )]
     UnattributableEvent { stream_id: String, stream_position: u64 },
+    #[error(
+        "credential event at stream position {stream_position} on '{subject}' names credential '{key}', whose events belong on another subject"
+    )]
+    MisfiledEvent {
+        subject: String,
+        stream_position: u64,
+        key: CredentialKey,
+    },
     #[error("credential event is invalid: {source}")]
     InvalidEvent {
         #[source]
@@ -424,9 +403,9 @@ pub enum RuntimeProjectionRefreshError {
         #[source]
         source: CredentialEvolveError,
     },
-    #[error("credential stream read failed for {credential_id}: {source}")]
+    #[error("credential stream read failed for {stream_id}: {source}")]
     ReadCredential {
-        credential_id: CredentialId,
+        stream_id: CredentialKey,
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },
@@ -470,8 +449,8 @@ pub async fn run_tracked_refresh_worker<EventStream, EventStore>(
     shutdown: impl Future<Output = ()>,
 ) where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-    EventStore: StreamRead<str>,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    EventStore: StreamRead<CredentialKey>,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
 {
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -561,21 +540,21 @@ impl RuntimeProjectionCursor {
 #[derive(Default)]
 struct RuntimeProjectionTable {
     integrations: BTreeMap<RuntimeIntegrationKey, RuntimeIntegrationProjection>,
-    applied_positions: BTreeMap<CredentialId, StreamPosition>,
+    applied_positions: BTreeMap<CredentialKey, StreamPosition>,
 }
 
 impl RuntimeProjectionTable {
     fn is_stale(&self, change: &RuntimeProjectionChange, position: StreamPosition) -> bool {
-        change.credential_ids().any(|id| {
+        change.stream_ids().any(|id| {
             self.applied_positions
-                .get(id)
+                .get(&id)
                 .is_some_and(|applied| *applied >= position)
         })
     }
 
     fn record(&mut self, change: &RuntimeProjectionChange, position: StreamPosition) {
-        for id in change.credential_ids() {
-            self.applied_positions.insert(id.clone(), position);
+        for id in change.stream_ids() {
+            self.applied_positions.insert(id, position);
         }
     }
 
@@ -588,13 +567,13 @@ impl RuntimeProjectionTable {
         removed
     }
 
-    fn remove_credential_id(&mut self, id: &CredentialId) -> Vec<CredentialRef> {
+    fn remove_stream(&mut self, id: &CredentialKey) -> Vec<CredentialRef> {
         let mut removed = Vec::new();
         for projection in self.integrations.values_mut() {
             let kinds = projection
                 .credentials
                 .iter()
-                .filter(|(_, credential)| credential.id() == id)
+                .filter(|(_, credential)| CredentialKey::from(*credential) == *id)
                 .map(|(kind, _)| *kind)
                 .collect::<Vec<_>>();
             for kind in kinds {
@@ -612,7 +591,7 @@ enum RuntimeProjectionChange {
         key: RuntimeIntegrationKey,
         credential: CredentialRef,
     },
-    Unpublish(CredentialId),
+    Unpublish(CredentialKey),
 }
 
 impl RuntimeProjectionChange {
@@ -628,20 +607,19 @@ impl RuntimeProjectionChange {
         if let Some(credential) = post_revocation_credential_ref(state)
             .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
         {
-            let key = RuntimeIntegrationKey::from_credential_ref(&credential)
-                .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
+            let key = RuntimeIntegrationKey::from_credential_ref(&credential);
             return Ok(Some(Self::Retire { key, credential }));
         }
-        Ok(unpublished_credential_id(state)
+        Ok(unpublished_stream_id(state)
             .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?
             .map(Self::Unpublish))
     }
 
-    fn credential_ids(&self) -> Box<dyn Iterator<Item = &CredentialId> + '_> {
+    fn stream_ids(&self) -> Box<dyn Iterator<Item = CredentialKey> + '_> {
         match self {
-            Self::Publish(projection) => Box::new(projection.credentials.values().map(CredentialRef::id)),
-            Self::Retire { credential, .. } => Box::new(std::iter::once(credential.id())),
-            Self::Unpublish(id) => Box::new(std::iter::once(id)),
+            Self::Publish(projection) => Box::new(projection.credentials.values().map(CredentialKey::from)),
+            Self::Retire { credential, .. } => Box::new(std::iter::once(CredentialKey::from(credential))),
+            Self::Unpublish(id) => Box::new(std::iter::once(id.clone())),
         }
     }
 }
@@ -666,7 +644,9 @@ impl InMemoryRuntimeProjectionRepository {
         for projection in projections.values() {
             if let Ok(position) = StreamPosition::try_new(projection.version()) {
                 for credential in projection.credentials.values() {
-                    table.applied_positions.insert(credential.id().clone(), position);
+                    table
+                        .applied_positions
+                        .insert(CredentialKey::from(credential), position);
                 }
             }
         }
@@ -712,29 +692,24 @@ impl InMemoryRuntimeProjectionRepository {
                 affected.extend(table.remove_credential(key, credential.kind()));
                 affected
             }
-            RuntimeProjectionChange::Unpublish(id) => table.remove_credential_id(id),
+            RuntimeProjectionChange::Unpublish(id) => table.remove_stream(id),
         };
         table.record(&change, position);
         Ok(Some(affected))
     }
 
-    async fn credential_ids(&self) -> BTreeSet<CredentialId> {
+    async fn stream_ids(&self) -> BTreeSet<CredentialKey> {
         self.table
             .lock()
             .await
             .integrations
             .values()
-            .flat_map(|projection| {
-                projection
-                    .credentials
-                    .values()
-                    .map(|credential| credential.id().clone())
-            })
+            .flat_map(|projection| projection.credentials.values().map(CredentialKey::from))
             .collect()
     }
 
-    async fn remove_credential_id(&self, id: &CredentialId) -> Vec<CredentialRef> {
-        self.table.lock().await.remove_credential_id(id)
+    async fn remove_stream(&self, id: &CredentialKey) -> Vec<CredentialRef> {
+        self.table.lock().await.remove_stream(id)
     }
 
     async fn get(&self, key: &RuntimeIntegrationKey) -> Option<RuntimeIntegrationProjection> {
@@ -780,8 +755,8 @@ impl RuntimeCredentialRegistry {
     ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionStreamRefreshError>
     where
         EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-        EventStore: StreamRead<str>,
-        <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+        EventStore: StreamRead<CredentialKey>,
+        <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
     {
         refresh_runtime_projections_from_credential_stream_tracked(
             &self.projections,
@@ -801,8 +776,8 @@ impl RuntimeCredentialRegistry {
     ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionStreamRefreshError>
     where
         EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-        EventStore: StreamRead<str>,
-        <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+        EventStore: StreamRead<CredentialKey>,
+        <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
     {
         refresh_runtime_projections_from_credential_stream_incremental(
             &self.projections,
@@ -856,8 +831,8 @@ pub async fn refresh_runtime_projections_from_credential_stream_tracked<EventStr
 ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionStreamRefreshError>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-    EventStore: StreamRead<str>,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    EventStore: StreamRead<CredentialKey>,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
 {
     let checkpoint = cursor.checkpoint();
     let mut report = refresh_runtime_projections_from_credential_stream_incremental(
@@ -886,8 +861,8 @@ pub async fn refresh_runtime_projections_from_credential_stream_incremental<Even
 ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionStreamRefreshError>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-    EventStore: StreamRead<str>,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    EventStore: StreamRead<CredentialKey>,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
 {
     let events = read_credential_event_stream(event_stream, from_sequence)
         .await
@@ -924,14 +899,15 @@ pub async fn refresh_runtime_projections_from_credential_events(
     }
 
     let mut next_projections = BTreeMap::new();
-    for (_stream_id, mut stream_events) in streams {
+    for (subject, mut stream_events) in streams {
         stream_events.sort_by_key(|(position, _)| *position);
         let version = stream_events.last().map_or(0, |(position, _)| *position);
-        let state = stream_events
-            .into_iter()
-            .map(|(_, event)| event)
-            .try_fold(initial_state(), |state, event| evolve(state, &event))
-            .map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
+        let mut state = initial_state();
+        for (stream_position, event) in stream_events {
+            let stream = subject_stream(&subject, stream_position, &event)?;
+            state = evolve_stream(&stream, state, &event)
+                .map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
+        }
 
         let Some(projection) = RuntimeIntegrationProjection::from_credential_state(&state, version)
             .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
@@ -954,12 +930,12 @@ async fn refresh_runtime_projections_from_changed_credential_events<EventStore>(
     events: impl IntoIterator<Item = StreamEvent>,
 ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionRefreshError>
 where
-    EventStore: StreamRead<str>,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    EventStore: StreamRead<CredentialKey>,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
 {
     let mut report = RuntimeProjectionRefreshReport::default();
-    let mut changed_credentials = BTreeMap::<CredentialId, u64>::new();
-    let mut revoked_recorded_at = BTreeMap::<CredentialId, DateTime<Utc>>::new();
+    let mut changed_credentials = BTreeMap::<CredentialKey, u64>::new();
+    let mut revoked_recorded_at = BTreeMap::<CredentialKey, DateTime<Utc>>::new();
     let mut poisoned_subjects = Vec::<(u64, String)>::new();
 
     for event in events {
@@ -981,17 +957,9 @@ where
             }
         };
         report.decoded_events += 1;
-        let credential_id = match decoded
-            .event
-            .as_ref()
-            .ok_or(RuntimeProjectionRefreshError::MissingEvent)
-            .and_then(|case| {
-                event_credential_id(case)
-                    .map(|id| (id, matches!(case, CredentialEventCase::Revoked(_))))
-                    .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })
-            }) {
-            Ok((credential_id, revoked)) => {
-                if revoked {
+        let credential_id = match subject_stream(event.stream_id(), stream_position, &decoded) {
+            Ok(credential_id) => {
+                if matches!(decoded.event.as_ref(), Some(CredentialEventCase::Revoked(_))) {
                     revoked_recorded_at.insert(credential_id.clone(), recorded_at);
                 }
                 credential_id
@@ -1009,22 +977,22 @@ where
             .or_insert(stream_position);
     }
 
-    let mut known_subjects = BTreeMap::<String, CredentialId>::new();
-    for credential_id in projections
-        .credential_ids()
+    let mut known_subjects = BTreeMap::<String, CredentialKey>::new();
+    for stream_id in projections
+        .stream_ids()
         .await
         .into_iter()
         .chain(changed_credentials.keys().cloned())
     {
-        if let Ok(subject) = CredentialSubject::event(&CredentialKey::derive(&credential_id)) {
-            known_subjects.insert(subject.as_str().to_string(), credential_id);
+        if let Ok(subject) = credential_event_subject(&stream_id) {
+            known_subjects.insert(subject.as_str().to_string(), stream_id);
         }
     }
-    let mut poisoned_credentials = BTreeSet::<CredentialId>::new();
+    let mut poisoned_credentials = BTreeSet::<CredentialKey>::new();
     for (stream_position, stream_id) in poisoned_subjects {
         match known_subjects.get(&stream_id) {
-            Some(credential_id) => {
-                poisoned_credentials.insert(credential_id.clone());
+            Some(stream_id) => {
+                poisoned_credentials.insert(stream_id.clone());
             }
             None if is_credential_event_subject(&stream_id) => {
                 warn!(stream_position, %stream_id, "poisoned event belongs to a credential that is not projected");
@@ -1037,10 +1005,10 @@ where
             }
         }
     }
-    for credential_id in &poisoned_credentials {
-        changed_credentials.remove(credential_id);
-        error!(%credential_id, "evicting credential with an unreadable event");
-        for evicted in projections.remove_credential_id(credential_id).await {
+    for stream_id in &poisoned_credentials {
+        changed_credentials.remove(stream_id);
+        error!(%stream_id, "evicting credential with an unreadable event");
+        for evicted in projections.remove_stream(stream_id).await {
             cache.invalidate(&evicted).await;
         }
         report.poisoned_credentials += 1;
@@ -1049,10 +1017,10 @@ where
     report.changed_credentials = changed_credentials.len();
 
     let mut transient_failure = None;
-    for (credential_id, version) in changed_credentials {
-        let revoked_event_recorded_at = revoked_recorded_at.get(&credential_id).copied();
+    for (stream_id, version) in changed_credentials {
+        let revoked_event_recorded_at = revoked_recorded_at.get(&stream_id).copied();
         let changed_position = position(version)?;
-        let applied = match load_credential_state(event_store, &credential_id).await {
+        let applied = match load_credential_state(event_store, &stream_id).await {
             Ok((state, loaded_position)) => {
                 apply_state_to_projection(
                     projections,
@@ -1068,12 +1036,12 @@ where
         match applied {
             Ok(()) => report.applied_credentials += 1,
             Err(source @ RuntimeProjectionRefreshError::ReadCredential { .. }) => {
-                warn!(%credential_id, error = %source, "credential read failed, will retry");
+                warn!(%stream_id, error = %source, "credential read failed, will retry");
                 transient_failure.get_or_insert(source);
             }
             Err(source) => {
-                error!(%credential_id, error = %source, "evicting credential whose state cannot be projected");
-                for evicted in projections.remove_credential_id(&credential_id).await {
+                error!(%stream_id, error = %source, "evicting credential whose state cannot be projected");
+                for evicted in projections.remove_stream(&stream_id).await {
                     cache.invalidate(&evicted).await;
                 }
                 report.poisoned_credentials += 1;
@@ -1088,29 +1056,38 @@ where
     Ok(report)
 }
 
+/// Whether a subject has the shape of a credential's event subject: a project
+/// token, then a credential id.
+///
+/// An event this build cannot decode on such a subject is still a credential
+/// event, so it is recognized rather than treated as foreign.
 fn is_credential_event_subject(stream_id: &str) -> bool {
-    stream_id
+    let Some((project, id)) = stream_id
         .strip_prefix(CREDENTIAL_EVENT_SUBJECT_PREFIX)
         .and_then(|rest| rest.strip_prefix('.'))
-        .is_some_and(|key| key.len() == 32 && key.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .and_then(|rest| rest.split_once('.'))
+    else {
+        return false;
+    };
+    !project.is_empty() && CredentialId::new(id).is_ok()
 }
 
 async fn load_credential_state<EventStore>(
     event_store: &EventStore,
-    credential_id: &CredentialId,
+    stream_id: &CredentialKey,
 ) -> Result<(state_v1::CredentialStateSnapshot, Option<StreamPosition>), RuntimeProjectionRefreshError>
 where
-    EventStore: StreamRead<str>,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    EventStore: StreamRead<CredentialKey>,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
 {
     let stream = event_store
         .read_stream(ReadStreamRequest {
-            stream_id: credential_id.as_str(),
+            stream_id,
             from: ReadFrom::Beginning,
         })
         .await
         .map_err(|source| RuntimeProjectionRefreshError::ReadCredential {
-            credential_id: credential_id.clone(),
+            stream_id: stream_id.clone(),
             source: Box::new(source),
         })?;
     let mut state = initial_state();
@@ -1123,9 +1100,35 @@ where
         else {
             continue;
         };
-        state = evolve(state, &event).map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
+        state = evolve_stream(stream_id, state, &event)
+            .map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
     }
     Ok((state, last_position))
+}
+
+/// The credential whose stream `subject` is, named by an event read from it.
+///
+/// A stream-wide scan reads every credential together, so the subject is the
+/// only record of which credential stream an event was read from. The event
+/// must name the credential whose subject that is.
+fn subject_stream(
+    subject: &str,
+    stream_position: u64,
+    event: &v1::CredentialEvent,
+) -> Result<CredentialKey, RuntimeProjectionRefreshError> {
+    let case = event
+        .event
+        .as_ref()
+        .ok_or(RuntimeProjectionRefreshError::MissingEvent)?;
+    let key = event_key(case).map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
+    match credential_event_subject(&key) {
+        Ok(expected) if expected.as_str() == subject => Ok(key),
+        _ => Err(RuntimeProjectionRefreshError::MisfiledEvent {
+            subject: subject.to_string(),
+            stream_position,
+            key,
+        }),
+    }
 }
 
 async fn invalidate_all(cache: &RuntimeCredentialCache, credentials: &[CredentialRef]) {
@@ -1156,18 +1159,14 @@ async fn apply_state_to_projection(
     Ok(())
 }
 
-fn unpublished_credential_id(
+fn unpublished_stream_id(
     state: &state_v1::CredentialStateSnapshot,
-) -> Result<Option<CredentialId>, CredentialProtoDecodeError> {
+) -> Result<Option<CredentialKey>, CredentialProtoDecodeError> {
     match state.state.as_ref() {
-        Some(CredentialStateSnapshotCase::PendingWrite(pending)) => Ok(Some(decode_credential_id(
-            "pending_write.credential_id",
-            &pending.credential_id,
-        )?)),
-        Some(CredentialStateSnapshotCase::WriteFailed(failed)) => Ok(Some(decode_credential_id(
-            "write_failed.credential_id",
-            &failed.credential_id,
-        )?)),
+        Some(CredentialStateSnapshotCase::PendingWrite(pending)) => {
+            Ok(Some(decode_pending_write_state(pending)?.key()))
+        }
+        Some(CredentialStateSnapshotCase::WriteFailed(failed)) => Ok(Some(decode_write_failed_state(failed)?.0.key())),
         None
         | Some(
             CredentialStateSnapshotCase::Missing(_)
@@ -1203,27 +1202,6 @@ fn post_revocation_credential_ref(
             | CredentialStateSnapshotCase::Active(_)
             | CredentialStateSnapshotCase::RotationPending(_),
         ) => Ok(None),
-    }
-}
-
-fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, CredentialProtoDecodeError> {
-    match event {
-        CredentialEventCase::WriteRequested(inner) => Ok(decode_write_requested(inner)?.0),
-        CredentialEventCase::WriteFailed(inner) => Ok(decode_write_failed(inner)?.0),
-        CredentialEventCase::Activated(inner) => {
-            let metadata = decode_message_field("event.metadata", &inner.metadata)?;
-            Ok(decode_credential_metadata("event.metadata", metadata)?
-                .reference()
-                .id()
-                .clone())
-        }
-        CredentialEventCase::RotationRequested(inner) => Ok(decode_rotation_requested(inner)?.id().clone()),
-        CredentialEventCase::RotationFailed(inner) => Ok(decode_rotation_failed(inner)?.0.id().clone()),
-        CredentialEventCase::Revoked(inner) => Ok(decode_revoked(inner)?.id().clone()),
-        CredentialEventCase::Rotated(inner) => Ok(decode_rotated(inner)?.0.id().clone()),
-        CredentialEventCase::DestroyRequested(inner) => Ok(decode_destroy_requested(inner)?.0.id().clone()),
-        CredentialEventCase::Destroyed(inner) => Ok(decode_destroyed(inner)?.id().clone()),
-        CredentialEventCase::DestroyFailed(inner) => Ok(decode_destroy_failed(inner)?.0.id().clone()),
     }
 }
 

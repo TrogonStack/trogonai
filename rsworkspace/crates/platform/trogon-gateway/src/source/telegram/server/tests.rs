@@ -12,7 +12,7 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::NonZeroDuration;
 
-use crate::credential::commands::domain::{CredentialOwnerId, CredentialRef, CredentialScope};
+use crate::credential::commands::domain::{CredentialIdentity, CredentialOwnerId, CredentialRef, CredentialScope};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 use crate::secret_store::{
     MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStorePut, SecretStoreRevoke,
@@ -70,12 +70,14 @@ impl RuntimeFixture {
     async fn put(&self, secret: &str) -> CredentialRef {
         self.store
             .put(
-                CredentialScope::integration(
-                    CredentialOwnerId::new("tenant-1").unwrap(),
-                    SourceKind::Telegram,
-                    self.integration_id.clone(),
+                CredentialIdentity::derive(
+                    CredentialScope::integration(
+                        CredentialOwnerId::new("tenant-1").unwrap(),
+                        SourceKind::Telegram,
+                        self.integration_id.clone(),
+                    ),
+                    CredentialKind::WebhookSecret,
                 ),
-                CredentialKind::WebhookSecret,
                 trogon_std::SecretString::new(secret).unwrap(),
             )
             .await
@@ -85,7 +87,9 @@ impl RuntimeFixture {
     async fn activate(&self, credential: CredentialRef, version: u64) {
         self.registry
             .projections()
-            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, version).unwrap())
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(
+                credential, version,
+            ))
             .await;
     }
 

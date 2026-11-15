@@ -19,20 +19,15 @@ trogonai/{owner_id}/credentials/{credential_id}
 Both variables are percent-encoded by `encode_path_segment` before the URL is
 built, but **OpenBao decodes them again before routing, storage, and policy
 matching**. That was verified, not assumed: writing to
-`.../credentials/openbao%3Atenant-1%3Agithub%2Fprimary%3Awebhook_secret` stores
-a key that lists as `openbao:tenant-1:github/` containing
-`primary:webhook_secret`. The encoding is therefore transport-level only and
-buys no path containment.
+`.../credentials/a%3Ab%2Fc` stores a key that lists as `a:b/` containing `c`.
+The encoding is therefore transport-level only and buys no path containment.
 
 Two consequences drive the rules below:
 
-1. **The credential-id portion spans a variable number of segments.** A
-   source-scoped id (`openbao:tenant-1:discord:bot_token`) is one; an
-   integration-scoped id (`openbao:tenant-1:github/primary:webhook_secret`) is
-   two. So the credential position needs the trailing `*` glob. A
-   single-segment `+` there matches nothing at all, which fails closed but
-   would have made every policy silently useless.
-2. **The owner position is still exactly one segment**, so `+` is correct
+1. **The credential position is one segment.** The credential id is a
+   canonical UUID, which never contains a `/`. The policies glob that position
+   with a trailing `*`, which matches the one segment.
+2. **The owner position is also exactly one segment**, so `+` is correct
    there and owner subtrees cannot be crossed. That holds because
    `CredentialOwnerId` admits only alphanumerics, `-`, `_`, `.`, and `:`, and
    `SourceIntegrationId` rejects path separators. Containment comes from those

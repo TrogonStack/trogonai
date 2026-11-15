@@ -1,25 +1,27 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::CredentialMetadata;
+use super::domain::{CredentialKey, CredentialMetadata};
 use super::proto::{activated_to_proto, decode_pending_write_state};
-use super::state::{
-    CredentialDecideError, CredentialEvolveError, validate_activation_metadata, validate_ref_matches_pending,
-};
+use super::state::{CredentialDecideError, CredentialEvolveError, ensure_active_metadata, ensure_recorded_identity};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActivateCredentialWrite {
+    stream_id: CredentialKey,
     metadata: CredentialMetadata,
 }
 
 impl ActivateCredentialWrite {
     pub fn new(metadata: CredentialMetadata) -> Self {
-        Self { metadata }
+        Self {
+            stream_id: metadata.reference().key(),
+            metadata,
+        }
     }
 }
 
 impl Decider for ActivateCredentialWrite {
-    type StreamId = str;
+    type StreamId = CredentialKey;
     type State = state_v1::CredentialStateSnapshot;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
@@ -28,7 +30,7 @@ impl Decider for ActivateCredentialWrite {
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.metadata.reference().id().as_str()
+        &self.stream_id
     }
 
     fn initial_state() -> Self::State {
@@ -49,10 +51,10 @@ impl Decider for ActivateCredentialWrite {
                 });
             }
         };
-        let (pending_id, pending_scope, pending_kind) = decode_pending_write_state(pending)?;
+        let identity = decode_pending_write_state(pending)?;
 
-        validate_activation_metadata(&command.metadata)?;
-        validate_ref_matches_pending(command.metadata.reference(), &pending_id, &pending_scope, pending_kind)?;
+        ensure_active_metadata(&command.metadata)?;
+        ensure_recorded_identity(&identity, command.metadata.reference().identity())?;
 
         Ok(Decision::event(v1::CredentialEvent {
             event: Some(activated_to_proto(&command.metadata).into()),

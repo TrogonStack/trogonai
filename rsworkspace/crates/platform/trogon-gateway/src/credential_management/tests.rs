@@ -16,7 +16,7 @@ use trogon_decider_runtime::{
 
 use super::idempotency::IdempotencyKeyError;
 use super::*;
-use crate::credential::commands::domain::{CredentialDestroyReason, CredentialFailureReason, CredentialId};
+use crate::credential::commands::domain::{CredentialDestroyReason, CredentialFailureReason};
 use crate::credential::commands::proto::{
     active_state_to_proto, cleanup_failed_to_proto_state, destroy_requested_to_proto_state, destroyed_to_proto_state,
     pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
@@ -60,34 +60,41 @@ impl ManagementTestStreamStore {
     }
 }
 
-impl StreamRead<str> for ManagementTestStreamStore {
+impl StreamRead<CredentialKey> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(
+        &self,
+        request: ReadStreamRequest<'_, CredentialKey>,
+    ) -> Result<ReadStreamResponse, Self::Error> {
         self.ensure_available()?;
         let start = match request.from {
             ReadFrom::Beginning => 1,
             ReadFrom::Position(position) => position.as_u64(),
         };
+        let stream_id = request.stream_id.to_string();
         let events = self.events.lock().await;
         let stream_events = events
             .iter()
-            .filter(|event| event.stream_id() == request.stream_id && event.stream_position.as_u64() >= start)
+            .filter(|event| event.stream_id() == stream_id && event.stream_position.as_u64() >= start)
             .cloned()
             .collect();
         Ok(ReadStreamResponse {
-            current_position: current_position(&events, request.stream_id),
+            current_position: current_position(&events, &stream_id),
             events: stream_events,
         })
     }
 }
 
-impl StreamAppend<str> for ManagementTestStreamStore {
+impl StreamAppend<CredentialKey> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
-    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, CredentialKey>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
         let mut events = self.events.lock().await;
-        let current_position = current_position(&events, request.stream_id);
+        let current_position = current_position(&events, &request.stream_id.to_string());
         match request.stream_write_precondition {
             StreamWritePrecondition::Any => {}
             StreamWritePrecondition::StreamExists if current_position.is_some() => {}
@@ -114,27 +121,27 @@ impl StreamAppend<str> for ManagementTestStreamStore {
     }
 }
 
-impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for ManagementTestStreamStore {
+impl SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn read_snapshot(
         &self,
-        request: ReadSnapshotRequest<'_, str>,
+        request: ReadSnapshotRequest<'_, CredentialKey>,
     ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
         self.ensure_available()?;
         let snapshots = self.snapshots.lock().await;
         Ok(ReadSnapshotResponse {
-            snapshot: snapshots.get(request.snapshot_id).cloned(),
+            snapshot: snapshots.get(&request.snapshot_id.to_string()).cloned(),
         })
     }
 }
 
-impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for ManagementTestStreamStore {
+impl SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey> for ManagementTestStreamStore {
     type Error = ManagementTestStreamError;
 
     async fn write_snapshot(
         &self,
-        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, str>,
+        request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, CredentialKey>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
         let mut snapshots = self.snapshots.lock().await;
         snapshots.insert(request.snapshot_id.to_string(), request.snapshot);
@@ -2491,12 +2498,14 @@ impl SnapshotFixture {
         let secrets = MockOpenBaoSecretStore::default();
         let credential = secrets
             .put(
-                CredentialScope::integration(
-                    CredentialOwnerId::new("tenant-1").unwrap(),
-                    SourceKind::GitHub,
-                    SourceIntegrationId::new("primary").unwrap(),
+                CredentialIdentity::derive(
+                    CredentialScope::integration(
+                        CredentialOwnerId::new("tenant-1").unwrap(),
+                        SourceKind::GitHub,
+                        SourceIntegrationId::new("primary").unwrap(),
+                    ),
+                    CredentialKind::WebhookSecret,
                 ),
-                CredentialKind::WebhookSecret,
                 SecretString::new("super-secret").unwrap(),
             )
             .await
@@ -2511,7 +2520,7 @@ impl SnapshotFixture {
     }
 
     fn active(&self) -> state_v1::ActiveCredentialState {
-        active_state_to_proto(&self.metadata, &[])
+        active_state_to_proto(self.metadata.reference(), self.metadata.fingerprint(), &[])
     }
 }
 
@@ -2568,27 +2577,20 @@ async fn command_response_reports_every_credential_lifecycle_state() {
 
 #[tokio::test]
 async fn command_response_rejects_states_a_command_cannot_end_in() {
-    let credential_id = CredentialId::new("tenant-1:github/primary:webhook_secret").unwrap();
     let scope = CredentialScope::integration(
         CredentialOwnerId::new("tenant-1").unwrap(),
         SourceKind::GitHub,
         SourceIntegrationId::new("primary").unwrap(),
     );
+    let identity = CredentialIdentity::derive(scope, CredentialKind::WebhookSecret);
     let failure = CredentialFailureReason::new("openbao write failed").unwrap();
     let cases = [
         ("missing", state_v1::CredentialStateSnapshot { state: None }),
         ("missing", snapshot(state_v1::CredentialMissingState {})),
-        (
-            "pending_write",
-            snapshot(pending_write_to_proto_state(
-                &credential_id,
-                &scope,
-                CredentialKind::WebhookSecret,
-            )),
-        ),
+        ("pending_write", snapshot(pending_write_to_proto_state(&identity))),
         (
             "write_failed",
-            snapshot(write_failed_to_proto_state(&credential_id, &failure)),
+            snapshot(write_failed_to_proto_state(&identity, &failure)),
         ),
     ];
 

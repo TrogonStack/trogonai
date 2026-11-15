@@ -2,13 +2,14 @@ use std::borrow::Cow;
 use std::fmt;
 
 use buffa::{EnumValue, MessageField, ProtoBox};
-use trogonai_proto::gateway::credentials::{state_v1, v1};
+use trogonai_proto::gateway::credentials::{CredentialEventCase, state_v1, v1};
 
 use super::domain::{
     CredentialDestroyReason, CredentialDestroyReasonError, CredentialFailureReason, CredentialFailureReasonError,
-    CredentialFingerprint, CredentialFingerprintError, CredentialId, CredentialIdError, CredentialKind,
-    CredentialMetadata, CredentialOwnerId, CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, CredentialVersionError, SourceKind, StorageBackend, StorageBackendError,
+    CredentialFingerprint, CredentialFingerprintError, CredentialId, CredentialIdError, CredentialIdentity,
+    CredentialIdentityVersion, CredentialKey, CredentialKind, CredentialMetadata, CredentialOwnerId,
+    CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
+    CredentialVersionError, SourceKind,
 };
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 
@@ -32,8 +33,6 @@ pub(crate) enum CredentialFieldInvalidError {
     OwnerId(#[from] CredentialOwnerIdError),
     #[error(transparent)]
     Fingerprint(#[from] CredentialFingerprintError),
-    #[error(transparent)]
-    StorageBackend(#[from] StorageBackendError),
     #[error(transparent)]
     FailureReason(#[from] CredentialFailureReasonError),
     #[error(transparent)]
@@ -59,8 +58,7 @@ pub(crate) enum CredentialFieldInvalidError {
 pub(crate) enum UnspecifiedEnumKind {
     SourceKind,
     CredentialKind,
-    CredentialStatus,
-    StorageBackend,
+    CredentialIdentityVersion,
 }
 
 impl fmt::Display for UnspecifiedEnumKind {
@@ -68,8 +66,7 @@ impl fmt::Display for UnspecifiedEnumKind {
         f.write_str(match self {
             Self::SourceKind => "source kind",
             Self::CredentialKind => "credential kind",
-            Self::CredentialStatus => "credential status",
-            Self::StorageBackend => "storage backend",
+            Self::CredentialIdentityVersion => "credential identity version",
         })
     }
 }
@@ -111,241 +108,304 @@ impl fmt::Display for CredentialFieldPath {
     }
 }
 
-pub(crate) fn credential_ref_to_proto(value: &CredentialRef) -> v1::CredentialRef {
-    v1::CredentialRef {
-        id: value.id().as_str().to_string(),
-        version: Some(value.version().get()),
-        owner_id: value.owner_id().as_str().to_string(),
-        source: Some(proto_source_kind(value.source()).into()),
-        scope_key: value.scope_key().to_string(),
-        kind: Some(proto_credential_kind(value.kind()).into()),
+pub(crate) fn identity_to_proto(identity: &CredentialIdentity) -> v1::CredentialIdentity {
+    v1::CredentialIdentity {
+        credential_id: identity.id().to_string(),
+        owner_id: identity.owner_id().as_str().to_string(),
+        source: Some(proto_source_kind(identity.source()).into()),
+        scope_key: identity.scope_key(),
+        kind: Some(proto_credential_kind(identity.kind()).into()),
+        identity_version: Some(proto_identity_version(identity.version()).into()),
     }
 }
 
-pub(crate) fn credential_metadata_to_proto(value: &CredentialMetadata) -> v1::CredentialMetadata {
-    v1::CredentialMetadata {
-        reference: MessageField::some(credential_ref_to_proto(value.reference())),
-        status: Some(proto_credential_status(value.status()).into()),
-        fingerprint: value.fingerprint().as_str().to_string(),
+pub(crate) fn key_to_proto(key: &CredentialKey) -> v1::CredentialKey {
+    v1::CredentialKey {
+        credential_id: key.credential_id().to_string(),
+        owner_id: key.owner_id().as_str().to_string(),
     }
 }
 
-pub(crate) fn decode_credential_ref(
+/// Rebuilds the identity a write request recorded. The id is read back as
+/// recorded and never derived again from the slot.
+pub(crate) fn decode_identity(
     field: impl Into<CredentialFieldPath>,
-    value: &v1::CredentialRef,
-) -> Result<CredentialRef, CredentialProtoDecodeError> {
+    value: &v1::CredentialIdentity,
+) -> Result<CredentialIdentity, CredentialProtoDecodeError> {
     let field: CredentialFieldPath = field.into();
-    let id = decode_credential_id(field.child("id"), &value.id)?;
+    let id = decode_credential_id(field.child("credential_id"), &value.credential_id)?;
     let owner_id = decode_owner_id(field.child("owner_id"), &value.owner_id)?;
     let source = decode_source_kind(field.child("source"), value.source.as_ref())?;
     let kind = decode_credential_kind(field.child("kind"), value.kind.as_ref())?;
-    let version = value
-        .version
-        .ok_or(CredentialProtoDecodeError::MissingField {
-            field: field.child("version"),
-        })
-        .and_then(|value| {
-            CredentialVersion::new(value).map_err(|source| invalid_field(field.child("version"), source))
-        })?;
+    let version = decode_identity_version(field.child("identity_version"), value.identity_version.as_ref())?;
     let scope = decode_scope_key(owner_id, source, field.child("scope_key"), &value.scope_key)?;
-    Ok(CredentialRef::new(id, version, &scope, kind))
+    Ok(CredentialIdentity::new(id, scope, kind, version))
 }
 
-pub(crate) fn write_requested_to_proto(
-    credential_id: &CredentialId,
-    scope: &CredentialScope,
-    kind: CredentialKind,
-) -> v1::CredentialWriteRequested {
+pub(crate) fn decode_key(
+    field: impl Into<CredentialFieldPath>,
+    value: &v1::CredentialKey,
+) -> Result<CredentialKey, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
+    let credential_id = decode_credential_id(field.child("credential_id"), &value.credential_id)?;
+    let owner_id = decode_owner_id(field.child("owner_id"), &value.owner_id)?;
+    Ok(CredentialKey::new(owner_id, credential_id))
+}
+
+pub(crate) fn decode_version(
+    field: impl Into<CredentialFieldPath>,
+    value: Option<u64>,
+) -> Result<CredentialVersion, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
+    let Some(value) = value else {
+        return Err(CredentialProtoDecodeError::MissingField { field });
+    };
+    CredentialVersion::new(value).map_err(|source| invalid_field(field, source))
+}
+
+fn decode_identity_field<P: ProtoBox<v1::CredentialIdentity>>(
+    field: impl Into<CredentialFieldPath>,
+    value: &MessageField<v1::CredentialIdentity, P>,
+) -> Result<CredentialIdentity, CredentialProtoDecodeError> {
+    let field: CredentialFieldPath = field.into();
+    decode_identity(&field, decode_message_field(&field, value)?)
+}
+
+fn decode_key_field<P: ProtoBox<v1::CredentialKey>>(
+    value: &MessageField<v1::CredentialKey, P>,
+) -> Result<CredentialKey, CredentialProtoDecodeError> {
+    decode_key("key", decode_message_field("key", value)?)
+}
+
+fn decode_fingerprint(
+    field: impl Into<CredentialFieldPath>,
+    value: &str,
+) -> Result<CredentialFingerprint, CredentialProtoDecodeError> {
+    CredentialFingerprint::new(value).map_err(|source| invalid_field(field, source))
+}
+
+fn decode_failure_reason(
+    field: impl Into<CredentialFieldPath>,
+    value: &str,
+) -> Result<CredentialFailureReason, CredentialProtoDecodeError> {
+    CredentialFailureReason::new(value).map_err(|source| invalid_field(field, source))
+}
+
+fn decode_destroy_reason(
+    field: impl Into<CredentialFieldPath>,
+    value: &str,
+) -> Result<CredentialDestroyReason, CredentialProtoDecodeError> {
+    CredentialDestroyReason::new(value).map_err(|source| invalid_field(field, source))
+}
+
+fn decode_state_ref<P: ProtoBox<v1::CredentialIdentity>>(
+    field: &'static str,
+    identity: &MessageField<v1::CredentialIdentity, P>,
+    version: Option<u64>,
+) -> Result<CredentialRef, CredentialProtoDecodeError> {
+    let field = CredentialFieldPath::from(field);
+    Ok(CredentialRef::new(
+        decode_identity_field(field.child("identity"), identity)?,
+        decode_version(field.child("version"), version)?,
+    ))
+}
+
+pub(crate) fn write_requested_to_proto(identity: &CredentialIdentity) -> v1::CredentialWriteRequested {
     v1::CredentialWriteRequested {
-        credential_id: credential_id.as_str().to_string(),
-        owner_id: scope.owner_id().as_str().to_string(),
-        source: Some(proto_source_kind(scope.source_kind()).into()),
-        kind: Some(proto_credential_kind(kind).into()),
-        scope_key: scope.scope_key(),
+        identity: MessageField::some(identity_to_proto(identity)),
     }
 }
 
 pub(crate) fn write_failed_to_proto(
-    credential_id: &CredentialId,
+    key: &CredentialKey,
     reason: &CredentialFailureReason,
 ) -> v1::CredentialWriteFailed {
     v1::CredentialWriteFailed {
-        credential_id: credential_id.as_str().to_string(),
+        key: MessageField::some(key_to_proto(key)),
         reason: reason.as_str().to_string(),
     }
 }
 
 pub(crate) fn activated_to_proto(metadata: &CredentialMetadata) -> v1::CredentialActivated {
+    let credential = metadata.reference();
     v1::CredentialActivated {
-        metadata: MessageField::some(credential_metadata_to_proto(metadata)),
+        key: MessageField::some(key_to_proto(&credential.key())),
+        version: Some(credential.version().get()),
+        fingerprint: metadata.fingerprint().as_str().to_string(),
     }
 }
 
-pub(crate) fn rotation_requested_to_proto(credential_ref: &CredentialRef) -> v1::CredentialRotationRequested {
+pub(crate) fn rotation_requested_to_proto(credential: &CredentialRef) -> v1::CredentialRotationRequested {
     v1::CredentialRotationRequested {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+        key: MessageField::some(key_to_proto(&credential.key())),
+        version: Some(credential.version().get()),
     }
 }
 
 pub(crate) fn rotation_failed_to_proto(
-    credential_ref: &CredentialRef,
+    credential: &CredentialRef,
     reason: &CredentialFailureReason,
 ) -> v1::CredentialRotationFailed {
     v1::CredentialRotationFailed {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+        key: MessageField::some(key_to_proto(&credential.key())),
+        version: Some(credential.version().get()),
         reason: reason.as_str().to_string(),
     }
 }
 
-pub(crate) fn rotated_to_proto(
-    previous_credential_ref: &CredentialRef,
-    metadata: &CredentialMetadata,
-) -> v1::CredentialRotated {
+pub(crate) fn rotated_to_proto(previous: &CredentialRef, metadata: &CredentialMetadata) -> v1::CredentialRotated {
+    let credential = metadata.reference();
     v1::CredentialRotated {
-        previous_credential_ref: MessageField::some(credential_ref_to_proto(previous_credential_ref)),
-        metadata: MessageField::some(credential_metadata_to_proto(metadata)),
+        key: MessageField::some(key_to_proto(&credential.key())),
+        previous_version: Some(previous.version().get()),
+        version: Some(credential.version().get()),
+        fingerprint: metadata.fingerprint().as_str().to_string(),
     }
 }
 
-pub(crate) fn revoked_to_proto(credential_ref: &CredentialRef) -> v1::CredentialRevoked {
+pub(crate) fn revoked_to_proto(credential: &CredentialRef) -> v1::CredentialRevoked {
     v1::CredentialRevoked {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+        key: MessageField::some(key_to_proto(&credential.key())),
+        version: Some(credential.version().get()),
     }
 }
 
 pub(crate) fn destroy_requested_to_proto(
-    credential_ref: &CredentialRef,
+    credential: &CredentialRef,
     reason: &CredentialDestroyReason,
 ) -> v1::CredentialDestroyRequested {
     v1::CredentialDestroyRequested {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+        key: MessageField::some(key_to_proto(&credential.key())),
+        version: Some(credential.version().get()),
         reason: reason.as_str().to_string(),
     }
 }
 
-pub(crate) fn destroyed_to_proto(credential_ref: &CredentialRef) -> v1::CredentialDestroyed {
+pub(crate) fn destroyed_to_proto(credential: &CredentialRef) -> v1::CredentialDestroyed {
     v1::CredentialDestroyed {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+        key: MessageField::some(key_to_proto(&credential.key())),
+        version: Some(credential.version().get()),
     }
 }
 
 pub(crate) fn destroy_failed_to_proto(
-    credential_ref: &CredentialRef,
+    credential: &CredentialRef,
     reason: &CredentialFailureReason,
 ) -> v1::CredentialDestroyFailed {
     v1::CredentialDestroyFailed {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+        key: MessageField::some(key_to_proto(&credential.key())),
+        version: Some(credential.version().get()),
         reason: reason.as_str().to_string(),
     }
 }
 
 pub(crate) fn decode_write_requested(
     event: &v1::CredentialWriteRequested,
-) -> Result<(CredentialId, CredentialScope, CredentialKind), CredentialProtoDecodeError> {
-    let credential_id = decode_credential_id("credential_id", &event.credential_id)?;
-    let owner_id = decode_owner_id("owner_id", &event.owner_id)?;
-    let source = decode_source_kind("source", event.source.as_ref())?;
-    let kind = decode_credential_kind("kind", event.kind.as_ref())?;
-    let scope = decode_scope_key(owner_id, source, "scope_key", &event.scope_key)?;
-    Ok((credential_id, scope, kind))
-}
-
-pub(crate) fn decode_credential_metadata(
-    field: impl Into<CredentialFieldPath>,
-    value: &v1::CredentialMetadata,
-) -> Result<CredentialMetadata, CredentialProtoDecodeError> {
-    let field: CredentialFieldPath = field.into();
-    let reference_field = field.child("reference");
-    let reference = decode_credential_ref(
-        &reference_field,
-        decode_message_field(&reference_field, &value.reference)?,
-    )?;
-    let status = decode_credential_status(field.child("status"), value.status.as_ref())?;
-    let storage_backend = StorageBackend::from_credential_id(reference.id())
-        .map_err(|source| invalid_field(reference_field.child("id"), source))?;
-    let fingerprint = CredentialFingerprint::new(&value.fingerprint)
-        .map_err(|source| invalid_field(field.child("fingerprint"), source))?;
-    Ok(CredentialMetadata::new(reference, status, storage_backend, fingerprint))
+) -> Result<CredentialIdentity, CredentialProtoDecodeError> {
+    decode_identity_field("identity", &event.identity)
 }
 
 pub(crate) fn decode_write_failed(
     event: &v1::CredentialWriteFailed,
-) -> Result<(CredentialId, CredentialFailureReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialKey, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_id("credential_id", &event.credential_id)?,
-        CredentialFailureReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
+        decode_key_field(&event.key)?,
+        decode_failure_reason("reason", &event.reason)?,
+    ))
+}
+
+pub(crate) fn decode_activated(
+    event: &v1::CredentialActivated,
+) -> Result<(CredentialKey, CredentialVersion, CredentialFingerprint), CredentialProtoDecodeError> {
+    Ok((
+        decode_key_field(&event.key)?,
+        decode_version("version", event.version)?,
+        decode_fingerprint("fingerprint", &event.fingerprint)?,
     ))
 }
 
 pub(crate) fn decode_rotation_requested(
     event: &v1::CredentialRotationRequested,
-) -> Result<CredentialRef, CredentialProtoDecodeError> {
-    decode_credential_ref(
-        "credential_ref",
-        decode_message_field("credential_ref", &event.credential_ref)?,
-    )
+) -> Result<(CredentialKey, CredentialVersion), CredentialProtoDecodeError> {
+    Ok((decode_key_field(&event.key)?, decode_version("version", event.version)?))
 }
 
 pub(crate) fn decode_rotation_failed(
     event: &v1::CredentialRotationFailed,
-) -> Result<(CredentialRef, CredentialFailureReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialKey, CredentialVersion, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_ref(
-            "credential_ref",
-            decode_message_field("credential_ref", &event.credential_ref)?,
-        )?,
-        CredentialFailureReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
+        decode_key_field(&event.key)?,
+        decode_version("version", event.version)?,
+        decode_failure_reason("reason", &event.reason)?,
     ))
 }
 
 pub(crate) fn decode_rotated(
     event: &v1::CredentialRotated,
-) -> Result<(CredentialRef, CredentialMetadata), CredentialProtoDecodeError> {
+) -> Result<
+    (
+        CredentialKey,
+        CredentialVersion,
+        CredentialVersion,
+        CredentialFingerprint,
+    ),
+    CredentialProtoDecodeError,
+> {
     Ok((
-        decode_credential_ref(
-            "previous_credential_ref",
-            decode_message_field("previous_credential_ref", &event.previous_credential_ref)?,
-        )?,
-        decode_credential_metadata("metadata", decode_message_field("metadata", &event.metadata)?)?,
+        decode_key_field(&event.key)?,
+        decode_version("previous_version", event.previous_version)?,
+        decode_version("version", event.version)?,
+        decode_fingerprint("fingerprint", &event.fingerprint)?,
     ))
 }
 
-pub(crate) fn decode_revoked(event: &v1::CredentialRevoked) -> Result<CredentialRef, CredentialProtoDecodeError> {
-    decode_credential_ref(
-        "credential_ref",
-        decode_message_field("credential_ref", &event.credential_ref)?,
-    )
+pub(crate) fn decode_revoked(
+    event: &v1::CredentialRevoked,
+) -> Result<(CredentialKey, CredentialVersion), CredentialProtoDecodeError> {
+    Ok((decode_key_field(&event.key)?, decode_version("version", event.version)?))
 }
 
 pub(crate) fn decode_destroy_requested(
     event: &v1::CredentialDestroyRequested,
-) -> Result<(CredentialRef, CredentialDestroyReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialKey, CredentialVersion, CredentialDestroyReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_ref(
-            "credential_ref",
-            decode_message_field("credential_ref", &event.credential_ref)?,
-        )?,
-        CredentialDestroyReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
+        decode_key_field(&event.key)?,
+        decode_version("version", event.version)?,
+        decode_destroy_reason("reason", &event.reason)?,
     ))
 }
 
-pub(crate) fn decode_destroyed(event: &v1::CredentialDestroyed) -> Result<CredentialRef, CredentialProtoDecodeError> {
-    decode_credential_ref(
-        "credential_ref",
-        decode_message_field("credential_ref", &event.credential_ref)?,
-    )
+pub(crate) fn decode_destroyed(
+    event: &v1::CredentialDestroyed,
+) -> Result<(CredentialKey, CredentialVersion), CredentialProtoDecodeError> {
+    Ok((decode_key_field(&event.key)?, decode_version("version", event.version)?))
 }
 
 pub(crate) fn decode_destroy_failed(
     event: &v1::CredentialDestroyFailed,
-) -> Result<(CredentialRef, CredentialFailureReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialKey, CredentialVersion, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_ref(
-            "credential_ref",
-            decode_message_field("credential_ref", &event.credential_ref)?,
-        )?,
-        CredentialFailureReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
+        decode_key_field(&event.key)?,
+        decode_version("version", event.version)?,
+        decode_failure_reason("reason", &event.reason)?,
     ))
+}
+
+/// The credential an event names, read off the event itself after the whole
+/// event decodes.
+pub(crate) fn event_key(event: &CredentialEventCase) -> Result<CredentialKey, CredentialProtoDecodeError> {
+    match event {
+        CredentialEventCase::WriteRequested(inner) => Ok(decode_write_requested(inner)?.key()),
+        CredentialEventCase::WriteFailed(inner) => Ok(decode_write_failed(inner)?.0),
+        CredentialEventCase::Activated(inner) => Ok(decode_activated(inner)?.0),
+        CredentialEventCase::RotationRequested(inner) => Ok(decode_rotation_requested(inner)?.0),
+        CredentialEventCase::RotationFailed(inner) => Ok(decode_rotation_failed(inner)?.0),
+        CredentialEventCase::Rotated(inner) => Ok(decode_rotated(inner)?.0),
+        CredentialEventCase::Revoked(inner) => Ok(decode_revoked(inner)?.0),
+        CredentialEventCase::DestroyRequested(inner) => Ok(decode_destroy_requested(inner)?.0),
+        CredentialEventCase::Destroyed(inner) => Ok(decode_destroyed(inner)?.0),
+        CredentialEventCase::DestroyFailed(inner) => Ok(decode_destroy_failed(inner)?.0),
+    }
 }
 
 fn proto_source_kind(value: SourceKind) -> v1::CredentialSource {
@@ -385,14 +445,9 @@ fn proto_credential_kind(value: CredentialKind) -> v1::CredentialKind {
     }
 }
 
-fn proto_credential_status(value: CredentialStatus) -> v1::CredentialStatus {
+fn proto_identity_version(value: CredentialIdentityVersion) -> v1::CredentialIdentityVersion {
     match value {
-        CredentialStatus::Pending => v1::CredentialStatus::CREDENTIAL_STATUS_PENDING,
-        CredentialStatus::Active => v1::CredentialStatus::CREDENTIAL_STATUS_ACTIVE,
-        CredentialStatus::Previous => v1::CredentialStatus::CREDENTIAL_STATUS_PREVIOUS,
-        CredentialStatus::Revoked => v1::CredentialStatus::CREDENTIAL_STATUS_REVOKED,
-        CredentialStatus::Expired => v1::CredentialStatus::CREDENTIAL_STATUS_EXPIRED,
-        CredentialStatus::Destroyed => v1::CredentialStatus::CREDENTIAL_STATUS_DESTROYED,
+        CredentialIdentityVersion::V1 => v1::CredentialIdentityVersion::CREDENTIAL_IDENTITY_VERSION_V1,
     }
 }
 
@@ -451,109 +506,72 @@ fn decode_credential_kind(
     }
 }
 
-fn decode_credential_status(
+fn decode_identity_version(
     field: impl Into<CredentialFieldPath>,
-    value: Option<&EnumValue<v1::CredentialStatus>>,
-) -> Result<CredentialStatus, CredentialProtoDecodeError> {
+    value: Option<&EnumValue<v1::CredentialIdentityVersion>>,
+) -> Result<CredentialIdentityVersion, CredentialProtoDecodeError> {
     let field: CredentialFieldPath = field.into();
     match decode_known_enum(&field, value)? {
-        v1::CredentialStatus::CREDENTIAL_STATUS_PENDING => Ok(CredentialStatus::Pending),
-        v1::CredentialStatus::CREDENTIAL_STATUS_ACTIVE => Ok(CredentialStatus::Active),
-        v1::CredentialStatus::CREDENTIAL_STATUS_PREVIOUS => Ok(CredentialStatus::Previous),
-        v1::CredentialStatus::CREDENTIAL_STATUS_REVOKED => Ok(CredentialStatus::Revoked),
-        v1::CredentialStatus::CREDENTIAL_STATUS_EXPIRED => Ok(CredentialStatus::Expired),
-        v1::CredentialStatus::CREDENTIAL_STATUS_DESTROYED => Ok(CredentialStatus::Destroyed),
-        v1::CredentialStatus::CREDENTIAL_STATUS_UNSPECIFIED => Err(invalid_field(
+        v1::CredentialIdentityVersion::CREDENTIAL_IDENTITY_VERSION_V1 => Ok(CredentialIdentityVersion::V1),
+        v1::CredentialIdentityVersion::CREDENTIAL_IDENTITY_VERSION_UNSPECIFIED => Err(invalid_field(
             field,
-            CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::CredentialStatus),
+            CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::CredentialIdentityVersion),
         )),
     }
 }
 
-pub(crate) fn credential_metadata_to_proto_state(value: &CredentialMetadata) -> state_v1::CredentialMetadata {
-    state_v1::CredentialMetadata {
-        reference: MessageField::some(credential_ref_to_proto(value.reference())),
-        status: Some(proto_credential_status(value.status()).into()),
-        storage_backend: Some(proto_state_storage_backend(value.storage_backend()).into()),
-        fingerprint: value.fingerprint().as_str().to_string(),
-    }
-}
-
-pub(crate) fn decode_credential_metadata_state(
-    field: impl Into<CredentialFieldPath>,
-    value: &state_v1::CredentialMetadata,
-) -> Result<CredentialMetadata, CredentialProtoDecodeError> {
-    let field: CredentialFieldPath = field.into();
-    Ok(CredentialMetadata::new(
-        decode_credential_ref(
-            field.child("reference"),
-            decode_message_field(field.child("reference"), &value.reference)?,
-        )?,
-        decode_credential_status(field.child("status"), value.status.as_ref())?,
-        decode_storage_backend_state(field.child("storage_backend"), value.storage_backend.as_ref())?,
-        CredentialFingerprint::new(&value.fingerprint)
-            .map_err(|source| invalid_field(field.child("fingerprint"), source))?,
-    ))
-}
-
-pub(crate) fn pending_write_to_proto_state(
-    credential_id: &CredentialId,
-    scope: &CredentialScope,
-    kind: CredentialKind,
-) -> state_v1::PendingCredentialWriteState {
+pub(crate) fn pending_write_to_proto_state(identity: &CredentialIdentity) -> state_v1::PendingCredentialWriteState {
     state_v1::PendingCredentialWriteState {
-        credential_id: credential_id.as_str().to_string(),
-        owner_id: scope.owner_id().as_str().to_string(),
-        source: Some(proto_source_kind(scope.source_kind()).into()),
-        kind: Some(proto_credential_kind(kind).into()),
-        scope_key: scope.scope_key(),
+        identity: MessageField::some(identity_to_proto(identity)),
     }
 }
 
 pub(crate) fn decode_pending_write_state(
     state: &state_v1::PendingCredentialWriteState,
-) -> Result<(CredentialId, CredentialScope, CredentialKind), CredentialProtoDecodeError> {
-    let credential_id = decode_credential_id("pending_write.credential_id", &state.credential_id)?;
-    let owner_id = decode_owner_id("pending_write.owner_id", &state.owner_id)?;
-    let source = decode_source_kind("pending_write.source", state.source.as_ref())?;
-    let kind = decode_credential_kind("pending_write.kind", state.kind.as_ref())?;
-    let scope = decode_scope_key(owner_id, source, "pending_write.scope_key", &state.scope_key)?;
-    Ok((credential_id, scope, kind))
+) -> Result<CredentialIdentity, CredentialProtoDecodeError> {
+    decode_identity_field("pending_write.identity", &state.identity)
 }
 
+pub(crate) fn active_state_to_proto(
+    credential: &CredentialRef,
+    fingerprint: &CredentialFingerprint,
+    previous_versions: &[CredentialVersion],
+) -> state_v1::ActiveCredentialState {
+    state_v1::ActiveCredentialState {
+        identity: MessageField::some(identity_to_proto(credential.identity())),
+        version: Some(credential.version().get()),
+        fingerprint: fingerprint.as_str().to_string(),
+        previous_versions: previous_versions.iter().copied().map(CredentialVersion::get).collect(),
+    }
+}
+
+/// The active version as metadata, with every version it replaced. They all
+/// share the one identity the state records.
 pub(crate) fn decode_active_state(
     field: impl Into<CredentialFieldPath>,
     value: &state_v1::ActiveCredentialState,
 ) -> Result<(CredentialMetadata, Vec<CredentialRef>), CredentialProtoDecodeError> {
     let field: CredentialFieldPath = field.into();
-    let metadata = decode_credential_metadata_state(
-        field.child("metadata"),
-        decode_message_field(field.child("metadata"), &value.metadata)?,
-    )?;
-    let previous_versions = value
-        .previous_versions
-        .iter()
-        .map(|credential| decode_credential_ref(field.child("previous_versions"), credential))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((metadata, previous_versions))
-}
-
-pub(crate) fn active_state_to_proto(
-    metadata: &CredentialMetadata,
-    previous_versions: &[CredentialRef],
-) -> state_v1::ActiveCredentialState {
-    state_v1::ActiveCredentialState {
-        metadata: MessageField::some(credential_metadata_to_proto_state(metadata)),
-        previous_versions: previous_versions.iter().map(credential_ref_to_proto).collect(),
+    let identity = decode_identity_field(field.child("identity"), &value.identity)?;
+    let version = decode_version(field.child("version"), value.version)?;
+    let fingerprint = decode_fingerprint(field.child("fingerprint"), &value.fingerprint)?;
+    let previous_field = field.child("previous_versions");
+    let mut previous_versions = Vec::with_capacity(value.previous_versions.len());
+    for previous in &value.previous_versions {
+        let previous = decode_version(&previous_field, Some(*previous))?;
+        previous_versions.push(CredentialRef::new(identity.clone(), previous));
     }
+    let credential = CredentialRef::new(identity, version);
+    Ok((
+        CredentialMetadata::new(credential, CredentialStatus::Active, fingerprint),
+        previous_versions,
+    ))
 }
 
 pub(crate) fn active_credential_ref(
     active: &state_v1::ActiveCredentialState,
 ) -> Result<CredentialRef, CredentialProtoDecodeError> {
-    let metadata = decode_message_field("active.metadata", &active.metadata)?;
-    let reference = decode_message_field("active.metadata.reference", &metadata.reference)?;
-    decode_credential_ref("active.metadata.reference", reference)
+    decode_state_ref("active", &active.identity, active.version)
 }
 
 pub(crate) fn rotation_pending_to_proto_state(
@@ -564,122 +582,89 @@ pub(crate) fn rotation_pending_to_proto_state(
     }
 }
 
+pub(crate) fn write_failed_to_proto_state(
+    identity: &CredentialIdentity,
+    reason: &CredentialFailureReason,
+) -> state_v1::FailedCredentialWriteState {
+    state_v1::FailedCredentialWriteState {
+        identity: MessageField::some(identity_to_proto(identity)),
+        reason: reason.as_str().to_string(),
+    }
+}
+
 pub(crate) fn decode_write_failed_state(
     state: &state_v1::FailedCredentialWriteState,
-) -> Result<(CredentialId, CredentialFailureReason), CredentialProtoDecodeError> {
+) -> Result<(CredentialIdentity, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_id("write_failed.credential_id", &state.credential_id)?,
-        CredentialFailureReason::new(&state.reason).map_err(|source| invalid_field("write_failed.reason", source))?,
+        decode_identity_field("write_failed.identity", &state.identity)?,
+        decode_failure_reason("write_failed.reason", &state.reason)?,
     ))
+}
+
+pub(crate) fn revoked_to_proto_state(credential: &CredentialRef) -> state_v1::RevokedCredentialState {
+    state_v1::RevokedCredentialState {
+        identity: MessageField::some(identity_to_proto(credential.identity())),
+        version: Some(credential.version().get()),
+    }
 }
 
 pub(crate) fn decode_revoked_state(
     state: &state_v1::RevokedCredentialState,
 ) -> Result<CredentialRef, CredentialProtoDecodeError> {
-    decode_credential_ref(
-        "revoked.credential_ref",
-        decode_message_field("revoked.credential_ref", &state.credential_ref)?,
-    )
+    decode_state_ref("revoked", &state.identity, state.version)
+}
+
+pub(crate) fn destroy_requested_to_proto_state(
+    credential: &CredentialRef,
+    reason: &CredentialDestroyReason,
+) -> state_v1::DestroyRequestedCredentialState {
+    state_v1::DestroyRequestedCredentialState {
+        identity: MessageField::some(identity_to_proto(credential.identity())),
+        version: Some(credential.version().get()),
+        reason: reason.as_str().to_string(),
+    }
 }
 
 pub(crate) fn decode_destroy_requested_state(
     state: &state_v1::DestroyRequestedCredentialState,
 ) -> Result<(CredentialRef, CredentialDestroyReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_ref(
-            "destroy_requested.credential_ref",
-            decode_message_field("destroy_requested.credential_ref", &state.credential_ref)?,
-        )?,
-        CredentialDestroyReason::new(&state.reason)
-            .map_err(|source| invalid_field("destroy_requested.reason", source))?,
+        decode_state_ref("destroy_requested", &state.identity, state.version)?,
+        decode_destroy_reason("destroy_requested.reason", &state.reason)?,
     ))
+}
+
+pub(crate) fn destroyed_to_proto_state(credential: &CredentialRef) -> state_v1::DestroyedCredentialState {
+    state_v1::DestroyedCredentialState {
+        identity: MessageField::some(identity_to_proto(credential.identity())),
+        version: Some(credential.version().get()),
+    }
 }
 
 pub(crate) fn decode_destroyed_state(
     state: &state_v1::DestroyedCredentialState,
 ) -> Result<CredentialRef, CredentialProtoDecodeError> {
-    decode_credential_ref(
-        "destroyed.credential_ref",
-        decode_message_field("destroyed.credential_ref", &state.credential_ref)?,
-    )
+    decode_state_ref("destroyed", &state.identity, state.version)
+}
+
+pub(crate) fn cleanup_failed_to_proto_state(
+    credential: &CredentialRef,
+    reason: &CredentialFailureReason,
+) -> state_v1::CleanupFailedCredentialState {
+    state_v1::CleanupFailedCredentialState {
+        identity: MessageField::some(identity_to_proto(credential.identity())),
+        version: Some(credential.version().get()),
+        reason: reason.as_str().to_string(),
+    }
 }
 
 pub(crate) fn decode_cleanup_failed_state(
     state: &state_v1::CleanupFailedCredentialState,
 ) -> Result<(CredentialRef, CredentialFailureReason), CredentialProtoDecodeError> {
     Ok((
-        decode_credential_ref(
-            "cleanup_failed.credential_ref",
-            decode_message_field("cleanup_failed.credential_ref", &state.credential_ref)?,
-        )?,
-        CredentialFailureReason::new(&state.reason).map_err(|source| invalid_field("cleanup_failed.reason", source))?,
+        decode_state_ref("cleanup_failed", &state.identity, state.version)?,
+        decode_failure_reason("cleanup_failed.reason", &state.reason)?,
     ))
-}
-
-pub(crate) fn write_failed_to_proto_state(
-    credential_id: &CredentialId,
-    reason: &CredentialFailureReason,
-) -> state_v1::FailedCredentialWriteState {
-    state_v1::FailedCredentialWriteState {
-        credential_id: credential_id.as_str().to_string(),
-        reason: reason.as_str().to_string(),
-    }
-}
-
-pub(crate) fn revoked_to_proto_state(credential_ref: &CredentialRef) -> state_v1::RevokedCredentialState {
-    state_v1::RevokedCredentialState {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
-    }
-}
-
-pub(crate) fn destroy_requested_to_proto_state(
-    credential_ref: &CredentialRef,
-    reason: &CredentialDestroyReason,
-) -> state_v1::DestroyRequestedCredentialState {
-    state_v1::DestroyRequestedCredentialState {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
-        reason: reason.as_str().to_string(),
-    }
-}
-
-pub(crate) fn destroyed_to_proto_state(credential_ref: &CredentialRef) -> state_v1::DestroyedCredentialState {
-    state_v1::DestroyedCredentialState {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
-    }
-}
-
-pub(crate) fn cleanup_failed_to_proto_state(
-    credential_ref: &CredentialRef,
-    reason: &CredentialFailureReason,
-) -> state_v1::CleanupFailedCredentialState {
-    state_v1::CleanupFailedCredentialState {
-        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
-        reason: reason.as_str().to_string(),
-    }
-}
-
-fn proto_state_storage_backend(value: StorageBackend) -> state_v1::StorageBackend {
-    match value {
-        StorageBackend::InMemory => state_v1::StorageBackend::STORAGE_BACKEND_IN_MEMORY,
-        StorageBackend::OpenBao => state_v1::StorageBackend::STORAGE_BACKEND_OPENBAO,
-        StorageBackend::StaticConfig => state_v1::StorageBackend::STORAGE_BACKEND_STATIC_CONFIG,
-    }
-}
-
-fn decode_storage_backend_state(
-    field: impl Into<CredentialFieldPath>,
-    value: Option<&EnumValue<state_v1::StorageBackend>>,
-) -> Result<StorageBackend, CredentialProtoDecodeError> {
-    let field: CredentialFieldPath = field.into();
-    match decode_known_enum(&field, value)? {
-        state_v1::StorageBackend::STORAGE_BACKEND_IN_MEMORY => Ok(StorageBackend::InMemory),
-        state_v1::StorageBackend::STORAGE_BACKEND_OPENBAO => Ok(StorageBackend::OpenBao),
-        state_v1::StorageBackend::STORAGE_BACKEND_STATIC_CONFIG => Ok(StorageBackend::StaticConfig),
-        state_v1::StorageBackend::STORAGE_BACKEND_UNSPECIFIED => Err(invalid_field(
-            field,
-            CredentialFieldInvalidError::UnspecifiedEnum(UnspecifiedEnumKind::StorageBackend),
-        )),
-    }
 }
 
 pub(crate) fn decode_message_field<T: Default, P: ProtoBox<T>>(

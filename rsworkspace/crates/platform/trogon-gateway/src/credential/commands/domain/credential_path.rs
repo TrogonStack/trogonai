@@ -1,35 +1,29 @@
 use std::fmt;
 
+use super::CredentialKey;
 use super::constants::{COLLECTION_SEGMENT, CREDENTIAL_PATH_SEGMENTS, ROOT_SEGMENT};
-use super::{CredentialId, CredentialOwnerId, CredentialRef};
 
+/// Where a credential's material lives in the managed subtree.
+///
+/// The path comes from the credential's key alone, so it names neither the scope
+/// nor the kind, and a credential keeps its path for as long as it keeps its id.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CredentialPath {
-    owner_id: CredentialOwnerId,
-    credential_id: CredentialId,
+    key: CredentialKey,
 }
 
 impl CredentialPath {
-    pub fn new(owner_id: CredentialOwnerId, credential_id: CredentialId) -> Self {
-        Self {
-            owner_id,
-            credential_id,
-        }
+    pub fn new(key: CredentialKey) -> Self {
+        Self { key }
     }
 
-    pub fn segments(&self) -> [&str; CREDENTIAL_PATH_SEGMENTS] {
+    pub fn segments(&self) -> [String; CREDENTIAL_PATH_SEGMENTS] {
         [
-            ROOT_SEGMENT,
-            self.owner_id.as_str(),
-            COLLECTION_SEGMENT,
-            self.credential_id.as_str(),
+            ROOT_SEGMENT.to_string(),
+            self.key.owner_id().as_str().to_string(),
+            COLLECTION_SEGMENT.to_string(),
+            self.key.credential_id().to_string(),
         ]
-    }
-}
-
-impl From<&CredentialRef> for CredentialPath {
-    fn from(credential: &CredentialRef) -> Self {
-        Self::new(credential.owner_id().clone(), credential.id().clone())
     }
 }
 

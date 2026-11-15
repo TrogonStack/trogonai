@@ -21,30 +21,10 @@ fn resolves_literal_to_static_reference() {
     .unwrap();
 
     assert_eq!(
-        secret.reference().to_string(),
-        "static-config:github/primary:webhook_secret@1"
+        secret.credential().as_str(),
+        "static-config:github/primary:webhook_secret"
     );
     assert_eq!(secret.into_plaintext().unwrap().as_str(), "gh-secret");
-}
-
-#[test]
-fn metadata_fingerprint_stays_bounded_for_the_longest_integration_id() {
-    let scope = CredentialScope::integration(
-        CredentialOwnerId::static_config(),
-        SourceKind::GooglePubSub,
-        SourceIntegrationId::new("a".repeat(64)).unwrap(),
-    );
-    let secret = StaticConfigSecretStore::resolve(
-        scope,
-        CredentialKind::ServiceAccountCredentials,
-        StaticConfigSecretInput::Literal("service-account-json".to_string()),
-        &InMemoryEnv::new(),
-    )
-    .unwrap();
-
-    let metadata = StaticConfigSecretStore::metadata(&secret).unwrap();
-
-    assert_eq!(metadata.fingerprint().as_str().len(), "static-config:".len() + 64);
 }
 
 #[test]
@@ -82,17 +62,21 @@ fn debug_redacts_the_material() {
 
 #[test]
 fn verifier_only_material_cannot_be_read_as_plaintext() {
-    let reference = StaticConfigSecretStore::credential_ref(&discord_scope(), CredentialKind::BotToken).unwrap();
+    let credential = PublicCredentialId::new(&CredentialOwnerId::static_config(), "discord", CredentialKind::BotToken);
     let secret = StaticConfigSecret::new(
-        reference.clone(),
+        credential.clone(),
         SecretMaterial::Verifier(SecretVerifier::new("verifier").unwrap()),
     );
 
     let error = secret.into_plaintext().unwrap_err();
 
+    assert_eq!(
+        error.to_string(),
+        "credential is verifier-only: static-config:discord:bot_token"
+    );
     assert!(matches!(
         error,
-        StaticConfigSecretStoreError::VerifierOnly { credential } if credential == reference
+        StaticConfigSecretStoreError::VerifierOnly { credential: actual } if actual == credential
     ));
 }
 

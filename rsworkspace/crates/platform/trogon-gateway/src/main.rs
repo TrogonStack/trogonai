@@ -31,6 +31,7 @@ use crate::constants::{
     ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
     OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
+use crate::credential::commands::domain::CredentialKey;
 use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
 use futures_util::FutureExt;
@@ -808,8 +809,8 @@ async fn refresh_credential_runtime_projection_from_start<EventStream, EventStor
 )>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-    EventStore: StreamRead<str>,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    EventStore: StreamRead<CredentialKey>,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
 {
     let report = registry
         .refresh_from_credential_stream_tracked(event_stream, event_store)

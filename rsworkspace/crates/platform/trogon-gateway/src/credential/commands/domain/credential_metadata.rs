@@ -1,24 +1,17 @@
-use super::{CredentialFingerprint, CredentialRef, CredentialStatus, StorageBackend};
+use super::{CredentialFingerprint, CredentialRef, CredentialStatus};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CredentialMetadata {
     reference: CredentialRef,
     status: CredentialStatus,
-    storage_backend: StorageBackend,
     fingerprint: CredentialFingerprint,
 }
 
 impl CredentialMetadata {
-    pub fn new(
-        reference: CredentialRef,
-        status: CredentialStatus,
-        storage_backend: StorageBackend,
-        fingerprint: CredentialFingerprint,
-    ) -> Self {
+    pub fn new(reference: CredentialRef, status: CredentialStatus, fingerprint: CredentialFingerprint) -> Self {
         Self {
             reference,
             status,
-            storage_backend,
             fingerprint,
         }
     }
@@ -29,10 +22,6 @@ impl CredentialMetadata {
 
     pub fn status(&self) -> CredentialStatus {
         self.status
-    }
-
-    pub fn storage_backend(&self) -> StorageBackend {
-        self.storage_backend
     }
 
     pub fn fingerprint(&self) -> &CredentialFingerprint {
