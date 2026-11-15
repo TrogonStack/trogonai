@@ -30,13 +30,6 @@ impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Ca
 where
     S: StreamRead<PeerId> + StreamAppend<PeerId>,
 {
-    pub async fn acknowledge_batch(
-        &self,
-        _owner: &TrustedPeerOwner,
-        _request: proto::AcknowledgeBatchRequest,
-    ) -> ApplicationResult<proto::AcknowledgeBatchResponse, S> {
-        Err(PeerApplicationError::NotImplemented)
-    }
     pub async fn roster(
         &self,
         _owner: &TrustedPeerOwner,
