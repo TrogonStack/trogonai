@@ -6,5 +6,9 @@ workspace_crate(
      '//rsworkspace/crates/peers/trogon-peer',
      '//rsworkspace/crates/platform/trogonai-proto'],
     dev_deps = ['//rsworkspace/crates/peers/trogon-peer-context'],
-    integration_tests = {'application_tests': {}, 'command_grants': {}, 'enrollment': {}, 'message_history_admission': {}},
+    integration_tests = {'application_tests': {},
+     'command_grants': {},
+     'content_binding_value': {},
+     'enrollment': {},
+     'message_history_admission': {}},
 )
