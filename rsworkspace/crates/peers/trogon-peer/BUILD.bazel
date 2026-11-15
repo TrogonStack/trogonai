@@ -4,5 +4,9 @@ workspace_crate(
     name = 'trogon-peer',
     deps = ['//rsworkspace/crates/decider/trogon-decider', '//rsworkspace/crates/platform/trogonai-proto'],
     dev_deps = ['//rsworkspace/crates/decider/trogon-decider-runtime'],
-    integration_tests = {'creation_precondition': {}, 'enrollment': {}, 'enrollment_timestamp': {}, 'validation': {}},
+    integration_tests = {'attachment': {},
+     'creation_precondition': {},
+     'enrollment': {},
+     'enrollment_timestamp': {},
+     'validation': {}},
 )
