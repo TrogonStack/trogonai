@@ -45,3 +45,24 @@ sh_test(
         "//rsworkspace:Cargo.lock",
     ],
 )
+
+sh_test(
+    name = "rust_license_test",
+    srcs = ["rust_license_test.sh"],
+    data = [
+        "//rsworkspace:Cargo.toml",
+        "@rules_rust//cargo:current_cargo_toolchain",
+        "@rules_rust//rust/toolchain:current_rustc_files",
+    ],
+    env = {
+        "CARGO": "$(rootpath @rules_rust//cargo:current_cargo_toolchain)",
+        "CARGO_MANIFEST": "$(rootpath //rsworkspace:Cargo.toml)",
+        "RUSTC": "$(rootpath @rules_rust//rust/toolchain:current_rustc_files)",
+    },
+    # The member manifests cargo reads are not among the declared inputs, so the
+    # test runs outside the sandbox and is never served from the cache.
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+)
