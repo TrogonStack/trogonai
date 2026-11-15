@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use serde_json::json;
 use trogon_claude_agent_sdk::{
-    CallbackError, CancellationToken, ElicitationHandler, ElicitationMode, ElicitationRequest, ElicitationResponse,
-    HookHandler, HookOutput, HookRequest, JsonObject, McpServerName, UserDialogHandler, UserDialogRequest,
-    UserDialogResponse,
+    CallbackError, CancellationToken, ControlRequestId, ElicitationHandler, ElicitationMode, ElicitationRequest,
+    ElicitationResponse, HookHandler, HookOutput, HookRequest, JsonObject, McpServerName, UserDialogHandler,
+    UserDialogRequest, UserDialogResponse,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -47,13 +47,14 @@ async fn closures_are_elicitation_handlers_with_an_opaque_debug_form() -> TestRe
         .call(ElicitationRequest {
             server_name: McpServerName::from("server"),
             message: "need input".into(),
-            mode: ElicitationMode::Form,
+            mode: Some(ElicitationMode::Form),
             url: None,
             elicitation_id: None,
             requested_schema: None,
             title: None,
             display_name: None,
             description: None,
+            request_id: ControlRequestId::from("elicitation-1"),
             signal: CancellationToken::new(),
         })
         .await?;
@@ -74,6 +75,7 @@ async fn closures_are_user_dialog_handlers_with_an_opaque_debug_form() -> TestRe
             dialog_kind: "confirm".into(),
             payload: JsonObject::new(),
             tool_use_id: None,
+            request_id: ControlRequestId::from("dialog-1"),
             signal: CancellationToken::new(),
         })
         .await?;
@@ -82,5 +84,34 @@ async fn closures_are_user_dialog_handlers_with_an_opaque_debug_form() -> TestRe
         json!({"behavior": "completed", "result": {"kind": "confirm"}})
     );
     assert_eq!(format!("{:?}", &*handler), "UserDialogHandler { .. }");
+    Ok(())
+}
+
+#[test]
+fn elicitation_modes_round_trip_their_wire_names() {
+    for (name, mode) in [
+        ("form", ElicitationMode::Form),
+        ("url", ElicitationMode::Url),
+        ("future", ElicitationMode::Other("future".into())),
+    ] {
+        assert_eq!(ElicitationMode::from(name.to_owned()), mode);
+        assert_eq!(mode.as_str(), name);
+    }
+}
+
+#[test]
+fn an_out_of_band_answer_is_the_null_the_typescript_handler_returns() -> TestResult {
+    assert_eq!(
+        ElicitationResponse::AnsweredOutOfBand.to_wire_json()?,
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        UserDialogResponse::AnsweredOutOfBand.to_wire_json()?,
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        UserDialogResponse::Cancelled.to_wire_json()?,
+        json!({"behavior": "cancelled"})
+    );
     Ok(())
 }

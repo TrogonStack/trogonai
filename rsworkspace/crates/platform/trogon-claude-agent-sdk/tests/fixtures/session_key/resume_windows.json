@@ -1,0 +1,346 @@
+{
+ "capture": "Real runtimes, Windows path modules, session directory C:\\sess\\s. typescript_accepts: the resume helper Jtt from @anthropic-ai/claude-agent-sdk 0.3.323 sdk.mjs run with Node path.win32 resolve, isAbsolute and sep; true when it went on to load the subpath instead of skipping it as unsafe. python_accepts: _is_safe_subpath from claude_agent_sdk 0.2.181 with PureWindowsPath as Path and a lexical resolve. Python's own resolve() reads the file system on Windows, which a capture off Windows cannot reproduce, so names the host rejects when resolving (reserved device names) are not part of this capture.",
+ "session_dir": "C:\\sess\\s",
+ "subpaths": [
+  {
+   "subpath": "subagents/agent-1",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "subagents/workflows/run-1/agent-2",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "agent",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a b/c d",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "/abs",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "\\abs",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "\\\\server\\share\\x",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "C:agent",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "C:\\agent",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "c:/agent",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "./agent",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "subagents/./agent",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "subagents/.",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": ".",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "..",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "../escape",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "subagents/../agent",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "subagents/../../escape",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "subagents\\..\\agent",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "..\\escape",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "subagents/..",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "a//b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a\\b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/b/",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": ".hidden",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "...",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/.../b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "x\u0000y",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "con/aux",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a:b",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "%2e%2e/x",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "é/中",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a\nb",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": " ",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/ /b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "C:",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "c:x/y",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "a/C:",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a\\\\b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "\\\\",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "/",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "//x",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "a/..b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "..a",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a./b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a /b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "CON",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/con",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/CON.txt",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/nul",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/prn.x",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a/aux",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "COM1/x",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "lpt1",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a|b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a?b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a*b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a<b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "a\"b",
+   "typescript_accepts": true,
+   "python_accepts": true
+  },
+  {
+   "subpath": "x\u0000",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "a/./",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "a/b/..",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "\\\\?\\C:\\x",
+   "typescript_accepts": false,
+   "python_accepts": false
+  },
+  {
+   "subpath": "C::x",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "1:x",
+   "typescript_accepts": true,
+   "python_accepts": false
+  },
+  {
+   "subpath": "é:x",
+   "typescript_accepts": true,
+   "python_accepts": false
+  }
+ ]
+}

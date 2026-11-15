@@ -1,0 +1,1 @@
+    Settings    REG_SZ    {"model":"user-registry","permissions":{"deny":["Read(./secrets/**)"]},"env":{"U":"1"}}

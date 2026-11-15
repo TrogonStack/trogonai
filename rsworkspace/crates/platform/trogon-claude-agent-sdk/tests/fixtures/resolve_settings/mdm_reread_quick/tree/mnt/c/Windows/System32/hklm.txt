@@ -1,0 +1,1 @@
+    Settings    REG_SZ    {"model":"A","wslInheritsWindowsSettings":true}

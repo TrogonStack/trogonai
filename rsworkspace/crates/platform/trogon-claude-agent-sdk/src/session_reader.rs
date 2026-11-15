@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    ListSessionsOptions, SdkSessionInfo, SessionFiles, SummaryDialect,
+    HomeDirectoryError, ListSessionsOptions, SdkSessionInfo, SessionFiles, SummaryDialect,
     constants::PRECOMPACT_SKIP_THRESHOLD,
     session_files::{collect_agent_files, read_agent_metadata_sidecar, valid_uuid},
     session_messages_ts::{ChainAlgorithm, MessageOptions, MessagesError, session_messages, subagent_messages},
@@ -206,16 +206,25 @@ fn read_transcript_ts(path: &Path, precompact_skip: bool) -> Option<Vec<u8>> {
     (!content.is_empty()).then_some(content)
 }
 
-/// [`SessionFiles::list_sessions`] over the environment's config directory; empty when none can be resolved.
-pub fn list_sessions(options: &ListSessionsOptions) -> Vec<SdkSessionInfo> {
-    SessionFiles::from_environment()
-        .map(|files| files.list_sessions(options))
-        .unwrap_or_default()
+/// [`SessionFiles::list_sessions`] over the environment's config directory.
+///
+/// # Errors
+///
+/// [`HomeDirectoryError`] when no config directory can be resolved, where Python raises `RuntimeError`.
+pub fn list_sessions(options: &ListSessionsOptions) -> Result<Vec<SdkSessionInfo>, HomeDirectoryError> {
+    Ok(SessionFiles::from_environment()?.list_sessions(options))
 }
 
 /// [`SessionFiles::get_session_info`] over the environment's config directory.
-pub fn get_session_info(session_id: &str, directory: Option<&Path>) -> Option<SdkSessionInfo> {
-    SessionFiles::from_environment()?.get_session_info(session_id, directory)
+///
+/// # Errors
+///
+/// [`HomeDirectoryError`] when no config directory can be resolved.
+pub fn get_session_info(
+    session_id: &str,
+    directory: Option<&Path>,
+) -> Result<Option<SdkSessionInfo>, HomeDirectoryError> {
+    Ok(SessionFiles::from_environment()?.get_session_info(session_id, directory))
 }
 
 /// [`SessionFiles::get_session_messages`] over the environment's config directory.
@@ -224,17 +233,16 @@ pub fn get_session_messages(
     directory: Option<&Path>,
     page: MessagePage,
 ) -> Result<Vec<SessionMessage>, MessagesError> {
-    match SessionFiles::from_environment() {
-        Some(files) => files.get_session_messages(session_id, directory, page),
-        None => Ok(Vec::new()),
-    }
+    SessionFiles::from_environment()?.get_session_messages(session_id, directory, page)
 }
 
 /// [`SessionFiles::list_subagents`] over the environment's config directory.
-pub fn list_subagents(session_id: &str, directory: Option<&Path>) -> Vec<String> {
-    SessionFiles::from_environment()
-        .map(|files| files.list_subagents(session_id, directory))
-        .unwrap_or_default()
+///
+/// # Errors
+///
+/// [`HomeDirectoryError`] when no config directory can be resolved.
+pub fn list_subagents(session_id: &str, directory: Option<&Path>) -> Result<Vec<String>, HomeDirectoryError> {
+    Ok(SessionFiles::from_environment()?.list_subagents(session_id, directory))
 }
 
 /// [`SessionFiles::get_subagent_messages`] over the environment's config directory.
@@ -243,8 +251,6 @@ pub fn get_subagent_messages(
     agent_id: &str,
     directory: Option<&Path>,
     page: MessagePage,
-) -> Vec<SessionMessage> {
-    SessionFiles::from_environment()
-        .map(|files| files.get_subagent_messages(session_id, agent_id, directory, page))
-        .unwrap_or_default()
+) -> Result<Vec<SessionMessage>, HomeDirectoryError> {
+    Ok(SessionFiles::from_environment()?.get_subagent_messages(session_id, agent_id, directory, page))
 }
