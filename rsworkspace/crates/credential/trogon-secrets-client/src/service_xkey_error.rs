@@ -1,0 +1,6 @@
+/// Why a value is not the secrets service's public curve key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ServiceXkeyError {
+    #[error("service xkey is not a curve public key")]
+    NotACurvePublicKey,
+}
