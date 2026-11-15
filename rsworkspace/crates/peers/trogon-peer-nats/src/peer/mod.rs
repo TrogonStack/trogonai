@@ -14,5 +14,7 @@ pub use peer_store_error::PeerStoreError;
 pub use peer_stream_config_mismatch_error::PeerStreamConfigMismatchError;
 pub use peer_subject_resolver::{PeerSubjectError, PeerSubjectResolver};
 
+mod scoped_store;
 #[cfg(test)]
 mod tests;
+pub use scoped_store::PeerJetStreamStore;
