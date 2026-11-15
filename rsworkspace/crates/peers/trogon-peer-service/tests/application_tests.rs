@@ -801,6 +801,56 @@ async fn prepared_assignment_replays_cached_exact_payload_and_frame_over_reconst
 }
 
 #[tokio::test]
+async fn optional_prompt_correlation_delivers_and_replays_the_same_assignment() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("optional_prompt", "queued for the next native prompt").await?;
+    let mut omitted = f.prepare();
+    omitted.prompt_id = None;
+    let first = f.app().prepare_batch(&f.bob, omitted).await?;
+    assert_eq!(first.messages.len(), 1);
+    assert_eq!(
+        first.messages[0].text.as_deref(),
+        Some("queued for the next native prompt")
+    );
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    for correlation in [Some(String::new()), None, Some("another_prompt".into())] {
+        let mut request = f.prepare();
+        request.prompt_id = correlation;
+        assert_eq!(f.app().prepare_batch(&f.bob, request).await?, first);
+    }
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
+
+#[tokio::test]
+async fn present_prompt_correlation_uses_existing_128_byte_and_control_boundaries() -> TestResult {
+    let f = Fixture::new().await?;
+    f.intake("prompt_boundary", "bounded correlation").await?;
+    let mut maximum = f.prepare();
+    maximum.prompt_id = Some("é".repeat(64));
+    assert_eq!(f.app().prepare_batch(&f.bob, maximum).await?.messages.len(), 1);
+    let appends = f.store.appends.load(Ordering::SeqCst);
+    let mut oversized = f.prepare();
+    oversized.prompt_id = Some("p".repeat(129));
+    assert!(matches!(
+        f.app().prepare_batch(&f.bob, oversized).await,
+        Err(trogon_peer_service::PeerApplicationError::Value(
+            trogon_peer::PeerValueError::TooLong { maximum: 128 }
+        ))
+    ));
+    let mut control = f.prepare();
+    control.prompt_id = Some("prompt\nforged".into());
+    assert!(matches!(
+        f.app().prepare_batch(&f.bob, control).await,
+        Err(trogon_peer_service::PeerApplicationError::Value(
+            trogon_peer::PeerValueError::InvalidCharacter
+        ))
+    ));
+    assert_eq!(f.store.appends.load(Ordering::SeqCst), appends);
+    Ok(())
+}
+
+#[tokio::test]
 async fn cache_failure_does_not_commit_preparation_and_frame_corruption_fails_closed() -> TestResult {
     let f = Fixture::new().await?;
     f.intake("key", "payload").await?;
