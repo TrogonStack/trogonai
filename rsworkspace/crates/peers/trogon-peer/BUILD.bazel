@@ -4,6 +4,7 @@ workspace_crate(
     integration_tests = {
         "attachment": {},
         "creation_precondition": {},
+        "detach": {},
         "enrollment": {},
         "enrollment_timestamp": {},
         "heartbeat": {},
