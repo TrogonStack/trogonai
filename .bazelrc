@@ -17,8 +17,18 @@ common:ci --ui_event_filters=-info
 build:ci --show_result=0
 test:ci --test_summary=terse
 
-# Lint checks run as aspects over the Rust targets. The checks are an output
-# group, so a build with this config also fails on unformatted sources.
+# The GitHub Actions cache has a 10 GB quota per repository, shared with the
+# Cargo, pnpm and mise caches, and a restored disk cache only ever grew. Bazel
+# trims it only after the server has been idle for the delay, so CI waits for
+# that before saving the cache (github:workflows:ci-bazel:trim-disk-cache).
+common:ci --experimental_disk_cache_gc_max_size=4G
+common:ci --experimental_disk_cache_gc_idle_delay=0s
+
+# Lint checks run as aspects over the Rust targets, so that `bazel build
+# --config=lint //...` checks the same targets CI builds. The checks are an
+# output group, so a build with this config also fails on unformatted sources;
+# --keep_going reports every finding instead of the first.
+build:lint --keep_going
 build:lint --aspects=//.config/bazel:rustfmt.bzl%rustfmt_aspect
 build:lint --output_groups=+rustfmt_checks
 

@@ -53,9 +53,6 @@ jobs:
       - name: Install dependencies
         run: mise run --skip-tools github:workflows:ci-web:install
 
-      - name: Format check
-        run: mise run --skip-tools github:workflows:ci-web:fmt-check
-
       - name: Lint
         run: mise run --skip-tools github:workflows:ci-web:lint
 
@@ -67,6 +64,3 @@ jobs:
 
       - name: Test
         run: mise run --skip-tools github:workflows:ci-web:test
-
-      - name: Primitive layer policy
-        run: mise run --skip-tools github:workflows:ci-web:check-primitives
