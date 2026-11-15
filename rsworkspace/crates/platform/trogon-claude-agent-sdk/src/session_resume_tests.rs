@@ -8,7 +8,7 @@ use serde::{Serialize, Serializer};
 
 use super::{
     AuthSources, ResumeWriter, copy_auth_files, redact_refresh_token, redact_refresh_token_ts,
-    secure_storage_config_dir, strip_settings_for_resume, strip_settings_for_resume_ts,
+    secure_storage_config_dir, strip_settings_for_resume, strip_settings_for_resume_ts, write_private_file,
 };
 use crate::{
     Environment, EnvironmentMode, SessionError, SummaryDialect,
@@ -195,5 +195,25 @@ async fn python_credentials_that_cannot_be_written_fail_the_resume() -> Result<(
     )
     .await;
     assert!(matches!(outcome, Err(SessionError::Io(error)) if error.kind() == io::ErrorKind::NotFound));
+    Ok(())
+}
+
+/// Both SDKs write resumed files with a plain truncating write into the fresh private directory (`fs.writeFile`,
+/// Python `path.open("w")`), so an existing file is replaced and a link is followed, not refused.
+#[test]
+fn resumed_files_are_written_with_a_plain_truncating_write() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("transcript.jsonl");
+    std::fs::write(&path, b"an older and longer transcript")?;
+    write_private_file(&NativeFileSystem, &path, b"new")?;
+    assert_eq!(std::fs::read(&path)?, b"new");
+    #[cfg(unix)]
+    {
+        let target = directory.path().join("target.jsonl");
+        let link = directory.path().join("link.jsonl");
+        std::os::unix::fs::symlink(&target, &link)?;
+        write_private_file(&NativeFileSystem, &link, b"through the link")?;
+        assert_eq!(std::fs::read(&target)?, b"through the link");
+    }
     Ok(())
 }

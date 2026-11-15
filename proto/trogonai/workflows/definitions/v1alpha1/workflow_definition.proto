@@ -11,6 +11,7 @@ import "trogonai/workflows/definitions/v1alpha1/digest.proto";
 import "trogonai/workflows/definitions/v1alpha1/node_ref.proto";
 import "trogonai/workflows/definitions/v1alpha1/policy.proto";
 import "trogonai/workflows/definitions/v1alpha1/value.proto";
+import "trogonai/workflows/definitions/v1alpha1/workload_identity.proto";
 
 message WorkflowDefinitionRef {
   string workflow_id = 1 [
@@ -45,6 +46,13 @@ message StoredWorkflowDefinition {
 // and replay; preserving opaque bytes alone does not make unknown behavior safe.
 // The constraints below prove local shape, not those admission guarantees.
 message WorkflowDefinition {
+  // Version 1 has no workload identity requirement. Version 2 requires it;
+  // admission/replay reject unsupported versions rather than discard identity.
+  option (buf.validate.message).cel = {
+    id: "workflow_definition.identity_contract"
+    message: "version 2 requires a workload identity profile and version 1 forbids it"
+    expression: "has(this.identity_requirement) == (this.contract_version == 2u)"
+  };
   option (buf.validate.message).cel = {
     id: "workflow_definition.unique_nodes"
     message: "node ids must be unique"
@@ -87,8 +95,14 @@ message WorkflowDefinition {
   RunPolicy policy = 6 [features.field_presence = LEGACY_REQUIRED];
   uint32 contract_version = 7 [
     features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).uint32.const = 1
+    (buf.validate.field).uint32 = {
+      in: [
+        1,
+        2
+      ]
+    }
   ];
+  WorkflowIdentityRequirement identity_requirement = 8;
 }
 
 message WorkflowNode {

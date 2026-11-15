@@ -1,0 +1,107 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/lifecycle.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_federation/v1alpha1/subject_binding.proto";
+
+// Owner ingress resolves the exact independent approval and authenticated
+// validation receipts. A well-shaped reference is not an authorization proof.
+message SubjectBindingActivation {
+  option (buf.validate.message).cel = {
+    id: "subject_binding_activation.evidence"
+    message: "activation receipts must bind the exact target scope and version"
+    expression: "this.approval_ref.owner_kind == 2 && this.validation_ref.owner_kind == 2 && this.approval_ref.operation_purpose == 1 && this.validation_ref.operation_purpose == 1 && this.subject_binding_ref.scope == this.approval_ref.scope && this.subject_binding_ref.version == this.approval_ref.version && this.subject_binding_ref.scope == this.validation_ref.scope && this.subject_binding_ref.version == this.validation_ref.version"
+  };
+  SubjectBindingRef subject_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationApprovalRef approval_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationValidationRef validation_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Normal revision stays in one owner/fence and strictly advances the accepted
+// revision. Restore requires an independently provisioned fence and old-writer
+// revocation, never a normal update to restored state (ADR#0098).
+message SubjectBindingRevision {
+  option (buf.validate.message).cel = {
+    id: "subject_binding_revision.continuity"
+    message: "a staged revision must preserve owner scope and fence and advance the revision"
+    expression: "this.current_subject_binding_ref.scope == this.proposed.subject_binding_ref.scope && this.current_subject_binding_ref.version.id == this.proposed.subject_binding_ref.version.id && this.current_subject_binding_ref.version.recovery_fence == this.proposed.subject_binding_ref.version.recovery_fence && this.proposed.subject_binding_ref.version.revision > this.current_subject_binding_ref.version.revision"
+  };
+  SubjectBindingRef current_subject_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  SubjectBinding proposed = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Each owner has a separate stream. Create uses NoStream; later commands use
+// the observed stream revision and stable Decider command_id. Ingress enforces
+// actor permissions, exact immutable artifacts, valid transitions and receipts.
+// Widening is independently approved. Emergency withdrawal needs no grant
+// approval and invalidates use before audit/bookkeeping recovery.
+message CreateSubjectBinding {
+  SubjectBinding configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message StageSubjectBindingRevision {
+  SubjectBindingRevision revision = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ActivateSubjectBinding {
+  SubjectBindingActivation activation = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WithdrawSubjectBinding {
+  SubjectBindingRef subject_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RetireSubjectBinding {
+  SubjectBindingRef subject_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Envelopes retain actor/time. Replay verifies artifacts, receipt provenance and
+// legal prior-state transitions; ordinary logs do not implement that evidence.
+message SubjectBindingEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    SubjectBinding created = 1;
+    SubjectBindingRevision revision_staged = 2;
+    SubjectBindingActivation activated = 3;
+    SubjectBindingRef withdrawn = 4;
+    SubjectBindingRef retired = 5;
+  }
+}
+
+message SubjectBindingState {
+  option (buf.validate.message).cel = {
+    id: "subject_binding_state.activation"
+    message: "an active configuration requires its exact activation evidence"
+    expression: "this.lifecycle != 2 || (has(this.activation) && this.activation.subject_binding_ref == this.configuration.subject_binding_ref)"
+  };
+  option (buf.validate.message).cel = {
+    id: "subject_binding_state.retirement"
+    message: "a retired configuration cannot admit use"
+    expression: "this.lifecycle != 3 || this.admission == 2"
+  };
+  option (buf.validate.message).cel = {
+    id: "subject_binding_state.staging"
+    message: "staged configuration must belong to the current owner and fence with a newer revision"
+    expression: "!has(this.staged) || (this.staged.current_subject_binding_ref == this.configuration.subject_binding_ref)"
+  };
+  SubjectBinding configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConfigurationAdmission admission = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SubjectBindingActivation activation = 4;
+  SubjectBindingRevision staged = 5;
+}

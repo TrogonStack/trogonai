@@ -12,7 +12,8 @@ from gate_errors import Code, GateError
 
 LIB = Path(__file__).resolve().parents[1]
 REVIEWED = LIB / "upstream"
-CRATE_TESTS = LIB.parents[3] / "tests"
+CRATE = LIB.parents[3]
+CRATE_TESTS = CRATE / "tests"
 TOP_LEVEL_TEST = re.compile(
     r"^#\[(?:tokio::)?test[^\]]*\]\n(?:(?:#\[.*\]|///.*)\n)*(?:async )?fn (\w+)", re.MULTILINE)
 
@@ -22,6 +23,12 @@ def source_test_selectors():
     return frozenset(f"{path.stem}::{name}"
                      for path in CRATE_TESTS.glob("*.rs")
                      for name in TOP_LEVEL_TEST.findall(path.read_text()))
+
+
+def source_unit_selectors():
+    """Unit test functions under the crate's src/, named `src/<path>.rs::<name>`."""
+    return bm.unit_test_selectors({path.relative_to(CRATE).as_posix(): path.read_text()
+                                   for path in (CRATE / "src").rglob("*.rs")})
 
 PY_PATH = "src/pkg/mod.py"
 TS_PATH = "package/sdk.mjs"
@@ -237,6 +244,56 @@ class BehaviorMapTests(unittest.TestCase):
         bm.contracts_check(behaviors, frozenset({"query::rejects_unknown"}))
         self.assertCode(Code.REFERENCE, bm.contracts_check, behaviors, frozenset())
 
+    def test_unit_test_selectors_name_only_test_functions(self):
+        source = (
+            "fn helper() {}\n"
+            "#[test]\n"
+            "fn plain() {}\n"
+            "mod tests {\n"
+            "    #[tokio::test(start_paused = true)]\n"
+            "    /// Pins the paused clock.\n"
+            "    #[allow(dead_code)]\n"
+            "    async fn paused() {}\n"
+            "    #[tokio::test]\n"
+            "    async fn multi() {}\n"
+            "    #[test_case]\n"
+            "    fn not_a_test() {}\n"
+            "}\n")
+        self.assertEqual(
+            bm.unit_test_selectors({"src/nested/a_tests.rs": source}),
+            {"src/nested/a_tests.rs::plain", "src/nested/a_tests.rs::paused",
+             "src/nested/a_tests.rs::multi"})
+
+    def test_unit_test_selectors_reject_paths_outside_src(self):
+        for path in ("tests/a.rs", "src/A.rs", "src/a.py", "/src/a.rs", "src/../a.rs"):
+            with self.subTest(path=path):
+                self.assertCode(Code.FORMAT, bm.unit_test_selectors, {path: "#[test]\nfn a() {}\n"})
+
+    def test_contracts_may_name_unit_tests(self):
+        behaviors = fixture_behaviors()
+        units = bm.unit_test_selectors({"src/a_tests.rs": "#[test]\nfn pins() {}\nfn helper() {}\n"})
+        behaviors["rows"][0]["contracts"] = ["query::rejects_unknown", "src/a_tests.rs::pins"]
+        bm.contracts_check(behaviors, frozenset({"query::rejects_unknown"}), units)
+
+    def test_unit_contracts_must_resolve_to_a_test_function(self):
+        behaviors = fixture_behaviors()
+        units = bm.unit_test_selectors({"src/a_tests.rs": "#[test]\nfn pins() {}\nfn helper() {}\n"})
+        for selector in ("src/a_tests.rs::helper", "src/a_tests.rs::absent", "src/b_tests.rs::pins"):
+            with self.subTest(selector=selector):
+                behaviors["rows"][0]["contracts"] = [selector]
+                self.assertCode(Code.REFERENCE, bm.contracts_check, behaviors, frozenset(), units)
+        behaviors["rows"][0]["contracts"] = ["src/a_tests.rs::pins"]
+        self.assertCode(Code.REFERENCE, bm.contracts_check, behaviors, frozenset({"src/a_tests.rs::pins"}))
+
+    def test_malformed_unit_contracts_are_format(self):
+        behaviors = fixture_behaviors()
+        units = frozenset({"src/a_tests.rs::pins"})
+        for selector in ("src/a_tests.rs", "src/a_tests.rs::", "src/A.rs::pins",
+                         "src/a_tests.rs::pins::more", "src/../a_tests.rs::pins"):
+            with self.subTest(selector=selector):
+                behaviors["rows"][0]["contracts"] = [selector]
+                self.assertCode(Code.FORMAT, bm.contracts_check, behaviors, frozenset(), units)
+
     def test_validation_does_not_mutate_input(self):
         behaviors = fixture_behaviors()
         before = copy.deepcopy(behaviors)
@@ -266,7 +323,7 @@ class ReviewedMappingTests(unittest.TestCase):
 
     def test_mapping_is_well_formed(self):
         bm.pinned_files(self.pins)
-        bm.contracts_check(self.behaviors, source_test_selectors())
+        bm.contracts_check(self.behaviors, source_test_selectors(), source_unit_selectors())
 
     def test_mapping_matches_reviewed_bytes(self):
         ids = bm.validate(self.behaviors, self.pins, self.reviewed_sources())

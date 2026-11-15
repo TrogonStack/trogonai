@@ -1,11 +1,8 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "grpc-nats-micro",
-    # The echo conformance test starts a NATS server in a container through Docker.
-    integration_tests = {"echo_conformance": {"tags": ["requires-network"]}},
-    deps = [
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
+    integration_tests = {
+        # Starts a NATS server in a container through Docker.
+        "echo_conformance": {"tags": ["requires-network"]},
+    },
 )
