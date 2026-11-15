@@ -1,0 +1,1 @@
+    Settings    REG_SZ    {"availableModels":["opus"],"permissions":{"deny":["WebFetch"]}}
