@@ -1,5 +1,6 @@
 use std::{
     error::Error,
+    ffi::OsStr,
     io::{self, BufRead, Write},
     sync::{
         Arc,
@@ -9,6 +10,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
+use trogon_claude_agent_sdk::adapters::{EnvironmentVariable, SystemEnvironment};
 
 fn emit(value: Value) -> io::Result<()> {
     let stdout = io::stdout();
@@ -23,6 +25,21 @@ fn field<'a>(value: &'a Value, key: &str) -> io::Result<&'a str> {
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| io::Error::other("fixture expected string field"))
+}
+
+/// The CLI takes a prompt as a string, which Python and the client write, or as content blocks, which `sdk.mjs`
+/// writes for a string given to `query()`.
+fn prompt_text(content: &Value) -> io::Result<&str> {
+    match content {
+        Value::Array(blocks) => blocks
+            .first()
+            .map_or(Err(io::Error::other("fixture expected a text block")), |block| {
+                field(block, "text")
+            }),
+        other => other
+            .as_str()
+            .ok_or_else(|| io::Error::other("fixture expected string field")),
+    }
 }
 
 fn result(text: &str) -> Value {
@@ -81,9 +98,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .next()
         .ok_or_else(|| io::Error::other("fixture missing initialize"))??;
     let initialize: Value = serde_json::from_str(&first)?;
-    // The TypeScript argv shape delivers the system prompt inside `initialize`.
+    // The TypeScript argv shape delivers the system prompt inside `initialize`, the Python one on the command line.
     let custom_prompt = initialize["request"]["systemPrompt"][0]
         .as_str()
+        .or_else(|| {
+            args.windows(2)
+                .find_map(|pair| (pair[0] == "--system-prompt").then_some(pair[1].as_str()))
+        })
         .filter(|prompt| !prompt.is_empty());
     assert_eq!(initialize["type"], "control_request");
     assert_eq!(initialize["request"]["subtype"], "initialize");
@@ -108,17 +129,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::thread::sleep(Duration::from_secs(30));
         return Ok(());
     }
-    if mode == "init-malformed" {
-        emit(
-            json!({"type":"control_response","response":{"subtype":"success","request_id":initialize_id,"response":42}}),
-        )?;
-        std::thread::sleep(Duration::from_secs(30));
-        return Ok(());
-    }
     let initialization = if mode == "hook" {
         json!({"hooks_applied":true,"hook_on_failure_supported":true,"claude_code_version":"2.1.319"})
     } else if mode == "hook-not-applied" {
         json!({"hooks_applied":false,"hook_on_failure_supported":true})
+    } else if mode == "init-malformed" {
+        json!(42)
     } else if mode == "init-malformed-known" {
         json!({"models":"invalid"})
     } else if mode == "connection-info" {
@@ -139,7 +155,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         json!({"type":"control_response","response":{"subtype":"success","request_id":initialize_id,"response":initialization}}),
     )?;
     emit(
-        json!({"type":"system","subtype":"init","session_id":"fixture-session","arguments":args,"cwd":std::env::current_dir()?,"initialize_request":initialize["request"],"config_dir":std::env::var_os("CLAUDE_CONFIG_DIR")}),
+        json!({"type":"system","subtype":"init","session_id":"fixture-session","arguments":args,"cwd":std::env::current_dir()?,"initialize_request":initialize["request"],"config_dir":SystemEnvironment.var_os(OsStr::new("CLAUDE_CONFIG_DIR"))}),
     )?;
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -151,7 +167,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         match field(&value, "type")? {
             "user" => {
                 assert_eq!(value["message"]["role"], "user");
-                assert_eq!(value["session_id"], "");
+                // A one-shot prompt names the empty session; a streamed message names none.
+                assert!(
+                    value
+                        .get("session_id")
+                        .is_none_or(|session| session.as_str() == Some(""))
+                );
                 assert_eq!(value["parent_tool_use_id"], Value::Null);
                 input_count += 1;
                 if mode == "structured" {
@@ -168,7 +189,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     continue;
                 }
-                let prompt = field(&value["message"], "content")?;
+                let prompt = prompt_text(&value["message"]["content"])?;
                 match mode {
                     "normal" | "argv" | "connection-info" => {
                         emit(assistant(prompt))?;
@@ -263,7 +284,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         )?;
                         if mode == "permission-cancel" {
                             emit(json!({"type":"control_cancel_request","request_id":"permission-1"}))?;
-                            emit(result("cancelled-permission"))?;
                         }
                     }
                     "hook" => {
@@ -313,7 +333,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         emit(result(field(&response["result"]["content"][0], "text")?))?;
                     }
                     "mirror" | "mirror-two" | "mirror-close" => {
-                        let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+                        let config = SystemEnvironment
+                            .var_os(OsStr::new("CLAUDE_CONFIG_DIR"))
                             .ok_or_else(|| io::Error::other("missing config root"))?;
                         let path =
                             std::path::PathBuf::from(config).join("projects/fixture-project/fixture-session.jsonl");
@@ -361,19 +382,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                         emit(
                             json!({"type":"control_request","request_id":"dialog-1","request":{"subtype":"request_user_dialog","dialog_kind":if mode == "dialog" { "fixture-dialog" } else { "undeclared" },"payload":{"choice":1},"tool_use_id":"tool-dialog"}}),
                         )?;
-                        if mode == "dialog-undeclared" {
-                            emit(result("undeclared"))?;
-                        }
                     }
-                    "malformed" => emit(json!({"type":"assistant","message":{"content":[]}}))?,
-                    "oversized" => {
+                    "malformed" => {
+                        emit(json!({"type":"assistant","message":{"content":[]}}))?;
+                        emit(result(prompt))?;
+                    }
+                    "oversized" | "oversized-live" => {
                         io::stdout().write_all(&vec![b'x'; 8192])?;
                         io::stdout().write_all(b"\n")?;
                         io::stdout().flush()?;
+                        if mode == "oversized-live" {
+                            // Keeps running past the bad frame, so the SDK has to stop it.
+                            std::thread::sleep(Duration::from_secs(30));
+                        }
                     }
                     "failure" => {
                         io::stderr().write_all(&vec![b'Z'; 128 * 1024])?;
                         io::stderr().write_all(b"diagnostic-tail")?;
+                        std::process::exit(7);
+                    }
+                    "failure-secret" => {
+                        let secret = format!("sk-{}", "Ab1".repeat(8));
+                        io::stderr().write_all(format!("rejected key {secret} at startup\n").as_bytes())?;
                         std::process::exit(7);
                     }
                     "error-result-exit" => {
@@ -434,6 +464,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if mode == "controls" || mode == "mcp" || mode == "mcp-retain" {
                     let request = &value["request"];
                     emit(json!({"type":"system","subtype":"control_observed","request":request}))?;
+                    if request["subtype"] == "mcp_read_resource" && request["uri"] == "ui://local/none" {
+                        emit(
+                            json!({"type":"control_response","response":{"subtype":"success","request_id":value["request_id"]}}),
+                        )?;
+                        continue;
+                    }
+                    if request["subtype"] == "mcp_read_resource" && request["uri"] == "https://local/app" {
+                        emit(
+                            json!({"type":"control_response","response":{"subtype":"error","request_id":value["request_id"],"error":"fixture reads ui:// resources only"}}),
+                        )?;
+                        continue;
+                    }
                     let response = match field(request, "subtype")? {
                         "interrupt" => {
                             if request["cancel_queued"] == true {
@@ -450,6 +492,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             json!({"categories":[],"totalTokens":3,"maxTokens":100,"rawMaxTokens":100,"percentage":3,"model":"fixture-model","isAutoCompactEnabled":true,"memoryFiles":[],"mcpTools":[]})
                         }
                         "background_tasks" => json!({"backgrounded":true}),
+                        "mcp_read_resource" => match request["uri"].as_str() {
+                            Some("ui://local/null") => Value::Null,
+                            Some("ui://local/text") => json!("as sent"),
+                            _ => {
+                                json!({"contents":[{"uri":request["uri"],"mimeType":"text/html;profile=mcp-app","text":"<p>app</p>","_meta":{"ui":{"csp":{}}}}],"extra":true})
+                            }
+                        },
                         "mcp_set_servers" => {
                             let names = request["servers"]
                                 .as_object()
@@ -504,11 +553,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             "control_response" => {
-                if matches!(
-                    mode,
-                    "dialog-undeclared" | "dialog-undeclared-saturated" | "dialog-undeclared-duplicate"
-                ) {
-                    return Err(io::Error::other("undeclared dialog received a response").into());
+                if matches!(mode, "dialog-undeclared-saturated" | "dialog-undeclared-duplicate") {
+                    return Err(io::Error::other("unanswered dialog received a response").into());
                 }
                 if mode == "permission-context" || mode == "permission-cli-arg" {
                     emit(
@@ -517,7 +563,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     emit(result("context"))?;
                     continue;
                 }
-                if mode == "elicitation" || mode == "dialog" {
+                if mode == "elicitation" || mode == "dialog" || mode == "dialog-undeclared" {
                     emit(result(&serde_json::to_string(&value["response"]["response"])?))?;
                     continue;
                 }
@@ -531,13 +577,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
                 if mode == "permission-cancel" {
-                    return Err(io::Error::other("cancelled callback sent a response").into());
+                    assert_eq!(value["response"]["request_id"], "permission-1");
+                    emit(result(field(&value["response"]["response"], "behavior")?))?;
+                    continue;
                 }
                 if mode == "unknown-control" {
                     assert_eq!(value["response"]["subtype"], "error");
                     emit(result("unsupported-control-rejected"))?;
                 } else {
                     assert_eq!(value["response"]["request_id"], "permission-1");
+                    if value["response"]["subtype"] == "error" {
+                        emit(result(field(&value["response"], "error")?))?;
+                        continue;
+                    }
                     assert_eq!(value["response"]["subtype"], "success");
                     let decision = &value["response"]["response"];
                     let behavior = field(decision, "behavior")?;

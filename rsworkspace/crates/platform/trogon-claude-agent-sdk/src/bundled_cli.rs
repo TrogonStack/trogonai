@@ -3,7 +3,8 @@
 //! Python resolves `<package>/_bundled/claude[.exe]` before any other discovery (`_find_bundled_cli`).
 //! TypeScript resolves the native binary from one of the `@anthropic-ai/claude-agent-sdk-<platform>-<arch>`
 //! optional dependency packages through Node module resolution (`vJ`). This crate ships no binary and has no
-//! Node runtime, so both lookups take the roots from the caller and nothing here runs during `connect`.
+//! Node runtime, so both lookups take the roots from the caller. `connect` runs the Python lookup only when
+//! `ClaudeAgentOptions::bundled_cli_root` names one, because TypeScript has no bundled directory.
 
 use std::{
     ffi::OsString,
@@ -11,9 +12,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use unicode_general_category::{GeneralCategory, get_general_category};
+
 use crate::{
-    adapters::{CanonicalizePath, ReadMetadata},
-    constants::{BUNDLED_DIRECTORY, PACKAGE_SCOPE_NAME},
+    adapters::{CanonicalizePath, ReadFile, ReadMetadata},
+    constants::{
+        BUNDLED_CLI_VERSION_FILE, BUNDLED_DIRECTORY, DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION, PACKAGE_SCOPE_NAME,
+    },
 };
 
 fn is_file<F: ReadMetadata>(filesystem: &F, path: &Path) -> bool {
@@ -27,6 +32,80 @@ pub fn find_bundled_cli<F: ReadMetadata>(package_root: &Path, windows: bool, fil
         .join(BUNDLED_DIRECTORY)
         .join(if windows { "claude.exe" } else { "claude" });
     is_file(filesystem, &candidate).then_some(candidate)
+}
+
+fn is_decimal(c: char) -> bool {
+    get_general_category(c) == GeneralCategory::DecimalNumber
+}
+
+/// The value Python's `int` gives a Unicode `Nd` digit. Every script's digits sit in runs of ten consecutive code
+/// points that start at zero, so the value is the offset from the start of the contiguous `Nd` block modulo ten.
+fn decimal_value(c: char) -> u32 {
+    let mut offset = 0;
+    let mut cursor = c;
+    while let Some(previous) = (cursor as u32)
+        .checked_sub(1)
+        .and_then(char::from_u32)
+        .filter(|previous| is_decimal(*previous))
+    {
+        offset += 1;
+        cursor = previous;
+    }
+    offset % 10
+}
+
+/// The leading `major.minor.patch` of a version string, like Python's `re.match(r"(\d{1,9})\.(\d{1,9})\.(\d{1,9})")`:
+/// anchored at the start, nothing is required after the patch number and a patch run longer than nine digits is
+/// cut at nine. Python's `\d` is any Unicode `Nd` digit and `int` reads every one of them.
+fn leading_version(version: &str) -> Option<[u32; 3]> {
+    fn number(text: &str, exact: bool) -> Option<(u32, &str)> {
+        let digits = text.chars().take_while(|c| is_decimal(*c)).count();
+        let take = if exact { digits } else { digits.min(9) };
+        if take == 0 || take > 9 {
+            return None;
+        }
+        let (taken, rest) = text.split_at(text.chars().take(take).map(char::len_utf8).sum());
+        let value = taken.chars().fold(0, |value, c| value * 10 + decimal_value(c));
+        Some((value, rest))
+    }
+    let (major, rest) = number(version, true)?;
+    let (minor, rest) = number(rest.strip_prefix('.')?, true)?;
+    let (patch, _) = number(rest.strip_prefix('.')?, false)?;
+    Some([major, minor, patch])
+}
+
+/// Python `_meets_derived_client_app_minimum`: the version starts with `major.minor.patch` and that triple is not
+/// below `999.0.0`, compared as a list. Nothing qualifies until upstream lowers the minimum.
+pub fn meets_derived_client_app_minimum(version: &str) -> bool {
+    leading_version(version).is_some_and(|parsed| parsed >= DERIVED_CLIENT_APP_MINIMUM_CLAUDE_CODE_VERSION)
+}
+
+/// Python `_derive_client_app` for the bundled executable: whether `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` is
+/// derived. It is when the pinned CLI version of the SDK package (`pinned_cli_version`, Python's
+/// `__cli_version__`) meets the minimum, `cli_path` is the bundled executable that [`find_bundled_cli`] finds
+/// under `package_root`, and the `claude.version` file beside it records a version that meets the minimum. A
+/// missing or unreadable record, or one that is not UTF-8, means no. Any other executable counts as too old.
+///
+/// TypeScript has neither the gate nor the trigger, so `connect` calls this only when
+/// `ClaudeAgentOptions::client_app_derivation` names a [`crate::BundledCli`].
+pub fn bundled_cli_derives_client_app<F: ReadMetadata, H: ReadFile>(
+    cli_path: &Path,
+    package_root: &Path,
+    windows: bool,
+    pinned_cli_version: &str,
+    filesystem: &F,
+    host: &H,
+) -> bool {
+    if !meets_derived_client_app_minimum(pinned_cli_version) {
+        return false;
+    }
+    if find_bundled_cli(package_root, windows, filesystem).as_deref() != Some(cli_path) {
+        return false;
+    }
+    host.read_file(&cli_path.with_file_name(BUNDLED_CLI_VERSION_FILE))
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .is_some_and(|recorded| meets_derived_client_app_minimum(&recorded))
 }
 
 /// The platform a native package is selected for, spelled like Node's `process.platform` and `process.arch`.
@@ -47,9 +126,8 @@ impl NativePackageTarget {
         }
     }
 
-    /// The platform this crate was compiled for. Upstream decides musl at run time from the Node process report
-    /// (`glibcVersionRuntime` absent on Linux); a Rust process has no such report, so the compile target's libc
-    /// stands in for it.
+    /// The platform this process runs on, with musl preferred on Linux unless the process runs against glibc, as
+    /// upstream decides from the Node process report.
     pub fn host() -> Self {
         let platform = match std::env::consts::OS {
             "macos" => "darwin",
@@ -64,7 +142,7 @@ impl NativePackageTarget {
             "loongarch64" => "loong64",
             other => other,
         };
-        Self::new(platform, arch, cfg!(all(target_os = "linux", target_env = "musl")))
+        Self::new(platform, arch, cfg!(target_os = "linux") && !reports_glibc_runtime())
     }
 
     pub fn platform(&self) -> &str {
@@ -97,6 +175,21 @@ impl NativePackageTarget {
             .map(|package| format!("{package}/claude{extension}"))
             .collect()
     }
+}
+
+/// Node's process report carries `glibcVersionRuntime`, read with `gnu_get_libc_version()` at run time, only when
+/// the process runs against glibc; upstream prefers musl on Linux whenever the field is absent. This asks the same
+/// function of this process.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn reports_glibc_runtime() -> bool {
+    // SAFETY: `gnu_get_libc_version` takes no arguments and returns a pointer to a static string.
+    !unsafe { libc::gnu_get_libc_version() }.is_null()
+}
+
+/// A process that is not linked against glibc has no `gnu_get_libc_version`, like a Node built without glibc.
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn reports_glibc_runtime() -> bool {
+    false
 }
 
 /// Resolves a module specifier to a file path the way Node's `require.resolve` does for the calling module.

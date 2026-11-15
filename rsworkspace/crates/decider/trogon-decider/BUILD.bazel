@@ -1,3 +1,6 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(name = "trogon-decider")
+workspace_crate(
+    name = "trogon-decider",
+    crate_features = ["test-support"],
+)

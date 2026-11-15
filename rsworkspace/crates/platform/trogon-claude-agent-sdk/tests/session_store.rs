@@ -11,9 +11,10 @@ use std::{
 
 use serde_json::json;
 use trogon_claude_agent_sdk::{
-    Environment, InMemorySessionStore, MirrorEnqueueError, MirrorFailureError, SessionEntry, SessionError, SessionId,
-    SessionKey, SessionProjectKey, SessionRuntime, SessionStore, SessionStoreError, SessionStoreFuture,
-    SessionStoreOptions, SessionSubpath, StoreResume, Timeout, TranscriptMirror,
+    Environment, EnvironmentMode, InMemorySessionStore, MirrorEnqueueError, MirrorFailureError, SessionEntry,
+    SessionError, SessionId, SessionKey, SessionListEntry, SessionProjectKey, SessionRuntime, SessionStore,
+    SessionStoreError, SessionStoreFuture, SessionStoreOperation, SessionStoreOptions, SessionSubpath, StoreResume,
+    SummaryDialect, Timeout, TranscriptMirror,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -29,9 +30,9 @@ fn memory_mirror_root() -> PathBuf {
 
 fn key(project: &str, session: &str) -> Result<SessionKey, Box<dyn Error>> {
     Ok(SessionKey::new(
-        SessionProjectKey::new(project)?,
+        SessionProjectKey::new(project),
         SessionId::from(session),
-    )?)
+    ))
 }
 fn entry(kind: &str, value: usize) -> Result<SessionEntry, Box<dyn Error>> {
     Ok(SessionEntry::try_from(
@@ -41,7 +42,7 @@ fn entry(kind: &str, value: usize) -> Result<SessionEntry, Box<dyn Error>> {
 fn options(store: Arc<dyn SessionStore>, root: &Path) -> Result<SessionStoreOptions, Box<dyn Error>> {
     let mut options = SessionStoreOptions::from(store);
     options.config_directory = Some(root.to_path_buf());
-    options.project_key = Some(SessionProjectKey::new("project")?);
+    options.project_key = Some(SessionProjectKey::new("project"));
     Ok(options)
 }
 
@@ -91,7 +92,7 @@ async fn repeated_stable_uuids_are_stored_again_like_upstream_reference_stores()
 async fn projects_sessions_and_subpaths_are_isolated_and_delete_cascades() -> TestResult {
     let store = InMemorySessionStore::new();
     let main = key("project", SESSION)?;
-    let sub = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")?);
+    let sub = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one"));
     let other = key("other-project", SESSION)?;
     store.append(&main, &[entry("user", 1)?]).await?;
     store.append(&sub, &[entry("assistant", 2)?]).await?;
@@ -125,7 +126,7 @@ fn store_paths_reject_traversal_and_windows_aliases() -> TestResult {
         "C:escape",
         "subagents/nul\0byte",
     ] {
-        assert!(SessionSubpath::new(value).is_err(), "accepted unsafe subpath");
+        assert!(SessionSubpath::checked(value).is_err(), "accepted unsafe subpath");
     }
     if cfg!(windows) {
         for value in [
@@ -134,14 +135,20 @@ fn store_paths_reject_traversal_and_windows_aliases() -> TestResult {
             "subagents/name.",
             "subagents//empty",
         ] {
-            assert!(SessionSubpath::new(value).is_err(), "accepted a Windows alias");
+            assert!(SessionSubpath::checked(value).is_err(), "accepted a Windows alias");
         }
     }
     for value in ["..", "../project", "NUL", "project.", "project ", "C:project"] {
-        assert!(SessionProjectKey::new(value).is_err(), "accepted unsafe project key");
+        assert!(
+            SessionProjectKey::checked(value).is_err(),
+            "accepted unsafe project key"
+        );
     }
     for value in ["NUL", "session.", "session ", "../session", "C:session"] {
-        assert!(key("project", value).is_err(), "accepted unsafe session key");
+        assert!(
+            SessionKey::checked(SessionProjectKey::new("project"), SessionId::from(value)).is_err(),
+            "accepted unsafe session key"
+        );
     }
     let root = tempfile::tempdir()?;
     assert!(SessionKey::from_transcript_path(&root.path().join("project/../escape.jsonl"), root.path()).is_err());
@@ -162,7 +169,7 @@ async fn resume_materializes_main_subagents_and_metadata_without_touching_creden
     let root = tempfile::tempdir()?;
     let store = Arc::new(InMemorySessionStore::new());
     let main = key("project", SESSION)?;
-    let sub = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")?);
+    let sub = main.clone().with_subpath(SessionSubpath::new("subagents/agent-one"));
     store.append(&main, &[entry("user", 1)?]).await?;
     store
         .append(
@@ -178,6 +185,7 @@ async fn resume_materializes_main_subagents_and_metadata_without_touching_creden
         StoreResume::Session(SessionId::from(SESSION)),
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await?;
     let config = runtime.config_dir.clone().ok_or("missing config directory")?;
@@ -211,6 +219,7 @@ async fn w3_resume_leaves_an_existing_caller_transcript_untouched() -> TestResul
         StoreResume::Session(SessionId::from(SESSION)),
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await?;
     let config = runtime.config_dir.clone().ok_or("missing config directory")?;
@@ -235,6 +244,7 @@ async fn configuring_mirror_without_resume_does_not_create_a_config_directory() 
         StoreResume::None,
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await?;
     assert_eq!(runtime.config_dir, Some(config_root.clone()));
@@ -250,20 +260,34 @@ async fn latest_resume_skips_sidechains_and_materializes_the_newest_main_session
     let main = key("project", SESSION)?;
     let sidechain = key("project", "123e4567-e89b-42d3-a456-426614174001")?;
     store.append(&main, &[entry("user", 1)?]).await?;
+    // The store stamps appends with the wall clock in milliseconds; keep the sidechain strictly newer.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     store
         .append(
             &sidechain,
             &[SessionEntry::try_from(json!({"type":"assistant","isSidechain":true}))?],
         )
         .await?;
-    let runtime = SessionRuntime::prepare(
-        &options(store, root.path())?,
-        StoreResume::Latest,
-        root.path(),
-        &Environment::default(),
-    )
-    .await?;
-    assert_eq!(runtime.resume_session_id.as_ref().map(SessionId::as_str), Some(SESSION));
+    // Python walks past sidechains; TypeScript `nnt` resumes the newest listed session as is.
+    for (dialect, expected) in [
+        (SummaryDialect::Python, SESSION),
+        (SummaryDialect::TypeScript, sidechain.session_id().as_str()),
+    ] {
+        let mut options = options(store.clone(), root.path())?;
+        options.dialect = dialect;
+        let runtime = SessionRuntime::prepare(
+            &options,
+            StoreResume::Latest,
+            root.path(),
+            &Environment::default(),
+            Default::default(),
+        )
+        .await?;
+        assert_eq!(
+            runtime.resume_session_id.as_ref().map(SessionId::as_str),
+            Some(expected)
+        );
+    }
     Ok(())
 }
 
@@ -278,15 +302,16 @@ async fn resume_entry_and_byte_limits_refuse_materialization_without_transcript_
             .await?;
         let mut options = options(store, root.path())?;
         if bytes_limited {
-            options.limits.max_resume_bytes = NonZeroUsize::new(2).ok_or("zero bound")?;
+            options.limits.max_resume_bytes = Some(NonZeroUsize::new(2).ok_or("zero bound")?);
         } else {
-            options.limits.max_resume_entries = NonZeroUsize::new(1).ok_or("zero bound")?;
+            options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero bound")?);
         }
         let outcome = SessionRuntime::prepare(
             &options,
             StoreResume::Session(SessionId::from(SESSION)),
             root.path(),
             &Environment::default(),
+            Default::default(),
         )
         .await;
         if bytes_limited {
@@ -315,18 +340,19 @@ async fn resume_subkey_limit_cleans_an_already_seeded_main_transcript() -> TestR
     for name in ["subagents/one", "subagents/two"] {
         store
             .append(
-                &main.clone().with_subpath(SessionSubpath::new(name)?),
+                &main.clone().with_subpath(SessionSubpath::new(name)),
                 &[entry("assistant", 2)?],
             )
             .await?;
     }
     let mut options = options(store, root.path())?;
-    options.limits.max_subkeys = trogon_claude_agent_sdk::QueueCapacity::new(1)?;
+    options.limits.max_subkeys = Some(trogon_claude_agent_sdk::QueueCapacity::new(1)?);
     let outcome = SessionRuntime::prepare(
         &options,
         StoreResume::Session(SessionId::from(SESSION)),
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await;
     assert!(matches!(outcome, Err(SessionError::SubpathLimit)));
@@ -354,16 +380,275 @@ impl SessionStore for PendingLoadStore {
 async fn resume_load_timeout_does_not_install_any_files() -> TestResult {
     let root = tempfile::tempdir()?;
     let mut options = options(Arc::new(PendingLoadStore), root.path())?;
-    options.limits.load_timeout = Timeout::new(Duration::from_millis(20))?;
+    options.limits.load_timeout = Timeout::new(Duration::from_millis(20));
     let outcome = SessionRuntime::prepare(
         &options,
         StoreResume::Session(SessionId::from(SESSION)),
         root.path(),
         &Environment::default(),
+        Default::default(),
     )
     .await;
-    assert!(matches!(outcome, Err(SessionError::LoadTimeout)));
+    assert!(matches!(outcome, Err(SessionError::LoadTimeout(_))));
     assert!(std::fs::read_dir(root.path())?.next().is_none());
+    Ok(())
+}
+
+async fn resume(
+    options: &SessionStoreOptions,
+    resume: StoreResume,
+    cwd: &Path,
+) -> Result<SessionRuntime, SessionError> {
+    SessionRuntime::prepare(options, resume, cwd, &Environment::default(), Default::default()).await
+}
+
+/// TypeScript `Wn(directory, env)` names the project from `options.env` alone when it replaces the process
+/// environment, so the store-backed resume loads the session under that name.
+#[tokio::test]
+async fn typescript_resume_reads_the_project_name_from_a_replacing_env() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    store
+        .append(&key("named-project", SESSION)?, &[entry("user", 1)?])
+        .await?;
+    let mut options = options(store, root.path())?;
+    options.project_key = None;
+    let subprocess = Environment::from([
+        ("CLAUDE_CONFIG_DIR".into(), "/configured".into()),
+        ("CLAUDE_CODE_PROJECT_DIR_NAME".into(), "named-project".into()),
+    ]);
+    let runtime = SessionRuntime::prepare(
+        &options,
+        StoreResume::Session(SessionId::from(SESSION)),
+        root.path(),
+        &subprocess,
+        EnvironmentMode::Replace,
+    )
+    .await?;
+    assert_eq!(runtime.resume_session_id.as_ref().map(SessionId::as_str), Some(SESSION));
+    let config = runtime.config_dir.clone().ok_or("missing config directory")?;
+    assert!(
+        config
+            .join("projects/named-project")
+            .join(format!("{SESSION}.jsonl"))
+            .is_file()
+    );
+    Ok(())
+}
+
+/// Python derives the project from the working directory alone when no project key is configured.
+#[tokio::test]
+async fn python_resume_without_a_project_key_names_the_project_from_the_directory() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut options = options(Arc::new(InMemorySessionStore::new()), root.path())?;
+    options.project_key = None;
+    options.dialect = SummaryDialect::Python;
+    let runtime = resume(&options, StoreResume::None, root.path()).await?;
+    assert!(runtime.resume_session_id.is_none());
+    assert!(runtime.materialized.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn latest_resume_with_nothing_to_resume_runs_without_a_resumed_session() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    let mut options = options(store.clone(), root.path())?;
+    let runtime = resume(&options, StoreResume::Latest, root.path()).await?;
+    assert!(runtime.resume_session_id.is_none(), "typescript, empty listing");
+    // Python skips sessions whose id is not a UUID and resumes nothing when no other session is listed.
+    store
+        .append(&key("project", "not-a-uuid")?, &[entry("user", 1)?])
+        .await?;
+    options.dialect = SummaryDialect::Python;
+    let runtime = resume(&options, StoreResume::Latest, root.path()).await?;
+    assert!(runtime.resume_session_id.is_none(), "python, no UUID session");
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_latest_resume_refuses_a_listing_over_the_entry_limit() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    let other = format!("{}1", &SESSION[..SESSION.len() - 1]);
+    for session in [SESSION, other.as_str()] {
+        store.append(&key("project", session)?, &[entry("user", 1)?]).await?;
+    }
+    let mut options = options(store, root.path())?;
+    options.dialect = SummaryDialect::Python;
+    options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero bound")?);
+    assert!(matches!(
+        resume(&options, StoreResume::Latest, root.path()).await,
+        Err(SessionError::EntryLimit)
+    ));
+    Ok(())
+}
+
+/// Python writes a subagent's transcript and its metadata sidecar independently: either may be absent.
+#[tokio::test]
+async fn python_resume_writes_only_the_subagent_files_that_have_entries() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    let main = key("project", SESSION)?;
+    store.append(&main, &[entry("user", 1)?]).await?;
+    let metadata = SessionEntry::try_from(json!({"type":"agent_metadata","agentType":"reviewer"}))?;
+    store
+        .append(
+            &main
+                .clone()
+                .with_subpath(SessionSubpath::new("subagents/metadata-only")),
+            std::slice::from_ref(&metadata),
+        )
+        .await?;
+    store
+        .append(
+            &main
+                .clone()
+                .with_subpath(SessionSubpath::new("subagents/transcript-only")),
+            &[entry("assistant", 2)?],
+        )
+        .await?;
+    let mut options = options(store, root.path())?;
+    options.dialect = SummaryDialect::Python;
+    let runtime = resume(&options, StoreResume::Session(SessionId::from(SESSION)), root.path()).await?;
+    let subagents = runtime
+        .config_dir
+        .clone()
+        .ok_or("missing config directory")?
+        .join("projects/project")
+        .join(SESSION)
+        .join("subagents");
+    assert!(subagents.join("metadata-only.meta.json").is_file());
+    assert!(!subagents.join("metadata-only.jsonl").exists());
+    assert!(subagents.join("transcript-only.jsonl").is_file());
+    assert!(!subagents.join("transcript-only.meta.json").exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_resume_counts_a_metadata_sidecar_against_the_entry_limit() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let store = Arc::new(InMemorySessionStore::new());
+    let main = key("project", SESSION)?;
+    store.append(&main, &[entry("user", 1)?]).await?;
+    store
+        .append(
+            &main.clone().with_subpath(SessionSubpath::new("subagents/agent-one")),
+            &[SessionEntry::try_from(json!({"type":"agent_metadata"}))?],
+        )
+        .await?;
+    let mut options = options(store, root.path())?;
+    options.dialect = SummaryDialect::Python;
+    options.limits.max_resume_entries = Some(NonZeroUsize::new(1).ok_or("zero bound")?);
+    assert!(matches!(
+        resume(&options, StoreResume::Session(SessionId::from(SESSION)), root.path()).await,
+        Err(SessionError::EntryLimit)
+    ));
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum Subagents {
+    ListingHangs,
+    LoadHangs,
+    Missing,
+}
+
+/// Serves one main transcript and one listed subagent whose listing or load hangs, or that has no entries.
+struct SubagentStore(Subagents, SessionEntry);
+impl SessionStore for SubagentStore {
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        matches!(
+            operation,
+            SessionStoreOperation::Append | SessionStoreOperation::Load | SessionStoreOperation::ListSubkeys
+        )
+    }
+    fn append<'a>(&'a self, _: &'a SessionKey, _: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn load<'a>(&'a self, key: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>> {
+        Box::pin(async move {
+            if key.subpath().is_none() {
+                return Ok(Some(vec![self.1.clone()]));
+            }
+            match self.0 {
+                Subagents::LoadHangs => std::future::pending().await,
+                Subagents::ListingHangs | Subagents::Missing => Ok(None),
+            }
+        })
+    }
+    fn list_subkeys<'a>(&'a self, _: &'a SessionKey) -> SessionStoreFuture<'a, Vec<String>> {
+        Box::pin(async move {
+            match self.0 {
+                Subagents::ListingHangs => std::future::pending().await,
+                Subagents::LoadHangs | Subagents::Missing => Ok(vec!["subagents/agent-one".to_owned()]),
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn hung_subagent_listings_and_loads_time_out_with_upstream_text() -> TestResult {
+    for (subagents, expected) in [
+        (
+            Subagents::ListingHangs,
+            format!("SessionStore.listSubkeys() timed out after 20ms for session {SESSION}"),
+        ),
+        (
+            Subagents::LoadHangs,
+            format!("SessionStore.load() timed out after 20ms for session {SESSION} subpath subagents/agent-one"),
+        ),
+    ] {
+        let root = tempfile::tempdir()?;
+        let mut options = options(Arc::new(SubagentStore(subagents, entry("user", 1)?)), root.path())?;
+        options.limits.load_timeout = Timeout::new(Duration::from_millis(20));
+        match resume(&options, StoreResume::Session(SessionId::from(SESSION)), root.path()).await {
+            Err(SessionError::LoadTimeout(message)) => assert_eq!(message, expected),
+            other => return Err(format!("expected a load timeout, got {:?}", other.err()).into()),
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_listed_subagent_without_entries_is_skipped() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let options = options(
+        Arc::new(SubagentStore(Subagents::Missing, entry("user", 1)?)),
+        root.path(),
+    )?;
+    let runtime = resume(&options, StoreResume::Session(SessionId::from(SESSION)), root.path()).await?;
+    let session = runtime
+        .config_dir
+        .clone()
+        .ok_or("missing config directory")?
+        .join("projects/project");
+    assert!(session.join(format!("{SESSION}.jsonl")).is_file());
+    assert!(!session.join(SESSION).exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_dialect_reports_the_resume_materialization_text() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut options = options(Arc::new(PendingLoadStore), root.path())?;
+    options.limits.load_timeout = Timeout::new(Duration::from_millis(20));
+    options.dialect = SummaryDialect::Python;
+    let outcome = SessionRuntime::prepare(
+        &options,
+        StoreResume::Session(SessionId::from(SESSION)),
+        root.path(),
+        &Environment::default(),
+        Default::default(),
+    )
+    .await;
+    let Err(error) = outcome else {
+        return Err("expected a load timeout".into());
+    };
+    assert_eq!(
+        error.to_string(),
+        format!("SessionStore.load() for session {SESSION} timed out after 20ms during resume materialization")
+    );
     Ok(())
 }
 
@@ -408,8 +693,8 @@ async fn timed_out_mirror_append_is_reported_and_never_retried() -> TestResult {
     let root = memory_mirror_root();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut options = options(Arc::new(PendingStore { calls: calls.clone() }), &root)?;
-    options.limits.append_timeout = Timeout::new(Duration::from_millis(20))?;
-    options.limits.flush_timeout = Timeout::new(Duration::from_secs(1))?;
+    options.limits.append_timeout = Timeout::new(Duration::from_millis(20));
+    options.limits.flush_timeout = Some(Timeout::new(Duration::from_secs(1)));
     let mirror = TranscriptMirror::new(&options, root.join("projects"));
     mirror.enqueue(
         &root.join("projects/project").join(format!("{SESSION}.jsonl")),
@@ -491,7 +776,7 @@ async fn delayed_flush_wait_keeps_the_original_deadline() -> TestResult {
         }),
         &root,
     )?;
-    options.limits.flush_timeout = Timeout::new(Duration::from_millis(50))?;
+    options.limits.flush_timeout = Some(Timeout::new(Duration::from_millis(50)));
     let mirror = TranscriptMirror::new(&options, root.join("projects"));
     mirror.enqueue(
         &root.join("projects/project").join(format!("{SESSION}.jsonl")),
@@ -558,4 +843,110 @@ async fn synchronous_flush_fences_keep_later_pending_appends_out_of_an_earlier_r
         2
     );
     Ok(())
+}
+
+const STORE_FAILURE_GOLDENS: &str = include_str!("fixtures/session_resume/python_store_failures.json");
+
+/// The recorded Python store: the call a case names raises with that backend message, and every other call answers
+/// one transcript entry, with a subagent `agent-a` when the store lists subkeys.
+struct ResumeFailingStore {
+    case: String,
+    entry: SessionEntry,
+}
+
+impl ResumeFailingStore {
+    fn refuse<'a, T: Send + 'a>(message: &'static str) -> SessionStoreFuture<'a, T> {
+        Box::pin(async move { Err(SessionStoreError::backend(std::io::Error::other(message))) })
+    }
+}
+
+impl SessionStore for ResumeFailingStore {
+    fn supports(&self, operation: SessionStoreOperation) -> bool {
+        match operation {
+            SessionStoreOperation::Append | SessionStoreOperation::Load => true,
+            SessionStoreOperation::List => self.case == "list_sessions",
+            SessionStoreOperation::ListSubkeys => matches!(self.case.as_str(), "list_subkeys" | "subkey_load"),
+            _ => false,
+        }
+    }
+    fn append<'a>(&'a self, _: &'a SessionKey, _: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn load<'a>(&'a self, key: &'a SessionKey) -> SessionStoreFuture<'a, Option<Vec<SessionEntry>>> {
+        match (self.case.as_str(), key.subpath()) {
+            ("load", None) => Self::refuse("backend refused the load"),
+            ("subkey_load", Some(_)) => Self::refuse("subagent load refused"),
+            _ => Box::pin(async { Ok(Some(vec![self.entry.clone()])) }),
+        }
+    }
+    fn list_sessions<'a>(&'a self, _: &'a SessionProjectKey) -> SessionStoreFuture<'a, Vec<SessionListEntry>> {
+        if self.case == "list_sessions" {
+            return Self::refuse("listing refused");
+        }
+        Box::pin(async { Err(SessionStoreError::Unsupported(SessionStoreOperation::List)) })
+    }
+    fn list_subkeys<'a>(&'a self, _: &'a SessionKey) -> SessionStoreFuture<'a, Vec<String>> {
+        if self.case == "list_subkeys" {
+            return Self::refuse("subkey listing refused");
+        }
+        Box::pin(async { Ok(vec!["agent-a".to_owned()]) })
+    }
+}
+
+/// Python's `_with_timeout` wraps a failing store call in its resume materialization text, matched against
+/// `claude_agent_sdk` itself; TypeScript lets the store's own error through.
+#[tokio::test]
+async fn store_failures_during_resume_read_like_each_sdk() -> TestResult {
+    let goldens: serde_json::Value = serde_json::from_str(STORE_FAILURE_GOLDENS)?;
+    let session = goldens["session"].as_str().ok_or("session")?;
+    for case in goldens["cases"].as_array().ok_or("cases")? {
+        let name = case["name"].as_str().ok_or("name")?;
+        let resume_from = match case["resume"].as_str() {
+            Some("session") => StoreResume::Session(SessionId::from(session)),
+            _ => StoreResume::Latest,
+        };
+        for dialect in [SummaryDialect::Python, SummaryDialect::TypeScript] {
+            let root = tempfile::tempdir()?;
+            let store = Arc::new(ResumeFailingStore {
+                case: name.to_owned(),
+                entry: SessionEntry::try_from(json!({"type":"user","uuid":"u1"}))?,
+            });
+            let mut options = options(store, root.path())?;
+            options.dialect = dialect;
+            let Err(error) = resume(&options, resume_from.clone(), root.path()).await else {
+                return Err(format!("{name} resumed under {dialect:?}").into());
+            };
+            match dialect {
+                SummaryDialect::Python => {
+                    assert_eq!(Some(error.to_string().as_str()), case["python"].as_str(), "{name}");
+                    assert!(matches!(error, SessionError::ResumeStore { .. }), "{name}");
+                }
+                SummaryDialect::TypeScript => assert!(
+                    matches!(
+                        error,
+                        SessionError::Store(SessionStoreError::Backend(_)) | SessionError::ContinueRequiresList
+                    ),
+                    "{name}: {error}"
+                ),
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_store_failure_of_rust_origin_keeps_its_own_text_in_the_python_wrapper() {
+    for (source, text) in [
+        (SessionStoreError::Poisoned, "session store lock is poisoned"),
+        (SessionStoreError::ClockExhausted, "session store clock exhausted"),
+    ] {
+        let error = SessionError::ResumeStore {
+            call: "SessionStore.load()".to_owned(),
+            source,
+        };
+        assert_eq!(
+            error.to_string(),
+            format!("SessionStore.load() failed during resume materialization: {text}")
+        );
+    }
 }

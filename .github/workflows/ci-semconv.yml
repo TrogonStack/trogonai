@@ -10,6 +10,7 @@ on:
       - '.config/mise/config.toml'
       - '.config/mise/mise.lock'
       - '.github/workflows/ci-semconv.yml'
+      - '.config/mise/tasks/github/workflows/ci-semconv/**'
 
 concurrency:
   group: ci-semconv-${{ github.ref }}
@@ -33,4 +34,4 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check semconv registry and enforce naming policies
-        run: mise run --skip-tools semconv:check
+        run: mise run --skip-tools github:workflows:ci-semconv:check
