@@ -384,3 +384,43 @@ fn a_list_whose_failing_entries_cannot_be_located_is_dropped() {
     let union = json!({"type": "union", "options": [strings()]});
     assert_eq!(read_policy(&probe_block(union), document), dropped);
 }
+
+#[test]
+fn a_policy_helper_entry_that_cannot_be_read_is_dropped_alone() {
+    let schema = schema().expect("schema loads");
+    let long = format!("/{}", "a".repeat(1024));
+    let payload = json!({"model": "m"});
+    let document = json!({"policyHelpers": {
+        "macos": {"path": long, "defaultSettings": {"policyHelpers": {}}},
+        "linux": {"path": long, "defaultSettings": payload, "outputBehavior": "merge"},
+        "windows": {"path": long, "defaultSettings": payload, "outputBehavior": "bogus"},
+        "wsl": {"path": long, "defaultSettings": payload},
+        "default": payload,
+        "other": 1,
+    }});
+    assert_eq!(
+        read_policy(schema, document),
+        json!({"policyHelpers": {
+            "linux": {"defaultSettings": payload, "outputBehavior": "merge"},
+            "wsl": {"defaultSettings": payload},
+            "default": payload,
+        }})
+    );
+    assert_eq!(
+        read_policy(
+            schema,
+            json!({"policyHelpers": {"linux": {"path": long}, "macos": 5, "wsl": {"path": null}}})
+        ),
+        json!({"policyHelpers": {}})
+    );
+}
+
+#[test]
+fn a_policy_helper_map_that_is_not_an_object_reads_as_an_empty_map() {
+    let schema = schema().expect("schema loads");
+    assert_eq!(
+        read_policy(schema, json!({"policyHelpers": "x"})),
+        json!({"policyHelpers": {}})
+    );
+    assert_eq!(read_policy(schema, json!({"policyHelpers": null})), json!({}));
+}

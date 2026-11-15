@@ -271,6 +271,7 @@ impl SettingsSchema {
                     Err(()) => Some(Value::Bool(true)),
                 }
             }
+            "policyHelpers" => read_policy_helpers(field, value),
             _ => match self.top_level_restrictive(key) {
                 Some(restrictive) => {
                     if value.is_null() {
@@ -544,6 +545,70 @@ impl SettingsSchema {
                 self.is_unset(&child, entry) || (self.is_lock_block(&child) && self.is_empty_lock_block(&child, entry))
             })
     }
+}
+
+/// The member of an object schema by name.
+fn member_of<'a>(shape: &Shape<'a>, name: &str) -> Option<&'a Node> {
+    shape
+        .members
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, node)| &**node)
+}
+
+/// `cP`'s own reader of the per-OS policy helper map. An entry that cannot be read is dropped on its own instead of
+/// the whole map, and a map that is not an object reads as an empty map.
+fn read_policy_helpers(field: &Node, value: &Value) -> Option<Value> {
+    let shape = object_of(unwrap_catch_optional(field))?;
+    match value {
+        Value::Null => None,
+        Value::Object(entries) => Some(Value::Object(
+            shape
+                .members
+                .iter()
+                .filter_map(|(name, member)| Some((name.clone(), read_policy_helper(member, entries.get(name)?)?)))
+                .collect(),
+        )),
+        _ => Some(Value::Object(Map::new())),
+    }
+}
+
+/// One entry of the policy helper map (`g` inside `cP`). A static payload that cannot be read is left out of the
+/// entry. An OS entry that still cannot be read keeps its static payload alone when that payload and its output
+/// behavior can be read, and is dropped otherwise; the `default` entry is a payload itself and has no entry fields.
+fn read_policy_helper(member: &Node, input: &Value) -> Option<Value> {
+    let entry = object_of(member);
+    let payload = entry.as_ref().and_then(|shape| member_of(shape, "defaultSettings"));
+    let mut readable = input.clone();
+    if let (Some(payload), Value::Object(fields)) = (payload, &mut readable)
+        && fields
+            .get("defaultSettings")
+            .is_some_and(|settings| payload.validate(Some(settings)).is_err())
+    {
+        fields.shift_remove("defaultSettings");
+    }
+    match member.validate(Some(&readable)) {
+        Ok(output) => output,
+        Err(()) => entry.and_then(|shape| kept_payload(&shape, input)),
+    }
+}
+
+/// The static payload an OS entry that cannot be read keeps, with its output behavior when it names one.
+fn kept_payload(shape: &Shape<'_>, input: &Value) -> Option<Value> {
+    let fields = input.as_object()?;
+    let settings = fields.get("defaultSettings").filter(|settings| !settings.is_null())?;
+    let mut kept = Map::new();
+    kept.insert(
+        "defaultSettings".to_owned(),
+        member_of(shape, "defaultSettings")?.validate(Some(settings)).ok()??,
+    );
+    if let Some(behavior) = fields.get("outputBehavior").filter(|behavior| !behavior.is_null()) {
+        kept.insert(
+            "outputBehavior".to_owned(),
+            member_of(shape, "outputBehavior")?.validate(Some(behavior)).ok()??,
+        );
+    }
+    Some(Value::Object(kept))
 }
 
 /// The schema inside a catch and an optional wrapper.
