@@ -13,6 +13,7 @@ workspace_crate(
      'enrollment_timestamp': {},
      'heartbeat': {},
      'intake': {},
+     'preparation': {},
      'receipt_replay': {},
      'sending': {},
      'validation': {}},
