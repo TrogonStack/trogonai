@@ -83,32 +83,7 @@ impl Decider for Heartbeat {
         state::evolve(state, event)
     }
     fn decide(state: &PeerState, command: &Self) -> Result<Decision<Self>, HeartbeatError> {
-        let enrollment = state.enrollment.as_option().ok_or(HeartbeatError::MissingEnrollment)?;
-        let identity = state::parse_enrollment(enrollment)?;
-        if identity.owner() != &command.owner {
-            return Err(HeartbeatError::OwnerMismatch);
-        }
-        let previous = state.attachment.as_option().ok_or(HeartbeatError::Inactive)?;
-        state::validate_attachment(enrollment, previous)?;
-        if command.attachment.peer_id() != identity.peer_id()
-            || previous.attachment_ref.connector_id.as_deref() != Some(command.attachment.connector_id().as_str())
-            || previous.attachment_ref.generation != Some(command.attachment.generation())
-        {
-            return Err(HeartbeatError::Fenced);
-        }
-        if previous.status.and_then(|value| value.as_known())
-            != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED)
-        {
-            return Err(HeartbeatError::Inactive);
-        }
-        let observed = state::read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
-        let expires = state::read_time(previous.expires_at.as_option(), "attachment.expires_at")?;
-        if command.now < observed {
-            return Err(HeartbeatError::ClockRegression);
-        }
-        if command.now >= expires {
-            return Err(HeartbeatError::Expired);
-        }
+        let previous = guard_live_attachment(state, &command.owner, &command.attachment, command.now)?;
         let previous_activity = state
             .active_at
             .as_option()
@@ -155,4 +130,37 @@ impl Decider for Heartbeat {
             ),
         }))
     }
+}
+
+pub(super) fn guard_live_attachment<'a>(
+    state: &'a PeerState,
+    owner: &TrustedPeerOwner,
+    reference: &AttachmentRef,
+    now: DateTime<Utc>,
+) -> Result<&'a proto::PeerAttachment, HeartbeatError> {
+    let enrollment = state.enrollment.as_option().ok_or(HeartbeatError::MissingEnrollment)?;
+    let identity = state::parse_enrollment(enrollment)?;
+    if identity.owner() != owner {
+        return Err(HeartbeatError::OwnerMismatch);
+    }
+    let previous = state.attachment.as_option().ok_or(HeartbeatError::Inactive)?;
+    state::validate_attachment(enrollment, previous)?;
+    if reference.peer_id() != identity.peer_id()
+        || previous.attachment_ref.connector_id.as_deref() != Some(reference.connector_id().as_str())
+        || previous.attachment_ref.generation != Some(reference.generation())
+    {
+        return Err(HeartbeatError::Fenced);
+    }
+    if previous.status.and_then(|value| value.as_known()) != Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED) {
+        return Err(HeartbeatError::Inactive);
+    }
+    let observed = state::read_time(previous.observed_at.as_option(), "attachment.observed_at")?;
+    let expires = state::read_time(previous.expires_at.as_option(), "attachment.expires_at")?;
+    if now < observed {
+        return Err(HeartbeatError::ClockRegression);
+    }
+    if now >= expires {
+        return Err(HeartbeatError::Expired);
+    }
+    Ok(previous)
 }
