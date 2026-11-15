@@ -18,7 +18,7 @@ use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
-use crate::wire::{WireError, decode_response, encode_request, req_id_from_request_headers};
+use crate::wire::{decode_response, encode_request, req_id_from_request_headers};
 
 #[instrument(
     name = ACP_SESSION_PROMPT,
@@ -141,20 +141,12 @@ where
                                 let _ = js_msg.ack().await;
                                 break Err(agent_err);
                             }
-                            Err(WireError::Codec(_) | WireError::Deserialize(_) | WireError::UnexpectedMessage) => {
+                            Err(_) => {
                                 let _ = js_msg.ack_with(AckKind::Term).await;
                                 bridge.metrics.record_error("prompt", "bad_response_payload");
                                 break Err(Error::new(
                                     ErrorCode::INTERNAL_ERROR,
                                     "bad response payload",
-                                ));
-                            }
-                            Err(e) => {
-                                let _ = js_msg.ack_with(AckKind::Term).await;
-                                bridge.metrics.record_error("prompt", "bad_response_payload");
-                                break Err(Error::new(
-                                    ErrorCode::INTERNAL_ERROR,
-                                    format!("decode response: {e}"),
                                 ));
                             }
                         }

@@ -91,6 +91,7 @@ impl JetStreamSubjectPurger for MockJetStreamPurger {
     }
 }
 
+#[derive(Clone)]
 pub struct MockJsMessage {
     inner: async_nats::Message,
     signals: Arc<Mutex<Vec<AckKindSnapshot>>>,

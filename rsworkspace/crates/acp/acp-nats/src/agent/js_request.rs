@@ -14,7 +14,7 @@ use crate::acp_prefix::AcpPrefix;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
 use crate::req_id::ReqId;
-use crate::wire::{WireError, decode_response, encode_request, req_id_from_request_headers};
+use crate::wire::{decode_response, encode_request, req_id_from_request_headers};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn js_request<J, Req, Res>(
@@ -82,13 +82,9 @@ where
                         let _ = js_msg.ack().await;
                         Err(agent_err)
                     }
-                    Err(WireError::Codec(_) | WireError::Deserialize(_) | WireError::UnexpectedMessage) => {
+                    Err(_) => {
                         let _ = js_msg.ack_with(AckKind::Term).await;
                         Err(Error::new(ErrorCode::INTERNAL_ERROR, "bad response payload"))
-                    }
-                    Err(e) => {
-                        let _ = js_msg.ack_with(AckKind::Term).await;
-                        Err(Error::new(ErrorCode::INTERNAL_ERROR, format!("decode response: {e}")))
                     }
                 };
             }

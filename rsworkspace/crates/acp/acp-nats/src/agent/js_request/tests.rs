@@ -163,6 +163,7 @@ async fn js_request_bad_response_payload() {
     js.consumer_factory.add_consumer(consumer);
 
     let msg = MockJsMessage::new(make_bad_payload_msg("req-1"));
+    let observed = msg.clone();
     tx.unbounded_send(Ok(msg)).unwrap();
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
@@ -177,8 +178,72 @@ async fn js_request_bad_response_payload() {
     )
     .await;
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().message.contains("bad response payload"));
+    let error = result.unwrap_err();
+    assert_eq!(error.code, agent_client_protocol::ErrorCode::INTERNAL_ERROR);
+    assert_eq!(error.message, "bad response payload");
+    assert_eq!(observed.signals(), vec![AckKindSnapshot::AckWith(AckKindValue::Term)]);
+}
+
+#[tokio::test]
+async fn js_request_terminates_invalid_results_and_response_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    let wrong_direction = encode(&Message::Request {
+        id: jsonrpc_nats::RequestId::String("req-1".into()),
+        method: "session/prompt".into(),
+        params: serde_json::json!({"sessionId": "s1", "prompt": []}),
+    })?;
+    let mut conflicting_metadata = make_wire_success_msg(
+        "req-1",
+        &PromptResponse::new(agent_client_protocol::v1::schema::StopReason::EndTurn),
+    );
+    conflicting_metadata
+        .headers
+        .as_mut()
+        .ok_or("encoded response has no headers")?
+        .insert(jsonrpc_nats::HEADER_ERROR_CODE, "-32603");
+
+    for (case, message) in [
+        (
+            "invalid result",
+            make_wire_success_msg("req-1", &serde_json::Value::Null),
+        ),
+        (
+            "request on the response stream",
+            make_nats_msg(&wrong_direction.body, Some(wrong_direction.headers)),
+        ),
+        ("conflicting error-code projection", conflicting_metadata),
+    ] {
+        let js = MockJs::new();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(consumer);
+        let message = MockJsMessage::new(message);
+        let observed = message.clone();
+        assert!(tx.unbounded_send(Ok(message)).is_ok());
+
+        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+            &js,
+            "acp.v1.session.s1.agent.prompt",
+            "session/prompt",
+            &agent_client_protocol::v1::schema::PromptRequest::new(
+                "s1",
+                vec![agent_client_protocol::v1::schema::ContentBlock::from("Continue.")],
+            ),
+            &test_prefix(),
+            &test_sid("s1"),
+            &ReqId::from_test("req-1"),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        let error = result.err().ok_or("invalid response was accepted")?;
+        assert_eq!(error.code, agent_client_protocol::ErrorCode::INTERNAL_ERROR, "{case}");
+        assert_eq!(error.message, "bad response payload", "{case}");
+        assert_eq!(
+            observed.signals(),
+            vec![AckKindSnapshot::AckWith(AckKindValue::Term)],
+            "{case}"
+        );
+    }
+    Ok(())
 }
 
 #[tokio::test]
