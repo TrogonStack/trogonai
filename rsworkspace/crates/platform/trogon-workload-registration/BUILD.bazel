@@ -8,9 +8,14 @@ workspace_crate(
         "approval_boundaries": {},
         # Start NATS JetStream servers in containers through Docker.
         "cluster": {"tags": ["requires-network"]},
+        "native_registration_artifacts": {
+            "compile_data": ["tests/support/registration_archive_fixture.rs"],
+            "tags": ["requires-network"],
+        },
         "producer": {"tags": ["requires-network"]},
         "production": {"tags": ["requires-network"]},
         "recovery": {"tags": ["requires-network"]},
+        "registration_archive_values": {},
         "runner": {
             "data": [
                 "Cargo.toml",
