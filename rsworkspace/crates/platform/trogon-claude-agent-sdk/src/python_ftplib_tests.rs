@@ -111,7 +111,9 @@ impl FtpServer {
     }
 }
 
-/// `Server.run`: the steps, then the lines the client sends until it closes. An error ends the connection.
+/// `Server.run`: the steps, then the lines the client sends until it closes. A reply the closed client refuses ends
+/// the steps but still records the lines it sent before closing, which the reader may already hold, since whether the
+/// close lands before or after a reply is a race the recording happened to win. Any other error ends the connection.
 fn run(connection: &TcpStream, steps: &[Step], data: &TcpListener, log: &Mutex<Vec<Vec<String>>>) {
     if let Ok(mut log) = log.lock() {
         log.push(Vec::new());
@@ -131,8 +133,10 @@ fn run(connection: &TcpStream, steps: &[Step], data: &TcpListener, log: &Mutex<V
             }
             Step::Close => return,
         };
-        if result.is_err() {
-            return;
+        match result {
+            Ok(()) => {}
+            Err(_) if matches!(step, Step::Send(_)) => break,
+            Err(_) => return,
         }
     }
     let _timeout_set = connection.set_read_timeout(Some(TAIL_TIMEOUT));
@@ -344,6 +348,35 @@ fn ftp_urls_open_and_read_as_python_recorded() -> TestResult {
         }
     }
     assert_eq!(recorded.len(), 79);
+    Ok(())
+}
+
+#[test]
+fn a_refused_reply_still_records_the_lines_the_client_sent_before_closing() -> TestResult {
+    let control = TcpListener::bind("127.0.0.1:0")?;
+    let data = TcpListener::bind("127.0.0.1:0")?;
+    let mut client = TcpStream::connect(control.local_addr()?)?;
+    client.write_all(b"CONNECT example.invalid:443 HTTP/1.1\r\nHost: example.invalid:443\r\n\r\n")?;
+    drop(client);
+    let (connection, _) = control.accept()?;
+    connection.shutdown(std::net::Shutdown::Write)?;
+    let log = Mutex::new(Vec::new());
+    let steps = [
+        Step::Recv,
+        Step::Send(b"331 password\r\n".to_vec()),
+        Step::Recv,
+        Step::Recv,
+    ];
+    run(&connection, &steps, &data, &log);
+    let commands = log.into_inner().map_err(|_| "the log was poisoned")?;
+    assert_eq!(
+        commands,
+        [[
+            "CONNECT example.invalid:443 HTTP/1.1\r\n",
+            "Host: example.invalid:443\r\n",
+            "\r\n"
+        ]]
+    );
     Ok(())
 }
 
