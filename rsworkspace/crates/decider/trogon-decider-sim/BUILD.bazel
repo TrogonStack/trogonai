@@ -1,13 +1,11 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
+    data = ["//rsworkspace/wasm-components/trogon-schedules-decider:component"],
     integration_tests = {
-        # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm and
-        # cli/trogon-decider-test/schedules.yaml through CARGO_MANIFEST_DIR; the wasm
-        # component is built by cargo component outside Bazel.
-        "parity_schedules": {"tags": ["manual"]},
-        # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-        # built by cargo component outside Bazel.
-        "schedules": {"tags": ["manual"]},
+        "parity_schedules": {"data": ["//rsworkspace/cli/trogon-decider-test:schedules.yaml"]},
     },
+    # SimFixture and the parity test resolve the component and schedules.yaml
+    # through CARGO_MANIFEST_DIR, relative to the runfiles root at run time.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
 )

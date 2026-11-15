@@ -57,7 +57,12 @@ lists several versions, the first one is used. The executable name defaults to
 the last segment of the tool name, so `ubi:open-telemetry/weaver` provides
 `weaver`, and an `exe` option overrides it.
 
-The Rust toolchain supports macOS ARM64 and Linux x86-64 hosts. The Node.js
+The Rust toolchain supports macOS ARM64 and Linux x86-64 hosts. Each target
+in the rust entry's `targets` option, such as
+`rust = { version = "...", targets = "wasm32-unknown-unknown" }`, also gets
+`@mise_rust//:rust_toolchain_<target>`, which compiles for that target on the
+host. Register it next to `@mise_rust//:rust_toolchain`. Only
+`wasm32-unknown-unknown` is supported so far. The Node.js
 toolchain supports macOS and Linux hosts on ARM64 and x86-64.
 
 Bazel does not watch files in repositories that another module extension

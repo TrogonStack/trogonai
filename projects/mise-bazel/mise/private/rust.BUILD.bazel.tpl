@@ -118,4 +118,5 @@ toolchain(
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
 )
 
+%{targets}
 exports_files(["ROOT"])
