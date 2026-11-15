@@ -1,24 +1,75 @@
-use std::{
-    future::Future,
-    path::PathBuf,
-    pin::pin,
-    task::{Context, Poll, Waker},
+use std::path::PathBuf;
+
+use trogon_claude_agent_sdk::ClaudeAgentOptions;
+
+#[cfg(all(unix, feature = "test-support"))]
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(all(unix, feature = "test-support"))]
+use trogon_claude_agent_sdk::{
+    ClaudeSdkClient,
+    adapters::{NativeFileSystem, RuntimeAdapters},
+    test_support::FixedEnvironment,
 };
 
-use trogon_claude_agent_sdk::{ClaudeAgentOptions, ClaudeSdkClient, Error};
+#[cfg(all(unix, feature = "test-support"))]
+#[path = "support/scripted_process.rs"]
+mod scripted_process;
 
-/// The API draft must not pretend that a connection was established.
-#[test]
-fn connect_reports_unimplemented_runtime() {
-    let mut connection = pin!(ClaudeSdkClient::connect(ClaudeAgentOptions::default()));
-    let mut context = Context::from_waker(Waker::noop());
-    assert!(matches!(
-        connection.as_mut().poll(&mut context),
-        Poll::Ready(Err(Error::NotImplemented))
+#[cfg(all(unix, feature = "test-support"))]
+use scripted_process::{ScriptedProcessEvent, ScriptedProcessSpawner};
+
+/// Python `connect()` returns only after a real initialization reply (TypeScript hands the client out as soon as the
+/// request is queued), and disconnect closes the child's input.
+#[cfg(all(unix, feature = "test-support"))]
+#[tokio::test]
+async fn python_connect_waits_for_initialization_and_disconnect_closes_input() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let observer = process.observer();
+    let connecting = tokio::spawn(ClaudeSdkClient::connect_with_adapters(
+        ClaudeAgentOptions {
+            argv_style: trogon_claude_agent_sdk::ArgvStyle::Python,
+            ..ClaudeAgentOptions::default()
+        },
+        RuntimeAdapters {
+            environment: FixedEnvironment {
+                directory: PathBuf::from("unused-memory-directory"),
+                variables: Default::default(),
+            },
+            process,
+            filesystem: NativeFileSystem,
+        },
     ));
+    let mut input = BufReader::new(harness.stdin).lines();
+    let request: serde_json::Value = serde_json::from_str(
+        &input
+            .next_line()
+            .await?
+            .ok_or_else(|| std::io::Error::other("missing initialize"))?,
+    )?;
+    assert_eq!(request["request"]["subtype"], "initialize");
+    assert!(!connecting.is_finished());
+    let server = tokio::spawn(async move {
+        let mut stdout = harness.stdout;
+        let response = format!(
+            "{{\"type\":\"control_response\",\"response\":{{\"subtype\":\"success\",\"request_id\":{},\"response\":{{\"claude_code_version\":\"fixture\"}}}}}}\n",
+            request["request_id"],
+        );
+        stdout.write_all(response.as_bytes()).await?;
+        assert!(input.next_line().await?.is_none());
+        drop(stdout);
+        drop(harness.stderr);
+        harness.observer.complete(0);
+        Ok::<_, std::io::Error>(())
+    });
+    let client = connecting.await??;
+    client.disconnect().await?;
+    server.await??;
+    assert!(observer.events()?.contains(&ScriptedProcessEvent::StdinClosed));
+    Ok(())
 }
 
-/// Preserve upstream configuration values for the future runtime to interpret.
+/// Preserve unrestricted upstream configuration values for the runtime to interpret.
 #[test]
 fn configuration_preserves_upstream_optional_values() {
     let defaults = ClaudeAgentOptions::default();
@@ -36,6 +87,9 @@ fn configuration_preserves_upstream_optional_values() {
         };
         assert_eq!(options.cli_path, Some(PathBuf::from(cli_path)));
         assert_eq!(options.cwd, Some(PathBuf::from("workspace")));
-        assert_eq!(options.model.as_deref(), Some(model));
+        assert_eq!(
+            options.model.as_ref().map(trogon_claude_agent_sdk::ModelName::as_str),
+            Some(model)
+        );
     }
 }

@@ -46,7 +46,7 @@ fn compute_sig(secret: &str, body: &[u8]) -> String {
 fn test_config() -> SentryConfig {
     SentryConfig {
         client_secret: SentryClientSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("sentry").unwrap(),
+        subject_prefix: DottedNatsToken::new("sentry").unwrap(),
         stream_name: NatsToken::new("SENTRY").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),

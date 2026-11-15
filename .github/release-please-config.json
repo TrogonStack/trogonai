@@ -14,16 +14,19 @@
   ],
   "packages": {
     "rsworkspace/crates/acp/acp-nats-stdio": {
-      "component": "acp-nats-stdio"
+      "component": "acp-nats-stdio",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "/rsworkspace/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value===\"acp-nats-stdio\")].version"
+        }
+      ]
     }
   },
   "plugins": [
     {
       "type": "sentence-case"
-    },
-    {
-      "type": "cargo-workspace",
-      "merge": false
     }
   ],
   "tag-separator": "@",

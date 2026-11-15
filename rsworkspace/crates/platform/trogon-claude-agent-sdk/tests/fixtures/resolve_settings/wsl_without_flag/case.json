@@ -1,0 +1,10 @@
+{
+  "platform": "linux",
+  "env": {
+    "WSL_DISTRO_NAME": "Ubuntu"
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": []
+  }
+}

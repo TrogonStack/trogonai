@@ -1,0 +1,335 @@
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::{JsonObject, ProtocolError};
+
+/// One hook matcher of the initialize request. TypeScript leaves `matcher` out when it is unset; Python sends
+/// `null`.
+#[derive(Serialize)]
+pub(crate) struct HookMatcherPayload<'a> {
+    /// `None` leaves the key out, `Some(None)` sends `null`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matcher: Option<Option<&'a str>>,
+    #[serde(rename = "hookCallbackIds")]
+    pub callback_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<serde_json::Number>,
+    #[serde(rename = "onFailure", skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<&'static str>,
+}
+
+/// The hooks section: events in the order they first appear among the registrations, as both SDKs keep the
+/// insertion order of their hooks object.
+pub(crate) type HooksPayload<'a> = indexmap::IndexMap<&'static str, Vec<HookMatcherPayload<'a>>>;
+
+/// TypeScript `buildInitializeRequest`: every key in upstream order, an unset key left out.
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InitializeRequest<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<HooksPayload<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sdk_mcp_servers: Option<Vec<&'a str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sdk_mcp_server_configs: Option<JsonObject>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sdk_mcp_server_manifests: Option<JsonObject>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_schema: Option<&'a JsonObject>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<Vec<&'a str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub append_system_prompt: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_mode_instructions: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt_snapshot: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub append_subagent_system_prompt: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_aliases: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_running_mcp_tools: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_dynamic_sections: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents: Option<JsonObject>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_search_isolation_exempt_mcp_servers: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_suggestions: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_progress_summaries: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_subagent_text: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supported_dialog_kinds: Option<Vec<&'a str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_task_stop_affordance: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rapid_followup_preempt: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_nested_subagent_tool_calls: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_trust: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugins: Option<Vec<crate::plugin::PluginPayload<'a>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_settings: Option<Value>,
+}
+
+/// Python `Query.initialize`: `hooks` always present (`null` when there are none), then only the keys Python
+/// knows, in its order. Python sends `forwardSubagentText` only when it is `true`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PythonInitializeRequest<'a> {
+    pub hooks: Option<HooksPayload<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents: Option<JsonObject>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_dynamic_sections: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt_snapshot: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_subagent_text: Option<Value>,
+}
+
+impl<'a> InitializeRequest<'a> {
+    /// The request in the given dialect's shape and key order.
+    pub(crate) fn into_payload(self, style: crate::ArgvStyle) -> RequestPayload<'a> {
+        match style {
+            crate::ArgvStyle::TypeScript => RequestPayload::Initialize(Box::new(self)),
+            crate::ArgvStyle::Python => RequestPayload::PythonInitialize(Box::new(PythonInitializeRequest {
+                hooks: self.hooks,
+                agents: self.agents,
+                exclude_dynamic_sections: self.exclude_dynamic_sections,
+                system_prompt_snapshot: self.system_prompt_snapshot,
+                skills: self.skills,
+                forward_subagent_text: self.forward_subagent_text.filter(|value| *value == Value::Bool(true)),
+            })),
+        }
+    }
+}
+
+/// The `mcp_message` request `sdk.mjs` `sendMcpServerMessageToCli` writes: `{type, request_id, request}`, a
+/// different key order from its other control requests.
+#[derive(Serialize)]
+pub(crate) struct TypeScriptMcpForward<'a, T> {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub request_id: &'a str,
+    pub request: T,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "subtype", rename_all = "snake_case")]
+pub(crate) enum RequestPayload<'a> {
+    Initialize(Box<InitializeRequest<'a>>),
+    #[serde(rename = "initialize")]
+    PythonInitialize(Box<PythonInitializeRequest<'a>>),
+    Interrupt {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cancel_queued: Option<bool>,
+    },
+    /// TypeScript leaves an unset model out (`Some(None)` never occurs there); Python sends `null`.
+    SetModel {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<Option<&'a str>>,
+    },
+    SetPermissionMode {
+        mode: &'a str,
+    },
+    RewindFiles {
+        user_message_id: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        dry_run: Option<bool>,
+    },
+    McpStatus,
+    GetContextUsage {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<&'static str>,
+    },
+    SetMcpPermissionModeOverride {
+        #[serde(rename = "serverName")]
+        server_name: &'a str,
+        mode: Option<&'static str>,
+    },
+    SetMaxThinkingTokens {
+        max_thinking_tokens: Option<u64>,
+        /// `None` leaves the key out, `Some(None)` sends `null`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thinking_display: Option<Option<&'static str>>,
+    },
+    ApplyFlagSettings {
+        settings: &'a JsonObject,
+    },
+    UpdateSettings {
+        source: &'static str,
+        settings: &'a JsonObject,
+    },
+    GetUsage {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        skip_behaviors: Option<bool>,
+    },
+    ReadFile {
+        path: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max_bytes: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        encoding: Option<&'static str>,
+    },
+    ReloadPlugins {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hold_on_cache_impact: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        add_plugins: Option<Vec<crate::plugin::PluginPayload<'a>>>,
+    },
+    ReloadSkills,
+    ReloadOutputStyles,
+    SeedReadState {
+        path: &'a str,
+        /// A finite number, or `null` for NaN and the infinities as `JSON.stringify` writes them.
+        mtime: serde_json::Value,
+    },
+    McpReconnect {
+        #[serde(rename = "serverName")]
+        server_name: &'a str,
+    },
+    McpToggle {
+        #[serde(rename = "serverName")]
+        server_name: &'a str,
+        enabled: bool,
+    },
+    McpReadResource {
+        #[serde(rename = "serverName")]
+        server_name: &'a str,
+        uri: &'a str,
+    },
+    StopTask {
+        task_id: &'a str,
+    },
+    BackgroundTasks {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<&'a str>,
+    },
+    McpSetServers {
+        servers: JsonObject,
+    },
+    McpMessage {
+        server_name: &'a str,
+        message: &'a JsonObject,
+    },
+    /// TypeScript `enableRemoteControl`: `JSON.stringify` drops the keys that are `undefined`.
+    RemoteControl {
+        enabled: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reattach_session_id: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        keep_session_on_exit: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        work_secret: Option<&'a str>,
+    },
+}
+
+impl RequestPayload<'_> {
+    pub(crate) fn to_value(&self) -> Result<Value, ProtocolError> {
+        serde_json::to_value(self).map_err(ProtocolError::from)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+pub(crate) enum OutboundFrame<'a, T> {
+    /// Python `{"type", "request_id", "request"}`.
+    #[serde(rename = "control_request")]
+    Request { request_id: &'a str, request: T },
+    #[serde(rename = "control_response")]
+    Response { response: CallbackResponse<'a, T> },
+}
+
+/// TypeScript `{request_id, type: "control_request", request}`.
+#[derive(Serialize)]
+pub(crate) struct TypeScriptControlRequest<'a, T> {
+    pub request_id: &'a str,
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub request: T,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "subtype", rename_all = "snake_case")]
+pub(crate) enum CallbackResponse<'a, T> {
+    Success {
+        request_id: &'a str,
+        response: T,
+    },
+    /// A handler that returned `undefined`: `JSON.stringify` leaves the `response` key out.
+    #[serde(rename = "success")]
+    SuccessWithoutResponse {
+        request_id: &'a str,
+    },
+    Error {
+        request_id: &'a str,
+        error: &'a str,
+        /// TypeScript adds the code of its own `RE` errors only.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error_code: Option<&'a str>,
+    },
+}
+
+/// A `PermissionResult` in the order a host writes its fields, then the `toolUseID` TypeScript spreads after them.
+#[derive(Serialize)]
+#[serde(tag = "behavior", rename_all = "snake_case")]
+pub(crate) enum PermissionResponsePayload<'a> {
+    Allow {
+        #[serde(rename = "updatedInput", skip_serializing_if = "Option::is_none")]
+        updated_input: Option<Value>,
+        #[serde(rename = "updatedPermissions", skip_serializing_if = "Option::is_none")]
+        updated_permissions: Option<Vec<Value>>,
+        #[serde(rename = "decisionClassification", skip_serializing_if = "Option::is_none")]
+        decision_classification: Option<&'static str>,
+        #[serde(rename = "toolUseID", skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<&'a str>,
+    },
+    Deny {
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        interrupt: Option<bool>,
+        #[serde(rename = "decisionClassification", skip_serializing_if = "Option::is_none")]
+        decision_classification: Option<&'static str>,
+        #[serde(rename = "toolUseID", skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<&'a str>,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+pub(crate) enum EmbeddedMcpPayload<'a> {
+    #[serde(rename = "sdk")]
+    Sdk { name: &'a str },
+}
+
+impl EmbeddedMcpPayload<'_> {
+    pub(crate) fn to_value(&self) -> Result<Value, ProtocolError> {
+        serde_json::to_value(self).map_err(ProtocolError::from)
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct McpConfigPayload {
+    #[serde(rename = "mcpServers")]
+    pub servers: JsonObject,
+}
+
+#[derive(Serialize)]
+pub(crate) struct McpResponsePayload {
+    pub mcp_response: Value,
+}

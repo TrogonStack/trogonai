@@ -165,7 +165,7 @@ def main():
     parser.add_argument("--buf", help="Override the Buf executable selected by mise")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    pinned_buf = tomllib.loads((root / "mise.toml").read_text())["tools"]["buf"]
+    pinned_buf = tomllib.loads((root / ".config" / "mise" / "config.toml").read_text())["tools"]["buf"]
     buf = args.buf
     if not buf:
         selected = run(["mise", "which", "buf", "--tool", f"buf@{pinned_buf}"])

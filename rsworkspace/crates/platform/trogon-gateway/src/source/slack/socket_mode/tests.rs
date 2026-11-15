@@ -21,9 +21,9 @@ use std::task::Poll;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use trogon_nats::AdvancedMockNatsClient;
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{MaxPayload, MockJetStreamPublisher, MockObjectStore, StreamMaxAge};
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 
 fn wrap_publisher<P: JetStreamPublisher>(publisher: P) -> ClaimCheckPublisher<P, MockObjectStore> {
@@ -36,7 +36,7 @@ fn wrap_publisher<P: JetStreamPublisher>(publisher: P) -> ClaimCheckPublisher<P,
 
 fn socket_config() -> SlackConfig {
     SlackConfig {
-        subject_prefix: NatsToken::new("slack").unwrap(),
+        subject_prefix: DottedNatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         ack_budget: AckBudget::default(),
@@ -51,7 +51,7 @@ fn socket_config() -> SlackConfig {
 
 fn webhook_config() -> SlackConfig {
     SlackConfig {
-        subject_prefix: NatsToken::new("slack").unwrap(),
+        subject_prefix: DottedNatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         ack_budget: AckBudget::default(),

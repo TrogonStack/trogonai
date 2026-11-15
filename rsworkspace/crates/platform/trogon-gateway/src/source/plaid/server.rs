@@ -13,7 +13,7 @@ use axum::{
     routing::post,
 };
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
 };
@@ -81,7 +81,7 @@ fn key_fetch_throttled() -> Response {
 
 async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
-    subject_prefix: &NatsToken,
+    subject_prefix: &DottedNatsToken,
     delivery_id: &PlaidDeliveryId,
     reason: RejectReason,
     body: Bytes,
@@ -108,7 +108,7 @@ struct Ingest<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock, F: PlaidK
     publisher: ClaimCheckPublisher<P, S>,
     clock: C,
     keys: PlaidKeyCache<F>,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     timestamp_tolerance: NonZeroDuration,
     nats_ack_timeout: NonZeroDuration,
 }

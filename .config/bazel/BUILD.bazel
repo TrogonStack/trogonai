@@ -1,0 +1,5 @@
+alias(
+    name = "buf",
+    actual = "@mise//tools/buf",
+    visibility = ["//visibility:public"],
+)

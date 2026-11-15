@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Install the mise-managed tools used by native Bazel targets"
+set -euo pipefail
+
+exec mise install bazel buf go rust

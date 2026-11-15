@@ -10,6 +10,7 @@ use std::future::{Future, IntoFuture};
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
@@ -41,7 +42,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 fn test_config() -> TwitterConfig {
     TwitterConfig {
         consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("twitter").unwrap(),
+        subject_prefix: DottedNatsToken::new("twitter").unwrap(),
         stream_name: NatsToken::new("TWITTER").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
@@ -459,7 +460,7 @@ async fn publish_ack_failure_returns_internal_server_error() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("twitter").unwrap(),
+        subject_prefix: DottedNatsToken::new("twitter").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 
@@ -491,7 +492,7 @@ async fn unroutable_publish_ack_failure_returns_internal_server_error() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("twitter").unwrap(),
+        subject_prefix: DottedNatsToken::new("twitter").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 

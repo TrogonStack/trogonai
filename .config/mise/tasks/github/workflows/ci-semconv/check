@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Check the semconv registry and enforce naming policies"
+#MISE depends=["semconv:check"]
+set -euo pipefail

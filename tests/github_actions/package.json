@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "devDependencies": {
+    "@actions/expressions": "0.3.61",
+    "js-yaml": "4.3.2",
+    "picomatch": "4.0.7"
+  }
+}
