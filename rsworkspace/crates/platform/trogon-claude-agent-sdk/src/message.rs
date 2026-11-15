@@ -1,5 +1,6 @@
+use crate::deep_json::{OwnedValues, drop_values_iteratively};
 use crate::{
-    JsonObject, MessageId, MessageOrigin, SessionId, ToolName, ToolUseId,
+    DeepJsonObject, DeepJsonValue, JsonObject, MessageId, MessageOrigin, SessionId, ToolName, ToolUseId,
     upstream::{messages as ts, tool_inputs::ToolInputSchemas, tool_outputs::ToolOutputSchemas},
 };
 
@@ -37,8 +38,8 @@ pub enum Message {
     /// TypeScript declarations list, and [`Message::to_active_goal_message`] the `active_goal` message.
     Unknown {
         kind: String,
-        data: JsonObject,
-        raw: JsonObject,
+        data: DeepJsonObject,
+        raw: DeepJsonObject,
     },
 }
 
@@ -53,7 +54,7 @@ impl Message {
             Self::StreamEvent(message) => &message.raw,
             Self::RateLimit(message) => &message.raw,
             Self::ConversationReset(message) => &message.raw,
-            Self::Unknown { raw, .. } => raw,
+            Self::Unknown { raw, .. } => raw.as_object(),
         }
     }
 
@@ -153,27 +154,27 @@ pub enum ContentBlock {
     ToolUse {
         id: ToolUseId,
         name: ToolName,
-        input: JsonObject,
+        input: DeepJsonObject,
     },
     ToolResult {
         tool_use_id: ToolUseId,
-        content: serde_json::Value,
+        content: DeepJsonValue,
         status: ToolResultStatus,
     },
     /// Python `ServerToolUseBlock`: a tool the API runs itself, such as `advisor`.
     ServerToolUse {
         id: ToolUseId,
         name: String,
-        input: JsonObject,
+        input: DeepJsonObject,
     },
     /// Python `ServerToolResultBlock`, decoded from an `advisor_tool_result` block.
     ServerToolResult {
         tool_use_id: ToolUseId,
-        content: serde_json::Value,
+        content: DeepJsonValue,
     },
     Unknown {
         kind: String,
-        data: JsonObject,
+        data: DeepJsonObject,
     },
 }
 
@@ -184,7 +185,7 @@ impl ContentBlock {
         match self {
             Self::ToolUse { name, input, .. } => Some(ToolInputSchemas::for_tool(
                 name.as_str(),
-                &serde_json::Value::Object(input.clone()),
+                &serde_json::Value::Object(input.as_object().clone()),
             )),
             _ => None,
         }
@@ -476,3 +477,167 @@ fn sdk_message(raw: &JsonObject) -> ts::SDKMessage {
 fn exact<T: serde::Serialize + serde::de::DeserializeOwned>(raw: &JsonObject) -> Option<T> {
     crate::tool_view::exact(&serde_json::Value::Object(raw.clone()))
 }
+
+impl OwnedValues for Message {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        match self {
+            Self::Assistant(message) => message.each_value(visit),
+            Self::User(message) => message.each_value(visit),
+            Self::System(message) => message.each_value(visit),
+            Self::Result(message) => message.each_value(visit),
+            Self::StreamEvent(message) => message.each_value(visit),
+            Self::RateLimit(message) => message.each_value(visit),
+            Self::ConversationReset(message) => message.each_value(visit),
+            Self::Unknown { data, raw, .. } => {
+                data.each_value(visit);
+                raw.each_value(visit);
+            }
+        }
+    }
+}
+
+impl OwnedValues for AssistantMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.content.each_value(visit);
+        self.usage.each_value(visit);
+        self.additional_fields.each_value(visit);
+        self.message_fields.each_value(visit);
+        self.raw.each_value(visit);
+    }
+}
+
+impl OwnedValues for UserMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.content.each_value(visit);
+        self.origin.each_value(visit);
+        self.tool_use_result.each_value(visit);
+        self.additional_fields.each_value(visit);
+        self.message_fields.each_value(visit);
+        self.raw.each_value(visit);
+    }
+}
+
+impl OwnedValues for Content {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        if let Self::Blocks(blocks) = self {
+            blocks.each_value(visit);
+        }
+    }
+}
+
+impl OwnedValues for ContentBlock {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        match self {
+            Self::ToolUse { input, .. } | Self::ServerToolUse { input, .. } => input.each_value(visit),
+            Self::ToolResult { content, .. } | Self::ServerToolResult { content, .. } => content.each_value(visit),
+            Self::Unknown { data, .. } => data.each_value(visit),
+            Self::Text { .. } | Self::Thinking { .. } => {}
+        }
+    }
+}
+
+impl OwnedValues for SystemMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.data.each_value(visit);
+        self.event.each_value(visit);
+        self.raw.each_value(visit);
+    }
+}
+
+impl OwnedValues for SystemEvent {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        match self {
+            Self::TaskProgress(message) => message.each_value(visit),
+            Self::TaskNotification(message) => message.each_value(visit),
+            Self::TaskUpdated(message) => message.each_value(visit),
+            Self::MirrorError(message) => message.each_value(visit),
+            Self::TaskStarted(_) | Self::Hook(_) | Self::Other => {}
+        }
+    }
+}
+
+impl OwnedValues for TaskProgressMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        visit(&mut self.usage);
+    }
+}
+
+impl OwnedValues for TaskNotificationMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.usage.each_value(visit);
+    }
+}
+
+impl OwnedValues for TaskUpdatedMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.patch.each_value(visit);
+    }
+}
+
+impl OwnedValues for MirrorErrorMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.key.each_value(visit);
+    }
+}
+
+impl OwnedValues for ResultMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.structured_output.each_value(visit);
+        self.usage.each_value(visit);
+        self.origin.each_value(visit);
+        self.model_usage.each_value(visit);
+        self.permission_denials.each_value(visit);
+        self.deferred_tool_use.each_value(visit);
+        self.additional_fields.each_value(visit);
+        self.raw.each_value(visit);
+    }
+}
+
+impl OwnedValues for DeferredToolUse {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.input.each_value(visit);
+    }
+}
+
+impl OwnedValues for StreamEvent {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.event.each_value(visit);
+        self.additional_fields.each_value(visit);
+        self.raw.each_value(visit);
+    }
+}
+
+impl OwnedValues for RateLimitInfo {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.raw.each_value(visit);
+    }
+}
+
+impl OwnedValues for RateLimitEvent {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.rate_limit_info.each_value(visit);
+        self.raw.each_value(visit);
+    }
+}
+
+impl OwnedValues for ConversationResetMessage {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.raw.each_value(visit);
+    }
+}
+
+drop_values_iteratively!(
+    AssistantMessage,
+    UserMessage,
+    SystemMessage,
+    TaskProgressMessage,
+    TaskNotificationMessage,
+    TaskUpdatedMessage,
+    MirrorErrorMessage,
+    ResultMessage,
+    DeferredToolUse,
+    StreamEvent,
+    RateLimitInfo,
+    RateLimitEvent,
+    ConversationResetMessage,
+);

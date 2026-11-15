@@ -40,6 +40,12 @@ impl SessionEntry {
     }
 }
 
+impl crate::deep_json::OwnedValues for SessionEntry {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        crate::deep_json::OwnedValues::each_value(&mut self.0, visit);
+    }
+}
+
 impl From<JsonObject> for SessionEntry {
     fn from(value: JsonObject) -> Self {
         Self::new(value)

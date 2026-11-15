@@ -1599,6 +1599,332 @@
       ]
     },
     {
+      "id": "m15-python-tool-argument-recursion-limits",
+      "concept": "CPython recursion limits while the Python SDK validates tool arguments",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 632,
+        "sha256": "0fa69433fbf5c59db302f48147e58dc307ef3031bc8abba6ff2a102a05a8e519"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs validates tool arguments in Node, which has no CPython frame or C recursion limit."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool calls jsonschema.validate(instance=arguments, schema=...) in the host process, and a RecursionError becomes the error result text. The frame limit is sys.getrecursionlimit(), 1000 unless the host program raises it, as neither claude_agent_sdk nor mcp calls sys.setrecursionlimit; the C recursion limit is CPython 3.12's fixed 10000. McpServerDialect::Python has no setting for either: RecursionModel::default() in src/python_recursion_model.rs fixes the frame limit at 1000 with jsonschema.validate at frame 17, the module is private to the crate, RecursionModel::new is only built by unit tests, and validate_retrieving, the only validation the Python dialect runs, takes the default. Under that limit the C checks held by const, enum and items never reach 10000: at a frame limit of 200000, const passes the C limit at nesting 3332 and enum at 3331, and a draft 7 items chain stays clean to 6000, while at 1000 const and enum pass the frame limit at nesting 326 and items at 161, as python_recursion.json records. The any() of the type keyword holds its checks only while is_type runs, which never descends into the instance, and the message repr runs after any() returns, so the type cases of python_recursion.json (repr boundary 9990 and 9991), python_recursion_limits.json (every frame offset at limits 1000 to 1009) and python_compare.json (type, anyOf, not and not not at 9980 to 9986) match in depth and message. jsonschema 4.26.0 (validators.py SHA256 97f171b995b4b0ca05530a9366a1252fb1753f99f3cb7b1068b6d9aab1096fa5) runs the RefResolver branch of _validate_reference, lines 472 to 483, only when the resolver field of line 235 is set; validate builds its validator from the schema alone at line 1329, check_schema from the metaschema and format checker at line 311, and only the deprecated resolver property at line 333 sets that field, so run_tool never reaches line 481."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::m15_python_dialect_meets_the_default_recursion_limit_the_python_sdk_never_raises"
+      ],
+      "rust": [
+        "src/lib.rs",
+        "src/python_recursion_model.rs",
+        "src/python_jsonschema.rs",
+        "src/sdk_mcp_python.rs"
+      ]
+    },
+    {
+      "id": "m16-python-settings-recursion-limits",
+      "concept": "CPython recursion limits while the Python SDK merges the sandbox into the settings value",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 461,
+        "line_end": 474,
+        "sha256": "568cc3ccd95c88400876e953f14c99cd4b54427b3442deee5236092731016178"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs merges the sandbox into a settings object the caller already holds and writes it with JSON.stringify; it parses no settings text, so no CPython recursion limit applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "_build_settings_value runs json.loads on the settings text, or on the file it names, when a sandbox is set, and catches only OSError, ValueError and TypeError as \"Failed to load settings: ...\", so the RecursionError of a deeply nested document reaches the caller bare. CPython 3.12's json C scanner makes one C recursion check per array or object it enters against the fixed Py_C_RECURSION_LIMIT of 10000, which sys.setrecursionlimit does not move, and the checks already open where json.loads runs count against it: a plain function holds 3, ClaudeSDKClient.connect under asyncio.run holds 7, and query() holds 13, so json.loads reads 9997, 9993 and 9987 nested objects there and raises \"maximum recursion depth exceeded while decoding a JSON object from a unicode string\" one level deeper. python_settings_goldens.py records each boundary from CPython 3.12.16 and the pinned claude_agent_sdk, searched with a fresh event loop and checked again after a first call, so caches a first call fills do not move it, together with the --settings value at each boundary and the values for settings text holding lone surrogate escapes, which json.loads keeps in the str and json.dumps writes back as escapes. PythonCStack in src/python_c_stack.rs holds those counts: ClaudeSdkClient::connect and connect_with_adapters build the command with CLIENT_CONNECT, the query functions with QUERY, and python_settings_value loads the text with that depth instead of a fixed cap, keeps the RecursionError message without the \"Failed to load settings\" prefix, and dumps without recursing. The settings engine of src/settings_read.rs, which reads settings the way the CLI does, is not this path and keeps its own bound."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "python_settings_value::client_connect_reads_settings_as_deep_as_claude_sdk_client_connect",
+        "python_settings_value::query_reads_settings_as_deep_as_python_query"
+      ],
+      "rust": [
+        "src/argv.rs",
+        "src/client.rs",
+        "src/constants.rs",
+        "src/process_transport.rs",
+        "src/python_c_stack.rs",
+        "src/python_json_value.rs",
+        "src/settings_option.rs"
+      ]
+    },
+    {
+      "id": "m17-python-remote-ref-close-timing",
+      "concept": "When the Python SDK closes the connections urlopen opened for a remote $ref",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no CPython connection close timing applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any retrieval error into the error result text, and jsonschema 4.26.0 (validators.py SHA256 97f171b995b4b0ca05530a9366a1252fb1753f99f3cb7b1068b6d9aab1096fa5) reads each remote document with `with urlopen(request) as response:` and json.load. CPython 3.12.16 closes every connection of that call before the tool result is written: HTTPResponse closes its socket at body end through _close_conn (http/client.py SHA256 c2c0694155837d72fc710a4138e5d1e53ae1a652b117a2e23a5b1b0db527a0f9), http_error_302 runs fp.read() and fp.close() before it follows a redirect (urllib/request.py SHA256 b6a7860356d99186e7ad1b35c47f2f09d7524a398096214d8c276277947b672c, lines 742 and 743), and the HTTPError that http_error_default raises with the open fp, or any other error that holds the response, is freed by refcount when the except clause ends, also with the cycle collector disabled. python_close_goldens.py records, through Query._handle_control_request and SdkMcpBridge, each server end of each call at the moment the control response is written: a client FIN for every connection, an RST only for a 404 whose 20000 byte body stays unread past the 8 KiB socket buffer, five connections for a redirect loop and two for one hop. The Python dialect's urlopen in src/python_urlopen.rs and src/python_http_client.rs closes at the same points, reading through 8 KiB buffers, so the server sees the same FIN or RST before the answer, as the contract checks over the full Python dialect MCP server."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "remote_schema_retriever::python_dialect_closes_each_retrieval_connection_before_the_call_answers"
+      ],
+      "rust": [
+        "src/python_http_client.rs",
+        "src/python_urlopen.rs",
+        "src/urlopen_retriever.rs"
+      ]
+    },
+    {
+      "id": "m19-python-tls-hello-retry-groups",
+      "concept": "TLS after a HelloRetryRequest for a group rustls does not implement while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. That context supports X25519MLKEM768, X25519, P-256, X448, P-384, P-521, ffdhe2048 and ffdhe3072. When the server answers the ClientHello with a HelloRetryRequest for X448, P-521, ffdhe2048 or ffdhe3072, OpenSSL sends a second ClientHello with a key share in that group and completes the handshake in it."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "rustls implements none of those four groups. src/python_urlopen_tls_gate.rs checks the retry request and the server hello against the group the server asked for, but hands rustls a retry request for P-256, so the second ClientHello carries a P-256 share where OpenSSL's carries one in the requested group, and once the server hello picks that group the first encrypted record fails with \"[SSL] record layer failure\" where Python completes the handshake. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_hello_retry_for_a_group_rustls_lacks_is_answered_with_a_p256_share"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m20-python-tls-suites-without-rustls",
+      "concept": "TLS 1.2 DHE and CBC cipher suites the Python SDK accepts while it retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. Under TLS 1.2 that context offers, besides the AEAD ECDHE suites, ECDHE-ECDSA and ECDHE-RSA with AES-CBC and SHA-256 or SHA-384, and DHE-RSA with AES-GCM or with AES-CBC and SHA-256, and a server that picks one of them completes the handshake, or fails with OpenSSL's text for what it sent."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "rustls implements none of these suites. src/python_urlopen_tls_gate.rs checks a server hello that picks one with OpenSSL's rules, then tells rustls the server chose the AES-128-GCM suite with the same signature algorithm, ECDHE-ECDSA for the ECDSA suites and ECDHE-RSA for the others, so the key exchange and what follows it are read as that suite and a server that goes on with the suite it picked gets a rustls error text where Python connects or reports OpenSSL's text. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_dhe_key_exchange_is_read_as_the_ecdhe_suite_rustls_implements"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m21-python-tls-rewritten-server-hello-transcript",
+      "concept": "The handshake transcript after the TLS gate rewrites a server hello while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. OpenSSL hashes the server hello into the handshake transcript exactly as the server sent it, so a server that carries on after a hello OpenSSL accepts reaches the Finished check with the transcript both ends hold."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Where a server's hello would make rustls fail first with a text of its own while OpenSSL carries on, src/python_urlopen_tls_gate.rs hands rustls a rewritten hello, with a suite rustls implements, without the extensions rustls refuses, or with the session id rustls expects. rustls hashes the rewritten bytes, so its transcript differs from the server's and the Finished check fails with the rustls text where Python completes the handshake. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::rustls_hashes_the_server_hello_the_gate_rewrote"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m22-python-tls-after-server-hello",
+      "concept": "ssl.SSLError texts for handshake messages after the server hello while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. OpenSSL checks the certificate, certificate status, server key exchange, encrypted extensions, certificate request, certificate verify and Finished messages that follow the server hello, and each failure raises ssl.SSLError with an OpenSSL reason, which urlopen raises as URLError."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_tls_gate.rs applies OpenSSL's record, alert and handshake framing rules and its server hello rules, then lets rustls read the contents of the messages that follow. A server that breaks the protocol there gets the rustls error text, except the certificate failures src/python_urlopen_tls.rs words as OpenSSL does: a self-signed certificate, a missing issuer, a name or address mismatch, and an expired or not yet valid certificate. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::messages_after_the_server_hello_fail_with_the_rustls_text_except_certificate_failures"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m23-python-tls-encrypted-alerts",
+      "concept": "Alerts a server sends in the encrypted phase of the handshake while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. OpenSSL raises ssl.SSLError with its text for a fatal alert it decrypts during the handshake, as it does for an alert it reads in the clear."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_tls_gate.rs cannot read encrypted records: under TLS 1.3 it passes them to rustls until the handshake is over, and under TLS 1.2 it steps aside at the server's change cipher spec. rustls decrypts the alerts in them, so their error text is the rustls text, while an alert in the clear gets OpenSSL's text from alert_text in the gate. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::an_encrypted_handshake_alert_raises_the_rustls_text"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m24-python-tls-handshake-message-cap",
+      "concept": "The largest handshake message a server may send while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. OpenSSL accepts a server hello of up to 65607 bytes and a certificate, server key exchange or certificate request message of up to 102400 bytes, and raises \"[SSL: EXCESSIVE_MESSAGE_SIZE] excessive message size\" past each limit."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_tls_gate.rs applies OpenSSL's limits to the messages it reads in the clear, but rustls refuses any handshake message longer than 65535 bytes, so a TLS 1.2 certificate, server key exchange or certificate request message of 65536 to 102400 bytes, and a TLS 1.3 certificate message of that size, which the gate never sees, fail with the rustls text where Python reads them. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_certificate_message_past_65535_bytes_fails_with_the_rustls_text"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m25-python-tls-read-errors",
+      "concept": "Errors while the Python SDK reads the body of a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. json.load reads the body through the ssl socket after the handshake, and a server that breaks the protocol there makes response.read() raise ssl.SSLError with OpenSSL's text."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "The body is read through rustls, so the io::Error a read of the body returns carries the rustls text instead of OpenSSL's. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_body_read_error_carries_the_rustls_text"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs",
+        "src/python_http_client.rs"
+      ]
+    },
+    {
+      "id": "m26-python-tls-trust-directory-lookup",
+      "concept": "When the trusted roots of SSL_CERT_DIR are read while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. urlopen builds that context with its opener on the first call, whatever the scheme. OpenSSL reads SSL_CERT_FILE then, but looks a certificate up in the hashed SSL_CERT_DIR directory at each handshake, so a root written there as its subject hash with a .0 suffix after the first urlopen is trusted by the next https retrieval. python_tls_context.json records it as the directory_read_at_each_handshake case."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_tls.rs builds the rustls root store when the context is built, on the first retrieval, from SSL_CERT_FILE and SSL_CERT_DIR read through the environment adapter, so a root written to the directory afterwards is not trusted and the retrieval fails with the certificate verify failed text where Python connects. The other seven cases of python_tls_context.json match, and building the context fails on neither side, so no other trust store error text differs. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_root_written_to_ssl_cert_dir_after_the_first_retrieval_is_not_trusted"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/urlopen_retriever.rs"
+      ]
+    },
+    {
       "id": "r01-queue-capacity",
       "concept": "Queue capacity bounds",
       "python": {
@@ -3075,6 +3401,44 @@
       "rust": [
         "src/driver.rs",
         "src/version_check.rs"
+      ]
+    },
+    {
+      "id": "m18-python-system-proxy-undefined-reads",
+      "concept": "System proxy values CPython crashes on or reads from uninitialized memory while the Python SDK retrieves a remote $ref",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so it reads neither the macOS system configuration nor the Windows registry."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "With no proxy variable set, urlopen in CPython 3.12.16 reads proxies from the macOS system configuration through _scproxy, and from the Windows registry through winreg as getproxies_registry and proxy_bypass_registry read it. _scproxy sends a value of the wrong type, such as a host that is not a string, a message it does not answer, which raises an NSException that ends the interpreter. winreg.QueryValueEx converts the whole buffer it allocated with Reg2Py, so a REG_DWORD or REG_QWORD shorter than its width, and any bytes past what the second RegQueryValueExW wrote, are read from uninitialized memory."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_sysconf.rs leaves a value of the wrong type out, as if it were absent, because a crashed process has no answer to match. src/python_urlopen_registry.rs zeroes the buffer, so a short integer and the rest of a shorter answer read as zero bytes. Reg2Py and the Windows error classes are checked against expectations worked by hand from Python/winreg.c, PC/errmap.h and Objects/exceptions.c, because the recording host has no winreg; getproxies_registry and proxy_bypass_registry are recorded from CPython over a fake winreg."
+      },
+      "contracts": [
+        "src/python_urlopen_sysconf_tests.rs::reads_the_system_configuration_as_scproxy_and_urllib_read_it",
+        "src/python_urlopen_sysconf_tests.rs::a_string_is_cut_at_its_first_nul_and_a_lone_surrogate_does_not_convert",
+        "src/python_urlopen_registry_tests.rs::reads_the_registry_as_getproxies_registry_and_proxy_bypass_registry_read_it",
+        "src/python_urlopen_registry_tests.rs::an_integer_is_read_little_endian_and_zero_without_data",
+        "src/python_urlopen_registry_tests.rs::a_string_is_cut_at_its_first_nul_and_keeps_a_lone_surrogate",
+        "src/python_urlopen_registry_tests.rs::a_multi_string_drops_one_final_nul_and_splits_at_each_other",
+        "src/python_urlopen_registry_tests.rs::any_other_type_is_its_bytes_or_none_without_data",
+        "src/python_urlopen_registry_tests.rs::a_windows_error_is_the_oserror_python_raises_for_its_code",
+        "src/python_urlopen_registry_tests.rs::a_windows_error_code_maps_to_the_class_of_its_errno"
+      ],
+      "rust": [
+        "src/python_urlopen_registry.rs",
+        "src/python_urlopen_registry_windows.rs",
+        "src/python_urlopen_sysconf.rs"
       ]
     },
     {
