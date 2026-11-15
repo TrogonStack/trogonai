@@ -162,7 +162,10 @@ def decider_suites(binary):
                     binary,
                     "//{}:component".format(package),
                     suite,
+                    _WASM_TOOLS,
                 ],
+                # decider-test runs the import check through wasm-tools.
+                env = {"WASM_TOOLS": "$(rootpath {})".format(_WASM_TOOLS)},
             )
 
         parity = "parity_" + alias

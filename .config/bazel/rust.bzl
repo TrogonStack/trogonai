@@ -71,6 +71,7 @@ def _dedupe(items):
 def workspace_crate(
         compile_data = [],
         data = [],
+        env = {},
         rustc_env = {},
         library_tags = [],
         unit_test_args = [],
@@ -86,6 +87,8 @@ def workspace_crate(
     Args:
         compile_data: Files read at compile time by every target.
         data: Files read at run time by every test.
+        env: Environment for running every test. Values may use `$(rootpath ...)`
+            on a `data` label.
         rustc_env: Environment for compiling every target.
         library_tags: Tags for the library target.
         unit_test_args: Arguments for the library's unit test binary.
@@ -113,6 +116,7 @@ def workspace_crate(
     library = crate["library"]
     compile_data = _files(compile_data)
     data = _files(data)
+    test_env = _env(env)
     rustc_env = _env(rustc_env)
 
     # crate_aliases may return a select, which only `|` can merge into.
@@ -161,6 +165,7 @@ def workspace_crate(
             compile_data = compile_data + _files(settings["compile_data"]),
             crate_features = crate_features,
             data = data,
+            env = test_env,
             proc_macro_deps = test_proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
             tags = unit_test_tags,
@@ -187,6 +192,7 @@ def workspace_crate(
             crate_root = test["root"],
             data = data + binary_data + _files(settings["data"]),
             edition = edition,
+            env = test_env,
             proc_macro_deps = normal_proc_macro_deps + test_proc_macro_deps,
             rustc_env = rustc_env | binary_env | _env(settings["rustc_env"]),
             rustc_flags = _RUSTC_FLAGS,
@@ -276,6 +282,7 @@ def workspace_crate(
             # A test compiles the crate again and takes features from its own attributes.
             crate_features = crate_features,
             data = data,
+            env = test_env,
             proc_macro_deps = test_proc_macro_deps,
             rustc_flags = _RUSTC_FLAGS,
             tags = unit_test_tags,

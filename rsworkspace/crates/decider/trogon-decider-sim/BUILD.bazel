@@ -1,7 +1,12 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    data = ["//rsworkspace/wasm-components/trogon-schedules-decider:component"],
+    data = [
+        "//.config/bazel:wasm-tools",
+        "//rsworkspace/wasm-components/trogon-schedules-decider:component",
+    ],
+    # The import check runs wasm-tools, which is not on the sandbox PATH.
+    env = {"WASM_TOOLS": "$(rootpath //.config/bazel:wasm-tools)"},
     integration_tests = {
         "parity_schedules": {"data": ["//rsworkspace/cli/trogon-decider-test:schedules.yaml"]},
     },
