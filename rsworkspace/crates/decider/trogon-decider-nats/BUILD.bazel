@@ -1,13 +1,6 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-decider-nats",
     # Most tests start a NATS server in a container through Docker.
     unit_test_tags = ["requires-network"],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
 )

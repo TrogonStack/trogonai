@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+// An explicitly selected qualification target, not a claim of runtime support.
+// Cloud node attestation is independent of KMS and resource federation.
+enum WorkloadEnvironment {
+  WORKLOAD_ENVIRONMENT_UNSPECIFIED = 0;
+  WORKLOAD_ENVIRONMENT_LINUX_SELF_HOSTED = 1;
+  WORKLOAD_ENVIRONMENT_KUBERNETES = 2;
+  WORKLOAD_ENVIRONMENT_CONTAINER = 3;
+  WORKLOAD_ENVIRONMENT_AWS_VM = 4;
+  WORKLOAD_ENVIRONMENT_GOOGLE_CLOUD_VM = 5;
+  WORKLOAD_ENVIRONMENT_AZURE_VM = 6;
+}
+
+enum DeploymentTier {
+  DEPLOYMENT_TIER_UNSPECIFIED = 0;
+  DEPLOYMENT_TIER_DEVELOPMENT = 1;
+  DEPLOYMENT_TIER_PRODUCTION = 2;
+}
+
+enum WorkloadIsolation {
+  WORKLOAD_ISOLATION_UNSPECIFIED = 0;
+  WORKLOAD_ISOLATION_TRUSTED_HOST = 1;
+  WORKLOAD_ISOLATION_DEDICATED_WORKLOAD = 2;
+}

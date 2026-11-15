@@ -1,18 +1,7 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-policy-cel",
     integration_tests = {
-        "bundle": {"compile_data": glob(["tests/common/*.rs"])},
-        "compile": {"compile_data": glob(["tests/common/*.rs"])},
-        "composition": {"compile_data": glob(["tests/common/*.rs"])},
-        "engine_limits": {"compile_data": glob(["tests/common/*.rs"])},
-        "facts": {"compile_data": glob(["tests/common/*.rs"])},
-        "rule_sets": {"compile_data": glob(["tests/common/*.rs"])},
-        "rules": {"compile_data": glob(["tests/common/*.rs"])},
+        "*": {"compile_data": ["tests/common/*.rs"]},
     },
-    deps = [
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/policy/trogon-policy-eval",
-    ],
 )

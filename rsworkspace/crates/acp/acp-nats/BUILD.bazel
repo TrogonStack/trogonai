@@ -1,11 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "acp-nats",
-    deps = [
-        "//rsworkspace/crates/platform/jsonrpc-nats",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
-)
+workspace_crate()

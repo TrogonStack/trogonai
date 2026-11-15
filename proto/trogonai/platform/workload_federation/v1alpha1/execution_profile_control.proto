@@ -1,0 +1,101 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/execution_profile.proto";
+import "trogonai/platform/workload_federation/v1alpha1/lifecycle.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+// One stream per profile. Register uses NoStream; later changes use the current
+// Decider revision and stable command id. The owner authenticates approvals and
+// validation for the exact artifact. Revision/widening withdraws earlier use
+// before a fresh independently approved activation; emergency denial never waits
+// for approval, audit recovery or a provider. Retired identities are not reused.
+message RegisterExecutionProfile {
+  ExecutionProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ReviseExecutionProfile {
+  ExecutionProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ActivateExecutionProfile {
+  option (buf.validate.message).cel = {
+    id: "activate_execution_profile.evidence"
+    message: "activation evidence must bind the exact scoped profile version"
+    expression: "this.approval_ref.scope == this.execution_profile_ref.scope && this.validation_ref.scope == this.execution_profile_ref.scope && this.approval_ref.version == this.execution_profile_ref.version && this.validation_ref.version == this.execution_profile_ref.version && this.approval_ref.owner_kind == 5 && this.validation_ref.owner_kind == 5 && this.approval_ref.operation_purpose == 1 && this.validation_ref.operation_purpose == 1"
+  };
+  ExecutionProfileRef execution_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationApprovalRef approval_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationValidationRef validation_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message WithdrawExecutionProfile {
+  ExecutionProfileRef execution_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RetireExecutionProfile {
+  ExecutionProfileRef execution_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExecutionProfileRegistered {
+  ExecutionProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExecutionProfileRevised {
+  ExecutionProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExecutionProfileActivated {
+  option (buf.validate.message).cel = {
+    id: "execution_profile_activated.evidence"
+    message: "activation evidence must bind the exact scoped profile version"
+    expression: "this.approval_ref.scope == this.execution_profile_ref.scope && this.validation_ref.scope == this.execution_profile_ref.scope && this.approval_ref.version == this.execution_profile_ref.version && this.validation_ref.version == this.execution_profile_ref.version && this.approval_ref.owner_kind == 5 && this.validation_ref.owner_kind == 5 && this.approval_ref.operation_purpose == 1 && this.validation_ref.operation_purpose == 1"
+  };
+  ExecutionProfileRef execution_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationApprovalRef approval_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationValidationRef validation_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExecutionProfileWithdrawn {
+  ExecutionProfileRef execution_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExecutionProfileRetired {
+  ExecutionProfileRef execution_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Actor and occurrence time belong to the authenticated event envelope.
+message ExecutionProfileEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    ExecutionProfileRegistered registered = 1;
+    ExecutionProfileRevised revised = 2;
+    ExecutionProfileActivated activated = 3;
+    ExecutionProfileWithdrawn withdrawn = 4;
+    ExecutionProfileRetired retired = 5;
+  }
+}
+
+message ExecutionProfileState {
+  ExecutionProfile profile = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConfigurationAdmission admission = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  uint64 stream_revision = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
