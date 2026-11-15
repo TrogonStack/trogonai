@@ -2736,6 +2736,145 @@ async fn offline_catalog_members_leave_live_roster_and_keep_historical_activity(
 }
 
 #[tokio::test]
+async fn live_roster_filters_expired_and_detached_peers_without_erasing_their_history() -> TestResult {
+    let mut f = Fixture::new().await?;
+    let service = trogon_peer_service::PeerService::new(f.store.clone(), f.policy.clone(), f.clock.clone());
+    let (charlie, c) = f.add_peer("charlie").await?;
+    let active = *f
+        .clock
+        .time
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?;
+    f.intake("expired_inbox", "retain expired connector inbox").await?;
+    let mut send = f.send("detached_inbox", "retain detached connector inbox");
+    send.recipient_peer_id = c.peer_id.clone();
+    let sent = f.app().send(&f.alice, send).await?;
+    let sender = PeerId::parse(
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let message = MessageId::new(
+        sent.message
+            .message_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    f.app()
+        .reconcile(&f.alice, &sender, &[message], WorkLimit::new(1)?)
+        .await?;
+    for (owner, reference) in [(&f.bob, &f.b), (&charlie, &c)] {
+        service
+            .heartbeat(
+                owner,
+                proto::HeartbeatRequest {
+                    attachment_ref: reference.clone().into(),
+                    availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_BUSY.into()),
+                    active_at: trogonai_proto::convert::timestamp_from_datetime(&active).into(),
+                    ..Default::default()
+                },
+            )
+            .await?;
+    }
+    service
+        .detach(
+            &charlie,
+            proto::DetachRequest {
+                attachment_ref: c.clone().into(),
+            },
+        )
+        .await?;
+    let expired = PeerId::parse(
+        f.b.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    )?;
+    let detached = PeerId::parse(c.peer_id.clone().ok_or(trogon_peer_service::PeerPortError::Integrity)?)?;
+    let expired_history = f.history(&expired).await?;
+    let detached_history = f.history(&detached).await?;
+    assert_eq!(expired_history.inbox.len(), 1);
+    assert_eq!(detached_history.inbox.len(), 1);
+    assert_eq!(expired_history.active_at, detached_history.active_at);
+    assert!(expired_history.active_at.is_set());
+    *f.clock
+        .time
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)? += chrono::Duration::seconds(10);
+    f.a = service
+        .enroll(&f.alice, Fixture::enrollment("alice"))
+        .await?
+        .attachment
+        .attachment_ref
+        .clone()
+        .into_option()
+        .ok_or(trogon_peer_service::PeerPortError::Integrity)?;
+    let (_, live) = f.add_peer("dana").await?;
+    let mut catalog = f
+        .catalog
+        .peers
+        .lock()
+        .map_err(|_| trogon_peer_service::PeerPortError::Unavailable)?
+        .clone();
+    catalog.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+    let mut cursor = None;
+    let mut live_ids = Vec::new();
+    for member in &catalog {
+        let page = f
+            .app()
+            .roster(
+                &f.alice,
+                proto::RosterRequest {
+                    attachment_ref: f.a.clone().into(),
+                    page_size: Some(1),
+                    page_token: cursor,
+                },
+            )
+            .await?;
+        assert_eq!(page.next_page_token.as_deref(), Some(member.as_str()));
+        if member == &expired || member == &detached {
+            assert!(
+                page.peers.is_empty(),
+                "nonlive catalog members must not appear in the live roster"
+            );
+        } else {
+            assert_eq!(page.peers.len(), 1);
+            assert!(page.peers[0].availability.is_some());
+            live_ids.push(
+                page.peers[0]
+                    .peer_id
+                    .clone()
+                    .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+            );
+        }
+        cursor = page.next_page_token;
+    }
+    let last = f
+        .app()
+        .roster(
+            &f.alice,
+            proto::RosterRequest {
+                attachment_ref: f.a.clone().into(),
+                page_size: Some(1),
+                page_token: cursor,
+            },
+        )
+        .await?;
+    assert!(last.peers.is_empty());
+    assert!(last.next_page_token.is_none());
+    let mut expected = vec![
+        f.a.peer_id
+            .clone()
+            .ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+        live.peer_id.ok_or(trogon_peer_service::PeerPortError::Integrity)?,
+    ];
+    expected.sort();
+    assert_eq!(live_ids, expected);
+    assert_eq!(f.history(&expired).await?, expired_history);
+    assert_eq!(f.history(&detached).await?, detached_history);
+    Ok(())
+}
+
+#[tokio::test]
 async fn lost_send_append_reply_retries_the_original_durable_obligation() -> TestResult {
     let f = Fixture::new().await?;
     f.store.lose_append_reply.store(true, Ordering::SeqCst);
