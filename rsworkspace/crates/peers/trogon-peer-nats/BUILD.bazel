@@ -2,6 +2,9 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     name = 'trogon-peer-nats',
-    deps = ['//rsworkspace/crates/platform/trogon-nats'],
-    integration_tests = {'routing_contract': {}},
+    deps = ['//rsworkspace/crates/decider/trogon-decider-nats',
+     '//rsworkspace/crates/peers/trogon-peer',
+     '//rsworkspace/crates/platform/trogon-nats'],
+    dev_deps = ['//rsworkspace/crates/decider/trogon-decider-runtime', '//rsworkspace/crates/platform/trogonai-proto'],
+    integration_tests = {'routing_contract': {}, 'store_admission_tests': {}},
 )
