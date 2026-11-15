@@ -1,0 +1,9 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    name = 'trogon-peer-service',
+    deps = ['//rsworkspace/crates/decider/trogon-decider-runtime',
+     '//rsworkspace/crates/peers/trogon-peer',
+     '//rsworkspace/crates/platform/trogonai-proto'],
+    integration_tests = {'enrollment': {}},
+)
