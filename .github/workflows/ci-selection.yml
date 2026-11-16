@@ -22,6 +22,9 @@ on:
       # JSON object mapping each job in self-hosted-job-names to its runs-on.
       runs-on-by-job:
         value: ${{ jobs.choose-runner.outputs.runs-on-by-job }}
+      # How many of those jobs went to a self-hosted runner.
+      self-hosted-count:
+        value: ${{ jobs.choose-runner.outputs.self-hosted-count }}
 
 permissions:
   contents: read
@@ -43,6 +46,7 @@ jobs:
       id-token: write
     outputs:
       runs-on-by-job: ${{ steps.choose-runner.outputs.runs-on-by-job }}
+      self-hosted-count: ${{ steps.choose-runner.outputs.self-hosted-count }}
     steps:
       # return-empty-token: a failure gives an empty token, and a run that declared
       # no environment reads the provider empty and skips every step. Either
