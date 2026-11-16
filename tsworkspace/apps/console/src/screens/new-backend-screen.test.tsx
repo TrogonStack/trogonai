@@ -10,13 +10,6 @@ const PEM = '-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0\n-----END CERTI
 describe('register backend wizard', () => {
   it('registers an AWS KMS backend after every check passes', async () => {
     const user = userEvent.setup();
-    const probeStart = performance.now();
-    let probeLast = probeStart;
-    const mark = (label: string) => {
-      const now = performance.now();
-      console.log(`[probe new-backend] ${label} step=${Math.round(now - probeLast)}ms total=${Math.round(now - probeStart)}ms`);
-      probeLast = now;
-    };
     const backend = createFakeBackend({ latencyMs: 0 });
     const completeRegistration = backend.keyCustody.completeRegistration.bind(backend.keyCustody);
     const load = backend.keyCustody.load.bind(backend.keyCustody);
@@ -38,60 +31,42 @@ describe('register backend wizard', () => {
       return completeRegistration(attemptId);
     };
     renderApp('/keys/backends/new', backend);
-    mark('L33 render');
 
     await user.click(await screen.findByRole('radio', { name: /AWS KMS/ }));
-    mark('L35');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    mark('L36');
 
     await user.type(screen.getByLabelText('Display name'), 'Acme AWS staging');
-    mark('L38');
     await user.type(screen.getByLabelText('Role ARN'), 'arn:aws:iam::381204965517:role/trogon-key-access');
-    mark('L39');
     await user.click(screen.getByRole('button', { name: 'Generate setup instructions' }));
-    mark('L40');
 
     expect(await screen.findByText('Your external ID')).toBeInTheDocument();
-    mark('L42');
     expect(screen.getAllByText(/trogon-ext-/).length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: 'I have applied these' }));
-    mark('L44');
 
     await user.click(await screen.findByRole('button', { name: 'Run checks' }));
-    mark('L46');
     const checks = await screen.findByRole('list', { name: 'Validation checks' });
-    mark('L47');
     await waitFor(() => expect(within(checks).getAllByLabelText('Passed')).toHaveLength(4));
-    mark('L48');
     expect(within(checks).getByText('AssumeRole without an external ID is denied')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Back to instructions' }));
-    mark('L51');
     await user.click(screen.getByRole('button', { name: 'I have applied these' }));
-    mark('L52');
     expect(within(screen.getByRole('list', { name: 'Validation checks' })).getAllByLabelText('Passed')).toHaveLength(4);
     expect(screen.queryByRole('button', { name: 'Run checks' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Register backend' }));
-    mark('L55');
     expect(screen.getByRole('button', { name: 'Back to instructions' })).toBeDisabled();
     holdRefresh = true;
     releaseCompletion();
 
     expect(await screen.findByRole('heading', { name: 'Backend registered' })).toBeInTheDocument();
-    mark('L60');
     expect(screen.getByText(/AWS KMS/)).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: 'View backend' }));
-    mark('L62');
 
     expect(await screen.findByText('Loading backend')).toBeInTheDocument();
-    mark('L64');
     expect(screen.queryByText('Backend not found')).not.toBeInTheDocument();
 
     holdRefresh = false;
     releaseRefresh();
     expect(await screen.findByRole('heading', { name: 'Acme AWS staging' })).toBeInTheDocument();
-    mark('L69');
   });
 
   it('keeps the owner on backend details while setup preparation is pending', async () => {

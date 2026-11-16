@@ -12,13 +12,6 @@ const NEW_ARN = 'arn:aws:kms:eu-west-1:512049177301:key/1c0e7d52-9b4a-4f6e-8a31-
 describe('bind key wizard', () => {
   it('binds a key against a purpose from the catalogue after every check passes', async () => {
     const user = userEvent.setup();
-    const probeStart = performance.now();
-    let probeLast = probeStart;
-    const mark = (label: string) => {
-      const now = performance.now();
-      console.log(`[probe new-key] ${label} step=${Math.round(now - probeLast)}ms total=${Math.round(now - probeStart)}ms`);
-      probeLast = now;
-    };
     const backend = createFakeBackend({ latencyMs: 0 });
     const completeBinding = backend.keyCustody.completeBinding.bind(backend.keyCustody);
     let releaseCompletion!: () => void;
@@ -30,38 +23,26 @@ describe('bind key wizard', () => {
       return completeBinding(attemptId);
     };
     renderApp('/keys/keys/new?backend=kbe_aws_acme_prod', backend);
-    mark('L25 render');
 
     expect(await screen.findByRole('radio', { name: /Acme AWS production/ })).toBeChecked();
-    mark('L27');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    mark('L28');
 
     await user.type(screen.getByLabelText(/key locator/), NEW_ARN);
-    mark('L30');
     expect(screen.getByRole('radio', { name: /Session messages/ })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Session artifacts/ })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Workflow run interactions/ })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: /credential|secret/i })).not.toBeInTheDocument();
-    mark('L31-34 four role queries');
     await user.click(screen.getByRole('radio', { name: /Session artifacts/ }));
-    mark('L35');
     await user.click(screen.getByRole('button', { name: 'Continue to validation' }));
-    mark('L36');
 
     await user.click(await screen.findByRole('button', { name: 'Run checks' }));
-    mark('L38');
     const checks = await screen.findByRole('list', { name: 'Validation checks' });
-    mark('L39');
     await waitFor(() => expect(within(checks).getAllByLabelText('Passed')).toHaveLength(3));
-    mark('L40');
     await user.click(screen.getByRole('button', { name: 'Bind key' }));
-    mark('L41');
     expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
     releaseCompletion();
 
     expect(await screen.findByRole('heading', { name: 'Key bound' })).toBeInTheDocument();
-    mark('L45');
     expect(screen.getByRole('link', { name: 'View key' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Migrations' })).toHaveAttribute('href', '/keys/migrations');
   });
