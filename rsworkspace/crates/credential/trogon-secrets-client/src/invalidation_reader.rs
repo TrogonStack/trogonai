@@ -64,7 +64,8 @@ pub(crate) struct InvalidationReader(AbortHandle);
 impl InvalidationReader {
     /// Returns once the first consumer has caught up with the notices the
     /// stream held when it was created, or once the reader has lost its place
-    /// before that, when nothing is held and it keeps retrying.
+    /// before that, when nothing is held and it keeps retrying. Giving up on
+    /// it before then stops the reader.
     pub(crate) async fn start<J, C>(
         jetstream: J,
         clock: C,
@@ -78,9 +79,9 @@ impl InvalidationReader {
     {
         let reading = subscribe(&jetstream, &clock).await?;
         let (caught_up, ready) = oneshot::channel();
-        let task = tokio::spawn(read(jetstream, clock, cache, metrics, reading, caught_up));
+        let reader = Self(tokio::spawn(read(jetstream, clock, cache, metrics, reading, caught_up)).abort_handle());
         let _ = ready.await;
-        Ok(Self(task.abort_handle()))
+        Ok(reader)
     }
 }
 
