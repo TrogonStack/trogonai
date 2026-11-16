@@ -17,7 +17,7 @@ use std::{
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    Error, InitializeTimeoutError, Prompt, StartupOptions, startup_with_adapters,
+    Error, InitializeTimeoutError, Message, Prompt, StartupOptions, startup_with_adapters,
     upstream::messages::SDKStartupFailureReason,
 };
 
@@ -41,7 +41,11 @@ async fn startup_writes_the_handshake_then_the_prompt() -> Outcome {
         command.environment.get(OsStr::new(MARKS)),
         Some(&Some(OsString::from("1")))
     );
-    let query = warm.query(Prompt::from("hi")).await?;
+    let mut query = warm.query(Prompt::from("hi")).await?;
+    assert!(matches!(
+        tokio::time::timeout(WAIT, query.next_message()).await??,
+        Some(Message::Result(_))
+    ));
     query.disconnect().await?;
     assert_eq!(run.lines().await?, vec![INIT.to_owned(), user("hi")]);
     Ok(())

@@ -101,9 +101,11 @@ async fn tool_listing_keeps_names_the_mcp_protocol_discourages() -> Result<(), B
         "-lead".to_owned(),
         "x".repeat(129),
     ];
+    // A concurrent test must not cache this callsite only against its own default subscriber.
+    let _interest_peer = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     for dialect in [McpServerDialect::TypeScript, McpServerDialect::Python] {
         let warnings = Arc::new(Mutex::new(Vec::new()));
-        let _guard = tracing::subscriber::set_default(RecordingSubscriber(warnings.clone()));
+        let subscriber = tracing::Dispatch::new(RecordingSubscriber(warnings.clone()));
         let mut expected = Vec::new();
         for name in &names {
             if dialect == McpServerDialect::TypeScript {
@@ -118,13 +120,15 @@ async fn tool_listing_keeps_names_the_mcp_protocol_discourages() -> Result<(), B
                 search_hint: None,
                 always_load: false,
             });
-            let registry = LocalMcpServer::from(LocalMcpServerOptions {
-                name: McpServerName::from("local"),
-                version: Some("1".into()),
-                tools: Some(tool.into()),
-                instructions: None,
-                always_load: false,
-                dialect,
+            let registry = tracing::dispatcher::with_default(&subscriber, || {
+                LocalMcpServer::from(LocalMcpServerOptions {
+                    name: McpServerName::from("local"),
+                    version: Some("1".into()),
+                    tools: Some(tool.into()),
+                    instructions: None,
+                    always_load: false,
+                    dialect,
+                })
             });
             let server = registry.open_session();
             let request = serde_json::from_value::<JsonObject>;
