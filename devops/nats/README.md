@@ -452,6 +452,33 @@ nats-audit-provision runs the script as the PLATFORM user `audit-provisioner`
 once the accounts are pushed. `provision-audit.test.sh` checks it against a
 stand-in `nats`.
 
+## Provision the invalidation stream
+
+The secrets service publishes a release invalidation notice for each
+credential event that ends a release to the PLATFORM stream
+`SECRETS_INVALIDATION`, on
+`secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`
+([ADR#0081](../../docs/adr/0081-nats-tls-by-default-and-operator-mode-admission.md)
+Decision 3 amendment). It never creates the stream, and it refuses to start
+unless the stream exists and keeps what a holder of a released value relies
+on. The stream takes `secrets.invalidation.v1.*.>` and uses file storage,
+limits retention, `discard: old`, a one hour `max_age`, a two minute duplicate
+window, a 1024 byte maximum message size, `deny_delete`, `deny_purge` and
+direct get, with three replicas in production. Create it as a PLATFORM user
+before the first secrets service starts, with
+[provision-secrets-invalidation.sh](../docker/compose/services/nats/provision-secrets-invalidation.sh)
+and `TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS=3`, the setting the service
+checks the stream's replicas against.
+
+The script fails on a stream that already exists with a configuration that
+would lose a notice before a holder can read it, naming the field, and never
+edits it: an operator decides whether to replace it.
+
+The local stack creates it with one replica on every `up`.
+nats-secrets-invalidation-provision runs the script as the PLATFORM user
+`secrets-invalidation-provisioner` once the accounts are pushed.
+`provision-secrets-invalidation.test.sh` checks it against a stand-in `nats`.
+
 ## Where production keys live
 
 Production NATS material lives in OpenBao. The deployment reads it with its
