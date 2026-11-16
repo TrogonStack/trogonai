@@ -33,29 +33,34 @@ impl SecretsService {
     }
 
     /// Connects to NATS, finds the credential stream, checks the invalidation
-    /// stream, and logs in to OpenBao before it opens its audit chain and
+    /// stream, logs in to OpenBao, and has the invalidation publisher
+    /// listening on the credential stream before it opens its audit chain and
     /// joins the release queue group, so a service that cannot reach any of
-    /// them never takes a release. The invalidation stream is checked against
-    /// [`InvalidationStream`] with the configured replicas and never created:
-    /// a value released by a service that cannot announce its revocation
-    /// would outlive the revocation. A login OpenBao refuses is retried, with
-    /// a wait that doubles after each refusal up to a cap, until OpenBao
-    /// accepts it (ADR#0023 Decision 3).
+    /// them never takes a release, and the revocation of every value it
+    /// releases reaches the publisher's durable, which reads only the events
+    /// appended after it was created. The invalidation stream is checked
+    /// against [`InvalidationStream`] with the configured replicas and never
+    /// created: a value released by a service that cannot announce its
+    /// revocation would outlive the revocation. A login OpenBao refuses is
+    /// retried, with a wait that doubles after each refusal up to a cap, until
+    /// OpenBao accepts it (ADR#0023 Decision 3).
     ///
     /// It then serves releases and publishes invalidation notices until
     /// `shutdown`, or until either stops on its own, which stops the other
     /// too, so the service exits whole rather than release values whose
     /// revocation would go unannounced (ADR#0074). Last, it drains the audit
     /// records the releases it answered left behind. A `shutdown` that comes
-    /// while it still looks for a stream or logs in returns without serving.
+    /// while it still looks for a stream, logs in, or starts listening returns
+    /// without serving.
     ///
     /// # Errors
     ///
     /// Returns [`SecretsServiceError`] when the NATS settings cannot be used,
     /// the credential stream cannot be read, the invalidation stream is
     /// missing or would weaken a guarantee, the OpenBao settings cannot be
-    /// used for the AppRole login, or the release endpoint, the invalidation
-    /// publisher, or the audit writer stops before `shutdown`.
+    /// used for the AppRole login, the invalidation publisher cannot start
+    /// listening, or the release endpoint, the invalidation publisher, or the
+    /// audit writer stops before `shutdown`.
     pub async fn run(self, shutdown: CancellationToken) -> Result<(), SecretsServiceError> {
         let Self { config, sources } = self;
         let client = trogon_nats::connect(&config.nats, NATS_CONNECT_TIMEOUT)
@@ -96,7 +101,14 @@ impl SecretsService {
             return Ok(());
         };
 
-        let publisher = InvalidationPublisher::new(stream.clone(), jetstream.clone(), sources.tenant_owners.clone());
+        let Some(publisher) =
+            InvalidationPublisher::new(stream.clone(), jetstream.clone(), sources.tenant_owners.clone())
+                .listen(&shutdown)
+                .await
+                .map_err(SecretsServiceError::Publish)?
+        else {
+            return Ok(());
+        };
         let stamper = Stamper::new(SystemClock, UuidV7Generator);
         let writer = AuditWriter::new(
             JetStreamSink::with_defaults(jetstream),
