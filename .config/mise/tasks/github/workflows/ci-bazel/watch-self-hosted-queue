@@ -15,16 +15,24 @@ limit="${QUEUE_LIMIT_SECONDS:?}"
 max_attempts="${MAX_RUN_ATTEMPTS:?}"
 deadline=$((SECONDS + limit))
 
-while ((SECONDS < deadline)); do
-  status="$(gh api "repos/${repo}/actions/runs/${run_id}/attempts/${attempt}/jobs" \
-    --jq ".jobs[] | select(.name == \"${job}\") | .status")"
-  case "$status" in
-    queued | waiting | pending | requested) ;;
-    *)
-      echo "${job} is ${status:-not in this attempt}; nothing to watch."
-      exit 0
-      ;;
-  esac
+# Acts only on a status it read: a failed read keeps watching rather than end
+# the watch or cancel a verify that may have started, and the deadline is
+# checked after a read so the last status seen is current.
+while true; do
+  if status="$(gh api "repos/${repo}/actions/runs/${run_id}/attempts/${attempt}/jobs" \
+    --jq ".jobs[] | select(.name == \"${job}\") | .status")"; then
+    case "$status" in
+      queued | waiting | pending | requested)
+        ((SECONDS < deadline)) || break
+        ;;
+      *)
+        echo "${job} is ${status:-not in this attempt}; nothing to watch."
+        exit 0
+        ;;
+    esac
+  else
+    echo "::warning::Could not read ${job}'s status; trying again."
+  fi
   sleep 20
 done
 
