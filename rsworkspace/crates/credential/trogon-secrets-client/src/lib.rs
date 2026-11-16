@@ -68,7 +68,7 @@ mod fake_request_error;
 mod fake_secrets_service;
 #[cfg(test)]
 mod fixtures;
-mod invalid_release_response;
+mod invalid_release_response_error;
 mod invalidation_consumer;
 mod invalidation_notice;
 mod invalidation_reader;
@@ -119,7 +119,7 @@ pub use fake_outcome::FakeOutcome;
 pub use fake_request_error::FakeRequestError;
 #[cfg(any(test, feature = "test-support"))]
 pub use fake_secrets_service::FakeSecretsService;
-pub use invalid_release_response::InvalidReleaseResponse;
+pub use invalid_release_response_error::InvalidReleaseResponseError;
 pub use invalidation_consumer::InvalidationConsumer;
 pub use invalidation_notice::InvalidationNotice;
 pub(crate) use invalidation_reader::InvalidationReader;

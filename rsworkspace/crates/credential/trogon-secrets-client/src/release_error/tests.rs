@@ -8,7 +8,7 @@ use trogon_nats::mocks::MockError;
 use trogonai_proto::secrets::exchange::v1alpha1::{ResolveFailure, ResolveFailureCategory as Category};
 
 use super::ReleaseError;
-use crate::InvalidReleaseResponse;
+use crate::InvalidReleaseResponseError;
 
 fn failure(category: impl Into<EnumValue<Category>>, retry_after: Option<WireDuration>) -> ResolveFailure {
     ResolveFailure {
@@ -28,7 +28,7 @@ fn seconds(seconds: i64) -> WireDuration {
 fn refuses_a_category_it_does_not_know() {
     let refused = ReleaseError::reported(failure(99, None)).unwrap_err();
 
-    assert!(matches!(refused, InvalidReleaseResponse::UnknownCategory(99)));
+    assert!(matches!(refused, InvalidReleaseResponseError::UnknownCategory(99)));
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn refuses_the_categories_a_release_never_answers() {
         let refused = ReleaseError::reported(failure(category, None)).unwrap_err();
 
         assert!(
-            matches!(refused, InvalidReleaseResponse::UnexpectedCategory(code) if code == category as i32),
+            matches!(refused, InvalidReleaseResponseError::UnexpectedCategory(code) if code == category as i32),
             "{category:?}"
         );
     }
@@ -51,7 +51,10 @@ fn refuses_the_categories_a_release_never_answers() {
 fn refuses_a_throttle_without_retry_after() {
     let refused = ReleaseError::reported(failure(Category::RESOLVE_FAILURE_CATEGORY_THROTTLED, None)).unwrap_err();
 
-    assert!(matches!(refused, InvalidReleaseResponse::ThrottledWithoutRetryAfter));
+    assert!(matches!(
+        refused,
+        InvalidReleaseResponseError::ThrottledWithoutRetryAfter
+    ));
 }
 
 #[test]
@@ -61,7 +64,7 @@ fn refuses_a_negative_retry_after() {
 
     assert!(matches!(
         refused,
-        InvalidReleaseResponse::RetryAfter(DurationError::NegativeDuration)
+        InvalidReleaseResponseError::RetryAfter(DurationError::NegativeDuration)
     ));
 }
 
@@ -78,7 +81,7 @@ fn refuses_a_retry_after_on_any_category_but_throttled() {
         let refused = ReleaseError::reported(failure(category, Some(seconds(1)))).unwrap_err();
 
         assert!(
-            matches!(refused, InvalidReleaseResponse::RetryAfterOutsideThrottled),
+            matches!(refused, InvalidReleaseResponseError::RetryAfterOutsideThrottled),
             "{category:?}"
         );
     }

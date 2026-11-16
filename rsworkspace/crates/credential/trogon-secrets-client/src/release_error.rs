@@ -5,7 +5,7 @@ use grpc_nats_micro::client::RequestError;
 use grpc_nats_micro::{ReplyError, ServiceError, ServiceErrorCode};
 use trogonai_proto::secrets::exchange::v1alpha1::{ResolveFailure, ResolveFailureCategory as Category};
 
-use super::{InvalidReleaseResponse, ReleaseSubjectError, UnsealError};
+use super::{InvalidReleaseResponseError, ReleaseSubjectError, UnsealError};
 
 /// Why a release call produced no value.
 ///
@@ -40,7 +40,7 @@ pub enum ReleaseError {
     #[error("release call failed before an answer arrived")]
     Request(#[source] Box<dyn Error + Send + Sync>),
     #[error("release response is invalid")]
-    InvalidResponse(#[from] InvalidReleaseResponse),
+    InvalidResponse(#[from] InvalidReleaseResponseError),
     #[error("released value was already expired when it arrived")]
     Expired,
     /// The credential was invalidated, or the client lost track of its
@@ -66,26 +66,26 @@ impl ReleaseError {
                 Self::InvalidArgument(fault)
             }
             RequestError::Reply(ReplyError::Service(fault)) => Self::ServiceFault(fault),
-            RequestError::Reply(reply) => InvalidReleaseResponse::Reply(reply).into(),
+            RequestError::Reply(reply) => InvalidReleaseResponseError::Reply(reply).into(),
             other => Self::Request(Box::new(other)),
         }
     }
 
     /// Reads the failure the secrets service answered, refusing one the
     /// contract does not allow on a release.
-    pub(crate) fn reported(failure: ResolveFailure) -> Result<Self, InvalidReleaseResponse> {
+    pub(crate) fn reported(failure: ResolveFailure) -> Result<Self, InvalidReleaseResponseError> {
         let category = failure
             .category
             .as_known()
-            .ok_or(InvalidReleaseResponse::UnknownCategory(failure.category.to_i32()))?;
+            .ok_or(InvalidReleaseResponseError::UnknownCategory(failure.category.to_i32()))?;
         match (category, failure.retry_after.into_option()) {
             (Category::RESOLVE_FAILURE_CATEGORY_THROTTLED, Some(retry_after)) => Ok(Self::Throttled {
-                retry_after: Duration::try_from(retry_after).map_err(InvalidReleaseResponse::RetryAfter)?,
+                retry_after: Duration::try_from(retry_after).map_err(InvalidReleaseResponseError::RetryAfter)?,
             }),
             (Category::RESOLVE_FAILURE_CATEGORY_THROTTLED, None) => {
-                Err(InvalidReleaseResponse::ThrottledWithoutRetryAfter)
+                Err(InvalidReleaseResponseError::ThrottledWithoutRetryAfter)
             }
-            (_, Some(_)) => Err(InvalidReleaseResponse::RetryAfterOutsideThrottled),
+            (_, Some(_)) => Err(InvalidReleaseResponseError::RetryAfterOutsideThrottled),
             (Category::RESOLVE_FAILURE_CATEGORY_DENIED, None) => Ok(Self::Denied),
             (Category::RESOLVE_FAILURE_CATEGORY_KEY_DENIED, None) => Ok(Self::KeyDenied),
             (Category::RESOLVE_FAILURE_CATEGORY_UNAVAILABLE, None) => Ok(Self::Unavailable),
@@ -96,7 +96,9 @@ impl ReleaseError {
                 | Category::RESOLVE_FAILURE_CATEGORY_RECONNECT_REQUIRED
                 | Category::RESOLVE_FAILURE_CATEGORY_REFRESH_PENDING,
                 None,
-            ) => Err(InvalidReleaseResponse::UnexpectedCategory(failure.category.to_i32())),
+            ) => Err(InvalidReleaseResponseError::UnexpectedCategory(
+                failure.category.to_i32(),
+            )),
         }
     }
 }
