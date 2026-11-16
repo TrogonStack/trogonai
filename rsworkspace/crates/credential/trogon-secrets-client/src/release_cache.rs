@@ -1,31 +1,38 @@
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 
+use trogon_std::time::GetElapsed;
+
+use super::constants::RELEASE_HOLD_BOUND;
 use super::{CachedRelease, ReleaseCacheKey, ReleaseCacheMode, ReleaseInvalidation, ReleasedValue};
 
 /// The releases one client holds, bounded in count and in time.
 ///
 /// A copy expires at its hold, pulled ahead by its key's jitter, so it never
 /// outlives the value's `valid_until` nor [`crate::RELEASE_HOLD_BOUND`] after
-/// it arrived (ADR#0049).
+/// it arrived (ADR#0049). It also expires that long after it was held on
+/// `clock`, a monotonic clock, and never more than [`RELEASE_HOLD_BOUND`]
+/// after, so a wall clock stepped back cannot keep a copy serving past its
+/// hold.
 ///
 /// A release asked for before an invalidation, or before the reader lost its
 /// place, may be the value that invalidation dropped, so it is served but not
 /// held: every change bumps the epoch, and a release whose ticket names an
 /// older epoch is not kept.
-#[derive(Debug)]
-pub(crate) struct ReleaseCache {
-    entries: BTreeMap<ReleaseCacheKey, CachedRelease>,
+pub(crate) struct ReleaseCache<C: GetElapsed> {
+    entries: BTreeMap<ReleaseCacheKey, CachedRelease<C::Instant>>,
     capacity: usize,
+    clock: C,
     epoch: u64,
     mode: ReleaseCacheMode,
 }
 
-impl ReleaseCache {
-    pub(crate) const fn with_capacity(capacity: usize) -> Self {
+impl<C: GetElapsed> ReleaseCache<C> {
+    pub(crate) const fn with_capacity(capacity: usize, clock: C) -> Self {
         Self {
             entries: BTreeMap::new(),
             capacity,
+            clock,
             epoch: 0,
             mode: ReleaseCacheMode::Caching,
         }
@@ -34,7 +41,7 @@ impl ReleaseCache {
     /// The copy held under `key`, if it still serves at `now`.
     pub(crate) fn get(&mut self, key: &ReleaseCacheKey, now: SystemTime) -> Option<ReleasedValue> {
         let held = self.entries.get(key)?;
-        if held.is_live_at(now) {
+        if held.is_live_at(now, &self.clock) {
             return Some(held.value().clone());
         }
         self.entries.remove(key);
@@ -60,14 +67,17 @@ impl ReleaseCache {
         if ttl.is_zero() {
             return;
         }
-        let expires_at = value.hold_until() - key.jitter_within(ttl);
+        let jitter = key.jitter_within(ttl);
+        let expires_at = value.hold_until() - jitter;
+        let lifetime = (ttl - jitter).min(RELEASE_HOLD_BOUND);
         if !self.entries.contains_key(&key) && self.entries.len() >= self.capacity {
-            self.entries.retain(|_, held| held.is_live_at(now));
+            self.entries.retain(|_, held| held.is_live_at(now, &self.clock));
             if self.entries.len() >= self.capacity {
                 return;
             }
         }
-        self.entries.insert(key, CachedRelease::new(value, expires_at));
+        let held = CachedRelease::new(value, expires_at, self.clock.now(), lifetime);
+        self.entries.insert(key, held);
     }
 
     /// Drops every copy `notice` covers.

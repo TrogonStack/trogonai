@@ -5,7 +5,7 @@ use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pu
 use futures::{Stream, StreamExt};
 use time::OffsetDateTime;
 use tokio::task::AbortHandle;
-use trogon_std::time::EpochClock;
+use trogon_std::time::{EpochClock, GetElapsed};
 
 use super::constants::{INVALIDATION_FILTER, INVALIDATION_LOOKBACK, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM};
 use super::{
@@ -38,11 +38,12 @@ impl InvalidationReader {
     pub(crate) async fn start<J, C>(
         jetstream: J,
         clock: C,
-        cache: Arc<Mutex<ReleaseCache>>,
+        cache: Arc<Mutex<ReleaseCache<C>>>,
     ) -> Result<Self, InvalidationStartError>
     where
         J: InvalidationStreamSource,
-        C: EpochClock,
+        C: EpochClock + GetElapsed,
+        C::Instant: Send,
     {
         let notices = subscribe(&jetstream, &clock).await?;
         let task = tokio::spawn(read(jetstream, clock, cache, notices));
@@ -66,10 +67,11 @@ where
     Ok(consumer.messages().await?)
 }
 
-async fn read<J, C>(jetstream: J, clock: C, cache: Arc<Mutex<ReleaseCache>>, mut notices: Notices<J>)
+async fn read<J, C>(jetstream: J, clock: C, cache: Arc<Mutex<ReleaseCache<C>>>, mut notices: Notices<J>)
 where
     J: InvalidationStreamSource,
-    C: EpochClock,
+    C: EpochClock + GetElapsed,
+    C::Instant: Send,
 {
     loop {
         drain(&cache, &mut notices).await;
@@ -86,8 +88,9 @@ where
 
 /// Drops what each notice covers, until the consumer fails, skips one, or
 /// ends.
-async fn drain<S, N>(cache: &Mutex<ReleaseCache>, notices: &mut S)
+async fn drain<S, N, C>(cache: &Mutex<ReleaseCache<C>>, notices: &mut S)
 where
+    C: GetElapsed,
     S: Stream<Item = Result<N, pull::MessagesError>> + Unpin,
     N: InvalidationNotice,
 {

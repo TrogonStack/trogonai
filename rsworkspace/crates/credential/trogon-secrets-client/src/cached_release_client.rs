@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use trogon_nats::RequestClient;
-use trogon_std::time::EpochClock;
+use trogon_std::time::{EpochClock, GetElapsed};
 
 use super::constants::MAX_CACHED_RELEASES;
 use super::{
@@ -14,8 +14,10 @@ use super::{
 ///
 /// It holds at most [`MAX_CACHED_RELEASES`] copies, each until the earlier of
 /// its `valid_until` and [`crate::RELEASE_HOLD_BOUND`] after it arrived,
-/// pulled ahead by up to [`crate::RELEASE_CACHE_JITTER`] (ADR#0049). A failed
-/// release is never held.
+/// pulled ahead by up to [`crate::RELEASE_CACHE_JITTER`] (ADR#0049). The
+/// clock bounds that hold twice: on the wall, against `valid_until`, and on
+/// its monotonic side, so a wall clock stepped back never stretches a hold.
+/// A failed release is never held.
 ///
 /// It reads `SECRETS_INVALIDATION` through an ordered consumer of its own and
 /// drops every copy of a credential a notice names, for every host and
@@ -24,9 +26,9 @@ use super::{
 /// and every release is asked for again. Clones share the cache and the
 /// reader, which stops when the last clone is dropped.
 #[derive(Clone)]
-pub struct CachedReleaseClient<N, C> {
+pub struct CachedReleaseClient<N, C: GetElapsed> {
     client: ReleaseClient<N, C>,
-    cache: Arc<Mutex<ReleaseCache>>,
+    cache: Arc<Mutex<ReleaseCache<C>>>,
     _reader: Arc<InvalidationReader>,
 }
 
@@ -34,7 +36,8 @@ impl<N, C> CachedReleaseClient<N, C>
 where
     N: RequestClient,
     N::RequestError: 'static,
-    C: EpochClock,
+    C: EpochClock + GetElapsed,
+    C::Instant: Send,
 {
     /// Starts reading invalidations from `jetstream`, and refuses to start
     /// when it cannot, since a copy it never hears revoked would keep serving.
@@ -42,7 +45,10 @@ where
     where
         J: InvalidationStreamSource,
     {
-        let cache = Arc::new(Mutex::new(ReleaseCache::with_capacity(MAX_CACHED_RELEASES)));
+        let cache = Arc::new(Mutex::new(ReleaseCache::with_capacity(
+            MAX_CACHED_RELEASES,
+            client.clock().clone(),
+        )));
         let reader = InvalidationReader::start(jetstream, client.clock().clone(), Arc::clone(&cache)).await?;
         Ok(Self {
             client,
@@ -74,7 +80,7 @@ where
         self.cache().mode()
     }
 
-    fn cache(&self) -> std::sync::MutexGuard<'_, ReleaseCache> {
+    fn cache(&self) -> std::sync::MutexGuard<'_, ReleaseCache<C>> {
         self.cache.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }

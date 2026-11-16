@@ -1,19 +1,18 @@
 use std::time::{Duration, SystemTime};
 
 use trogon_credential_domain::{CredentialId, CredentialKey};
-use trogon_std::time::FixedEpochClock;
 
 use super::CachedReleaseClient;
-use crate::fixtures::{BUNDLE_GENERATION, CREDENTIAL_ID, VALUE, clock, now, request, runtime_service, secret, tenant};
+use crate::fixtures::{BUNDLE_GENERATION, CREDENTIAL_ID, VALUE, now, request, runtime_service, secret, tenant};
 use crate::{
     FakeOutcome, FakeSecretsService, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM, InvalidationStartError,
     InvalidationStep, ReleaseCacheMode, ReleaseClient, ReleaseClientConfig, ReleaseError, ReleaseRequest,
-    ScriptedInvalidations, TenantAccount,
+    ScriptedInvalidations, SteppedClock, TenantAccount,
 };
 
 const OTHER_CREDENTIAL_ID: &str = "1c7e3a4f-8d2b-4a6c-9e01-2f3b4c5d6e7f";
 
-type Client = CachedReleaseClient<FakeSecretsService, FixedEpochClock>;
+type Client = CachedReleaseClient<FakeSecretsService, SteppedClock>;
 
 fn in_a_minute() -> SystemTime {
     now() + Duration::from_secs(60)
@@ -46,9 +45,17 @@ async fn started(
     fake: &FakeSecretsService,
     invalidations: &ScriptedInvalidations,
 ) -> Result<Client, InvalidationStartError> {
+    started_on(fake, invalidations, SteppedClock::at(now())).await
+}
+
+async fn started_on(
+    fake: &FakeSecretsService,
+    invalidations: &ScriptedInvalidations,
+    clock: SteppedClock,
+) -> Result<Client, InvalidationStartError> {
     let client = ReleaseClient::new(
         fake.clone(),
-        clock(),
+        clock,
         ReleaseClientConfig::new(runtime_service(), fake.service_xkey()),
     );
     CachedReleaseClient::start(client, invalidations.clone()).await
@@ -334,4 +341,22 @@ async fn stops_reading_once_the_last_clone_is_dropped() {
     drop(clone);
     settle().await;
     assert!(!invalidations.is_read());
+}
+
+#[tokio::test(start_paused = true)]
+async fn asks_again_once_its_hold_passes_even_with_the_wall_clock_moved_back() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 2);
+    let clock = SteppedClock::at(now());
+    let client = started_on(&fake, &ScriptedInvalidations::default(), clock.clone())
+        .await
+        .unwrap();
+    let asked = request(&tenant());
+    client.release(&asked).await.unwrap();
+
+    clock.advance(in_a_minute().duration_since(now()).unwrap());
+    clock.set_wall(now() - Duration::from_secs(3_600));
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(fake.received().len(), 2);
 }

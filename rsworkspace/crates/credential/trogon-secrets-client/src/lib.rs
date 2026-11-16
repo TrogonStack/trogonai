@@ -26,7 +26,10 @@
 //! [`CachedReleaseClient`] holds each release it fetched until
 //! [`RELEASE_CACHE_JITTER`] or less before its hold ends, for one tenant,
 //! credential, destination, and location, and at most
-//! [`MAX_CACHED_RELEASES`] at once (ADR#0049, ADR#0023 Decision 6). Its own
+//! [`MAX_CACHED_RELEASES`] at once (ADR#0049, ADR#0023 Decision 6). A held
+//! copy also expires on the clock's monotonic side, never more than
+//! [`RELEASE_HOLD_BOUND`] after it was held, so a wall clock stepped back
+//! cannot stretch its hold. Its own
 //! reader of [`INVALIDATION_STREAM`] drops every held copy of a credential
 //! named on `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`,
 //! and every held copy at all for a notice it cannot read. It refuses to
@@ -89,6 +92,8 @@ mod scripted_invalidations;
 mod scripted_notice;
 mod service_xkey;
 mod service_xkey_error;
+#[cfg(test)]
+mod stepped_clock;
 mod tenant_account;
 mod tenant_account_error;
 mod unseal_error;
@@ -137,6 +142,8 @@ pub(crate) use scripted_invalidations::ScriptedInvalidations;
 pub(crate) use scripted_notice::ScriptedNotice;
 pub use service_xkey::ServiceXkey;
 pub use service_xkey_error::ServiceXkeyError;
+#[cfg(test)]
+pub(crate) use stepped_clock::SteppedClock;
 pub use tenant_account::TenantAccount;
 pub use tenant_account_error::TenantAccountError;
 pub use unseal_error::UnsealError;

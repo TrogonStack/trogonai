@@ -1,6 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use trogon_credential_domain::{CredentialId, CredentialKey};
+use trogon_std::time::MockClock;
 
 use super::ReleaseCache;
 use crate::fixtures::{CREDENTIAL_ID, VALUE, now, released_until, request, tenant};
@@ -35,8 +36,8 @@ fn notice_for(tenant: &TenantAccount, credential_id: &str) -> ReleaseInvalidatio
     ))
 }
 
-fn holding(key: &ReleaseCacheKey) -> ReleaseCache {
-    let mut cache = ReleaseCache::with_capacity(8);
+fn holding(key: &ReleaseCacheKey) -> ReleaseCache<MockClock> {
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
     cache.put(cache.ticket(), key.clone(), released_until(in_a_minute()), now());
     cache
 }
@@ -44,7 +45,7 @@ fn holding(key: &ReleaseCacheKey) -> ReleaseCache {
 #[test]
 fn holds_nothing_while_uncached() {
     let key = key_of(&tenant(), CREDENTIAL_ID);
-    let mut cache = ReleaseCache::with_capacity(8);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
     cache.suspend();
 
     cache.put(cache.ticket(), key.clone(), released_until(in_a_minute()), now());
@@ -57,7 +58,7 @@ fn holds_nothing_while_uncached() {
 fn does_not_hold_a_release_asked_for_before_an_invalidation() {
     let tenant = tenant();
     let key = key_of(&tenant, CREDENTIAL_ID);
-    let mut cache = ReleaseCache::with_capacity(8);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
     let ticket = cache.ticket();
 
     cache.invalidate(&notice_for(&tenant, OTHER_CREDENTIAL_ID));
@@ -69,7 +70,7 @@ fn does_not_hold_a_release_asked_for_before_an_invalidation() {
 #[test]
 fn does_not_hold_a_release_asked_for_before_the_reader_lost_its_place() {
     let key = key_of(&tenant(), CREDENTIAL_ID);
-    let mut cache = ReleaseCache::with_capacity(8);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
     let ticket = cache.ticket();
 
     cache.suspend();
@@ -83,7 +84,7 @@ fn does_not_hold_a_release_asked_for_before_the_reader_lost_its_place() {
 fn does_not_hold_a_release_whose_hold_is_over() {
     let key = key_of(&tenant(), CREDENTIAL_ID);
     let released = released_until(in_a_minute());
-    let mut cache = ReleaseCache::with_capacity(8);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
 
     cache.put(cache.ticket(), key.clone(), released.clone(), released.hold_until());
     cache.put(
@@ -101,7 +102,7 @@ fn does_not_hold_more_releases_than_it_has_room_for() {
     let tenant = tenant();
     let first = key_of(&tenant, CREDENTIAL_ID);
     let second = key_of(&tenant, OTHER_CREDENTIAL_ID);
-    let mut cache = ReleaseCache::with_capacity(1);
+    let mut cache = ReleaseCache::with_capacity(1, MockClock::new());
 
     cache.put(cache.ticket(), first.clone(), released_until(in_a_minute()), now());
     cache.put(cache.ticket(), second.clone(), released_until(in_a_minute()), now());
@@ -115,7 +116,7 @@ fn makes_room_by_dropping_copies_that_expired() {
     let tenant = tenant();
     let first = key_of(&tenant, CREDENTIAL_ID);
     let second = key_of(&tenant, OTHER_CREDENTIAL_ID);
-    let mut cache = ReleaseCache::with_capacity(1);
+    let mut cache = ReleaseCache::with_capacity(1, MockClock::new());
     let later = in_a_minute() + Duration::from_secs(1);
 
     cache.put(cache.ticket(), first.clone(), released_until(in_a_minute()), now());
@@ -133,7 +134,7 @@ fn makes_room_by_dropping_copies_that_expired() {
 #[test]
 fn replaces_a_copy_it_holds_even_when_full() {
     let key = key_of(&tenant(), CREDENTIAL_ID);
-    let mut cache = ReleaseCache::with_capacity(1);
+    let mut cache = ReleaseCache::with_capacity(1, MockClock::new());
     let longer = now() + Duration::from_secs(120);
 
     cache.put(cache.ticket(), key.clone(), released_until(in_a_minute()), now());
@@ -156,7 +157,7 @@ fn stops_serving_a_copy_at_its_jittered_expiry() {
 #[test]
 fn never_serves_a_copy_past_its_hold() {
     let key = key_of(&tenant(), CREDENTIAL_ID);
-    let mut cache = ReleaseCache::with_capacity(8);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
     let released = released_until(now() + Duration::from_secs(3_600));
 
     cache.put(cache.ticket(), key.clone(), released, now());
@@ -182,7 +183,7 @@ fn drops_every_copy_when_it_suspends() {
 #[test]
 fn holds_again_once_it_resumes() {
     let key = key_of(&tenant(), CREDENTIAL_ID);
-    let mut cache = ReleaseCache::with_capacity(8);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
     cache.suspend();
     cache.resume();
 
@@ -215,4 +216,38 @@ fn serves_a_copy_it_holds() {
 
     assert_eq!(held.value().as_str(), VALUE);
     assert_eq!(held.valid_until(), in_a_minute());
+}
+
+#[test]
+fn serves_a_copy_until_its_monotonic_deadline_when_the_wall_clock_moves_back() {
+    let key = key_of(&tenant(), CREDENTIAL_ID);
+    let clock = MockClock::new();
+    let mut cache = ReleaseCache::with_capacity(8, clock.clone());
+    cache.put(
+        cache.ticket(),
+        key.clone(),
+        released_until(now() + Duration::from_secs(3_600)),
+        now(),
+    );
+
+    clock.advance(RELEASE_HOLD_BOUND - RELEASE_CACHE_JITTER);
+
+    assert!(cache.get(&key, now() - Duration::from_secs(3_600)).is_some());
+}
+
+#[test]
+fn never_serves_a_copy_past_its_hold_when_the_wall_clock_moves_back() {
+    let key = key_of(&tenant(), CREDENTIAL_ID);
+    let clock = MockClock::new();
+    let mut cache = ReleaseCache::with_capacity(8, clock.clone());
+    cache.put(
+        cache.ticket(),
+        key.clone(),
+        released_until(now() + Duration::from_secs(3_600)),
+        now(),
+    );
+
+    clock.advance(RELEASE_HOLD_BOUND);
+
+    assert!(cache.get(&key, now() - Duration::from_secs(3_600)).is_none());
 }
