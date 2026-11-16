@@ -235,10 +235,13 @@ def main():
                 "--to=-#format=json",
             ]
             payload = json.dumps(fixture["payload"])
-            parsed = run(command, payload)
-            if parsed.returncode:
-                return None, [f"{label}: fixture cannot parse: {parsed.stderr}"]
             validated = run([*command, "--validate"], payload)
+            # Successful validation also proves parsing; retain the parse-only
+            # diagnostic when validation fails for a malformed fixture.
+            if validated.returncode:
+                parsed = run(command, payload)
+                if parsed.returncode:
+                    return None, [f"{label}: fixture cannot parse: {parsed.stderr}"]
             if not fixture["invalid"]:
                 if validated.returncode:
                     return "valid", [f"{label}: valid payload rejected: {validated.stderr}"]
@@ -256,8 +259,7 @@ def main():
                 if violation not in validated.stderr
             ]
 
-        # Each fixture costs two buf processes, so a serial run grows with every
-        # fixture added; map keeps the report in fixture order.
+        # Buf runs in separate processes; map keeps the report in fixture order.
         with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
             for kind, problems in pool.map(check, fixtures):
                 if kind == "valid":
