@@ -38,10 +38,6 @@ fn record(id: &str) -> RecordScheduleOccurrence {
 fn decider_identity_delegates_to_schedule_state() {
     let command = record("0198fa2f6d0a7b1a8cf9f762e73a1c15");
     assert_eq!(command.stream_id(), &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"));
-    assert_eq!(
-        RecordScheduleOccurrence::initial_state(),
-        super::super::state::initial_state()
-    );
 }
 
 fn recorded(id: &str, sequence: u64, at: DateTime<Utc>) -> v1::ScheduleEvent {

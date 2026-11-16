@@ -8,7 +8,7 @@ use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider, in_memory_exporter::InMemoryMetricExporter};
 use trogon_decider_runtime::{
     CommandExecution, Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity,
-    EventType, InMemoryStore, WritePrecondition,
+    EventType, Evolve, InMemoryStore, WritePrecondition,
 };
 use trogon_semconv::metric;
 
@@ -20,12 +20,22 @@ struct RecordCommand {
 #[derive(Debug, Clone)]
 struct RecordEvent;
 
+#[derive(Debug, Clone, Default)]
+struct RecordState;
+
+impl Evolve<RecordEvent> for RecordState {
+    type Error = Infallible;
+
+    fn evolve(self, _event: &RecordEvent) -> Result<Self, Self::Error> {
+        Ok(self)
+    }
+}
+
 impl Decider for RecordCommand {
     type StreamId = str;
-    type State = ();
+    type State = RecordState;
     type Event = RecordEvent;
     type DecideError = Infallible;
-    type EvolveError = Infallible;
 
     #[cfg_attr(
         dylint_lib = "trogon_dylint_lints",
@@ -38,12 +48,6 @@ impl Decider for RecordCommand {
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.id
-    }
-
-    fn initial_state() -> Self::State {}
-
-    fn evolve(_state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Ok(())
     }
 
     fn decide(_state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
