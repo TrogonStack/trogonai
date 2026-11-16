@@ -1,0 +1,19 @@
+diff --git a/js/private/node-bootstrap/coverage.cjs b/js/private/node-bootstrap/coverage.cjs
+--- a/js/private/node-bootstrap/coverage.cjs
++++ b/js/private/node-bootstrap/coverage.cjs
+@@ -104,4 +104,13 @@
+     const path = require('node:path')
+-    const { mkdirSync, writeFileSync } = require('node:fs')
+-
++    const { mkdirSync, readFileSync, writeFileSync } = require('node:fs')
++
++    try {
++        const manifest = process.env.COVERAGE_MANIFEST
++        if (manifest && !readFileSync(manifest, 'utf8').trim()) {
++            return false
++        }
++    } catch {
++        // The reporter owns manifest errors; unknown input must still collect.
++    }
++
+     let session
