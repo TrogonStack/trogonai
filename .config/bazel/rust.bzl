@@ -32,16 +32,43 @@ _TARGET_KEYS = {
     "integration_tests": ["args", "compile_data", "data", "rustc_env", "tags"],
 }
 
-def workspace_compile_fail_tests(name, fixtures, compile_data = []):
+def workspace_compile_fail_library(crate_features, dependency_overrides = {}):
+    """Isolates a fixture's feature set without reconfiguring its dependency graph.
+
+    Args:
+        crate_features: The library features used by the diagnostic goldens.
+        dependency_overrides: Workspace dependencies requiring fixture libraries.
+    """
+    crate = CRATES[native.package_name()]
+    library = crate["library"]
+    rust_library(
+        name = crate["name"] + "_compile_fail",
+        srcs = native.glob(["src/**/*.rs"]),
+        aliases = crate_aliases(normal = True, proc_macro = True) | crate["aliases"],
+        crate_features = crate_features,
+        crate_name = library["crate_name"],
+        crate_root = library["root"],
+        edition = crate["edition"],
+        proc_macro_deps = all_crate_deps(proc_macro = True) + crate["proc_macro_deps"],
+        rustc_env = {"CARGO_PKG_NAME": crate["name"]},
+        lint_config = ":" + crate["name"] + "_lints",
+        rustc_flags = _RUSTC_FLAGS,
+        version = crate["version"],
+        visibility = ["//visibility:public"],
+        deps = all_crate_deps(normal = True) + [dependency_overrides.get(dep, dep) for dep in crate["deps"]],
+    )
+
+def workspace_compile_fail_tests(name, fixtures, compile_data = [], dependency_overrides = {}):
     """Checks every fixture against its existing trybuild diagnostic golden.
 
     Args:
         name: The Bazel test name.
         fixtures: Rust fixture sources, each with a sibling `.stderr` file.
         compile_data: Files read by procedural macros while compiling fixtures.
+        dependency_overrides: Workspace dependencies requiring fixture libraries.
     """
     crate = CRATES[native.package_name()]
-    deps = all_crate_deps(normal = True, normal_dev = True) + crate["deps"] + crate["dev_deps"]
+    deps = all_crate_deps(normal = True, normal_dev = True) + [dependency_overrides.get(dep, dep) for dep in crate["deps"] + crate["dev_deps"]]
     proc_macro_deps = all_crate_deps(proc_macro = True, proc_macro_dev = True) + crate["proc_macro_deps"] + crate["dev_proc_macro_deps"]
     aliases = crate_aliases(normal = True, normal_dev = True, proc_macro = True, proc_macro_dev = True) | crate["aliases"]
     args = []
@@ -136,8 +163,7 @@ def workspace_crate(
         binaries = {},
         integration_tests = {},
         examples = {},
-        feature_variants = {},
-        compile_fail_features = None):
+        feature_variants = {}):
     """Declares the library, binaries, tests, doctests, and examples Cargo builds for this package.
 
     Dependencies, features, and targets come from Cargo. The arguments carry only
@@ -160,8 +186,6 @@ def workspace_crate(
         feature_variants: Maps a variant name to another set of Cargo features.
             Each variant declares every target again with those features, named
             with a `_<variant>` suffix, for feature sets Cargo checks separately.
-        compile_fail_features: Cargo features used by compiler-failure fixtures,
-            whose diagnostic goldens depend on the package-scoped feature set.
 
     Under `binaries`, `integration_tests`, and `examples`, the `*` entry applies
     to every target of that kind. `compile_data` and `data` entries are globs
@@ -195,11 +219,6 @@ def workspace_crate(
     )
 
     variants = {"": crate["crate_features"]}
-    if compile_fail_features != None:
-        variants[""] = select({
-            "//.config/bazel:compile_fail": compile_fail_features,
-            "//conditions:default": crate["crate_features"],
-        })
     for variant, variant_features in feature_variants.items():
         variants["_" + variant] = variant_features
     for suffix, crate_features in variants.items():
