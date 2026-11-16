@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Typecheck tsworkspace"
-#MISE dir="tsworkspace"
-set -euo pipefail
-
-exec pnpm typecheck

@@ -2,7 +2,7 @@ use super::Bridge;
 use crate::nats::{self, FlushClient, PublishClient, commands, parsing::SessionAgentMethod, responses};
 use crate::session_id::AcpSessionId;
 use crate::wire::encode_notification;
-use agent_client_protocol::schema::v1::CancelNotification;
+use agent_client_protocol::v1::schema::CancelNotification;
 use agent_client_protocol::{Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
 use trogon_semconv::span::ACP_SESSION_CANCEL;
@@ -31,7 +31,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
             .metrics
             .record_request("cancel", bridge.clock.elapsed(start).as_secs_f64(), false);
         bridge.metrics.record_error("cancel", "invalid_session_id");
-        Error::new(ErrorCode::InvalidParams.into(), format!("Invalid session ID: {}", e))
+        Error::new(ErrorCode::INVALID_PARAMS, format!("Invalid session ID: {}", e))
     })?;
 
     let prefix = bridge.config.acp_prefix_ref();

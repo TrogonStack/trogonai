@@ -12,7 +12,7 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -568,18 +568,7 @@ pub(crate) fn worktree_paths(cwd: &str, dialect: SummaryDialect) -> Vec<String> 
         let _ = stdout.read_to_string(&mut output);
         output
     });
-    let deadline = SystemTime::now() + Duration::from_secs(5);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if SystemTime::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-        }
-    };
+    let status = wait_until(&mut child, SystemTime::now() + Duration::from_secs(5), SystemTime::now);
     let Ok(output) = reader.join() else {
         return Vec::new();
     };
@@ -591,6 +580,21 @@ pub(crate) fn worktree_paths(cwd: &str, dialect: SummaryDialect) -> Vec<String> 
         .filter_map(|line| line.strip_prefix("worktree "))
         .map(|path| platform_nfc(path, dialect))
         .collect()
+}
+
+/// Polls `child` every ten milliseconds until it exits, or kills and reaps it once `now()` reaches `deadline`.
+fn wait_until(child: &mut Child, deadline: SystemTime, now: impl Fn() -> SystemTime) -> Option<ExitStatus> {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
 }
 
 /// `agent-<id>.jsonl` -> `agent-<id>.meta.json`, in the same directory.

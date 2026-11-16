@@ -63,6 +63,7 @@ mod constants;
 mod control;
 mod control_request_id;
 mod debug_file;
+mod deep_json;
 mod dialog;
 mod dialog_kind;
 mod driver;
@@ -75,6 +76,8 @@ mod float_digits;
 mod framing;
 mod home_directory;
 mod hooks;
+#[cfg(unix)]
+mod inherited_descriptors;
 mod js_json;
 mod js_object_order;
 mod js_regex;
@@ -82,6 +85,7 @@ mod js_runtime;
 mod js_text;
 mod json_scan;
 mod jsonrpc_message;
+mod large_stack;
 mod managed_settings_delivery;
 mod mcp_config;
 mod mcp_read_resource_response;
@@ -123,13 +127,44 @@ mod process_transport;
 mod prompt;
 mod pydantic_int_string;
 mod pydantic_validation_error;
+mod python_arith;
+mod python_c_stack;
+mod python_code_point;
+#[cfg(any(test, target_os = "macos", windows))]
+mod python_fnmatch;
+mod python_ftplib;
+mod python_hash;
+mod python_http_client;
+mod python_idna;
 mod python_json;
+mod python_json_error;
+mod python_json_load;
 mod python_json_value;
+mod python_jsonschema;
+mod python_pprint;
+mod python_re;
+mod python_re_cache;
+mod python_recursion_model;
+mod python_set;
+mod python_sort;
+mod python_string;
 mod python_text;
+mod python_urllib;
+mod python_urlopen;
+mod python_urlopen_proxy;
+#[cfg(any(test, windows))]
+mod python_urlopen_registry;
+#[cfg(any(test, target_os = "macos"))]
+mod python_urlopen_sysconf;
+mod python_urlopen_text;
+mod python_urlopen_tls;
+mod python_urlopen_tls_gate;
 mod python_value_repr;
 mod queue_capacity;
 mod raw_json_id;
 mod remote_control;
+mod remote_schema_error;
+mod remote_schema_retriever;
 #[cfg(unix)]
 mod run_as;
 mod run_end;
@@ -240,6 +275,8 @@ mod tool_view;
 mod transcript_mirror;
 mod transport;
 mod ui_host;
+mod urlopen_retriever;
+mod urlopen_retriever_options;
 mod usd_budget;
 mod user_input;
 mod user_input_priority;
@@ -346,6 +383,7 @@ pub use control::{
     SettingsUpdateSource,
 };
 pub use control_request_id::ControlRequestId;
+pub use deep_json::{DeepJsonObject, DeepJsonValue};
 pub use dialog::{
     ElicitationFuture, ElicitationHandler, ElicitationMode, ElicitationRequest, ElicitationResponse, UserDialogFuture,
     UserDialogHandler, UserDialogRequest, UserDialogResponse,
@@ -413,13 +451,19 @@ pub use process_options::{
     SpawnClaudeCodeProcess, SpawnOptions, StderrDelivery, StderrHandler, TraceContext,
 };
 pub use prompt::Prompt;
-pub use python_json_value::{
-    ExactInteger, ExactIntegerError, PythonJsonError, PythonJsonValue, PythonNumber, python_json_dumps,
-    python_json_loads,
+pub use python_c_stack::PythonCStack;
+pub use python_code_point::{PythonCodePoint, PythonCodePointError};
+pub use python_json_error::{
+    ExactIntegerError, JsonContainer, JsonDecodeError as PythonJsonDecodeError, JsonDecodeErrorKind, PythonJsonError,
 };
+pub use python_json_load::python_json_loads;
+pub use python_json_value::{ExactInteger, PythonJsonObject, PythonJsonValue, PythonNumber, python_json_dumps};
+pub use python_string::{CodePoints, PythonString};
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use raw_json_id::{RawJsonId, RawJsonIdError};
 pub use remote_control::{RemoteControlOptions, WorkSecretFuture, WorkSecretRefreshRequest, WorkSecretRefresher};
+pub use remote_schema_error::RemoteSchemaError;
+pub use remote_schema_retriever::RemoteSchemaRetriever;
 pub use runtime_options::{
     DangerousPermissionSkip, DebugOutput, EmptyCollection, HookEvents, PermissionPrompts, SdkBeta, Skills, TaskBudget,
     ThinkingConfig, ThinkingDisplay,
@@ -430,7 +474,7 @@ pub use sdk_mcp_choices::{
     SchemaCallbackOptions, SchemaChoice, StringCheckKind, StringFormatChoice, Transformation, UnionChoice,
 };
 pub use sdk_mcp_server::{
-    LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, SdkMcpServer, SdkMcpSession,
+    LocalMcpServer, LocalMcpServerOptions, McpFuture, McpServerError, PythonMcpFuture, SdkMcpServer, SdkMcpSession,
 };
 pub use sdk_tool::{McpToolFuture, McpToolHandler, McpToolOutput, McpToolRequest, SdkTool, SdkToolOptions};
 pub use sdk_tools::{SdkTools, SdkToolsError};
@@ -516,6 +560,8 @@ pub use upstream::settings_resolution::{
     PolicySettingsOrigin, ProvenanceEntry, ResolveSettingsOptions, ResolvedSettingSource, ResolvedSettings,
     SDKSettingsParseError,
 };
+pub use urlopen_retriever::UrlopenRetriever;
+pub use urlopen_retriever_options::UrlopenRetrieverOptions;
 pub use usd_budget::{UsdBudget, UsdBudgetError};
 pub use user_input::{InputBlock, UserInput};
 pub use user_input_priority::UserInputPriority;

@@ -1,0 +1,104 @@
+{
+ "python": "3.12.16",
+ "source": "urllib.request.urlopen(Request(url, headers={'User-Agent': ...})) through HTTPRedirectHandler (max_repeats 4, max_redirections 10)",
+ "routes": {
+  "/hop0": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDENCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop1": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDINCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop2": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDMNCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop3": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDQNCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop4": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDUNCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop5": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDYNCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop6": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDcNCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop7": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDgNCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop8": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDkNCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/hop9": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDEwDQpDb250ZW50LUxlbmd0aDogMA0KDQo=",
+  "/hop10": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDExDQpDb250ZW50LUxlbmd0aDogMA0KDQo=",
+  "/hop11": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDEyDQpDb250ZW50LUxlbmd0aDogMA0KDQo=",
+  "/hop12": "SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LUxlbmd0aDogMg0KDQp7fQ==",
+  "/a": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2INCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/b": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2ENCkNvbnRlbnQtTGVuZ3RoOiAwDQoNCg==",
+  "/frag": "SFRUUC8xLjEgMzAyIEZvdW5kDQpMb2NhdGlvbjogL2hvcDMjeA0KQ29udGVudC1MZW5ndGg6IDANCg0K"
+ },
+ "cases": [
+  {
+   "url": "http://127.0.0.1:{PORT}/hop1",
+   "outcome": {
+    "open_error": {
+     "class": "HTTPError",
+     "text": "HTTP Error 302: The HTTP server returned a redirect error that would lead to an infinite loop.\nThe last 30x error message was:\nFound"
+    }
+   },
+   "requests": [
+    "GET /hop1 HTTP/1.1",
+    "GET /hop2 HTTP/1.1",
+    "GET /hop3 HTTP/1.1",
+    "GET /hop4 HTTP/1.1",
+    "GET /hop5 HTTP/1.1",
+    "GET /hop6 HTTP/1.1",
+    "GET /hop7 HTTP/1.1",
+    "GET /hop8 HTTP/1.1",
+    "GET /hop9 HTTP/1.1",
+    "GET /hop10 HTTP/1.1",
+    "GET /hop11 HTTP/1.1"
+   ]
+  },
+  {
+   "url": "http://127.0.0.1:{PORT}/hop2",
+   "outcome": {
+    "body": "e30="
+   },
+   "requests": [
+    "GET /hop2 HTTP/1.1",
+    "GET /hop3 HTTP/1.1",
+    "GET /hop4 HTTP/1.1",
+    "GET /hop5 HTTP/1.1",
+    "GET /hop6 HTTP/1.1",
+    "GET /hop7 HTTP/1.1",
+    "GET /hop8 HTTP/1.1",
+    "GET /hop9 HTTP/1.1",
+    "GET /hop10 HTTP/1.1",
+    "GET /hop11 HTTP/1.1",
+    "GET /hop12 HTTP/1.1"
+   ]
+  },
+  {
+   "url": "http://127.0.0.1:{PORT}/a",
+   "outcome": {
+    "open_error": {
+     "class": "HTTPError",
+     "text": "HTTP Error 302: The HTTP server returned a redirect error that would lead to an infinite loop.\nThe last 30x error message was:\nFound"
+    }
+   },
+   "requests": [
+    "GET /a HTTP/1.1",
+    "GET /b HTTP/1.1",
+    "GET /a HTTP/1.1",
+    "GET /b HTTP/1.1",
+    "GET /a HTTP/1.1",
+    "GET /b HTTP/1.1",
+    "GET /a HTTP/1.1",
+    "GET /b HTTP/1.1",
+    "GET /a HTTP/1.1"
+   ]
+  },
+  {
+   "url": "http://127.0.0.1:{PORT}/frag",
+   "outcome": {
+    "body": "e30="
+   },
+   "requests": [
+    "GET /frag HTTP/1.1",
+    "GET /hop3 HTTP/1.1",
+    "GET /hop4 HTTP/1.1",
+    "GET /hop5 HTTP/1.1",
+    "GET /hop6 HTTP/1.1",
+    "GET /hop7 HTTP/1.1",
+    "GET /hop8 HTTP/1.1",
+    "GET /hop9 HTTP/1.1",
+    "GET /hop10 HTTP/1.1",
+    "GET /hop11 HTTP/1.1",
+    "GET /hop12 HTTP/1.1"
+   ]
+  }
+ ]
+}

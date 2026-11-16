@@ -21,9 +21,24 @@ use tokio::sync::Notify;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/dialects.json");
+const SCHEMAS: &str = include_str!("../tests/fixtures/sdk_mcp/python_schema.json");
+const CHECKED_SCHEMAS: &str = include_str!("../tests/fixtures/sdk_mcp/python_check_schema.json");
 const ENVELOPE: &str = include_str!("../tests/fixtures/sdk_mcp/python_envelope.json");
 const ZOD_FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/typescript_zod.json");
 const CHOICES_FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/typescript_choices.json");
+const RECURSION: &str = include_str!("../tests/fixtures/sdk_mcp/python_recursion.json");
+const RECURSION_REGEX: &str = include_str!("../tests/fixtures/sdk_mcp/python_recursion_regex.json");
+const RE_CACHE: &str = include_str!("../tests/fixtures/sdk_mcp/python_re_cache.json");
+const COMPARE: &str = include_str!("../tests/fixtures/sdk_mcp/python_compare.json");
+const SET_ORDER: &str = include_str!("../tests/fixtures/sdk_mcp/python_set_order.json");
+
+/// The `PYTHONHASHSEED` the replayed servers validate under. The fixtures were recorded with a random seed, and the
+/// only answers that depend on it, the first metaschema error of a schema with two invalid `properties` entries in
+/// `python_check_schema.json`, are the ones this seed gives.
+const RECORDED_HASH_SEED: u32 = 2;
+
+/// Stack for replaying the recursion fixtures, whose schemas and arguments nest about ten thousand levels deep.
+const DEEP_STACK: usize = 512 << 20;
 
 fn failed(message: &str) -> CallbackError {
     CallbackError::Failed(Box::new(std::io::Error::other(message.to_owned())))
@@ -257,7 +272,10 @@ fn server(spec: &Value, dialect: McpServerDialect) -> Result<LocalMcpServer, Box
         instructions: optional_text(spec, "instructions"),
         always_load: spec.get("always_load").and_then(Value::as_bool).unwrap_or(false),
         dialect,
-    }))
+    })
+    .with_remote_schema_retriever(Arc::new(crate::python_jsonschema::NoRetrieval))
+    .with_own_re_cache()
+    .with_hash_seed(RECORDED_HASH_SEED))
 }
 
 async fn replay(
@@ -1076,5 +1094,341 @@ async fn python_dialect_reads_every_jsonrpc_shape_like_the_mcp_package() -> Test
         }
     }
     assert!(rejected > 200);
+    Ok(())
+}
+
+/// Replays a fixture of schemas and argument sets run through the pinned Python package's tool call, each answer
+/// `OK`, `ERR` followed by the text of the error result, or `RPCERR` followed by the JSON-RPC error. Returns how many
+/// cases and answers it checked.
+async fn replay_python_tool_calls(text: &str) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    deserializer.disable_recursion_limit();
+    let fixture: Value = serde::Deserialize::deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    let cases = field(&fixture, "cases")?.as_array().ok_or("cases is not a list")?;
+    let mut answered = 0;
+    for (index, case) in cases.iter().enumerate() {
+        let spec = json!({"name": "s", "version": null, "instructions": null, "tools": [
+            {"name": "t", "handler": "ok", "schema": field(case, "schema")?}
+        ]});
+        let session = initialized(&server(&spec, McpServerDialect::Python)?).await?;
+        let schema = field(case, "schema")?;
+        let arguments = field(case, "arguments")?.as_array().ok_or("arguments is not a list")?;
+        let answers = field(case, "answers")?.as_array().ok_or("answers is not a list")?;
+        assert_eq!(arguments.len(), answers.len());
+        for (arguments, expected) in arguments.iter().zip(answers) {
+            let call = object(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+                "name":"t","arguments":arguments
+            }}))?;
+            let response = session
+                .request(call, CancellationToken::new())
+                .await?
+                .ok_or("missing tools/call response")?;
+            let expected = expected.as_str().ok_or("an answer is not text")?;
+            // Printed only on a mismatch: a schema nested thousands of levels deep prints long.
+            let context = || format!("case {index}: schema {schema} arguments {arguments}");
+            answered += 1;
+            if let Some(error) = expected.strip_prefix("RPCERR ") {
+                let error: Value = serde_json::from_str(error)?;
+                assert_eq!(response.get("error"), Some(&error), "{}", context());
+                continue;
+            }
+            let result = response.get("result").ok_or("tools/call without a result")?;
+            let actual = if result.get("isError").and_then(Value::as_bool).unwrap_or(false) {
+                let message = result
+                    .pointer("/content/0/text")
+                    .and_then(Value::as_str)
+                    .ok_or("error result without text")?;
+                format!("ERR {message}")
+            } else {
+                "OK".to_owned()
+            };
+            assert_eq!(actual, expected, "{}", context());
+        }
+    }
+    Ok((cases.len(), answered))
+}
+
+/// Every schema and argument set of `python_schema.json` was run through the pinned Python package's tool call.
+#[tokio::test]
+async fn python_dialect_validates_arguments_like_jsonschema_in_the_python_package() -> TestResult {
+    let (cases, answered) = replay_python_tool_calls(SCHEMAS).await?;
+    assert!(cases > 200);
+    assert!(answered > 5000);
+    Ok(())
+}
+
+/// Every schema of `python_check_schema.json`, most of them ones the metaschema of their draft rejects, was run
+/// through the pinned Python package's tool call, which checks the schema like `jsonschema.validate` before the
+/// arguments: the first metaschema error, not the best match, as the `SchemaError` text.
+#[tokio::test]
+async fn python_dialect_checks_the_schema_against_its_metaschema_like_jsonschema_in_the_python_package() -> TestResult {
+    let (cases, answered) = replay_python_tool_calls(CHECKED_SCHEMAS).await?;
+    assert!(cases > 1200);
+    assert!(answered > 1400);
+    Ok(())
+}
+
+/// [`replay_python_tool_calls`] on a thread whose stack holds fixtures nested about ten thousand levels deep, with a
+/// runtime of its own.
+fn replay_deep_python_tool_calls(text: &'static str) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+    let replayed = std::thread::Builder::new()
+        .stack_size(DEEP_STACK)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())?;
+            runtime
+                .block_on(replay_python_tool_calls(text))
+                .map_err(|error| error.to_string())
+        })?
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))?;
+    Ok(replayed)
+}
+
+/// Every case of `python_re_cache.json` ran in a fresh Python process, whose `re` caches already held what its
+/// imports compiled, calling the tools of one server in order: a deep pattern passes the recursion limit only where
+/// its compile is not cached, whether the process compiled it at import, another tool's call compiled it, or enough
+/// newer patterns evicted it. `str()` of a `SchemaError` or `UnknownType` compiles patterns too: the word pattern of a
+/// long string it pretty-prints, which passes the limit under nested lists only where it is not cached, and the
+/// margin pattern of `textwrap.dedent`, both of which count toward the evictions.
+#[test]
+fn python_dialect_shares_the_re_caches_of_the_python_process_across_calls() -> TestResult {
+    assert_eq!(replay_deep_process_cases(RE_CACHE)?, 12);
+    Ok(())
+}
+
+/// Every case of `python_compare.json` ran in a fresh Python process calling the tools of one server in order, with
+/// lists nested about ten thousand levels deep: comparing two of them in the `list.sort` of `_utils.uniq`, which
+/// `check_schema` runs for the `enum` of drafts 3 and 4, and printing one in a message, pass CPython's C recursion
+/// limit before its frame limit, the first call of the process paying the checks of the instructions it runs before
+/// specializing them.
+#[test]
+fn python_dialect_meets_the_c_recursion_limit_of_comparisons_and_reprs_like_the_python_process() -> TestResult {
+    assert_eq!(replay_deep_process_cases(COMPARE)?, 155);
+    Ok(())
+}
+
+/// [`replay_process_cases`] on a thread whose stack holds fixtures nested about ten thousand levels deep, with a
+/// runtime of its own.
+fn replay_deep_process_cases(text: &'static str) -> Result<usize, Box<dyn std::error::Error>> {
+    let replayed = std::thread::Builder::new()
+        .stack_size(DEEP_STACK)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())?;
+            runtime
+                .block_on(replay_process_cases(text))
+                .map_err(|error| error.to_string())
+        })?
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))?;
+    Ok(replayed)
+}
+
+/// `value` with every `{"$nest": [n, leaf]}` marker replaced by `leaf` nested under `n` lists.
+fn expand_nest(value: &Value) -> Result<Value, Box<dyn std::error::Error>> {
+    Ok(match value {
+        Value::Object(members) => match members.get("$nest") {
+            Some(marker) if members.len() == 1 => {
+                let (Some(depth), Some(leaf)) = (marker.get(0).and_then(Value::as_u64), marker.get(1)) else {
+                    return Err(format!("a $nest marker is not a depth and a leaf: {marker}").into());
+                };
+                (0..depth).fold(expand_nest(leaf)?, |inner, _| Value::Array(vec![inner]))
+            }
+            _ => Value::Object(
+                members
+                    .iter()
+                    .map(|(key, member)| -> Result<(String, Value), Box<dyn std::error::Error>> {
+                        Ok((key.clone(), expand_nest(member)?))
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
+        },
+        Value::Array(items) => Value::Array(items.iter().map(expand_nest).collect::<Result<_, _>>()?),
+        scalar => scalar.clone(),
+    })
+}
+
+/// `answer` with every `$nest(n,1)` token replaced by the repr of `1` nested under `n` lists.
+fn expand_nest_text(answer: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let mut expanded = String::new();
+    let mut rest = answer;
+    while let Some(start) = rest.find("$nest(") {
+        expanded.push_str(&rest[..start]);
+        let token = &rest[start + "$nest(".len()..];
+        let end = token
+            .find(",1)")
+            .ok_or_else(|| format!("an unterminated $nest token in {answer}"))?;
+        let depth: usize = token[..end].parse()?;
+        expanded.push_str(&"[".repeat(depth));
+        expanded.push('1');
+        expanded.push_str(&"]".repeat(depth));
+        rest = &token[end + ",1)".len()..];
+    }
+    expanded.push_str(rest);
+    Ok(expanded)
+}
+
+#[test]
+fn nest_markers_expand_to_nested_lists() -> TestResult {
+    assert_eq!(
+        expand_nest(&json!({"a": [{"$nest": [2, 1]}, {"$nest": [0, "x"]}], "b": {"$nest": [1, {"$nest": [1, 2]}]}}))?,
+        json!({"a": [[[1]], "x"], "b": [[2]]})
+    );
+    assert_eq!(
+        expand_nest(&json!({"$nest": 1, "other": 2}))?,
+        json!({"$nest": 1, "other": 2})
+    );
+    assert!(expand_nest(&json!({"$nest": [1]})).is_err());
+    assert_eq!(expand_nest_text("x $nest(2,1) y $nest(0,1)")?, "x [[1]] y 1");
+    assert!(expand_nest_text("$nest(2").is_err());
+    assert!(expand_nest_text("$nest(a,1)").is_err());
+    Ok(())
+}
+
+/// The calls of every case of a fixture recorded one fresh Python process per case, each case on one server,
+/// answered as the fixture writes them; returns how many cases it replayed.
+async fn replay_process_cases(text: &str) -> Result<usize, Box<dyn std::error::Error>> {
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    deserializer.disable_recursion_limit();
+    let fixture: Value = serde::Deserialize::deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    let fixture = expand_nest(&fixture)?;
+    let cases = field(&fixture, "cases")?.as_array().ok_or("cases is not a list")?;
+    for case in cases {
+        let name = field(case, "name")?;
+        let tools = field(case, "tools")?.as_object().ok_or("tools is not an object")?;
+        let tools: Vec<Value> = tools
+            .iter()
+            .map(|(name, schema)| json!({"name": name, "handler": "ok", "schema": schema}))
+            .collect();
+        let spec = json!({"name": "s", "version": null, "instructions": null, "tools": tools});
+        let session = initialized(&server(&spec, McpServerDialect::Python)?).await?;
+        let calls = field(case, "calls")?.as_array().ok_or("calls is not a list")?;
+        let answers = field(case, "answers")?.as_array().ok_or("answers is not a list")?;
+        assert_eq!(calls.len(), answers.len());
+        let mut actual = Vec::new();
+        for call in calls {
+            let (Some(tool), Some(arguments)) = (call.get(0), call.get(1)) else {
+                return Err(format!("{name}: a call is not a tool and its arguments").into());
+            };
+            let call = object(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+                "name": tool, "arguments": arguments
+            }}))?;
+            let response = session
+                .request(call, CancellationToken::new())
+                .await?
+                .ok_or("missing tools/call response")?;
+            if let Some(error) = response.get("error") {
+                actual.push(json!({"RPCERR": error}));
+                continue;
+            }
+            let result = response.get("result").ok_or("tools/call without a result")?;
+            actual.push(match result.pointer("/content/0/text").and_then(Value::as_str) {
+                Some(message) if result.get("isError") == Some(&Value::Bool(true)) => json!(format!("ERR {message}")),
+                _ => json!("OK"),
+            });
+        }
+        let answers = answers
+            .iter()
+            .map(|answer| -> Result<Value, Box<dyn std::error::Error>> {
+                let Some(answer) = answer.as_str() else {
+                    return Ok(answer.clone());
+                };
+                let answer = expand_nest_text(answer)?;
+                Ok(match answer.strip_prefix("RPCERR ") {
+                    Some(error) => json!({"RPCERR": serde_json::from_str::<Value>(error)?}),
+                    None => Value::String(answer),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(actual, answers, "{name}");
+    }
+    Ok(cases.len())
+}
+
+/// The tools of `python_set_order.json` were called in Python processes started with each recorded
+/// `PYTHONHASHSEED`: which `$ref` fails first among the `additionalProperties` extras, and which of the resources
+/// sharing an `$id` the crawl keeps, follow the set orders of that process's hash secret.
+#[tokio::test]
+async fn python_dialect_follows_the_set_orders_of_the_python_process_hash_seed() -> TestResult {
+    let fixture: Value = serde_json::from_str(SET_ORDER)?;
+    let tools = field(&fixture, "bridge_tools")?
+        .as_object()
+        .ok_or("bridge_tools is not an object")?;
+    let tools: Vec<Value> = tools
+        .iter()
+        .map(|(name, schema)| json!({"name": name, "handler": "ok", "schema": schema}))
+        .collect();
+    let spec = json!({"name": "s", "version": null, "instructions": null, "tools": tools});
+    let calls = field(&fixture, "bridge_calls")?
+        .as_array()
+        .ok_or("bridge_calls is not a list")?;
+    let seeds = field(&fixture, "seeds")?.as_array().ok_or("seeds is not a list")?;
+    assert_eq!(seeds.len(), 11);
+    for record in seeds {
+        let seed = u32::try_from(field(record, "seed")?.as_u64().ok_or("a seed is not a number")?)?;
+        let server = server(&spec, McpServerDialect::Python)?.with_hash_seed(seed);
+        let session = initialized(&server).await?;
+        let mut actual = Vec::new();
+        for call in calls {
+            let (Some(tool), Some(arguments)) = (call.get(0), call.get(1)) else {
+                return Err(format!("seed {seed}: a call is not a tool and its arguments").into());
+            };
+            let call = object(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+                "name": tool, "arguments": arguments
+            }}))?;
+            let response = session
+                .request(call, CancellationToken::new())
+                .await?
+                .ok_or("missing tools/call response")?;
+            let result = response.get("result").ok_or("tools/call without a result")?;
+            actual.push(match result.pointer("/content/0/text").and_then(Value::as_str) {
+                Some(message) if result.get("isError") == Some(&Value::Bool(true)) => json!(format!("ERR {message}")),
+                _ => json!("OK"),
+            });
+        }
+        assert_eq!(&Value::Array(actual), field(record, "bridge")?, "seed {seed}");
+    }
+    Ok(())
+}
+
+/// Every case of `python_recursion.json` and `python_recursion_regex.json` was run through the pinned Python
+/// package's tool call at the nesting just inside and just past the recursion limit: a `RecursionError` the handler
+/// catches is the text of an error result, one raised by `str()` of a `SchemaError` inside the handler answers the
+/// request with a JSON-RPC error, and arguments, defaults and unknown keywords nested 3000 levels deep pass through.
+#[test]
+fn python_dialect_meets_the_recursion_limit_like_jsonschema_in_the_python_package() -> TestResult {
+    assert_eq!(replay_deep_python_tool_calls(RECURSION)?, (444, 444));
+    Ok(())
+}
+
+/// The same for patterns whose groups nest until `re` passes the recursion limit.
+#[test]
+fn python_dialect_meets_the_recursion_limit_of_nested_patterns_like_jsonschema_in_the_python_package() -> TestResult {
+    assert_eq!(replay_deep_python_tool_calls(RECURSION_REGEX)?, (76, 76));
+    Ok(())
+}
+
+/// A TypeScript dialect server answers a Python runtime with what it answers the TypeScript one, as Python holds it.
+#[tokio::test]
+async fn a_typescript_dialect_server_answers_python_requests_as_it_answers_typescript_ones() -> TestResult {
+    let server = LocalMcpServer::from(LocalMcpServerOptions::new(McpServerName::from("typescript")));
+    let ping = object(json!({"jsonrpc":"2.0","id":1,"method":"ping"}))?;
+    let typescript = server
+        .open_session()
+        .request(ping.clone(), CancellationToken::new())
+        .await?;
+    let python = server
+        .open_session()
+        .request_python(ping, CancellationToken::new())
+        .await?;
+    assert!(typescript.is_some());
+    assert_eq!(python, typescript.map(python_object));
     Ok(())
 }

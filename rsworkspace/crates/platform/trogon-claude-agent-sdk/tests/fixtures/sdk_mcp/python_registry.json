@@ -1,0 +1,12689 @@
+{
+ "python": "3.12.16",
+ "claude_agent_sdk": "0.2.181",
+ "cases": [
+  {
+   "name": "no_key",
+   "values": null,
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "no_values",
+   "values": {},
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_only",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_and_override_disabled_by_absence",
+   "values": {
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_and_override_no_server",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyOverride": {
+     "str": "*"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": true
+    },
+    {
+     "host": "www.example.com",
+     "result": true
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": true
+    },
+    {
+     "host": "192.168.0.1",
+     "result": true
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": true
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": true
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": true
+    }
+   ]
+  },
+  {
+   "name": "enable_and_server_no_override",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_0",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "proxy:8080"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://proxy:8080"
+    ],
+    [
+     "https",
+     "http://proxy:8080"
+    ],
+    [
+     "ftp",
+     "http://proxy:8080"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://proxy:8080"
+    ],
+    [
+     "http",
+     "http://proxy:8080"
+    ],
+    [
+     "https",
+     "http://proxy:8080"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_1",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "proxy"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://proxy"
+    ],
+    [
+     "https",
+     "http://proxy"
+    ],
+    [
+     "ftp",
+     "http://proxy"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://proxy"
+    ],
+    [
+     "http",
+     "http://proxy"
+    ],
+    [
+     "https",
+     "http://proxy"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_2",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": ""
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://"
+    ],
+    [
+     "https",
+     "http://"
+    ],
+    [
+     "ftp",
+     "http://"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://"
+    ],
+    [
+     "http",
+     "http://"
+    ],
+    [
+     "https",
+     "http://"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_3",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a:1;https=b:2"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://a:1"
+    ],
+    [
+     "https",
+     "http://b:2"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://a:1"
+    ],
+    [
+     "https",
+     "http://b:2"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_4",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a:1;https=b:2;ftp=c:3"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://a:1"
+    ],
+    [
+     "https",
+     "http://b:2"
+    ],
+    [
+     "ftp",
+     "http://c:3"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://c:3"
+    ],
+    [
+     "http",
+     "http://a:1"
+    ],
+    [
+     "https",
+     "http://b:2"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_5",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "socks=s:1080"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "socks",
+     "socks://s:1080"
+    ],
+    [
+     "http",
+     "socks4://s:1080"
+    ],
+    [
+     "https",
+     "socks4://s:1080"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "socks4://s:1080"
+    ],
+    [
+     "https",
+     "socks4://s:1080"
+    ],
+    [
+     "socks",
+     "socks://s:1080"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_6",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a:1;socks=s:1080"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://a:1"
+    ],
+    [
+     "socks",
+     "socks://s:1080"
+    ],
+    [
+     "https",
+     "socks4://s:1080"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://a:1"
+    ],
+    [
+     "https",
+     "socks4://s:1080"
+    ],
+    [
+     "socks",
+     "socks://s:1080"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_7",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=;socks=s:1080"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://"
+    ],
+    [
+     "socks",
+     "socks://s:1080"
+    ],
+    [
+     "https",
+     "socks4://s:1080"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://"
+    ],
+    [
+     "https",
+     "socks4://s:1080"
+    ],
+    [
+     "socks",
+     "socks://s:1080"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_8",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "socks=socks://s:1080"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "socks",
+     "socks://s:1080"
+    ],
+    [
+     "http",
+     "socks4://s:1080"
+    ],
+    [
+     "https",
+     "socks4://s:1080"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "socks4://s:1080"
+    ],
+    [
+     "https",
+     "socks4://s:1080"
+    ],
+    [
+     "socks",
+     "socks://s:1080"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_9",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "socks=SOCKS://s:1080"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "socks",
+     "SOCKS://s:1080"
+    ],
+    [
+     "http",
+     "SOCKS://s:1080"
+    ],
+    [
+     "https",
+     "SOCKS://s:1080"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "SOCKS://s:1080"
+    ],
+    [
+     "https",
+     "SOCKS://s:1080"
+    ],
+    [
+     "socks",
+     "SOCKS://s:1080"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_10",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "socks=http://s:1080"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "socks",
+     "http://s:1080"
+    ],
+    [
+     "http",
+     "http://s:1080"
+    ],
+    [
+     "https",
+     "http://s:1080"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://s:1080"
+    ],
+    [
+     "https",
+     "http://s:1080"
+    ],
+    [
+     "socks",
+     "http://s:1080"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_11",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "socks="
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "socks",
+     "socks://"
+    ],
+    [
+     "http",
+     "socks4://"
+    ],
+    [
+     "https",
+     "socks4://"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "socks4://"
+    ],
+    [
+     "https",
+     "socks4://"
+    ],
+    [
+     "socks",
+     "socks://"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_12",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "ftp=x"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "ftp",
+     "http://x"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://x"
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_13",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "gopher=g:70"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "gopher",
+     "g:70"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "gopher",
+     "g:70"
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_14",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "a=b=c"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "a",
+     "b=c"
+    ]
+   ],
+   "handlers": [
+    [
+     "a",
+     "b=c"
+    ],
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_15",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a;bogus"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://a"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://a"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_16",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "bogus;http=a"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_17",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": ";"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_18",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "=x"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "",
+     "x"
+    ]
+   ],
+   "handlers": [
+    [
+     "",
+     "x"
+    ],
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_19",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a;"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://a"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://a"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_20",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "HTTP=a:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "HTTP",
+     "a:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "a:1"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_21",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "Http=a:1;http=b:2"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "Http",
+     "a:1"
+    ],
+    [
+     "http",
+     "http://b:2"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://b:2"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_22",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=https://a"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "https://a"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "https://a"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_23",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a://b"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "a://b"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "a://b"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_24",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=:a://b"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://:a://b"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://:a://b"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_25",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=/x://y"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http:///x://y"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http:///x://y"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_26",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a:/b"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://a:/b"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://a:/b"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_27",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=x\ny://z"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "x\ny://z"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "x\ny://z"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_28",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a:1;http=b:2"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://b:2"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://b:2"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_29",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": " http = a "
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     " http ",
+     " a "
+    ]
+   ],
+   "handlers": [
+    [
+     " http ",
+     " a "
+    ],
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_30",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a b;https=c"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://a b"
+    ],
+    [
+     "https",
+     "http://c"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://a b"
+    ],
+    [
+     "https",
+     "http://c"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_31",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "http=a\u0000b"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://a\u0000b"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://a\u0000b"
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_32",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "https=ü.example:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "https",
+     "http://ü.example:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     "http://ü.example:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_33",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": {
+      "code_points": [
+       104,
+       116,
+       116,
+       112,
+       61,
+       120,
+       56448,
+       121,
+       58,
+       49
+      ]
+     }
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     {
+      "code_points": [
+       104,
+       116,
+       116,
+       112,
+       58,
+       47,
+       47,
+       120,
+       56448,
+       121,
+       58,
+       49
+      ]
+     }
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     {
+      "code_points": [
+       104,
+       116,
+       116,
+       112,
+       58,
+       47,
+       47,
+       120,
+       56448,
+       121,
+       58,
+       49
+      ]
+     }
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_34",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "socks=s;http=a"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "socks",
+     "socks://s"
+    ],
+    [
+     "http",
+     "http://a"
+    ],
+    [
+     "https",
+     "socks4://s"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "http://a"
+    ],
+    [
+     "https",
+     "socks4://s"
+    ],
+    [
+     "socks",
+     "socks://s"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_35",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "socks=s;https="
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "socks",
+     "socks://s"
+    ],
+    [
+     "https",
+     "http://"
+    ],
+    [
+     "http",
+     "socks4://s"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     "socks4://s"
+    ],
+    [
+     "https",
+     "http://"
+    ],
+    [
+     "socks",
+     "socks://s"
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_36",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "proxy:8080;"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_37",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "do=d;proxy=p;a_b=c"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "do",
+     "d"
+    ],
+    [
+     "proxy",
+     "p"
+    ],
+    [
+     "a_b",
+     "c"
+    ]
+   ],
+   "handlers": [
+    [
+     "a_b",
+     "c"
+    ],
+    [
+     "do",
+     "d"
+    ],
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "proxy",
+     "p"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_38",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "int": 5
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://5"
+    ],
+    [
+     "https",
+     "http://5"
+    ],
+    [
+     "ftp",
+     "http://5"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://5"
+    ],
+    [
+     "http",
+     "http://5"
+    ],
+    [
+     "https",
+     "http://5"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_39",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "int": 0
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://0"
+    ],
+    [
+     "https",
+     "http://0"
+    ],
+    [
+     "ftp",
+     "http://0"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://0"
+    ],
+    [
+     "http",
+     "http://0"
+    ],
+    [
+     "https",
+     "http://0"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_40",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "bytes": [
+      112,
+      58,
+      49
+     ]
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://b'p:1'"
+    ],
+    [
+     "https",
+     "http://b'p:1'"
+    ],
+    [
+     "ftp",
+     "http://b'p:1'"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://b'p:1'"
+    ],
+    [
+     "http",
+     "http://b'p:1'"
+    ],
+    [
+     "https",
+     "http://b'p:1'"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_41",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "bytes": []
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://b''"
+    ],
+    [
+     "https",
+     "http://b''"
+    ],
+    [
+     "ftp",
+     "http://b''"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://b''"
+    ],
+    [
+     "http",
+     "http://b''"
+    ],
+    [
+     "https",
+     "http://b''"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_42",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "none": true
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://None"
+    ],
+    [
+     "https",
+     "http://None"
+    ],
+    [
+     "ftp",
+     "http://None"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://None"
+    ],
+    [
+     "http",
+     "http://None"
+    ],
+    [
+     "https",
+     "http://None"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_43",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "strs": [
+      "http=a",
+      "b"
+     ]
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "['http",
+     "a', 'b']"
+    ]
+   ],
+   "handlers": [
+    [
+     "['http",
+     "a', 'b']"
+    ],
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_44",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "strs": []
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://[]"
+    ],
+    [
+     "https",
+     "http://[]"
+    ],
+    [
+     "ftp",
+     "http://[]"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://[]"
+    ],
+    [
+     "http",
+     "http://[]"
+    ],
+    [
+     "https",
+     "http://[]"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_45",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "strs": [
+      {
+       "code_points": [
+        120,
+        56448
+       ]
+      }
+     ]
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://['x\\udc80']"
+    ],
+    [
+     "https",
+     "http://['x\\udc80']"
+    ],
+    [
+     "ftp",
+     "http://['x\\udc80']"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://['x\\udc80']"
+    ],
+    [
+     "http",
+     "http://['x\\udc80']"
+    ],
+    [
+     "https",
+     "http://['x\\udc80']"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "server_46",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "int": 18446744073709551615
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://18446744073709551615"
+    ],
+    [
+     "https",
+     "http://18446744073709551615"
+    ],
+    [
+     "ftp",
+     "http://18446744073709551615"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://18446744073709551615"
+    ],
+    [
+     "http",
+     "http://18446744073709551615"
+    ],
+    [
+     "https",
+     "http://18446744073709551615"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_0",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_1",
+   "values": {
+    "ProxyEnable": {
+     "int": 0
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_2",
+   "values": {
+    "ProxyEnable": {
+     "int": 4294967295
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_3",
+   "values": {
+    "ProxyEnable": {
+     "str": ""
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_4",
+   "values": {
+    "ProxyEnable": {
+     "str": "0"
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_5",
+   "values": {
+    "ProxyEnable": {
+     "str": "x"
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_6",
+   "values": {
+    "ProxyEnable": {
+     "bytes": [
+      0
+     ]
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_7",
+   "values": {
+    "ProxyEnable": {
+     "bytes": []
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_8",
+   "values": {
+    "ProxyEnable": {
+     "none": true
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_9",
+   "values": {
+    "ProxyEnable": {
+     "strs": []
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [],
+   "handlers": [
+    [
+     "ftp",
+     null
+    ],
+    [
+     "http",
+     null
+    ],
+    [
+     "https",
+     null
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_10",
+   "values": {
+    "ProxyEnable": {
+     "strs": [
+      ""
+     ]
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "enable_11",
+   "values": {
+    "ProxyEnable": {
+     "int": 18446744073709551615
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>;*.local"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_0",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<local>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_1",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "<LOCAL>"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_2",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": " <local> "
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_3",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "*.example.com"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": true
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": true
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_4",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "*.EXAMPLE.com"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": true
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": true
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_5",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "www.example.com;192.168.*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": true
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": true
+    },
+    {
+     "host": "192.168.0.1",
+     "result": true
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": true
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_6",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": " www.example.com ; *.local "
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": true
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": true
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_7",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "192.168.0.*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": true
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_8",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "a/b"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_9",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "a\\b"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_10",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "[ab]*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": true
+    }
+   ]
+  },
+  {
+   "name": "override_11",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "[!a]*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": true
+    },
+    {
+     "host": "www.example.com",
+     "result": true
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": true
+    },
+    {
+     "host": "192.168.0.1",
+     "result": true
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": true
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": true
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_12",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": true
+    },
+    {
+     "host": "localhost:80",
+     "result": true
+    },
+    {
+     "host": "example.com",
+     "result": true
+    },
+    {
+     "host": "www.example.com",
+     "result": true
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": true
+    },
+    {
+     "host": "192.168.0.1",
+     "result": true
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": true
+    },
+    {
+     "host": "a\\b",
+     "result": true
+    },
+    {
+     "host": "a/b",
+     "result": true
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": true
+    },
+    {
+     "host": "ß.de",
+     "result": true
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": true
+    },
+    {
+     "host": "host:",
+     "result": true
+    },
+    {
+     "host": "a.b:x",
+     "result": true
+    }
+   ]
+  },
+  {
+   "name": "override_13",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": ""
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_14",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": ";"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": true
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_15",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "localhost:80"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_16",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "İ*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_17",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "i̇*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": true
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_18",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "ß*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": true
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_19",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "SS*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_20",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     }
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": true
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_21",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": " example.com "
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": true
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_22",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "?xample.com"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": true
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_23",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "["
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_24",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "[]]"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_25",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "str": "*example.com*"
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": true
+    },
+    {
+     "host": "www.example.com",
+     "result": true
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": true
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_26",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "int": 5
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_27",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "int": 0
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_28",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "bytes": [
+      60,
+      108,
+      111,
+      99,
+      97,
+      108,
+      62
+     ]
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_29",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "bytes": []
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_30",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "none": true
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_31",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "strs": [
+      "<local>"
+     ]
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  },
+  {
+   "name": "override_32",
+   "values": {
+    "ProxyEnable": {
+     "int": 1
+    },
+    "ProxyServer": {
+     "str": "p:1"
+    },
+    "ProxyOverride": {
+     "strs": []
+    }
+   },
+   "getproxies": [
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "ftp",
+     "http://p:1"
+    ]
+   ],
+   "handlers": [
+    [
+     "ftp",
+     "http://p:1"
+    ],
+    [
+     "http",
+     "http://p:1"
+    ],
+    [
+     "https",
+     "http://p:1"
+    ],
+    [
+     "socks",
+     null
+    ],
+    [
+     "socks4",
+     null
+    ]
+   ],
+   "bypass": [
+    {
+     "host": "localhost",
+     "result": false
+    },
+    {
+     "host": "localhost:80",
+     "result": false
+    },
+    {
+     "host": "example.com",
+     "result": false
+    },
+    {
+     "host": "www.example.com",
+     "result": false
+    },
+    {
+     "host": "WWW.Example.COM:8080",
+     "result": false
+    },
+    {
+     "host": "192.168.0.1",
+     "result": false
+    },
+    {
+     "host": "192.168.1.10:3128",
+     "result": false
+    },
+    {
+     "host": "a\\b",
+     "result": false
+    },
+    {
+     "host": "a/b",
+     "result": false
+    },
+    {
+     "host": "",
+     "result": false
+    },
+    {
+     "host": "İstanbul.local",
+     "result": false
+    },
+    {
+     "host": "istanbul.local",
+     "result": false
+    },
+    {
+     "host": "ß.de",
+     "result": false
+    },
+    {
+     "host": {
+      "code_points": [
+       120,
+       56448,
+       121,
+       46,
+       108,
+       111,
+       99,
+       97,
+       108
+      ]
+     },
+     "result": false
+    },
+    {
+     "host": "[::1]:80",
+     "result": false
+    },
+    {
+     "host": "host:",
+     "result": false
+    },
+    {
+     "host": "a.b:x",
+     "result": false
+    }
+   ]
+  }
+ ]
+}

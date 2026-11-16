@@ -10,6 +10,7 @@ use crate::{
     constants::{
         PERMISSION_TOOL_USE_ID_FIELD, PYTHON_DICT_TYPE, PYTHON_NONE_TYPE, PYTHON_PERMISSION_RESULT_TYPE_ERROR,
     },
+    deep_json::OwnedValues,
     message_decode::Decoded,
 };
 
@@ -82,6 +83,44 @@ pub(crate) enum ControlResponse {
         message: String,
         error_code: Option<Value>,
     },
+}
+
+impl OwnedValues for Frame {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut Value)) {
+        match self {
+            Self::Message(message) => message.each_value(visit),
+            Self::ControlRequest { request, .. } => request.each_value(visit),
+            Self::ControlResponse {
+                response: ControlResponse::Success(response),
+                ..
+            } => response.each_value(visit),
+            Self::ControlResponse {
+                response: ControlResponse::Error { error_code, .. },
+                ..
+            } => error_code.each_value(visit),
+            Self::TranscriptMirror { entries, .. } => entries.each_value(visit),
+            Self::KeepAlive | Self::Unparsed | Self::Cancel { .. } => {}
+        }
+    }
+}
+
+impl OwnedValues for IncomingControl {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut Value)) {
+        match self {
+            Self::Permission(request) => request.each_value(visit),
+            Self::Hook { input, .. } => input.each_value(visit),
+            Self::Mcp { server_name, message } => {
+                server_name.each_value(visit);
+                message.each_value(visit);
+            }
+            Self::Elicitation(request) => request.requested_schema.each_value(visit),
+            Self::UserDialog { payload, .. } | Self::Ui { payload, .. } => payload.each_value(visit),
+            Self::OAuthTokenRefresh { kind, .. } => kind.each_value(visit),
+            Self::HostAuthTokenRefresh { status } => status.each_value(visit),
+            Self::RemoteControlWork { session_id } => session_id.each_value(visit),
+            Self::Unsupported { .. } => {}
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -304,8 +343,18 @@ pub(crate) fn parse_frame(bytes: &[u8]) -> Result<Frame, ProtocolError> {
     parse_value(&serde_json::from_slice(bytes)?, MessageDecoding::TypeScript)
 }
 
-/// Decodes an object a [`crate::Transport`] already parsed as JSON.
+/// Decodes an object a [`crate::Transport`] already parsed as JSON, at any nesting: the recursive decoding runs
+/// over the object with its deep containers set aside, and copies of them go back into the frame afterwards.
 pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<Frame, ProtocolError> {
+    let Some(detached) = crate::deep_json::detach(object) else {
+        return parse_shallow(object, mode);
+    };
+    let mut frame = parse_shallow(&detached.skeleton, mode)?;
+    frame.each_value(&mut |value| detached.reattach(value));
+    Ok(frame)
+}
+
+fn parse_shallow(object: &JsonObject, mode: MessageDecoding) -> Result<Frame, ProtocolError> {
     let data = || object.clone();
     Ok(match object.get("type").and_then(Value::as_str) {
         Some("control_request") => {

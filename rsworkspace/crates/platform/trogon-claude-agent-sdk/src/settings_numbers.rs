@@ -85,21 +85,27 @@ pub(crate) fn python_number(number: PythonNumber) -> Value {
     marker.map_or_else(|| approximate(&number), Value::Number)
 }
 
-/// The settings value for a JSON value `json.loads` read.
-pub(crate) fn python_value(value: PythonJsonValue) -> Value {
-    match value {
+/// The settings value for a JSON value `json.loads` read, or `None` when a string or key holds a lone
+/// surrogate, which a settings value cannot.
+pub(crate) fn python_value(mut value: PythonJsonValue) -> Option<Value> {
+    Some(match &mut value {
         PythonJsonValue::Null => Value::Null,
-        PythonJsonValue::Bool(flag) => Value::Bool(flag),
-        PythonJsonValue::Number(number) => python_number(number),
-        PythonJsonValue::String(text) => Value::String(text),
-        PythonJsonValue::Array(items) => Value::Array(items.into_iter().map(python_value).collect()),
-        PythonJsonValue::Object(entries) => Value::Object(
-            entries
+        PythonJsonValue::Bool(flag) => Value::Bool(*flag),
+        PythonJsonValue::Number(number) => python_number(number.clone()),
+        PythonJsonValue::String(text) => Value::String(std::mem::take(text).into_string().ok()?),
+        PythonJsonValue::Array(items) => Value::Array(
+            std::mem::take(items)
                 .into_iter()
-                .map(|(key, entry)| (key, python_value(entry)))
-                .collect(),
+                .map(python_value)
+                .collect::<Option<_>>()?,
         ),
-    }
+        PythonJsonValue::Object(entries) => Value::Object(
+            std::mem::take(entries)
+                .into_iter()
+                .map(|(key, entry)| Some((key.into_string().ok()?, python_value(entry)?)))
+                .collect::<Option<_>>()?,
+        ),
+    })
 }
 
 /// The exact number a marker stands for, while the resolve that made it keeps numbers.
@@ -147,7 +153,7 @@ pub(crate) fn exact_numbers(value: &Value) -> PythonJsonValue {
         Value::Object(entries) => PythonJsonValue::Object(
             entries
                 .iter()
-                .map(|(key, entry)| (key.clone(), exact_numbers(entry)))
+                .map(|(key, entry)| (key.as_str().into(), exact_numbers(entry)))
                 .collect(),
         ),
         other => PythonJsonValue::from(other),

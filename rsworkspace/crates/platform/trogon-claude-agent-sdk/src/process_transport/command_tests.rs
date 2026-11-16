@@ -1,11 +1,11 @@
 #![allow(clippy::expect_used)]
 
 use super::command;
-use crate::{ArgvStyle, ClaudeAgentOptions, ScriptRuntime, environment_plan::Inherited};
+use crate::{ArgvStyle, ClaudeAgentOptions, ScriptRuntime, environment_plan::Inherited, python_c_stack::PythonCStack};
 use std::path::Path;
 
 fn program_and_leading(options: &ClaudeAgentOptions, cli: &str, leading: usize) -> (String, Vec<String>) {
-    let built = command(options, Path::new(cli), &Inherited::new(), None).expect("command");
+    let built = command(options, Path::new(cli), &Inherited::new(), None, PythonCStack::MODULE).expect("command");
     let std = built.as_std();
     (
         std.get_program().to_string_lossy().into_owned(),

@@ -29,6 +29,7 @@ use crate::{
     environment_plan::{self, Inherited},
     framing::{FrameReader, SharedTail, drain_stderr_with},
     process_options::{EnvironmentMode, is_script},
+    python_c_stack::PythonCStack,
 };
 
 /// Builds the child command. A script path runs under `script_runtime.executable` (default `node`), as the
@@ -38,8 +39,9 @@ pub(crate) fn command(
     cli_path: &Path,
     inherited: &Inherited,
     derived_debug_file: Option<&Path>,
+    python_stack: PythonCStack,
 ) -> Result<ProcessCommand, Error> {
-    let arguments = argv::build(options, derived_debug_file)?;
+    let arguments = argv::build(options, derived_debug_file, python_stack)?;
     let mut command = if is_script(cli_path, options.argv_style) {
         let runtime = options
             .script_runtime
@@ -85,6 +87,14 @@ pub(crate) fn command(
     }
     #[cfg(unix)]
     {
+        if crate::inherited_descriptors::passes_only_stdio(options.argv_style) {
+            let limit = crate::inherited_descriptors::descriptor_limit();
+            // SAFETY: the closure only calls `close_range` and `fcntl`, which are async-signal-safe and allocate
+            // nothing.
+            unsafe {
+                command.pre_exec(move || crate::inherited_descriptors::keep_only_stdio(limit));
+            }
+        }
         let uid = match (&options.user, options.run_as_uid) {
             (Some(name), _) => Some(crate::run_as::lookup(name).map_err(Error::Io)?),
             (None, uid) => uid,
@@ -168,6 +178,8 @@ pub(crate) struct ProcessSpawn<'a, P> {
     /// `startup()` and `prewarm()`: ask the CLI to report startup marks, unless the caller's environment already
     /// carries the variable.
     pub startup_marks: bool,
+    /// Where the Python SDK builds the command: in `ClaudeSDKClient.connect` or in `query()`.
+    pub python_stack: PythonCStack,
 }
 
 /// TypeScript's `SpawnOptions` for the command the SDK would run. `signal` is the forwarded abort signal.
@@ -259,8 +271,9 @@ impl ProcessTransport {
             closed,
             parent_environment,
             startup_marks,
+            python_stack,
         } = input;
-        let mut command = command(options, &cli_path, inherited, derived_debug_file)?;
+        let mut command = command(options, &cli_path, inherited, derived_debug_file, python_stack)?;
         if startup_marks {
             command.env("CLAUDE_CODE_SDK_READS_STARTUP_MARKS", "1");
         }
@@ -320,7 +333,7 @@ impl ProcessTransport {
         Ok(Self {
             child: Some(child),
             stdin: Some(stdin),
-            frames: FrameReader::new(stdout, options.limits.max_buffer_size),
+            frames: FrameReader::new(stdout, options.limits.max_buffer_size, options.argv_style),
             stderr,
             stderr_tail,
             argv_style: options.argv_style,
@@ -478,39 +491,76 @@ impl Transport for ProcessTransport {
         stdin.write_all(data.as_bytes()).await.map_err(Error::WriteFailed)
     }
 
-    /// Python skips lines that do not start with `{`, and fails on a corrupt `{` line with `CLIJSONDecodeError`
-    /// except for a corrupt unterminated tail at end of file, which is dropped. TypeScript skips every line that
-    /// does not decode.
+    /// Python strips each line with `str.strip`, skips lines that do not then start with `{`, and fails on a corrupt
+    /// `{` line with `CLIJSONDecodeError` except for a corrupt unterminated tail at end of file, which is dropped.
+    /// TypeScript skips every line that does not decode, and fails on a `null` line. A line may nest past the
+    /// recursion limit of `serde_json`, as the JSON parsers of both SDKs read it: TypeScript's at any depth, and
+    /// Python's until `json.loads` raises `RecursionError` near 10,000 levels, which no line skips.
     async fn read_message(&mut self) -> Result<Option<JsonObject>, Error> {
         loop {
             let Some(frame) = self.frames.next().await? else {
                 self.stdout_ended = true;
                 return Ok(None);
             };
-            if !frame.trim_ascii_start().starts_with(b"{") {
-                if !frame.trim_ascii().is_empty() {
+            let python = self.argv_style == ArgvStyle::Python;
+            // TypeScript decodes stdout leniently; Python already raised for bytes that are not UTF-8.
+            let text = if python {
+                std::borrow::Cow::Borrowed(frame.as_slice())
+            } else {
+                match String::from_utf8_lossy(&frame) {
+                    std::borrow::Cow::Borrowed(text) => std::borrow::Cow::Borrowed(text.as_bytes()),
+                    std::borrow::Cow::Owned(text) => std::borrow::Cow::Owned(text.into_bytes()),
+                }
+            };
+            if !python && crate::deep_json::javascript_null(&text) {
+                return Err(Error::NullMessage("Cannot read properties of null (reading 'type')"));
+            }
+            let line = if python {
+                crate::deep_json::python_strip(&text)
+            } else {
+                text.trim_ascii_start()
+            };
+            if !line.starts_with(b"{") {
+                if !line.trim_ascii().is_empty() {
                     tracing::debug!("skipping non-JSON line from CLI stdout");
                 }
                 continue;
             }
+            if python {
+                match crate::deep_json::python_raise(line) {
+                    Some(crate::deep_json::PythonRaise::Recursion(text)) => return Err(Error::Recursion(text)),
+                    Some(crate::deep_json::PythonRaise::IntDigits(digits)) => {
+                        return Err(Error::IntDigits(crate::python_re::int_parse_limit_text(digits)));
+                    }
+                    None => {}
+                }
+            }
             // Python reads the ids of an `mcp_message` with `json.loads`; the scan keeps their exact text and
-            // hands `serde_json` the line with those ids replaced by `null`.
-            let scan = if self.argv_style == ArgvStyle::Python {
-                crate::McpWireScan::new(&frame)
+            // hands the parser the line with those ids replaced by `null`.
+            let scan = if python {
+                crate::McpWireScan::new(line)
             } else {
                 crate::McpWireScan::new(&[])
             };
-            match serde_json::from_slice::<JsonObject>(scan.frame(&frame)) {
-                Ok(object) => {
+            let parsed = if python {
+                crate::deep_json::parse_object(&crate::deep_json::python_integer_zero(scan.frame(line)))
+            } else {
+                crate::deep_json::parse_object(scan.frame(&text))
+            };
+            match parsed {
+                Ok(mut object) => {
+                    if !python {
+                        crate::deep_json::javascript_object(&mut object);
+                    }
                     self.wire_ids = scan.into_ids();
                     return Ok(Some(object));
                 }
                 Err(error) => {
-                    if self.argv_style == ArgvStyle::TypeScript || self.frames.last_was_tail() {
+                    if !python || self.frames.last_was_tail() {
                         tracing::debug!("skipping undecodable line from CLI stdout");
                         continue;
                     }
-                    return Err(crate::JsonDecodeError::new(&frame, error).into());
+                    return Err(crate::JsonDecodeError::new(line, error).into());
                 }
             }
         }

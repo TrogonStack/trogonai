@@ -22,7 +22,10 @@ use crate::{
         SETTINGS_PATH_WITH_SANDBOX_ERROR,
     },
     process_options::ArgvStyle,
-    python_json_value::{PythonJsonValue, PythonNumber, python_json_dumps, python_json_loads},
+    python_c_stack::PythonCStack,
+    python_json_error::PythonJsonError,
+    python_json_load::{drop_python_deep, loads_text},
+    python_json_value::{PythonJsonValue, PythonNumber, python_json_dumps},
     python_text,
     settings_json::{js_normalize, js_stringify, python_dumps},
     settings_numbers::same_value_zero,
@@ -329,8 +332,15 @@ fn python_join(cwd: Option<&Path>, settings: &str) -> PathBuf {
     }
 }
 
-/// Python `_build_settings_value`: the `--settings` value, `None` when none is passed.
-pub(crate) fn python_settings_value<R>(options: &ClaudeAgentOptions, files: &R) -> Result<Option<String>, Error>
+/// Python `_build_settings_value`: the `--settings` value, `None` when none is passed. `stack` is where Python
+/// calls it, which sets how deeply the settings text may nest before `json.loads` raises `RecursionError`. That
+/// error is not one of the `OSError`, `ValueError` and `TypeError` the function turns into `Failed to load
+/// settings`, so it keeps its own message.
+pub(crate) fn python_settings_value<R>(
+    options: &ClaudeAgentOptions,
+    files: &R,
+    stack: PythonCStack,
+) -> Result<Option<String>, Error>
 where
     R: ReadFile<Error = io::Error>,
 {
@@ -339,6 +349,7 @@ where
         return Ok(settings.filter(|text| !text.is_empty()));
     };
     let failed = |reason: String| -> Error { OptionError::new(format!("Failed to load settings: {reason}")).into() };
+    let sandbox = PythonJsonValue::from(&Value::Object(sandbox_object(sandbox)?));
     let mut document = PythonJsonValue::Object(IndexMap::new());
     if let Some(settings) = settings {
         let trimmed = crate::session_mutations::py_strip(&settings).to_owned();
@@ -362,16 +373,20 @@ where
             })?;
             text.strip_prefix('\u{feff}').map(str::to_owned).unwrap_or(text)
         };
-        document = python_json_loads(&text).map_err(|error| failed(error.to_string()))?;
+        document = loads_text(&text, stack.json_depth()).map_err(|error| match error {
+            PythonJsonError::Recursion(_) => OptionError::new(error.to_string()).into(),
+            _ => failed(error.to_string()),
+        })?;
     }
-    let PythonJsonValue::Object(map) = &mut document else {
-        return Err(failed(python_type_error(&document).to_owned()));
+    let mut map = match &mut document {
+        PythonJsonValue::Object(map) => std::mem::take(map),
+        other => return Err(failed(python_type_error(other).to_owned())),
     };
-    map.insert(
-        "sandbox".into(),
-        PythonJsonValue::from(&Value::Object(sandbox_object(sandbox)?)),
-    );
-    Ok(Some(python_json_dumps(&document)))
+    map.insert("sandbox".into(), sandbox);
+    let document = PythonJsonValue::Object(map);
+    let text = python_json_dumps(&document);
+    drop_python_deep(document);
+    Ok(Some(text))
 }
 
 #[cfg(test)]
