@@ -13,11 +13,14 @@ const bazelRoot = process.env.VITE_BAZEL_RUNFILES === '1' ? dirname(realpathSync
 // Bazel's declared dependencies can resolve outside the Vite root through runfiles symlinks.
 const allowOutsideRoot = process.env.VITE_ALLOW_OUTSIDE_ROOT === '1';
 
+// Split route chunks load on first navigation, so under Vitest that load lands inside a test's clock.
+const autoCodeSplitting = process.env.VITEST === undefined;
+
 const config = defineConfig({
   root: bazelRoot,
   resolve: { tsconfigPaths: true },
   server: { fs: { strict: !allowOutsideRoot } },
-  plugins: [devtools(), tailwindcss(), tanstackRouter({ target: 'react', autoCodeSplitting: true }), viteReact()],
+  plugins: [devtools(), tailwindcss(), tanstackRouter({ target: 'react', autoCodeSplitting }), viteReact()],
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
