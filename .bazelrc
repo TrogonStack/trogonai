@@ -9,12 +9,48 @@ test --test_output=errors
 
 # CI logs have no terminal to redraw the progress line in place, so every update
 # became a new line and buried the errors. Keep warnings, errors, failing test
-# output and the summary of tests that did not pass.
+# output, cache statistics and the test summary.
 common:ci --curses=no
 common:ci --noshow_loading_progress
 common:ci --show_progress_rate_limit=60
-common:ci --ui_event_filters=-info
 build:ci --show_result=0
 test:ci --test_summary=terse
+
+# The GitHub Actions cache has a 10 GB quota per repository, shared with the
+# Cargo, pnpm and mise caches, and a restored disk cache only ever grew. Bazel
+# trims it only after the server has been idle for the delay, so CI waits for
+# that before saving the cache (github:workflows:ci-bazel:trim-disk-cache).
+common:ci --experimental_disk_cache_gc_max_size=4G
+common:ci --experimental_disk_cache_gc_idle_delay=0s
+
+# Lint checks run as aspects over the Rust targets, so that `bazel build
+# --config=lint //...` checks the same targets CI builds. Select only the check
+# output groups to avoid rebuilding ordinary artifacts after coverage;
+# --keep_going reports every finding instead of the first.
+build:lint --keep_going
+build:lint --aspects=//.config/bazel:rustfmt.bzl%rustfmt_aspect
+build:lint --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:lint --output_groups=rustfmt_checks,clippy_checks
+build:lint --@rules_rust//rust/settings:clippy.toml=//rsworkspace:clippy.toml
+# Crate lint levels replace the aspect's default of denying warnings.
+build:lint --@rules_rust//rust/settings:clippy_flag=-Dwarnings
+
+# CI runs the tests through `bazel coverage` and builds with this config too,
+# so both commands share one configuration and its cached actions. Only the
+# repository's own Rust crates are instrumented, as `cargo cov` measures only
+# the rsworkspace members.
+build:coverage --collect_code_coverage
+build:coverage --instrumentation_filter=^//rsworkspace[/:]
+# Integration tests are test targets, which Bazel leaves uninstrumented by default,
+# so the library code they exercise would count as never run. cargo llvm-cov
+# instruments every test binary.
+build:coverage --instrument_test_targets
+build:coverage --combined_report=lcov
+# cargo llvm-cov compiles with these cfgs, and on the nightly toolchain the
+# coverage job uses, `coverage_nightly` turns `#[coverage(off)]` on. Bazel builds
+# with the stable toolchain, which accepts that attribute only in bootstrap mode.
+build:coverage --@rules_rust//rust/settings:extra_rustc_flag=--cfg=coverage
+build:coverage --@rules_rust//rust/settings:extra_rustc_flag=--cfg=coverage_nightly
+build:coverage --action_env=RUSTC_BOOTSTRAP=1
 
 try-import %workspace%/.bazelrc.local

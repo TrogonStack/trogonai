@@ -368,6 +368,16 @@ fn allow_full(style: ArgvStyle) -> PermissionDecision {
     }
 }
 
+/// A result no typed variant can express, carrying a stale `toolUseID` between its other keys.
+fn raw_result(_: ArgvStyle) -> PermissionDecision {
+    let mut result = JsonObject::new();
+    result.insert("behavior".into(), "allow".into());
+    result.insert("toolUseID".into(), "stale".into());
+    result.insert("updatedPermissions".into(), json!([{"type": 5}]));
+    result.insert("extra".into(), json!({"kept": null}));
+    PermissionDecision::Raw(result)
+}
+
 fn deny_interrupt(style: ArgvStyle) -> PermissionDecision {
     PermissionDecision::Deny {
         message: "no".into(),
@@ -379,7 +389,7 @@ fn deny_interrupt(style: ArgvStyle) -> PermissionDecision {
 #[tokio::test]
 async fn permission_decisions_are_written_byte_for_byte() -> TestResult {
     type Decide = fn(ArgvStyle) -> PermissionDecision;
-    let cases: [(&str, Decide, Option<&str>, &str, &str); 5] = [
+    let cases: [(&str, Decide, Option<&str>, &str, &str); 7] = [
         (
             "allow with every field",
             allow_full,
@@ -407,6 +417,20 @@ async fn permission_decisions_are_written_byte_for_byte() -> TestResult {
             Some("tu-1"),
             r#"{"type":"control_response","response":{"subtype":"error","request_id":"p1","error":"boom"}}"#,
             r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "p1", "error": "boom"}}"#,
+        ),
+        (
+            "raw result",
+            raw_result,
+            Some("tu-1"),
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"p1","response":{"behavior":"allow","toolUseID":"tu-1","updatedPermissions":[{"type":5}],"extra":{"kept":null}}}}"#,
+            r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "p1", "error": "Tool permission callback must return PermissionResult (PermissionResultAllow or PermissionResultDeny), got <class 'dict'>"}}"#,
+        ),
+        (
+            "raw result without a tool use id",
+            raw_result,
+            None,
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"p1","response":{"behavior":"allow","updatedPermissions":[{"type":5}],"extra":{"kept":null}}}}"#,
+            r#"{"type": "control_response", "response": {"subtype": "error", "request_id": "p1", "error": "Tool permission callback must return PermissionResult (PermissionResultAllow or PermissionResultDeny), got <class 'dict'>"}}"#,
         ),
         (
             "null result",
@@ -976,18 +1000,15 @@ async fn python_answers_work_secret_requests_as_unsupported_even_with_an_answere
 /// `claude_agent_sdk` each answered it with. Both callbacks echo the suggestions they were given.
 const SUGGESTION_GOLDENS: &str = include_str!("fixtures/permission_suggestions/goldens.json");
 
-/// What a typed decision can echo of the suggestions `sdk.mjs` hands over as sent: absent ones, or an array of
-/// objects, each kept verbatim.
-fn typescript_echo(raw: &JsonObject) -> Option<Option<Vec<PermissionUpdate>>> {
-    match raw.get("permission_suggestions") {
-        None => Some(None),
-        Some(Value::Array(entries)) => entries
-            .iter()
-            .map(|entry| entry.as_object().cloned().map(PermissionUpdate::Unknown))
-            .collect::<Option<Vec<_>>>()
-            .map(Some),
-        Some(_) => None,
+/// The result the TypeScript `canUseTool` of the goldens returns: `updatedPermissions` set to the suggestions
+/// exactly as sent, which `JSON.stringify` leaves out when there were none.
+fn typescript_echo(raw: &JsonObject) -> PermissionDecision {
+    let mut result = JsonObject::new();
+    result.insert("behavior".into(), "allow".into());
+    if let Some(suggestions) = raw.get("permission_suggestions") {
+        result.insert("updatedPermissions".into(), suggestions.clone());
     }
+    PermissionDecision::Raw(result)
 }
 
 #[tokio::test]
@@ -1000,10 +1021,14 @@ async fn permission_suggestions_reach_each_dialect_like_its_sdk() -> TestResult 
         let recorded = Arc::clone(&seen);
         let mut configured = options(style);
         configured.permission_handler = Some(Arc::new(move |request: ToolPermissionRequest| {
-            let echo = if typescript {
-                typescript_echo(&request.raw_request).flatten()
+            let decision = if typescript {
+                typescript_echo(&request.raw_request)
             } else {
-                Some(request.suggestions.clone())
+                PermissionDecision::Allow {
+                    updated_input: None,
+                    updated_permissions: Some(request.suggestions.clone()),
+                    decision_classification: None,
+                }
             };
             if let Ok(mut recorded) = recorded.lock() {
                 recorded.insert(
@@ -1011,13 +1036,7 @@ async fn permission_suggestions_reach_each_dialect_like_its_sdk() -> TestResult 
                     Value::Object(request.raw_request.clone()),
                 );
             }
-            async move {
-                PermissionDecision::Allow {
-                    updated_input: None,
-                    updated_permissions: echo,
-                    decision_classification: None,
-                }
-            }
+            async move { decision }
         }));
         let steps = cases
             .iter()
@@ -1045,14 +1064,7 @@ async fn permission_suggestions_reach_each_dialect_like_its_sdk() -> TestResult 
             let sent_fields = sent.as_object_mut().ok_or("a request that is not an object")?;
             sent_fields.remove("subtype");
             assert_eq!(seen.get(id), Some(&sent), "{name}");
-            let mut expected: Value = serde_json::from_str(case["typescript"].as_str().ok_or("no TypeScript line")?)?;
-            if typescript_echo(sent.as_object().ok_or("a request that is not an object")?).is_none() {
-                // The callback returned the raw value; a typed decision leaves it out instead.
-                if let Some(response) = expected["response"]["response"].as_object_mut() {
-                    response.remove("updatedPermissions");
-                }
-            }
-            assert_eq!(serde_json::from_str::<Value>(line)?, expected, "{name}");
+            assert_eq!(Some(line.as_str()), case["typescript"].as_str(), "{name}");
         }
     }
     Ok(())

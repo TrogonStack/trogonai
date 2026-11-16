@@ -1,14 +1,13 @@
-load("//.config/bazel:rust.bzl", "workspace_crate")
+load("//.config/bazel:rust.bzl", "workspace_compile_fail_library", "workspace_crate")
 
-workspace_crate(
-    name = "trogon-scheduler-domain",
+workspace_crate()
+
+workspace_compile_fail_library(
     crate_features = [
-        "runtime-snapshot",
+        "default",
         "schedule-validation",
     ],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider",
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
+    dependency_overrides = {
+        "//rsworkspace/crates/platform/trogonai-proto:trogonai-proto": "//rsworkspace/crates/platform/trogonai-proto:trogonai-proto_compile_fail",
+    },
 )

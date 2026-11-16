@@ -4,18 +4,18 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use trogon_credential_domain::{CredentialIdentity, CredentialRef, CredentialScope};
 use trogon_nats::test_support::JetStreamTestServer;
+use trogon_secret_store::{
+    MockOpenBaoSecretStore, SecretMaterial, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+};
 use trogon_webhooks::{
     AuthenticationMode, ConfigurationRevision, EndpointId, EndpointRegistration, EndpointStatus, ProjectId,
     TimestampTolerance, WebhookBodySize,
 };
 
-use crate::credential::commands::domain::{CredentialRef, CredentialScope};
 use crate::credential_runtime_projection::{
     InMemoryRuntimeProjectionRepository, RuntimeIntegrationProjection, RuntimeIntegrationStatus,
-};
-use crate::secret_store::{
-    MockOpenBaoSecretStore, SecretMaterial, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
 };
 
 use super::*;
@@ -50,12 +50,14 @@ fn projection(credential: CredentialRef, status: RuntimeIntegrationStatus) -> Ru
 async fn provision_secret(store: &MockOpenBaoSecretStore) -> CredentialRef {
     store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("project-one").unwrap(),
-                SourceKind::Webhook,
-                SourceIntegrationId::new(ENDPOINT).unwrap(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("project-one").unwrap(),
+                    SourceKind::Webhook,
+                    SourceIntegrationId::new(ENDPOINT).unwrap(),
+                ),
+                CredentialKind::WebhookSecret,
             ),
-            CredentialKind::WebhookSecret,
             SecretString::new("test-initial-value").unwrap(),
         )
         .await
@@ -228,7 +230,6 @@ impl SecretStoreGet for UnavailableSecrets {
 
     async fn get(&self, _credential: &CredentialRef) -> Result<SecretMaterial, Self::Error> {
         Err(SecretStoreError::BackendUnavailable {
-            backend: crate::credential::commands::domain::StorageBackend::OpenBao,
             message: "test backend unavailable".to_owned(),
         })
     }

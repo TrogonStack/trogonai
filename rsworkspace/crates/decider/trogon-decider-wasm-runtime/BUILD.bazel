@@ -1,74 +1,16 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-decider-wasm-runtime",
-    dev_deps = [
-        "//rsworkspace/crates/decider/trogon-decider-nats",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
+    data = ["//rsworkspace/wasm-components/trogon-schedules-decider:component"],
     integration_tests = {
-        "act_chain_execution": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_act_chain_decider.wasm,
-            # built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
-        "nats_execution": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-            # built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
-        "schedules_execution": {
-            "compile_data": glob(["tests/support/*.rs"]),
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-            # built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
+        "act_chain_execution": {"data": ["//rsworkspace/wasm-components/trogon-act-chain-decider:component"]},
+        # Starts a NATS server in a container through Docker.
+        "nats_execution": {"tags": ["requires-network"]},
+        "schedules_execution": {"compile_data": ["tests/support/*.rs"]},
     },
-    # These tests load target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-    # built by cargo component outside Bazel.
-    unit_test_args = [
-        "--skip",
-        "module::tests::loads_a_zero_import_component_and_probes_its_descriptor",
-        "--skip",
-        "execution::tests::a_zero_tick_epoch_deadline_traps_as_deadline_exceeded",
-        "--skip",
-        "execution::tests::dropping_a_session_without_a_fresh_budget_traps_on_an_exhausted_leftover",
-        "--skip",
-        "execution::tests::drop_session_after_decide_recovers_from_an_exhausted_leftover_budget",
-        "--skip",
-        "execution::tests::conclude_session_runs_the_destructor_on_a_domain_error_outcome",
-        "--skip",
-        "execution::tests::conclude_session_skips_a_guest_that_already_trapped",
-        "--skip",
-        "execution::tests::drop_session_discarding_trap_swallows_a_destructor_failure",
-        "--skip",
-        "registry::tests::routes_registered_command_types",
-        "--skip",
-        "registry::tests::unknown_command_type_is_reported",
-        "--skip",
-        "registry::tests::duplicate_command_type_across_modules_is_rejected",
-        "--skip",
-        "registry::tests::routes_reports_every_registered_command_type_with_module_identity",
-        "--skip",
-        "registry::tests::handle_routes_delegate_to_the_wrapped_registry",
-        "--skip",
-        "registry::tests::activate_adds_routes_for_every_command_type_the_module_declares",
-        "--skip",
-        "registry::tests::activate_replaces_the_current_route_and_reports_the_previous_module_identity",
-        "--skip",
-        "registry::tests::retire_removes_the_route_and_reports_the_retired_module_identity",
-        "--skip",
-        "registry::tests::concurrent_activation_never_exposes_a_torn_route_pair",
-        "--skip",
-        "registry::tests::activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapshot",
-        "--skip",
-        "registry::tests::activate_under_live_jetstream_keeps_in_flight_dispatch_pinned_to_its_resolved_module",
-    ],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-        "//rsworkspace/crates/decider/trogon-decider-wit",
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
+    # The tests resolve the components through CARGO_MANIFEST_DIR, relative to
+    # the runfiles root at run time.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
+    # One registry test starts a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
 )

@@ -32,8 +32,7 @@ try {
   requireValue(sha(env.GITHUB_SHA) && run('git', ['rev-parse', '--verify', 'HEAD']).trim() === env.GITHUB_SHA);
   requireValue(env.GITHUB_OUTPUT);
 
-  const groups = env.CI_FILTERS === '.github/filters/ci.yml' ? ['rust', 'go', 'proto']
-    : env.CI_FILTERS === '.github/filters/codeql.yml' ? ['go', 'javascript-typescript', 'rust'] : null;
+  const groups = env.CI_FILTERS === '.github/filters/codeql.yml' ? ['go', 'javascript-typescript', 'rust'] : null;
   requireValue(groups);
   const filters = yaml.load(fs.readFileSync(path.join(workspace, env.CI_FILTERS), 'utf8'));
   requireValue(filters && !Array.isArray(filters) && typeof filters === 'object');

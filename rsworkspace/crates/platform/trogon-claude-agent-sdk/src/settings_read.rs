@@ -5,7 +5,8 @@
 use serde_json::{Map, Value};
 
 use crate::{
-    python_json_value::python_json_loads,
+    constants::SETTINGS_JSON_DEPTH,
+    python_json_load::loads_text,
     session_prompt::js_trim,
     settings_dialect::SettingsDialect,
     settings_numbers::{normalize_numbers, python_value},
@@ -44,7 +45,7 @@ fn parse_object(text: &str, dialect: SettingsDialect) -> Option<Map<String, Valu
     let body = text.strip_prefix('\u{feff}').unwrap_or(text);
     let parsed = match dialect {
         SettingsDialect::TypeScript => parse_json(body).ok()?,
-        SettingsDialect::Python => python_value(python_json_loads(body).ok()?),
+        SettingsDialect::Python => python_value(loads_text(body, SETTINGS_JSON_DEPTH).ok()?)?,
     };
     let Value::Object(mut document) = parsed else {
         return None;

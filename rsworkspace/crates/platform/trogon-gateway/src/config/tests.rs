@@ -3979,7 +3979,7 @@ fn subject_prefix_over_the_credential_stream_is_rejected() {
     let errs = stream_binding_errors(
         r#"
 [sources.github.integrations.primary]
-subject_prefix = "gateway.credentials"
+subject_prefix = "credentials"
 
 [sources.github.integrations.primary.webhook]
 webhook_secret = "gh-secret"
@@ -3989,7 +3989,7 @@ webhook_secret = "gh-secret"
     assert_eq!(
         errs,
         vec![
-            "gateway credentials: subject_prefix `gateway.credentials.events.v1` overlaps github/primary: subject_prefix `gateway.credentials`; each stream needs its own subjects"
+            "gateway credentials: subject_prefix `credentials.events.v1` overlaps github/primary: subject_prefix `credentials`; each stream needs its own subjects"
         ]
     );
 }
@@ -4106,7 +4106,10 @@ fn generic_webhooks_reject_invalid_infrastructure_configuration() {
 
 #[test]
 fn generic_webhooks_refuse_subjects_over_the_credential_stream() {
-    let file = write_toml("[webhooks]\nsubject_prefix = 'gateway.credentials'\n");
+    let file = write_toml(&format!(
+        "[webhooks]\nsubject_prefix = '{}'\n",
+        crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX
+    ));
 
     assert!(load(Some(file.path())).is_err());
 }

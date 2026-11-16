@@ -61,6 +61,15 @@ impl ToolPermissionRequest {
     }
 }
 
+impl crate::deep_json::OwnedValues for ToolPermissionRequest {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        crate::deep_json::OwnedValues::each_value(&mut self.input, visit);
+        crate::deep_json::OwnedValues::each_value(&mut self.suggestions, visit);
+        crate::deep_json::OwnedValues::each_value(&mut self.additional_fields, visit);
+        crate::deep_json::OwnedValues::each_value(&mut self.raw_request, visit);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct McpServerProvenance {
     pub name: String,
@@ -125,6 +134,11 @@ pub enum PermissionDecision {
     AnsweredOutOfBand,
     /// The handler failed: both SDKs answer with an error response carrying this message.
     Failed { message: String },
+    /// Any other object a TypeScript `canUseTool` resolves to, written as returned: its keys keep their order, the
+    /// request's `toolUseID` takes the place of one it carries (or drops it when the request had none), and nothing
+    /// is checked, so a field the typed variants cannot express reaches the CLI. Python rejects the value with the
+    /// `TypeError` response it gives a `dict`.
+    Raw(JsonObject),
 }
 
 impl PermissionDecision {

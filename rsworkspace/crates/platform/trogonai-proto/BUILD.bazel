@@ -1,22 +1,24 @@
-load("//.config/bazel:rust.bzl", "workspace_crate")
+load("//.config/bazel:rust.bzl", "workspace_compile_fail_library", "workspace_crate")
 
-# The generated tree is checked in under src/gen, so this is an ordinary crate.
-workspace_crate(
-    name = "trogonai-proto",
+workspace_crate()
+
+workspace_compile_fail_library(
     crate_features = [
-        "audit",
-        "chrono",
-        "decider",
-        "gateway",
-        "grpc-nats-micro",
-        "model-access",
-        "policy",
-        "runtime-host",
-        "runtime-snapshot",
         "schedules",
+        "chrono",
     ],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider",
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-    ],
+)
+
+# The committed output of `mise run proto:generate`, which
+# //proto:trogonai_proto_generated_test regenerates and compares.
+filegroup(
+    name = "generated",
+    srcs = glob(["src/gen/**"]),
+    visibility = ["//proto:__pkg__"],
+)
+
+# The test formats the regenerated tree with this crate's edition.
+exports_files(
+    ["Cargo.toml"],
+    visibility = ["//proto:__pkg__"],
 )

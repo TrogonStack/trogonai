@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use trogon_credential_domain::{CredentialKind, SourceKind};
+
 use super::ManagedCredentialTarget;
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 
 pub(super) const ADMIN_TOKEN_HEADER: &str = "x-trogon-admin-token";
 pub(super) const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";

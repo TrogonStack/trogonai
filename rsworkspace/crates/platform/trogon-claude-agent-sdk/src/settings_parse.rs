@@ -15,7 +15,7 @@ use crate::{
 
 /// `JSON.parse(text)`, reading a number past the double range as an infinity.
 pub(crate) fn parse_json(text: &str) -> Result<Value, serde_json::Error> {
-    let scanned = scan(text, false);
+    let scanned = scan(text);
     if !scanned.respelled && !scanned.tokens.iter().any(holds_marker_value) {
         return serde_json::from_str(text);
     }

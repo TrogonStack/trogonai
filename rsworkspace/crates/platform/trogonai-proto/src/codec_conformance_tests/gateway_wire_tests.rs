@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use super::gateway_tests::{command_response, credential_ref, events, metadata, snapshots, state_metadata};
+use super::gateway_tests::{command_response, events, identity, key, snapshots};
 use super::{assert_malformed, assert_wire_codec};
 use crate::gateway::credentials::{
     CredentialEventCase, CredentialStateSnapshotCase, checkpoints_v1, idempotency_v1, state_v1, v1,
@@ -71,92 +71,49 @@ macro_rules! assert_presence {
 #[test]
 fn required_field_presence_is_tracked_independently_of_empty_values() {
     assert_presence!(
-        v1::CredentialRef,
-        b"\x0a\x00\x1a\x00\x2a\x00",
-        has_id,
+        v1::CredentialIdentity,
+        b"\x0a\x00\x12\x00\x22\x00",
+        has_credential_id,
         has_owner_id,
         has_scope_key
     );
+    assert_presence!(v1::CredentialKey, b"\x0a\x00\x12\x00", has_credential_id, has_owner_id);
+    assert_presence!(v1::CredentialWriteRequested, b"\x0a\x00", has_identity);
+    assert_presence!(v1::CredentialWriteFailed, b"\x0a\x00\x12\x00", has_key, has_reason);
+    assert_presence!(v1::CredentialActivated, b"\x0a\x00\x1a\x00", has_key, has_fingerprint);
+    assert_presence!(v1::CredentialRotationRequested, b"\x0a\x00", has_key);
+    assert_presence!(v1::CredentialRotationFailed, b"\x0a\x00\x1a\x00", has_key, has_reason);
+    assert_presence!(v1::CredentialRotated, b"\x0a\x00\x22\x00", has_key, has_fingerprint);
+    assert_presence!(v1::CredentialRevoked, b"\x0a\x00", has_key);
+    assert_presence!(v1::CredentialDestroyRequested, b"\x0a\x00\x1a\x00", has_key, has_reason);
+    assert_presence!(v1::CredentialDestroyed, b"\x0a\x00", has_key);
+    assert_presence!(v1::CredentialDestroyFailed, b"\x0a\x00\x1a\x00", has_key, has_reason);
+    assert_presence!(state_v1::PendingCredentialWriteState, b"\x0a\x00", has_identity);
     assert_presence!(
-        v1::CredentialMetadata,
-        b"\x0a\x00\x22\x00",
-        has_reference,
+        state_v1::ActiveCredentialState,
+        b"\x0a\x00\x1a\x00",
+        has_identity,
         has_fingerprint
     );
-    assert_presence!(v1::CredentialActivated, b"\x0a\x00", has_metadata);
-    assert_presence!(
-        v1::CredentialDestroyFailed,
-        b"\x0a\x00\x12\x00",
-        has_credential_ref,
-        has_reason
-    );
-    assert_presence!(
-        v1::CredentialDestroyRequested,
-        b"\x0a\x00\x12\x00",
-        has_credential_ref,
-        has_reason
-    );
-    assert_presence!(v1::CredentialDestroyed, b"\x0a\x00", has_credential_ref);
-    assert_presence!(v1::CredentialRevoked, b"\x0a\x00", has_credential_ref);
-    assert_presence!(
-        v1::CredentialRotated,
-        b"\x0a\x00\x12\x00",
-        has_previous_credential_ref,
-        has_metadata
-    );
-    assert_presence!(
-        v1::CredentialRotationFailed,
-        b"\x0a\x00\x12\x00",
-        has_credential_ref,
-        has_reason
-    );
-    assert_presence!(v1::CredentialRotationRequested, b"\x0a\x00", has_credential_ref);
-    assert_presence!(
-        v1::CredentialWriteFailed,
-        b"\x0a\x00\x12\x00",
-        has_credential_id,
-        has_reason
-    );
-    assert_presence!(
-        v1::CredentialWriteRequested,
-        b"\x0a\x00\x12\x00\x2a\x00",
-        has_credential_id,
-        has_owner_id,
-        has_scope_key
-    );
-    assert_presence!(
-        state_v1::CredentialMetadata,
-        b"\x0a\x00\x22\x00",
-        has_reference,
-        has_fingerprint
-    );
-    assert_presence!(
-        state_v1::PendingCredentialWriteState,
-        b"\x0a\x00\x12\x00\x2a\x00",
-        has_credential_id,
-        has_owner_id,
-        has_scope_key
-    );
-    assert_presence!(state_v1::ActiveCredentialState, b"\x0a\x00", has_metadata);
     assert_presence!(
         state_v1::FailedCredentialWriteState,
         b"\x0a\x00\x12\x00",
-        has_credential_id,
+        has_identity,
         has_reason
     );
     assert_presence!(state_v1::RotationPendingCredentialState, b"\x0a\x00", has_active);
-    assert_presence!(state_v1::RevokedCredentialState, b"\x0a\x00", has_credential_ref);
+    assert_presence!(state_v1::RevokedCredentialState, b"\x0a\x00", has_identity);
     assert_presence!(
         state_v1::DestroyRequestedCredentialState,
-        b"\x0a\x00\x12\x00",
-        has_credential_ref,
+        b"\x0a\x00\x1a\x00",
+        has_identity,
         has_reason
     );
-    assert_presence!(state_v1::DestroyedCredentialState, b"\x0a\x00", has_credential_ref);
+    assert_presence!(state_v1::DestroyedCredentialState, b"\x0a\x00", has_identity);
     assert_presence!(
         state_v1::CleanupFailedCredentialState,
-        b"\x0a\x00\x12\x00",
-        has_credential_ref,
+        b"\x0a\x00\x1a\x00",
+        has_identity,
         has_reason
     );
     assert_presence!(
@@ -184,29 +141,30 @@ fn required_field_presence_is_tracked_independently_of_empty_values() {
 
 #[test]
 fn known_fields_reject_wrong_wire_types_and_truncated_values() {
-    assert_wire_types::<v1::CredentialRef>(&[1, 3, 5], &[2, 4, 6]);
-    assert_wire_types::<v1::CredentialMetadata>(&[1, 4], &[2]);
-    assert_wire_types::<v1::CredentialActivated>(&[1], &[]);
-    assert_wire_types::<v1::CredentialDestroyFailed>(&[1, 2], &[]);
-    assert_wire_types::<v1::CredentialDestroyRequested>(&[1, 2], &[]);
-    assert_wire_types::<v1::CredentialDestroyed>(&[1], &[]);
-    assert_wire_types::<v1::CredentialRevoked>(&[1], &[]);
-    assert_wire_types::<v1::CredentialRotated>(&[1, 2], &[]);
-    assert_wire_types::<v1::CredentialRotationFailed>(&[1, 2], &[]);
-    assert_wire_types::<v1::CredentialRotationRequested>(&[1], &[]);
+    assert_wire_types::<v1::CredentialIdentity>(&[1, 2, 4], &[3, 5, 6]);
+    assert_wire_types::<v1::CredentialKey>(&[1, 2], &[]);
+    assert_wire_types::<v1::CredentialWriteRequested>(&[1], &[]);
     assert_wire_types::<v1::CredentialWriteFailed>(&[1, 2], &[]);
-    assert_wire_types::<v1::CredentialWriteRequested>(&[1, 2, 5], &[3, 4]);
+    assert_wire_types::<v1::CredentialActivated>(&[1, 3], &[2]);
+    assert_wire_types::<v1::CredentialRotationRequested>(&[1], &[2]);
+    assert_wire_types::<v1::CredentialRotationFailed>(&[1, 3], &[2]);
+    assert_wire_types::<v1::CredentialRotated>(&[1, 4], &[2, 3]);
+    assert_wire_types::<v1::CredentialRevoked>(&[1], &[2]);
+    assert_wire_types::<v1::CredentialDestroyRequested>(&[1, 3], &[2]);
+    assert_wire_types::<v1::CredentialDestroyed>(&[1], &[2]);
+    assert_wire_types::<v1::CredentialDestroyFailed>(&[1, 3], &[2]);
     assert_wire_types::<v1::CredentialEvent>(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], &[]);
-    assert_wire_types::<state_v1::CredentialMetadata>(&[1, 4], &[2, 3]);
     assert_wire_types::<state_v1::CredentialStateSnapshot>(&[1, 2, 3, 4, 5, 6, 7, 8, 9], &[]);
-    assert_wire_types::<state_v1::PendingCredentialWriteState>(&[1, 2, 5], &[3, 4]);
-    assert_wire_types::<state_v1::ActiveCredentialState>(&[1, 2], &[]);
+    assert_wire_types::<state_v1::PendingCredentialWriteState>(&[1], &[]);
+    assert_wire_types::<state_v1::ActiveCredentialState>(&[1, 3], &[2]);
+    assert_malformed::<state_v1::ActiveCredentialState>(&[0x22, 2], DecodeError::UnexpectedEof);
+    assert_malformed::<state_v1::ActiveCredentialState>(&[0x20, 0x80], DecodeError::UnexpectedEof);
     assert_wire_types::<state_v1::FailedCredentialWriteState>(&[1, 2], &[]);
     assert_wire_types::<state_v1::RotationPendingCredentialState>(&[1], &[]);
-    assert_wire_types::<state_v1::RevokedCredentialState>(&[1], &[]);
-    assert_wire_types::<state_v1::DestroyRequestedCredentialState>(&[1, 2], &[]);
-    assert_wire_types::<state_v1::DestroyedCredentialState>(&[1], &[]);
-    assert_wire_types::<state_v1::CleanupFailedCredentialState>(&[1, 2], &[]);
+    assert_wire_types::<state_v1::RevokedCredentialState>(&[1], &[2]);
+    assert_wire_types::<state_v1::DestroyRequestedCredentialState>(&[1, 3], &[2]);
+    assert_wire_types::<state_v1::DestroyedCredentialState>(&[1], &[2]);
+    assert_wire_types::<state_v1::CleanupFailedCredentialState>(&[1, 3], &[2]);
     assert_wire_types::<checkpoints_v1::RuntimeProjectionCheckpoint>(&[], &[1]);
     assert_wire_types::<checkpoints_v1::CredentialRecoveryWorkerCheckpoint>(&[], &[1, 2, 3, 4]);
     assert_wire_types::<idempotency_v1::CredentialManagementIdempotencyRecord>(&[1, 3], &[2]);
@@ -216,85 +174,73 @@ fn known_fields_reject_wrong_wire_types_and_truncated_values() {
 
 #[test]
 fn string_fields_reject_invalid_utf8() {
-    assert_invalid_utf8::<v1::CredentialRef>(&[1, 3, 5]);
-    assert_invalid_utf8::<v1::CredentialMetadata>(&[4]);
-    assert_invalid_utf8::<v1::CredentialDestroyFailed>(&[2]);
-    assert_invalid_utf8::<v1::CredentialDestroyRequested>(&[2]);
-    assert_invalid_utf8::<v1::CredentialRotationFailed>(&[2]);
-    assert_invalid_utf8::<v1::CredentialWriteFailed>(&[1, 2]);
-    assert_invalid_utf8::<v1::CredentialWriteRequested>(&[1, 2, 5]);
-    assert_invalid_utf8::<state_v1::CredentialMetadata>(&[4]);
-    assert_invalid_utf8::<state_v1::PendingCredentialWriteState>(&[1, 2, 5]);
-    assert_invalid_utf8::<state_v1::FailedCredentialWriteState>(&[1, 2]);
-    assert_invalid_utf8::<state_v1::DestroyRequestedCredentialState>(&[2]);
-    assert_invalid_utf8::<state_v1::CleanupFailedCredentialState>(&[2]);
+    assert_invalid_utf8::<v1::CredentialIdentity>(&[1, 2, 4]);
+    assert_invalid_utf8::<v1::CredentialKey>(&[1, 2]);
+    assert_invalid_utf8::<v1::CredentialWriteFailed>(&[2]);
+    assert_invalid_utf8::<v1::CredentialActivated>(&[3]);
+    assert_invalid_utf8::<v1::CredentialRotationFailed>(&[3]);
+    assert_invalid_utf8::<v1::CredentialRotated>(&[4]);
+    assert_invalid_utf8::<v1::CredentialDestroyRequested>(&[3]);
+    assert_invalid_utf8::<v1::CredentialDestroyFailed>(&[3]);
+    assert_invalid_utf8::<state_v1::ActiveCredentialState>(&[3]);
+    assert_invalid_utf8::<state_v1::FailedCredentialWriteState>(&[2]);
+    assert_invalid_utf8::<state_v1::DestroyRequestedCredentialState>(&[3]);
+    assert_invalid_utf8::<state_v1::CleanupFailedCredentialState>(&[3]);
     assert_invalid_utf8::<idempotency_v1::CredentialManagementIdempotencyRecord>(&[1]);
     assert_invalid_utf8::<idempotency_v1::CredentialCommandResponse>(&[1]);
     assert_invalid_utf8::<idempotency_v1::CredentialRefResponse>(&[1, 3, 4, 5, 6, 7]);
 }
 
+/// A credential identity or key whose id is not UTF-8.
 const BAD_LEAF: [u8; 3] = [0x0a, 1, 0xff];
 
-fn bad_metadata() -> Vec<u8> {
-    length_prefixed(1, &BAD_LEAF)
-}
-
-fn bad_reference_field() -> Vec<u8> {
+/// An event or state payload whose identity, key, or active state holds a bad leaf.
+fn bad_payload() -> Vec<u8> {
     length_prefixed(1, &BAD_LEAF)
 }
 
 #[test]
 fn nested_messages_propagate_malformed_leaf_wire() {
-    assert_nested_invalid_utf8::<v1::CredentialMetadata>(&[1], &BAD_LEAF);
-    assert_nested_invalid_utf8::<v1::CredentialDestroyFailed>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<v1::CredentialWriteRequested>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<v1::CredentialWriteFailed>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<v1::CredentialActivated>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<v1::CredentialRotationRequested>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<v1::CredentialRotationFailed>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<v1::CredentialRotated>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<v1::CredentialRevoked>(&[1], &BAD_LEAF);
     assert_nested_invalid_utf8::<v1::CredentialDestroyRequested>(&[1], &BAD_LEAF);
     assert_nested_invalid_utf8::<v1::CredentialDestroyed>(&[1], &BAD_LEAF);
-    assert_nested_invalid_utf8::<v1::CredentialRevoked>(&[1], &BAD_LEAF);
-    assert_nested_invalid_utf8::<v1::CredentialRotationFailed>(&[1], &BAD_LEAF);
-    assert_nested_invalid_utf8::<v1::CredentialRotationRequested>(&[1], &BAD_LEAF);
-    assert_nested_invalid_utf8::<v1::CredentialRotated>(&[1], &BAD_LEAF);
-    assert_nested_invalid_utf8::<v1::CredentialRotated>(&[2], &bad_metadata());
-    assert_nested_invalid_utf8::<v1::CredentialActivated>(&[1], &bad_metadata());
-    assert_nested_invalid_utf8::<state_v1::CredentialMetadata>(&[1], &BAD_LEAF);
-    assert_nested_invalid_utf8::<state_v1::ActiveCredentialState>(&[1], &bad_metadata());
-    assert_nested_invalid_utf8::<state_v1::ActiveCredentialState>(&[2], &BAD_LEAF);
-    assert_nested_invalid_utf8::<state_v1::RotationPendingCredentialState>(&[1], &length_prefixed(1, &bad_metadata()));
+    assert_nested_invalid_utf8::<v1::CredentialDestroyFailed>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<state_v1::PendingCredentialWriteState>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<state_v1::ActiveCredentialState>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<state_v1::FailedCredentialWriteState>(&[1], &BAD_LEAF);
+    assert_nested_invalid_utf8::<state_v1::RotationPendingCredentialState>(&[1], &bad_payload());
     assert_nested_invalid_utf8::<state_v1::RevokedCredentialState>(&[1], &BAD_LEAF);
     assert_nested_invalid_utf8::<state_v1::DestroyRequestedCredentialState>(&[1], &BAD_LEAF);
     assert_nested_invalid_utf8::<state_v1::DestroyedCredentialState>(&[1], &BAD_LEAF);
     assert_nested_invalid_utf8::<state_v1::CleanupFailedCredentialState>(&[1], &BAD_LEAF);
     assert_nested_invalid_utf8::<idempotency_v1::CredentialCommandResponse>(&[3], &BAD_LEAF);
     assert_nested_invalid_utf8::<idempotency_v1::CredentialManagementIdempotencyRecord>(&[3], &BAD_LEAF);
-    let mut event_payloads = vec![
-        BAD_LEAF.to_vec(),
-        BAD_LEAF.to_vec(),
-        length_prefixed(1, &bad_metadata()),
-    ];
-    event_payloads.extend((0..7).map(|_| bad_reference_field()));
-    for (index, payload) in event_payloads.iter().enumerate() {
+    for (index, event) in events().into_iter().enumerate() {
         let field = u8::try_from(index + 1).expect("field");
-        assert_malformed::<v1::CredentialEvent>(&length_prefixed(field, payload), DecodeError::InvalidUtf8);
-        let valid: v1::CredentialEvent = serde_json::from_value(events()[index].clone()).expect("event");
-        let repeated = [valid.encode_to_vec(), length_prefixed(field, payload)].concat();
+        assert_malformed::<v1::CredentialEvent>(&length_prefixed(field, &bad_payload()), DecodeError::InvalidUtf8);
+        let valid: v1::CredentialEvent = serde_json::from_value(event).expect("event");
+        let repeated = [valid.encode_to_vec(), length_prefixed(field, &bad_payload())].concat();
         assert_malformed::<v1::CredentialEvent>(&repeated, DecodeError::InvalidUtf8);
     }
-    let mut snapshot_payloads = vec![
-        Vec::new(),
-        BAD_LEAF.to_vec(),
-        length_prefixed(1, &bad_metadata()),
-        BAD_LEAF.to_vec(),
-        length_prefixed(1, &length_prefixed(1, &bad_metadata())),
-    ];
-    snapshot_payloads.extend((0..4).map(|_| bad_reference_field()));
-    for (index, payload) in snapshot_payloads.iter().enumerate().skip(1) {
+    for (index, snapshot) in snapshots().into_iter().enumerate().skip(1) {
         let field = u8::try_from(index + 1).expect("field");
+        let payload = if index == 4 {
+            length_prefixed(1, &bad_payload())
+        } else {
+            bad_payload()
+        };
         assert_malformed::<state_v1::CredentialStateSnapshot>(
-            &length_prefixed(field, payload),
+            &length_prefixed(field, &payload),
             DecodeError::InvalidUtf8,
         );
-        let valid: state_v1::CredentialStateSnapshot =
-            serde_json::from_value(snapshots()[index].clone()).expect("snapshot");
-        let repeated = [valid.encode_to_vec(), length_prefixed(field, payload)].concat();
+        let valid: state_v1::CredentialStateSnapshot = serde_json::from_value(snapshot).expect("snapshot");
+        let repeated = [valid.encode_to_vec(), length_prefixed(field, &payload)].concat();
         assert_malformed::<state_v1::CredentialStateSnapshot>(&repeated, DecodeError::InvalidUtf8);
     }
     let invalid_tag = DecodeError::InvalidWireType(7);
@@ -345,14 +291,25 @@ fn snapshot_oneof_members_merge_when_a_variant_repeats() {
         assert_wire_codec(&doubled, &expected);
     }
     let active: state_v1::ActiveCredentialState = serde_json::from_value(json!({
-        "metadata": {"reference": credential_ref(), "fingerprint": "a"},
-        "previousVersions": [credential_ref()]
+        "identity": identity(), "version": "3", "fingerprint": "a", "previousVersions": ["1"]
     }))
     .expect("active");
     let wire = [active.encode_to_vec(), active.encode_to_vec()].concat();
     let merged = state_v1::ActiveCredentialState::decode_from_slice(&wire).expect("merged active");
-    assert_eq!(merged.previous_versions.len(), 2);
+    assert_eq!(merged.previous_versions, [1, 1]);
     assert_wire_codec(&wire, &merged);
+}
+
+#[test]
+fn previous_versions_decode_from_packed_and_unpacked_wire() {
+    let expected = state_v1::ActiveCredentialState {
+        previous_versions: vec![1, 2],
+        ..Default::default()
+    };
+
+    assert_wire_codec(b"\x22\x02\x01\x02", &expected);
+    assert_wire_codec(b"\x20\x01\x20\x02", &expected);
+    assert_wire_codec(b"\x20\x01\x22\x01\x02", &expected);
 }
 
 fn entry(value: &Value) -> String {
@@ -401,12 +358,20 @@ fn oneof_json_rejects_conflicting_duplicate_and_malformed_members() {
     });
     assert_normalized::<state_v1::CredentialStateSnapshot>(nulls, json!({}));
     assert_normalized::<v1::CredentialEvent>(
-        json!({"write_requested": {"credential_id": "c", "owner_id": "o", "scope_key": "s"}}),
-        json!({"writeRequested": {"credentialId": "c", "ownerId": "o", "scopeKey": "s"}}),
+        json!({"write_requested": {"identity": {"credential_id": "c", "owner_id": "o", "scope_key": "s"}}}),
+        json!({"writeRequested": {"identity": {"credentialId": "c", "ownerId": "o", "scopeKey": "s"}}}),
+    );
+    assert_normalized::<v1::CredentialEvent>(
+        json!({"destroy_requested": {"key": {"credential_id": "c", "owner_id": "o"}, "version": 1, "reason": "r"}}),
+        json!({"destroyRequested": {"key": {"credentialId": "c", "ownerId": "o"}, "version": "1", "reason": "r"}}),
     );
     assert_normalized::<state_v1::CredentialStateSnapshot>(
-        json!({"pending_write": {"credential_id": "c", "owner_id": "o", "scope_key": "s"}}),
-        json!({"pendingWrite": {"credentialId": "c", "ownerId": "o", "scopeKey": "s"}}),
+        json!({"pending_write": {"identity": {"credential_id": "c", "owner_id": "o", "scope_key": "s"}}}),
+        json!({"pendingWrite": {"identity": {"credentialId": "c", "ownerId": "o", "scopeKey": "s"}}}),
+    );
+    assert_normalized::<state_v1::CredentialStateSnapshot>(
+        json!({"active": {"identity": null, "fingerprint": "f", "previous_versions": [1, "2"]}}),
+        json!({"active": {"identity": null, "fingerprint": "f", "previousVersions": ["1", "2"]}}),
     );
 }
 
@@ -524,9 +489,8 @@ fn json_serialization_surfaces_writer_failures_for_every_message() {
             .expect("payload")
             .clone()
     };
-    assert_serialization_failures::<v1::CredentialRef>(credential_ref());
-    assert_serialization_failures::<v1::CredentialMetadata>(metadata());
-    assert_serialization_failures::<state_v1::CredentialMetadata>(state_metadata());
+    assert_serialization_failures::<v1::CredentialIdentity>(identity());
+    assert_serialization_failures::<v1::CredentialKey>(key());
     for event in &events {
         assert_serialization_failures::<v1::CredentialEvent>(event.clone());
     }
@@ -563,13 +527,4 @@ fn json_serialization_surfaces_writer_failures_for_every_message() {
     }));
     assert_serialization_failures::<idempotency_v1::CredentialCommandResponse>(command_response());
     assert_serialization_failures::<idempotency_v1::CredentialRefResponse>(command_response()["credentialRef"].clone());
-}
-
-#[test]
-fn previous_version_collections_respect_element_memory_limits() {
-    let active: state_v1::ActiveCredentialState = serde_json::from_value(json!({
-        "metadata": state_metadata(), "previousVersions": [credential_ref()]
-    }))
-    .expect("active");
-    super::assert_collection_limit::<state_v1::ActiveCredentialState>(&active.encode_to_vec());
 }

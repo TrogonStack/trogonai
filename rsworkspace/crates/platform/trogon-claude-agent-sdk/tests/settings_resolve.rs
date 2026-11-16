@@ -2,9 +2,9 @@
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    PythonJsonValue, ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect, adapters::OperatingSystem,
-    filter_escalating_default_mode, js_stringify, python_json_dumps, resolve_python_settings_with,
-    resolve_settings_in_dialect_with, resolve_settings_with,
+    PythonJsonValue, PythonString, ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect,
+    adapters::OperatingSystem, filter_escalating_default_mode, js_stringify, python_json_dumps,
+    resolve_python_settings_with, resolve_settings_in_dialect_with, resolve_settings_with,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -80,6 +80,41 @@ fn explicit_cwd_selects_the_project_files() {
     let host = cascade_host().file("/elsewhere/.claude/settings.json", r#"{"model":"elsewhere"}"#);
     let result = resolve(&host, json!({"cwd": "/elsewhere", "settingSources": ["project"]}));
     assert_eq!(result["effective"], json!({"model": "elsewhere"}));
+}
+
+/// `wX(oE(t), t.canonicalGitRoot)` upstream: with no launch store root, no project config dir and no canonical git
+/// root, which the SDK never sets, the local settings live under the working directory.
+#[test]
+fn local_settings_live_under_the_working_directory() {
+    let host = cascade_host().file(
+        "/elsewhere/.claude/settings.local.json",
+        r#"{"model":"local-elsewhere"}"#,
+    );
+    let result = resolve(&host, json!({"cwd": "/elsewhere", "settingSources": ["local"]}));
+    assert_eq!(result["effective"], json!({"model": "local-elsewhere"}));
+    assert_eq!(
+        result["provenance"]["model"]["path"],
+        "/elsewhere/.claude/settings.local.json"
+    );
+}
+
+/// `cwd: Eet(e.cwd ?? cwd())` upstream: a relative working directory is made absolute against the process directory
+/// before any source is read, so the resolve error for a relative working directory is never reached.
+#[test]
+fn a_relative_working_directory_is_made_absolute_before_any_source_is_read() {
+    let host = cascade_host()
+        .file("/work/project/sub/.claude/settings.json", r#"{"model":"project-sub"}"#)
+        .file("/work/project/sub/.claude/settings.local.json", r#"{"env":{"C":"3"}}"#);
+    let result = resolve(&host, json!({"cwd": "sub", "settingSources": ["project", "local"]}));
+    assert_eq!(result["effective"], json!({"model": "project-sub", "env": {"C": "3"}}));
+    assert_eq!(
+        result["provenance"]["model"]["path"],
+        "/work/project/sub/.claude/settings.json"
+    );
+    assert_eq!(
+        result["provenance"]["env"]["path"],
+        "/work/project/sub/.claude/settings.local.json"
+    );
 }
 
 #[test]
@@ -449,11 +484,11 @@ fn the_python_resolve_keeps_every_number_as_json_loads_reads_it() -> TestResult 
             r#"{"custom":{"big":[123456789012345678901234567890,-98765432109876543210987654321,1.0,NaN,Infinity,1e400],"w":2.0,"z":-0.0}}"#,
         );
     let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
-    let PythonJsonValue::Object(resolved) = resolved else {
+    let PythonJsonValue::Object(resolved) = &resolved else {
         return Err("the resolved settings are not an object".into());
     };
     assert_eq!(
-        python_json_dumps(resolved.get("effective").expect("effective")),
+        python_json_dumps(resolved.get(&PythonString::from("effective")).expect("effective")),
         r#"{"env": {"A": "1.2345678901234568e+29"}, "custom": {"big": [123456789012345678901234567890, 1.0, -98765432109876543210987654321, NaN, Infinity], "w": 2.0, "z": -0.0}}"#
     );
     let approximate = effective_in(
@@ -476,11 +511,11 @@ fn the_python_resolve_unions_arrays_by_the_number_javascript_reads() -> TestResu
             r#"{"custom":{"l":[1.0,-0.0,2,9223372036854775808.0]}}"#,
         );
     let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
-    let PythonJsonValue::Object(resolved) = resolved else {
+    let PythonJsonValue::Object(resolved) = &resolved else {
         return Err("the resolved settings are not an object".into());
     };
     assert_eq!(
-        python_json_dumps(resolved.get("effective").expect("effective")),
+        python_json_dumps(resolved.get(&PythonString::from("effective")).expect("effective")),
         r#"{"custom": {"l": [1, 0, 2, 9.223372036854776e+18]}}"#
     );
     Ok(())

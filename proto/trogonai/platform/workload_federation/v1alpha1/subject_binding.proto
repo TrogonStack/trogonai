@@ -1,0 +1,318 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_federation/v1alpha1/trust_registration.proto";
+
+// Exact literal equality only, with bounded nonempty claim/value sets. There
+// are no patterns or wildcard expansion; reserved iss/sub/aud are bound by the
+// selected issuer, subject and audience rather than a second conflicting rule.
+message ExactClaimRequirement {
+  string claim = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      not_in: [
+        "iss",
+        "sub",
+        "aud"
+      ]
+      pattern: "^[A-Za-z0-9_.:/-]+$"
+    }
+  ];
+  repeated string values = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 32
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 2048
+        not_in: ["*"]
+      }
+    }
+  }];
+}
+
+message SpiffeSubjectRequirement {
+  option (buf.validate.message).cel = {
+    id: "spiffe_subject_requirement.domain"
+    message: "SPIFFE subject must belong to its exact declared trust domain"
+    expression: "this.spiffe_id == 'spiffe://' + this.trust_domain.value || this.spiffe_id.startsWith('spiffe://' + this.trust_domain.value + '/')"
+  };
+  SpiffeTrustDomain trust_domain = 1 [features.field_presence = LEGACY_REQUIRED];
+  string spiffe_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^spiffe://[a-z0-9._-]+(/[^?#]*)?$"
+    }
+  ];
+}
+
+// The actual configured exact sub is recorded on OidcSubjectRequirement. This
+// discriminator prevents assuming that every GitHub repository uses the same
+// default subject template. Unknown and unspecified profiles are refused.
+enum GithubSubjectFormat {
+  GITHUB_SUBJECT_FORMAT_UNSPECIFIED = 0;
+  GITHUB_SUBJECT_FORMAT_LEGACY = 1;
+  GITHUB_SUBJECT_FORMAT_IMMUTABLE = 2;
+  GITHUB_SUBJECT_FORMAT_CUSTOM = 3;
+}
+
+message GithubReusableWorkflowRequirement {
+  option (buf.validate.message).cel = {
+    id: "github_reusable_workflow_requirement.digest"
+    message: "a reusable workflow digest must be a complete SHA-1 or SHA-256 commit id"
+    expression: "this.job_workflow_sha.size() == 40 || this.job_workflow_sha.size() == 64"
+  };
+  string job_workflow_ref = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+  string job_workflow_sha = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 40
+      max_len: 64
+      pattern: "^[a-f0-9]+$"
+    }
+  ];
+}
+
+// The selected issuer distinguishes GitHub.com from Enterprise Server. All
+// listed claims must be verified from that issuer. Fork/event policy is checked
+// from actual job evidence; protected environment labels alone are not proof.
+message GithubActionsSubjectRequirement {
+  string repository_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[0-9]+$"
+    }
+  ];
+  string repository_owner_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[0-9]+$"
+    }
+  ];
+  GithubSubjectFormat subject_format = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string workflow_ref = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
+  ];
+  repeated string allowed_events = 5 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 16
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 128
+      }
+    }
+  }];
+  string ref = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+  string environment = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  GithubReusableWorkflowRequirement reusable_workflow = 8;
+  // If false, proof of a fork-origin job always refuses admission. If true,
+  // the separate live policy must expressly admit the exact event and subject.
+  bool allow_fork_origin = 9 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Verification mode is explicit; offline verification does not imply API-server
+// bound-object revocation. Missing mode or an unsupported mode refuses use.
+enum KubernetesTokenVerificationMode {
+  KUBERNETES_TOKEN_VERIFICATION_MODE_UNSPECIFIED = 0;
+  KUBERNETES_TOKEN_VERIFICATION_MODE_OFFLINE = 1;
+  KUBERNETES_TOKEN_VERIFICATION_MODE_TOKEN_REVIEW = 2;
+}
+
+message KubernetesSubjectRequirement {
+  option (buf.validate.message).cel = {
+    id: "kubernetes_subject_requirement.bound_object"
+    message: "bound-object revocation requires the token-review profile"
+    expression: "!this.require_bound_object || this.verification_mode == 2"
+  };
+  string cluster_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  string namespace = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  string service_account = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  string service_account_uid = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  KubernetesTokenVerificationMode verification_mode = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The selected API-server profile must prove pod/object revocation if required;
+  // a caller-provided UID or this flag alone proves nothing.
+  bool require_bound_object = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message OidcSubjectRequirement {
+  option (buf.validate.message).cel = {
+    id: "oidc_subject_requirement.kubernetes_subject"
+    message: "Kubernetes subject must match the exact namespace and service account"
+    expression: "!has(this.kubernetes) || this.subject == 'system:serviceaccount:' + this.kubernetes.namespace + ':' + this.kubernetes.service_account"
+  };
+  option (buf.validate.message).cel = {
+    id: "oidc_subject_requirement.claims"
+    message: "an OIDC claim must have exactly one requirement"
+    expression: "this.claims.map(c, c.claim).unique()"
+  };
+  string subject = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      not_in: ["*"]
+    }
+  ];
+  string audience = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      not_in: ["*"]
+    }
+  ];
+  repeated ExactClaimRequirement claims = 3 [(buf.validate.field).repeated.max_items = 32];
+  oneof profile {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty generic = 4;
+    GithubActionsSubjectRequirement github_actions = 5;
+    KubernetesSubjectRequirement kubernetes = 6;
+  }
+}
+
+// A profile explicitly selects reusable bearer admission or atomic one-time
+// redemption. An issuer-specific replay claim is mandatory for the latter; no
+// generic OIDC jti is invented. Durable records never store the assertion.
+message InboundReplayPolicy {
+  oneof mode {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty reusable_within_original_validity = 1;
+    string one_time_identifier_claim = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      not_in: [
+        "iss",
+        "sub",
+        "aud"
+      ]
+      pattern: "^[A-Za-z0-9_.:/-]+$"
+    }];
+  }
+}
+
+// A verified external subject maps to an existing eligible service/workload
+// principal in this scope. Admission refuses a person-principal target. This
+// record authorizes neither SVID enrollment nor person delegation; live policy
+// must still grant each registered operation.
+message SubjectBindingDefinition {
+  option (buf.validate.message).cel = {
+    id: "subject_binding_definition.operations"
+    message: "permitted operation identifiers must be unique"
+    expression: "this.permitted_operation_ids.map(o, o.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "subject_binding_definition.replay_profile"
+    message: "native SPIFFE admission cannot use an OIDC replay identifier"
+    expression: "!has(this.spiffe) || has(this.replay.reusable_within_original_validity)"
+  };
+  option (buf.validate.message).cel = {
+    id: "subject_binding_definition.scope"
+    message: "subject binding and trust registration must have the same scope"
+    expression: "this.scope == this.trust_registration_ref.scope"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 contract_version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+  TrustRegistrationRef trust_registration_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+  oneof subject {
+    option (buf.validate.oneof).required = true;
+    SpiffeSubjectRequirement spiffe = 4;
+    OidcSubjectRequirement oidc = 5;
+  }
+  trogonai.connections.types.v1alpha1.PrincipalId principal_id = 6 [features.field_presence = LEGACY_REQUIRED];
+  repeated PlatformOperationId permitted_operation_ids = 7 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 64
+  }];
+  google.protobuf.Duration max_session_lifetime = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+  InboundReplayPolicy replay = 9 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// artifact encodes exactly SubjectBindingDefinition, excluding this reference.
+// Ingress resolves the named trust/protocol and checks issuer/domain, audience,
+// exact claims and current target-principal authority before any use.
+message SubjectBinding {
+  option (buf.validate.message).cel = {
+    id: "subject_binding.scope"
+    message: "subject binding reference and definition must have the same scope"
+    expression: "this.subject_binding_ref.scope == this.definition.scope"
+  };
+  SubjectBindingRef subject_binding_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  SubjectBindingDefinition definition = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationArtifact artifact = 3 [features.field_presence = LEGACY_REQUIRED];
+}

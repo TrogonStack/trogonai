@@ -12,6 +12,8 @@ pub struct CredentialFacts {
     pub destination: Option<AuditName>,
     /// The decision record an injection served.
     pub decision_record_id: Option<RecordId>,
+    /// Where in the outbound request the credential is placed.
+    pub location: Option<AuditName>,
 }
 
 impl CredentialFacts {
@@ -22,6 +24,7 @@ impl CredentialFacts {
             binding_id,
             destination: None,
             decision_record_id: None,
+            location: None,
         }
     }
 }

@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+#MISE description="Record the untrusted coverage artifact's Actions context for independent validation"
+import json
+import os
+from pathlib import Path
+
+event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+pr = event.get('pull_request')
+context = {'version': 1, 'repository': os.environ['GITHUB_REPOSITORY'].lower(),
+           'repository_id': int(os.environ['GITHUB_REPOSITORY_ID']),
+           'run_id': int(os.environ['GITHUB_RUN_ID']), 'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+           'pr': event['number'] if pr else None, 'head_sha': pr['head']['sha'] if pr else None,
+           'base_sha': pr['base']['sha'] if pr else None, 'base_ref': pr['base']['ref'] if pr else None,
+           'measured_sha': os.environ['GITHUB_SHA']}
+(Path(os.environ['MISE_PROJECT_ROOT']) / 'rsworkspace/coverage-context.json').write_text(json.dumps(context) + '\n')

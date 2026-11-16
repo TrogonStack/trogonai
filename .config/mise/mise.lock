@@ -272,6 +272,7 @@ specifiers = ["1.96.0"]
 [tools.rust.options]
 components = "clippy,llvm-tools-preview,rustfmt"
 profile = "minimal"
+targets = "wasm32-unknown-unknown"
 
 [[tools."ubi:open-telemetry/weaver"]]
 version = "0.24.2"

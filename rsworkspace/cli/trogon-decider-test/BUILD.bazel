@@ -1,40 +1,19 @@
+load("//.config/bazel:decider.bzl", "decider_suites")
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
+exports_files(["schedules.yaml"])
+
 workspace_crate(
-    name = "trogon-decider-test",
-    binaries = {
-        "decider-test": {
-            # These tests load the wasm component built by cargo component outside Bazel.
-            "test_args": [
-                "--skip",
-                "tests::run_passes_the_checked_in_schedules_suite",
-                "--skip",
-                "tests::no_strict_allows_an_incomplete_suite_to_run",
-            ],
-        },
-    },
-    # These tests load target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-    # built by cargo component outside Bazel.
-    unit_test_args = [
-        "--skip",
-        "conformance::tests::an_authored_error_code_is_checked_against_the_guest_outcome",
-        "--skip",
-        "conformance::tests::an_explicit_normal_budget_still_executes_the_scenario",
-        "--skip",
-        "conformance::tests::an_instantiation_trap_cannot_stand_in_for_multiple_steps",
-        "--skip",
-        "conformance::tests::an_instantiation_trap_does_not_satisfy_an_accepted_expectation",
-        "--skip",
-        "conformance::tests::failed_scenarios_accumulate_in_human_and_tap_runs",
-        "--skip",
-        "conformance::tests::a_suite_whose_name_does_not_match_the_component_is_refused",
-        "--skip",
-        "conformance::tests::strictness_controls_whether_a_suite_with_no_coverage_can_pass",
-        "--skip",
-        "conformance::tests::the_checked_in_schedules_suite_passes",
+    data = [
+        "schedules.yaml",
+        "//.config/bazel:wasm-tools",
+        "//rsworkspace/wasm-components/trogon-schedules-decider:component",
     ],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider-sim",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
+    # The import check runs wasm-tools, which is not on the sandbox PATH.
+    env = {"WASM_TOOLS": "$(rootpath //.config/bazel:wasm-tools)"},
+    # The tests resolve the component and schedules.yaml through
+    # CARGO_MANIFEST_DIR, relative to the runfiles root at run time.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
 )
+
+decider_suites(binary = ":decider-test")

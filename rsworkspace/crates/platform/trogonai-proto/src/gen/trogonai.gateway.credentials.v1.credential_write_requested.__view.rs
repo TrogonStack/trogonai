@@ -3,45 +3,19 @@
 
 #[derive(Clone, Debug, Default)]
 pub struct CredentialWriteRequestedView<'a> {
-    /// Field 1: `credential_id`
-    pub credential_id: &'a str,
-    /// Field 2: `owner_id`
-    pub owner_id: &'a str,
-    /// Field 3: `source`
-    pub source: ::core::option::Option<
-        ::buffa::EnumValue<super::super::CredentialSource>,
+    /// Field 1: `identity`
+    pub identity: ::buffa::MessageFieldView<
+        super::super::__buffa::view::CredentialIdentityView<'a>,
     >,
-    /// Field 4: `kind`
-    pub kind: ::core::option::Option<::buffa::EnumValue<super::super::CredentialKind>>,
-    /// Field 5: `scope_key`
-    pub scope_key: &'a str,
-    #[doc(hidden)]
-    pub __buffa_required_seen_0: u64,
 }
 impl<'a> CredentialWriteRequestedView<'a> {
-    /**Whether required field `credential_id` was present on the wire.
+    /**Whether required field `identity` is set.
 
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_credential_id(&self) -> bool {
-        self.__buffa_required_seen_0 & 1u64 != 0
-    }
-    /**Whether required field `owner_id` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_owner_id(&self) -> bool {
-        self.__buffa_required_seen_0 & 2u64 != 0
-    }
-    /**Whether required field `scope_key` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_scope_key(&self) -> bool {
-        self.__buffa_required_seen_0 & 4u64 != 0
+    pub const fn has_identity(&self) -> bool {
+        self.identity.is_set()
     }
 }
 impl<'a> ::buffa::MessageView<'a> for CredentialWriteRequestedView<'a> {
@@ -79,42 +53,21 @@ impl<'a> ::buffa::MessageView<'a> for CredentialWriteRequestedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.credential_id = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 1u64;
-            }
-            2u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.owner_id = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 2u64;
-            }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                view.source = Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
-                );
-            }
-            4u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                view.kind = Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
-                );
-            }
-            5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.scope_key = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 4u64;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.identity.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.identity = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CredentialIdentityView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -142,49 +95,51 @@ impl<'a> ::buffa::MessageView<'a> for CredentialWriteRequestedView<'a> {
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::CredentialWriteRequested {
-            credential_id: self.credential_id.to_string(),
-            owner_id: self.owner_id.to_string(),
-            source: self.source,
-            kind: self.kind,
-            scope_key: self.scope_key.to_string(),
+            identity: match self.identity.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::CredentialIdentity,
+                        ::buffa::Inline<super::super::CredentialIdentity>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for CredentialWriteRequestedView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.credential_id) as u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.owner_id) as u64;
-        if let Some(ref v) = self.source {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
+        if self.identity.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.identity.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        if let Some(ref v) = self.kind {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
-        }
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.scope_key) as u64;
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.credential_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.owner_id, buf);
-        if let Some(ref v) = self.source {
-            ::buffa::types::put_int32_field(3u32, v.to_i32(), buf);
+        if self.identity.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                1u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.identity.write_to(__cache, buf);
         }
-        if let Some(ref v) = self.kind {
-            ::buffa::types::put_int32_field(4u32, v.to_i32(), buf);
-        }
-        ::buffa::types::put_string_field(5u32, &self.scope_key, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -206,19 +161,9 @@ impl<'__a> ::serde::Serialize for CredentialWriteRequestedView<'__a> {
         use ::serde::ser::SerializeMap as _;
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         {
-            __map.serialize_entry("credentialId", self.credential_id)?;
-        }
-        {
-            __map.serialize_entry("ownerId", self.owner_id)?;
-        }
-        if let ::core::option::Option::Some(ref __v) = self.source {
-            __map.serialize_entry("source", __v)?;
-        }
-        if let ::core::option::Option::Some(ref __v) = self.kind {
-            __map.serialize_entry("kind", __v)?;
-        }
-        {
-            __map.serialize_entry("scopeKey", self.scope_key)?;
+            if let ::core::option::Option::Some(__v) = self.identity.as_option() {
+                __map.serialize_entry("identity", __v)?;
+            }
         }
         __map.end()
     }
@@ -315,34 +260,14 @@ impl CredentialWriteRequestedOwnedView {
     pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
         self.0.into_bytes()
     }
-    /// Field 1: `credential_id`
+    /// Field 1: `identity`
     #[must_use]
-    pub fn credential_id(&self) -> &'_ str {
-        self.0.reborrow().credential_id
-    }
-    /// Field 2: `owner_id`
-    #[must_use]
-    pub fn owner_id(&self) -> &'_ str {
-        self.0.reborrow().owner_id
-    }
-    /// Field 3: `source`
-    #[must_use]
-    pub fn source(
+    pub fn identity(
         &self,
-    ) -> ::core::option::Option<::buffa::EnumValue<super::super::CredentialSource>> {
-        self.0.reborrow().source
-    }
-    /// Field 4: `kind`
-    #[must_use]
-    pub fn kind(
-        &self,
-    ) -> ::core::option::Option<::buffa::EnumValue<super::super::CredentialKind>> {
-        self.0.reborrow().kind
-    }
-    /// Field 5: `scope_key`
-    #[must_use]
-    pub fn scope_key(&self) -> &'_ str {
-        self.0.reborrow().scope_key
+    ) -> &::buffa::MessageFieldView<
+        super::super::__buffa::view::CredentialIdentityView<'_>,
+    > {
+        &self.0.reborrow().identity
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<CredentialWriteRequestedView<'static>>>

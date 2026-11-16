@@ -140,6 +140,7 @@ fn credential_use_names_a_credential_and_never_holds_one() {
         binding_id: "b".to_string(),
         destination: Some("api.example.com".to_string()),
         decision_record_id: Some("01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f01".to_string()),
+        location: Some("header:authorization".to_string()),
     })
     .expect("json");
     let mut keys: Vec<_> = json.as_object().expect("object").keys().cloned().collect();
@@ -147,8 +148,66 @@ fn credential_use_names_a_credential_and_never_holds_one() {
 
     assert_eq!(
         keys,
-        ["bindingId", "credential", "decisionRecordId", "destination", "kind"]
+        [
+            "bindingId",
+            "credential",
+            "decisionRecordId",
+            "destination",
+            "kind",
+            "location"
+        ]
     );
+}
+
+#[test]
+fn a_secrets_release_names_its_service_caller_and_where_the_credential_goes() {
+    let record = assert_json_codec::<AuditRecord>(json!({
+        "recordId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f05",
+        "class": "AUDIT_CLASS_MUST",
+        "occurredAt": "2026-11-03T10:00:00Z",
+        "recordedAt": "2026-11-03T10:00:01Z",
+        "tenant": {"value": "tenant_1"},
+        "project": {"value": "project_1"},
+        "actor": {"service": {"serviceId": "billing-runner"}},
+        "requestId": "use-1",
+        "attribution": {
+            "decision": "AUDIT_DECISION_ALLOW",
+            "enforcementMode": "ENFORCEMENT_MODE_ENFORCE",
+            "wouldDeny": false
+        },
+        "credentialUse": {
+            "kind": "CREDENTIAL_USE_KIND_RELEASE",
+            "credential": "projects/p1/credentials/c1",
+            "bindingId": "projects/p1/credentials/c1",
+            "destination": "api.example.com:443",
+            "location": "header:authorization"
+        }
+    }));
+
+    assert_eq!(record.request_id.as_deref(), Some("use-1"));
+}
+
+#[test]
+fn a_secrets_release_denial_is_on_its_own_surface() {
+    assert_json_codec::<AuditRecord>(json!({
+        "recordId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f06",
+        "class": "AUDIT_CLASS_MUST",
+        "occurredAt": "2026-11-03T10:00:00Z",
+        "recordedAt": "2026-11-03T10:00:01Z",
+        "tenant": {"value": "tenant_1"},
+        "project": {"value": "project_1"},
+        "actor": {"service": {"serviceId": "billing-runner"}},
+        "attribution": {
+            "decision": "AUDIT_DECISION_DENY",
+            "enforcementMode": "ENFORCEMENT_MODE_ENFORCE",
+            "wouldDeny": false,
+            "reasonCode": "owner_not_held"
+        },
+        "gatewayDecision": {
+            "surface": "GATEWAY_SURFACE_SECRETS_RELEASE",
+            "target": "projects/p1/credentials/c1"
+        }
+    }));
 }
 
 #[test]

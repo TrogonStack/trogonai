@@ -1,9 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "ard-nats",
-    deps = [
-        "//rsworkspace/crates/ard/ard-catalog",
-        "//rsworkspace/crates/platform/trogon-nats",
-    ],
-)
+workspace_crate()

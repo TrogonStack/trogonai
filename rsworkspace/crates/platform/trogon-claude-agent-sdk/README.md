@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
     while let Some(message) = response.next_message().await? {
         if let Message::Result(result) = message {
-            println!("{}", result.result.unwrap_or_default());
+            println!("{}", result.result.as_deref().unwrap_or_default());
         }
     }
     Ok(())
@@ -194,7 +194,8 @@ request and tool identities, suggestions, MCP provenance, the decision reason
 with its type and code, the matched ask rule, the computer folder, plugin and
 server prompt, plus a cancellation signal. A field of the wrong type stays in
 `additional_fields`. Decisions carry updated input, permission updates,
-interrupt and a decision classification; `AnsweredOutOfBand` writes nothing.
+interrupt and a decision classification; `AnsweredOutOfBand` writes nothing,
+and `Raw` writes any other object as returned (Python rejects it as a `dict`).
 Answers match `sdk.mjs` byte for byte by default and `claude_agent_sdk` under
 `ArgvStyle::Python`, including the answer without a handler, a callback the CLI
 cancels (TypeScript still writes its answer, Python writes nothing) and a
@@ -411,6 +412,112 @@ has no query option for it; `ClaudeAgentOptions::capture_sdk_mcp_manifests` is
 this crate's own switch and `Some(false)` disables it. Python style has no
 capture.
 
+The Python dialect validates tool arguments as the bridge does
+(`claude_agent_sdk/__init__.py`, `_build_input_schema` at lines 436-456 and
+`jsonschema.validate` near line 630): `jsonschema` 4.26 with the draft
+`validator_for` picks from `$schema`, `referencing` 0.37 reference resolution and
+the `best_match` error choice, reported as `Input validation error: <message>` or,
+for any other exception, its text. As in `jsonschema.validate`, the schema is
+checked first with `check_schema`: the first error the draft's metaschema yields,
+checked with the draft's `FORMAT_CHECKER` (only `regex` is registered in the
+pinned environment), is reported as the `SchemaError` text. The arguments are
+then checked with `format` as an annotation only, because the bridge passes no
+`FormatChecker`. Patterns follow a port of CPython's `re`. Python's recursion
+limit is counted frame by frame as CPython 3.12 counts it, for a bridge started
+with `asyncio.run` from module level (`jsonschema.validate` at frame 17 under
+the default limit of 1000) that already handled a call. Neither the Python SDK
+nor `mcp` raises that limit, and the dialect has no setting that does. A schema or arguments
+nested past that boundary give the same `maximum recursion depth exceeded` text,
+and a `SchemaError` too deep to print raises inside the bridge's handler, which
+the `mcp` server answers with a JSON-RPC error of code 0. A pattern `re` still
+holds compiled costs no compile frames, as in `re._compile`: its first-in
+first-out cache of 256 patterns and its least-recently-used cache of 512 are
+replayed across every call of every server in the process, so a pattern one call
+compiled is cached for the next until 512 newer patterns evict it. Printing an
+error uses those caches too: `pprint` splits a long string with
+`re.findall(r'\S*\s*', line)` and `textwrap.dedent` substitutes the error's
+margin with `re.sub`, and each compiles its pattern, six or seven frames deeper
+than a cached lookup, the first time the process needs it. A `SchemaError`
+printing a long string under 324 lists passes the limit while compiling the
+word pattern, and prints once an earlier error compiled it. The caches start as
+the pinned SDK's process holds them at its first tool call on macOS, filled by
+the imports of `claude_agent_sdk` and its dependencies and by the version check
+while connecting. A Python program that imports other modules, or runs on
+another platform, starts with other patterns cached, which moves a boundary only
+for a pattern nested to within a level of it. The repr of a value in an error
+message overflows near 10,000 levels on C recursion, which the schema's nesting
+does not move: one level sooner for a call of the `repr` builtin, as in
+`type_draft3`, and four sooner for a repr joined from a generator expression,
+as in `extras_msg` and the `oneOf` message. Comparing values nested near
+10,000 levels overflows on C recursion too: the `list.sort` of `_utils.uniq`,
+which `check_schema` runs for the `enum` of drafts 3 and 4, raises
+`maximum recursion depth exceeded in comparison`, and the `all` calls of
+`_utils.equal`, which `enum` and `const` call, hold checks that a repr beneath
+them counts. The first call of a process overflows a few levels sooner than the
+next: CPython runs an instruction generic once before specializing it, and the
+generic `sorted` and `next` calls and the loops over generators in
+`check_schema`, `iter_errors` and `descend` hold C recursion checks the
+specialized ones do not. Which of them the process already ran is kept with its
+`re` caches. The validator converts, compares, prints and drops values with
+loops over explicit stacks, so a value nested that deep does not overflow the
+native stack. In Python the boundary moves by a level when the caller sits a few frames deeper, as under another
+event loop setup or a test runner. The TypeScript dialect reads messages from
+the CLI at any nesting. The Python dialect fails with `Error::Recursion` where
+the Python SDK's reader raises `RecursionError` from `json.loads`: at the first
+object or array past 9,991 levels, counting the message itself, once the text
+before it reads as JSON. An unterminated last line fails too. Below those
+limits, a message is parsed, decoded and routed without recursing over its
+values, and the message types, `MessageParseError` and `ResultError` drop the
+values they own with a loop, so nesting never overflows the native stack.
+`Message::Unknown` and `ContentBlock` hold their JSON as `DeepJsonObject` and
+`DeepJsonValue`, which clone and drop it with a loop, so a destructured variant
+or a block moved out of its message drops the same way. The exceptions are a
+payload taken out with `into_object` or `into_value`, which drops as
+`serde_json` does, and the conversions a caller runs, such as `Clone` of the
+message structs, `Debug`, serialization and `to_sdk_message`. The
+TypeScript dialect runs no JSON Schema validator: it emulates the zod object
+the package builds.
+
+Where `jsonschema` and `referencing` iterate a `set` of strings, the Python
+dialect iterates it in CPython 3.12's order: the slots of its hash table, from
+`str` hashes under the process's hash secret. That order decides which
+`additionalProperties` extra fails first when one raises, such as an
+unresolvable `$ref`, and which of several resources sharing an `$id` or an
+anchor the crawl keeps. The secret follows `PYTHONHASHSEED` as Python reads it
+at startup: unset, empty or `random` gives a secret of its own to each process,
+and a seed from 0 to 4294967295 gives the secret Python derives from it, so a
+fixed seed reproduces a recorded order. A value Python refuses to start with is
+taken as random. The keyword sets of `referencing.jsonschema` are iterated as
+the `.pyc` CPython compiles them, which marshals each constant `frozenset` in
+sorted order; a module run without its cached `.pyc` builds them in source order
+instead. The order of `rpds` hash sets is not reproduced: its only set iterated
+while validating holds at most one URI.
+
+Like `jsonschema.validate`, the Python dialect retrieves a `$ref` that is outside
+the schema and the bundled metaschemas, as `_REMOTE_WARNING_REGISTRY` does. It
+fetches through a `RemoteSchemaRetriever`, set with
+`LocalMcpServer::with_remote_schema_retriever`. The default `UrlopenRetriever`
+ports CPython 3.12 `urllib.request.urlopen` for `http`, `https`, `ftp`, `data`
+and `file` URLs, with its redirects, exception classes and texts, and with the
+proxies `getproxies_environment` reads from the `<scheme>_proxy` and `no_proxy`
+variables or, when no variable names one, from the macOS system configuration as
+`_scproxy` reads it and from the Windows registry as `getproxies_registry` and
+`proxy_bypass_registry` read it. Over `https`, a server that breaks the protocol
+before encryption starts raises the `ssl.SSLError` text CPython 3.12 reports
+over OpenSSL 3.5.
+A failed retrieval makes the reference `Unresolvable`. Each response that opens logs the
+`DeprecationWarning` of `_warn_for_remote_retrieve` as a `WARN` event with the
+target `trogon_claude_agent_sdk::python_warnings`. The event carries `category`,
+`message`, `filename`, `lineno`, `source` and `uri`, and reaches the caller's
+`tracing` subscriber even though validation runs on its own thread. Python's
+default filters hide that warning, so it shows only where a subscriber keeps the
+target. A retrieved document loads as `json.load` loads it, with `NaN`,
+`Infinity`, integers beyond 64 bits and lone surrogates kept. A `$ref` URI
+holding a lone surrogate reaches the retriever through
+`RemoteSchemaRetriever::open_python`, which by default raises the
+`UnicodeEncodeError` of encoding it as UTF-8 and which `UrlopenRetriever` opens
+as `urlopen` opens it.
+
 `set_mcp_servers` is not serialized, as in TypeScript. It swaps in-process
 servers before the request is sent and keeps the session of a server that stays
 registered. Remove a server and re-add it to replace its registry instance. Its
@@ -516,7 +623,11 @@ upstream SDKs).
   `Child` with piped stdin and stdout, so a container or remote shell can host the
   CLI. The forwarded signal is cancelled only when the client closes after its
   abort controller was cancelled, past the close grace. As in TypeScript, a
-  custom spawn gets no default debug file. `on_process_spawned` is TypeScript's
+  custom spawn gets no default debug file. The SDK's own spawn passes the child
+  only its stdio under the Python dialect on every platform, as
+  `Popen(close_fds=True)` does, and under the TypeScript dialect on Apple
+  platforms, as libuv's `posix_spawn` does; a custom spawn decides which
+  descriptors its child keeps. `on_process_spawned` is TypeScript's
   undeclared `onProcessSpawned`: after the SDK's own spawn it receives the pid
   and `spawn_sync_ms`, and a panic in it is logged and ignored.
 - `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check, which
@@ -553,10 +664,25 @@ upstream SDKs).
   where the exit event clears `ready`), `Error::WriteToTerminatedProcess` after an
   exit in the Python style (with the exit code), `Error::WriteFailed` for an I/O
   failure and `Error::Aborted` after `abort()`.
-- Non-JSON stdout: `ArgvStyle::TypeScript` skips every undecodable line. Python
-  style skips lines that do not start with `{` and fails on a corrupt line with
+- Non-JSON stdout: `ArgvStyle::TypeScript` reads lines as Node `readline` does
+  (split at `\n`, `\r\n`, a lone `\r`, U+2028 and U+2029, decoded with
+  replacement characters), skips a blank line, parses the rest with `JSON.parse`
+  rules (object keys in `Object.keys` order, every number a double) and skips
+  every undecodable line. A `null` line is `Error::NullMessage` with V8's
+  `TypeError` text. Python style decodes stdout as strict UTF-8
+  (`Error::UnicodeDecode` with the `UnicodeDecodeError` text, whose position
+  Python counts within the chunk it read), strips the whitespace `str.strip`
+  takes, skips lines that do not start with `{` and fails on a corrupt line with
   `Error::JsonDecode` (the line and the original error), except that a corrupt
-  unterminated tail at end of file is dropped. With `MessageDecoding::Python`, a
+  unterminated tail at end of file is dropped. An integer past 4,300 digits is
+  `Error::IntDigits` with the `ValueError` text, on any line. Values the public
+  types cannot hold are handled as follows: Python's `NaN`, `Infinity`,
+  out-of-range floats such as `1e400` and lone surrogate escapes are
+  `Error::JsonDecode` on a terminated line and dropped in a tail; an integer
+  beyond 64 bits arrives as the nearest double, except one too long for a double,
+  which is `Error::JsonDecode` (or dropped in a tail); TypeScript lines holding
+  `Infinity` or a lone surrogate, and lines that parse to something other than
+  an object, are skipped. With `MessageDecoding::Python`, a
   known message missing a key Python reads is `Error::MessageParse`, carrying the
   raw object.
 - `ArgvStyle::TypeScript` appends `--await-initialize` through extra arguments
@@ -726,9 +852,8 @@ parent process). The result carries per-key provenance and `machinePolicy.didNot
 command output. A `ResolverState` holds what upstream keeps between calls;
 `ResolverState::with_rereads(PolicyRereads::Inline)` runs machine policy re-reads on the calling
 thread, so the host's clock alone decides when one has ended. Upstream reads the launch directory
-when the SDK module is imported; nothing here runs at load time, so `resolve_settings` reads it on
-its first call unless the binary calls `adapters::capture_launch_directory()` at the top of `main`,
-which gives the upstream timing. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
+when the SDK module is imported; here the loader reads it when the binary that links the crate
+loads, before `main`, and `adapters::capture_launch_directory()` returns that reading. `filter_escalating_default_mode` ports `filterEscalatingDefaultMode`. The
 `claude-sdk:resolve-diff` mise task compares the output with the pinned TypeScript resolver
 byte for byte. Numbers read as `JSON.parse` reads them: integers above 2^53 round, and a number
 past the double range reads as `Infinity`. A typed setting refuses `Infinity`, an `env` value spells

@@ -1,0 +1,253 @@
+{
+ "python": "3.12.16",
+ "claude_agent_sdk": "0.2.181",
+ "jsonschema": "4.26.0",
+ "documents": {
+  "http://e.test/range.json": "{\"pattern\": \"[\\ue000-\\ud800]\"}",
+  "http://e.test/low.json": "{\"pattern\": \"(?P<\\udc80>a)\"}",
+  "http://e.test/unresolvable.json": "{\"$ref\": \"urn:x\\ud800\"}",
+  "http://e.test/anchor.json": "{\"$ref\": \"#a\\udc80\"}",
+  "http://e.test/ascii.json": "{\"pattern\": \"[b-a]\"}",
+  "http://e.test/wide.json": "{\"pattern\": \"\\ud83d\\ude00[\\u00e9-a]\"}",
+  "http://e.test/plain.json": "{\"type\": \"string\"}",
+  "http://e.test/const.json": "{\"const\": \"\\ud800\"}"
+ },
+ "tools": [
+  {
+   "name": "range",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "v": {
+      "$ref": "http://e.test/range.json"
+     }
+    }
+   }
+  },
+  {
+   "name": "low",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "v": {
+      "$ref": "http://e.test/low.json"
+     }
+    }
+   }
+  },
+  {
+   "name": "unresolvable",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "v": {
+      "$ref": "http://e.test/unresolvable.json"
+     }
+    }
+   }
+  },
+  {
+   "name": "anchor",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "v": {
+      "$ref": "http://e.test/anchor.json"
+     }
+    }
+   }
+  },
+  {
+   "name": "ascii",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "v": {
+      "$ref": "http://e.test/ascii.json"
+     }
+    }
+   }
+  },
+  {
+   "name": "wide",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "v": {
+      "$ref": "http://e.test/wide.json"
+     }
+    }
+   }
+  },
+  {
+   "name": "const",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "v": {
+      "$ref": "http://e.test/const.json"
+     }
+    }
+   }
+  },
+  {
+   "name": "plain",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "v": {
+      "$ref": "http://e.test/plain.json"
+     }
+    }
+   }
+  }
+ ],
+ "answer": "ok \u00e9 \ud83d\ude00 \u2028 \u007f",
+ "calls": [
+  {
+   "request_id": "req_0",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 0,
+    "method": "initialize",
+    "params": {
+     "protocolVersion": "2025-06-18",
+     "capabilities": {},
+     "clientInfo": {
+      "name": "c",
+      "version": "1"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_0\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 0, \"result\": {\"capabilities\": {\"tools\": {\"listChanged\": false}}, \"protocolVersion\": \"2025-06-18\", \"serverInfo\": {\"name\": \"demo\", \"version\": \"1.0.0\"}}}}}}"
+  },
+  {
+   "request_id": "req_1",
+   "message": {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized"
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_1\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"result\": {}}}}}"
+  },
+  {
+   "request_id": "req_2",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+     "name": "range",
+     "arguments": {
+      "v": "x"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_2\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"content\": [{\"text\": \"bad character range \\ue000-\\ud800 at position 1\", \"type\": \"text\"}], \"isError\": true}}}}}"
+  },
+  {
+   "request_id": "req_3",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+     "name": "low",
+     "arguments": {
+      "v": "x"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_3\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 2, \"result\": {\"content\": [{\"text\": \"bad character in group name '\\\\udc80' at position 4\", \"type\": \"text\"}], \"isError\": true}}}}}"
+  },
+  {
+   "request_id": "req_4",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+     "name": "unresolvable",
+     "arguments": {
+      "v": "x"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_4\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 3, \"result\": {\"content\": [{\"text\": \"Unresolvable: urn:x\\ud800\", \"type\": \"text\"}], \"isError\": true}}}}}"
+  },
+  {
+   "request_id": "req_5",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "tools/call",
+    "params": {
+     "name": "anchor",
+     "arguments": {
+      "v": "x"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_5\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 4, \"result\": {\"content\": [{\"text\": \"NoSuchAnchor: 'a\\\\udc80' does not exist within {'$ref': '#a\\\\udc80'}\", \"type\": \"text\"}], \"isError\": true}}}}}"
+  },
+  {
+   "request_id": "req_6",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 5,
+    "method": "tools/call",
+    "params": {
+     "name": "ascii",
+     "arguments": {
+      "v": "x"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_6\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 5, \"result\": {\"content\": [{\"text\": \"bad character range b-a at position 1\", \"type\": \"text\"}], \"isError\": true}}}}}"
+  },
+  {
+   "request_id": "req_7",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 6,
+    "method": "tools/call",
+    "params": {
+     "name": "wide",
+     "arguments": {
+      "v": "x"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_7\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 6, \"result\": {\"content\": [{\"text\": \"bad character range \\u00e9-a at position 2\", \"type\": \"text\"}], \"isError\": true}}}}}"
+  },
+  {
+   "request_id": "req_8",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "method": "tools/call",
+    "params": {
+     "name": "const",
+     "arguments": {
+      "v": "x"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_8\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 7, \"result\": {\"content\": [{\"text\": \"Input validation error: '\\\\ud800' was expected\", \"type\": \"text\"}], \"isError\": true}}}}}"
+  },
+  {
+   "request_id": "req_9",
+   "message": {
+    "jsonrpc": "2.0",
+    "id": 8,
+    "method": "tools/call",
+    "params": {
+     "name": "plain",
+     "arguments": {
+      "v": "x"
+     }
+    }
+   },
+   "line": "{\"type\": \"control_response\", \"response\": {\"subtype\": \"success\", \"request_id\": \"req_9\", \"response\": {\"mcp_response\": {\"jsonrpc\": \"2.0\", \"id\": 8, \"result\": {\"content\": [{\"text\": \"ok \\u00e9 \\ud83d\\ude00 \\u2028 \\u007f\", \"type\": \"text\"}], \"isError\": false}}}}}"
+  }
+ ]
+}

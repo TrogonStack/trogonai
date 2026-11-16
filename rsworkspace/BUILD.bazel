@@ -1,4 +1,7 @@
 exports_files([
     "Cargo.lock",
     "Cargo.toml",
+    "clippy.toml",
+    "deny.toml",
+    "rustfmt.toml",
 ])

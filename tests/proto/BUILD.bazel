@@ -1,0 +1,7 @@
+# The contract validator and every fixture suite it discovers, for
+# //proto:contracts_test.
+filegroup(
+    name = "contracts",
+    srcs = ["validate.py"] + glob(["*/fixtures/*.json"]),
+    visibility = ["//proto:__pkg__"],
+)

@@ -73,6 +73,7 @@ pub mod __buffa {
         reg.register_json_any(super::audit_actor::__HUMAN_SESSION_ACTOR_JSON_ANY);
         reg.register_json_any(super::audit_actor::__BREAK_GLASS_ACTOR_JSON_ANY);
         reg.register_json_any(super::audit_actor::__AGENT_ACTOR_JSON_ANY);
+        reg.register_json_any(super::audit_actor::__SERVICE_ACTOR_JSON_ANY);
         reg.register_json_any(super::__AUDIT_CHECKPOINT_JSON_ANY);
         reg.register_json_any(super::__CHANGE_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_USE_JSON_ANY);

@@ -140,7 +140,9 @@ impl std::fmt::Debug for SpawnOptions {
 
 /// TypeScript `spawnClaudeCodeProcess`: starts the CLI in place of the SDK. The child must have piped stdin and
 /// stdout; its stderr is read when piped. As in TypeScript, the SDK then derives no default debug file and does not
-/// call [`OnProcessSpawned`]. A failure is [`crate::Error::Spawn`].
+/// call [`OnProcessSpawned`]. A failure is [`crate::Error::Spawn`]. Which descriptors above stderr the child keeps is
+/// up to the function: the SDK's own spawn marks them close-on-exec as each dialect's upstream does, and that does not
+/// apply here.
 #[derive(Clone)]
 pub struct SpawnClaudeCodeProcess(
     pub Arc<dyn Fn(SpawnOptions) -> std::io::Result<tokio::process::Child> + Send + Sync>,

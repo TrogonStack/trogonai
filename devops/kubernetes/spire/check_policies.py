@@ -10,13 +10,17 @@ from pathlib import Path
 from validation_fixture import deployment_fixture
 
 
+def expected_fixture():
+    return (json.dumps(deployment_fixture(), indent=2, sort_keys=True) + "\n").encode()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write-fixture", action="store_true", help="regenerate the reviewed Go test fixture")
     args = parser.parse_args()
     workspace = Path(__file__).resolve().parents[3] / "goworkspace"
     reviewed_fixture = workspace / "internal/spirepolicy/testdata/deployment.json"
-    expected = (json.dumps(deployment_fixture(), indent=2, sort_keys=True) + "\n").encode()
+    expected = expected_fixture()
     if args.write_fixture:
         reviewed_fixture.write_bytes(expected)
         return 0
