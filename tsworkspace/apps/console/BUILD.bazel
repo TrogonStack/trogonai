@@ -1,3 +1,4 @@
+load("@aspect_bazel_lib//lib:copy_file.bzl", "copy_file")
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
@@ -92,6 +93,20 @@ js_library(
     ],
 )
 
+# CI-only control: an undeclared test file in the canonical output tree.
+copy_file(
+    name = "undeclared_sibling",
+    src = "control/undeclared-sibling.txt",
+    out = "src/screens/declared1.test.tsx",
+)
+
+# Builds the sibling before the test without making it a test input.
+copy_file(
+    name = "undeclared_sibling_order",
+    src = ":undeclared_sibling",
+    out = "undeclared-sibling-order.txt",
+)
+
 vitest_bin.vitest_test(
     name = "test",
     args = ["run"],
@@ -100,6 +115,7 @@ vitest_bin.vitest_test(
     data = [
         ":node_modules",
         ":test_inputs",
+        ":undeclared_sibling_order",
         "//tsworkspace:node_modules/vitest",
     ],
     env = {
