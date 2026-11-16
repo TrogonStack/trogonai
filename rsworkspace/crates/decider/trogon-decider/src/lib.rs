@@ -101,6 +101,7 @@
 //! ```
 
 mod act;
+mod decider_state;
 mod decision;
 pub mod event;
 mod events;
@@ -113,6 +114,7 @@ mod write_precondition;
 pub use act::{Act, ActBuilder};
 #[doc(hidden)]
 pub use act::{ActChain, ActRun, First, Steps, Then};
+pub use decider_state::DeciderState;
 pub use decision::Decision;
 #[doc(hidden)]
 pub use decision::{DecisionError, DecisionResult, evaluate_decision};
@@ -138,14 +140,14 @@ pub type EvolveError<C> = <<C as Decider>::State as Evolve<<C as Decider>::Event
 
 /// Decision-making for a typed command.
 ///
-/// The state provides its no-history value through [`Default`] and replays events through
-/// [`Evolve`]. The command only decides which new events to produce.
+/// [`DeciderState`] combines the state's no-history value through [`Default`] and event replay
+/// through [`Evolve`]. The command only decides which new events to produce.
 pub trait Decider: Sized {
     /// Stream identifier type. Usually `str` so commands return a borrowed slice.
     type StreamId: ?Sized;
 
     /// State rebuilt from prior events.
-    type State: Default + Evolve<Self::Event>;
+    type State: DeciderState<Self::Event>;
 
     /// Domain event appended to the stream.
     type Event;

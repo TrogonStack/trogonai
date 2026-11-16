@@ -124,7 +124,8 @@ ownership rules permit the replay implementation.
 A consuming crate may instead define a local, single-field
 `#[repr(transparent)]` state wrapper in `commands/state`, such as
 `CredentialState(state_v1::CredentialStateSnapshot)`, to own the domain's
-`Default` and `Evolve<Event>` implementations. `Default` means the state before
+`Default` and `Evolve<Event>` implementations, which automatically satisfy
+`DeciderState<Event>`. `Default` means the state before
 any events. A generated protobuf default can be an empty message with
 `state: None` or an unspecified enum value, while the aggregate starts in an
 explicit `Missing` state. Its derived `Default` cannot be replaced by another

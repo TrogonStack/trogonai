@@ -18,7 +18,7 @@ A decider is a plain Rust type implementing `trogon_decider::Decider`:
 pub trait Decider: Sized {
     type StreamId: ?Sized;
 
-    type State: Default + Evolve<Self::Event>;
+    type State: DeciderState<Self::Event>;
     type Event;
     type DecideError: std::error::Error;
 
@@ -30,7 +30,8 @@ pub trait Decider: Sized {
 }
 ```
 
-State owns the no-history value through `Default` and event replay through `Evolve<Event>`.
+`DeciderState<Event>` is implemented automatically for state types that provide the no-history
+value through `Default` and event replay through `Evolve<Event>`.
 For snapshots it also implements `StateSnapshot` to name its protobuf `Payload` type.
 The standard `From<Payload>` and `AsRef<Payload>` implementations restore the state and borrow
 the payload for encoding. Native stores keep using the protobuf payload type.

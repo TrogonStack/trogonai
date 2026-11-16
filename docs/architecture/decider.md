@@ -15,7 +15,7 @@ Every decider is a plain Rust type implementing `trogon_decider::Decider`
 ```rust
 pub trait Decider: Sized {
     type StreamId: ?Sized;
-    type State: Default + Evolve<Self::Event>;
+    type State: DeciderState<Self::Event>;
     type Event;
     type DecideError: std::error::Error;
 
@@ -30,7 +30,14 @@ pub trait Evolve<Event>: Sized {
     type Error: std::error::Error;
     fn evolve(self, event: &Event) -> Result<Self, Self::Error>;
 }
+
+pub trait DeciderState<Event>: Default + Evolve<Event> {}
+
+impl<T, Event> DeciderState<Event> for T where T: Default + Evolve<Event> {}
 ```
+
+`DeciderState<Event>` names the shared state contract. Its blanket implementation means state
+types only implement `Default` and `Evolve<Event>`.
 
 The state's `Default` seeds state with no events applied. Its `Evolve<Event>` folds one stored event into
 state and is the only place state changes. `decide` evaluates a command against the current
