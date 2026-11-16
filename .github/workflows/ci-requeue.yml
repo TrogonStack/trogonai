@@ -1,0 +1,40 @@
+name: CI Requeue
+
+# Runs a cancelled CI Bazel run again for watch-self-hosted-queue in
+# ci-bazel.yml. That job cancels its own run, so the rerun has to come from a
+# run that outlives it.
+on:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: ID of the cancelled CI Bazel run to run again.
+        required: true
+        type: string
+
+concurrency:
+  group: ci-requeue-${{ inputs.run-id }}
+
+permissions:
+  actions: write
+
+jobs:
+  rerun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
+      - name: Run again
+        run: mise run --skip-tools github:workflows:ci-requeue:rerun
+        env:
+          RUN_ID: ${{ inputs.run-id }}
+          GH_TOKEN: ${{ github.token }}
