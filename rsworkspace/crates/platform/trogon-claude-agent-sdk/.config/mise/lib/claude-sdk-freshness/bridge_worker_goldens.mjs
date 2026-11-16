@@ -301,6 +301,8 @@ const pure = {
       ['event: e\r\rdata: x\n\n'],
       ['event: e\ndata: x\r\n\n'],
       ['event: e\ndata: x\n\r\nevent: f\ndata: y\n\r\n'],
+      [new Uint8Array(Buffer.from('event: e\ndata: \u{1F600}\n\n')).slice(0, 17), new Uint8Array(Buffer.from('event: e\ndata: \u{1F600}\n\n')).slice(17)],
+      [new Uint8Array([...Buffer.from('event: e\ndata: '), 0xc3]), new Uint8Array(Buffer.from('\n\n'))],
     ].map((chunks) => {
       const parser = new frameParser();
       const frames = [];

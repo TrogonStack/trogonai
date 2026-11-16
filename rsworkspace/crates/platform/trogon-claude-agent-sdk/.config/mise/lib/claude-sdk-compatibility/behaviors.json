@@ -6385,6 +6385,43 @@
       ]
     },
     {
+      "id": "c35-child-descriptors",
+      "concept": "Which descriptors above stderr the CLI child keeps",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 828,
+        "line_end": 836,
+        "sha256": "9827b8acafb514ed0f55792f99f2ea7400de0039c17f9e9fec7bb09f251b1e06"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a=Ket(t,n,{cwd:r,stdio:[\"pipe\",\"pipe\",\"pipe\"],signal:s,env:o,windowsHide:!0})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "7547db7b52c107cfbb25b6568d2f26b0b6ed79f2216655e4b184eea82ec2f4d8"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python starts the CLI with anyio.open_process, which is subprocess.Popen with close_fds=True, so the child keeps only its stdio on every platform. TypeScript starts it with child_process.spawn, that is libuv, which on Apple platforms calls posix_spawn with POSIX_SPAWN_CLOEXEC_DEFAULT, so only the stdio passes, and elsewhere forks and leaves the child every descriptor that is not close-on-exec."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect: on Apple platforms the SDK's own spawn marks every descriptor above stderr close-on-exec in the child, and elsewhere it leaves them as they are. ArgvStyle::Python marks them on every platform, as close_fds=True closes them. A spawn_claude_code_process function decides for itself which descriptors its child keeps."
+      },
+      "contracts": [
+        "inherited_descriptors::the_child_keeps_inheritable_descriptors_only_where_the_dialect_upstream_does",
+        "src/inherited_descriptors/tests.rs::keeping_only_stdio_marks_an_inheritable_descriptor_close_on_exec",
+        "src/inherited_descriptors/tests.rs::the_python_dialect_passes_only_stdio_everywhere_and_typescript_only_on_apple"
+      ],
+      "rust": [
+        "src/inherited_descriptors.rs",
+        "src/process_options.rs",
+        "src/process_transport.rs"
+      ]
+    },
+    {
       "id": "p01-startup-initialize-timer",
       "concept": "How long startup() waits for the CLI to answer initialize",
       "python": {

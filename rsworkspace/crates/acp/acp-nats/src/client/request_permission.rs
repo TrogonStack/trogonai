@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{RequestPermissionRequest, RequestPermissionResponse};
+use agent_client_protocol::v1::schema::{RequestPermissionRequest, RequestPermissionResponse};
 use async_nats::header::HeaderMap;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -20,7 +20,7 @@ pub enum RequestPermissionError {
 pub fn error_code_and_message(e: &RequestPermissionError) -> (ErrorCode, String) {
     match e {
         RequestPermissionError::InvalidRequest(inner) => (
-            ErrorCode::InvalidParams,
+            ErrorCode::INVALID_PARAMS,
             format!("Invalid request_permission request: {}", inner),
         ),
         RequestPermissionError::ClientError(inner) => (inner.code, inner.message.clone()),

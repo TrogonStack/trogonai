@@ -4,7 +4,7 @@ use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_ENDPOINT, ACP_PROTOCOL_VERS
 /// Upstream owns session-header routing now, so this lives with the tests.
 const ACP_SESSION_ID_HEADER: &str = "acp-session-id";
 use acp_nats::Config;
-use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
+use agent_client_protocol::v1::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 use axum::body::{Body, to_bytes};
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{Request, StatusCode};
@@ -113,7 +113,7 @@ async fn session_stream(
         .header(ACCEPT.as_str(), "text/event-stream")
         .header(ACP_CONNECTION_ID_HEADER, connection_id)
         .header(ACP_SESSION_ID_HEADER, session_id)
-        .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+        .header(ACP_PROTOCOL_VERSION_HEADER, "1")
         .send()
         .await
         .unwrap();
@@ -189,6 +189,110 @@ fn http_post_request(body: &str) -> Request<Body> {
         .unwrap()
 }
 
+fn jsonrpc_array_fixture() -> Value {
+    json!([
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}},
+        {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": "/workspace", "mcpServers": []}},
+        {"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "session-1"}}
+    ])
+}
+
+fn assert_invalid_array_response(response: &Value) {
+    assert!(response.is_object());
+    assert!(response.get("id").unwrap().is_null());
+    assert_eq!(response["error"]["code"], -32600);
+    assert!(response.get("result").is_none());
+}
+
+#[tokio::test]
+async fn streamable_http_rejects_arrays_before_dispatching_any_entries() {
+    let nats = AdvancedMockNatsClient::new();
+    let _injector = nats.inject_messages();
+    nats.set_response(
+        "acp.v1.global.agent.initialize",
+        canonical_result(r#"{"protocolVersion":1}"#),
+    );
+    let (app, shutdown_tx) = build_test_app(nats.clone());
+
+    let response = app
+        .clone()
+        .oneshot(http_post_request(&jsonrpc_array_fixture().to_string()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(response.headers().get(ACP_CONNECTION_ID_HEADER).is_none());
+    let body: Value = serde_json::from_str(&body_text(response).await).unwrap();
+    assert_invalid_array_response(&body);
+    assert!(nats.requested_payloads().is_empty());
+    assert!(nats.published_messages().is_empty());
+
+    let response = app
+        .clone()
+        .oneshot(http_post_request(
+            r#"{"jsonrpc":"2.0","id":4,"method":"initialize","params":{"protocolVersion":1}}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.headers().get(ACP_CONNECTION_ID_HEADER).is_some());
+    let body: Value = serde_json::from_str(&body_text(response).await).unwrap();
+    assert_eq!(body["id"], 4);
+    assert_eq!(body["result"]["protocolVersion"], 1);
+    assert_eq!(nats.requested_payloads().len(), 1);
+    assert!(nats.published_messages().is_empty());
+
+    shutdown_tx.send(true).unwrap();
+}
+
+#[tokio::test]
+async fn websocket_rejects_arrays_without_dispatch_and_accepts_the_next_request() {
+    let nats = AdvancedMockNatsClient::new();
+    let _injector = nats.inject_messages();
+    nats.set_response(
+        "acp.v1.global.agent.initialize",
+        canonical_result(r#"{"protocolVersion":1}"#),
+    );
+    let (addr, shutdown_tx, server_task) = start_test_server(nats.clone()).await;
+    let (mut websocket, _) = connect_async(format!("ws://{addr}{ACP_ENDPOINT}")).await.unwrap();
+    websocket
+        .send(Message::Text(jsonrpc_array_fixture().to_string().into()))
+        .await
+        .unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(2), websocket.next())
+        .await
+        .expect("timeout waiting for array rejection")
+        .expect("websocket closed")
+        .unwrap();
+    let body: Value = serde_json::from_str(response.to_text().unwrap()).unwrap();
+    assert_invalid_array_response(&body);
+    assert!(nats.requested_payloads().is_empty());
+    assert!(nats.published_messages().is_empty());
+
+    websocket
+        .send(Message::Text(
+            r#"{"jsonrpc":"2.0","id":4,"method":"initialize","params":{"protocolVersion":1}}"#.into(),
+        ))
+        .await
+        .unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(2), websocket.next())
+        .await
+        .expect("timeout waiting for initialize")
+        .expect("websocket closed")
+        .unwrap();
+    let body: Value = serde_json::from_str(response.to_text().unwrap()).unwrap();
+    assert_eq!(body["id"], 4);
+    assert_eq!(body["result"]["protocolVersion"], 1);
+    assert_eq!(nats.requested_payloads().len(), 1);
+    assert!(nats.published_messages().is_empty());
+
+    drop(websocket);
+    shutdown_tx.send(true).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), server_task)
+        .await
+        .expect("server task did not shut down")
+        .unwrap();
+}
+
 #[tokio::test]
 async fn test_websocket_connection_lifecycle() {
     let nats_mock = AdvancedMockNatsClient::new();
@@ -197,7 +301,7 @@ async fn test_websocket_connection_lifecycle() {
     let _injector = nats_mock.inject_messages();
 
     // Setup mock response for NATS
-    let nats_response = r#"{"agentCapabilities": {"loadSession": false, "mcpCapabilities": {"http": false, "sse": false}, "promptCapabilities": {"audio": false, "embeddedContext": false, "image": false}, "sessionCapabilities": {}}, "authMethods": [], "protocolVersion": 0}"#;
+    let nats_response = r#"{"agentCapabilities": {"loadSession": false, "mcpCapabilities": {"http": false, "sse": false}, "promptCapabilities": {"audio": false, "embeddedContext": false, "image": false}, "sessionCapabilities": {}}, "authMethods": [], "protocolVersion": 1}"#;
     nats_mock.set_response("acp.v1.global.agent.initialize", canonical_result(nats_response));
 
     let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
@@ -208,7 +312,7 @@ async fn test_websocket_connection_lifecycle() {
     assert!(response.headers().contains_key(ACP_CONNECTION_ID_HEADER));
 
     // Send initialize request
-    let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
+    let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 1}}"#;
     ws_stream.send(Message::Text(req.into())).await.unwrap();
 
     // Await response
@@ -218,7 +322,7 @@ async fn test_websocket_connection_lifecycle() {
         .expect("stream closed")
         .unwrap();
 
-    let expected_ws_response = r#"{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"auth":{},"loadSession":false,"mcpCapabilities":{"acp":false,"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}}"#;
+    let expected_ws_response = r#"{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"auth":{},"loadSession":false,"mcpCapabilities":{"acp":false,"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}}"#;
 
     match msg {
         Message::Text(t) => {
@@ -252,7 +356,7 @@ async fn test_shutdown_while_connection_active() {
     let ws_url = format!("ws://{}{}", addr, ACP_ENDPOINT);
     let (mut ws_stream, _) = connect_async(&ws_url).await.unwrap();
 
-    let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 0}}"#;
+    let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion": 1}}"#;
     ws_stream.send(Message::Text(req.into())).await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -272,13 +376,13 @@ async fn streamable_http_initialize_returns_connection_id_and_json_response() {
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let response = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -299,7 +403,7 @@ async fn streamable_http_initialize_returns_connection_id_and_json_response() {
 
     let body: Value = serde_json::from_str(&body_text(response).await).unwrap();
     assert_eq!(body["id"], 1);
-    assert_eq!(body["result"]["protocolVersion"], 0);
+    assert_eq!(body["result"]["protocolVersion"], 1);
     // `connectionId` is not an ACP v1 schema field. The old transport injected it
     // into the result body; upstream returns it only as a header, which is the
     // spec-conformant behavior, so the body must carry no such field.
@@ -318,7 +422,7 @@ async fn streamable_http_session_new_returns_accepted_and_get_stream_event() {
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
     nats_mock.set_response(
         "acp.v1.global.agent.session.new",
         canonical_result(r#"{"sessionId":"test-session-1"}"#),
@@ -332,7 +436,7 @@ async fn streamable_http_session_new_returns_accepted_and_get_stream_event() {
         .post(&url)
         .header(CONTENT_TYPE.as_str(), "application/json")
         .header(ACCEPT.as_str(), "application/json, text/event-stream")
-        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#)
         .send()
         .await
         .unwrap();
@@ -350,7 +454,7 @@ async fn streamable_http_session_new_returns_accepted_and_get_stream_event() {
         .get(&url)
         .header(ACCEPT.as_str(), "text/event-stream")
         .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-        .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+        .header(ACP_PROTOCOL_VERSION_HEADER, "1")
         .send()
         .await
         .unwrap();
@@ -362,7 +466,7 @@ async fn streamable_http_session_new_returns_accepted_and_get_stream_event() {
         .header(CONTENT_TYPE.as_str(), "application/json")
         .header(ACCEPT.as_str(), "application/json, text/event-stream")
         .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-        .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+        .header(ACP_PROTOCOL_VERSION_HEADER, "1")
         .body(r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#)
         .send()
         .await
@@ -387,7 +491,7 @@ async fn streamable_http_session_load_uses_request_session_id_header() {
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
     nats_mock.set_response("acp.v1.session.test-session-1.agent.load", canonical_result("{}"));
 
     let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
@@ -398,7 +502,7 @@ async fn streamable_http_session_load_uses_request_session_id_header() {
         .post(&url)
         .header(CONTENT_TYPE.as_str(), "application/json")
         .header(ACCEPT.as_str(), "application/json, text/event-stream")
-        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#)
         .send()
         .await
         .unwrap();
@@ -420,7 +524,7 @@ async fn streamable_http_session_load_uses_request_session_id_header() {
         .header(ACCEPT.as_str(), "text/event-stream")
         .header(ACP_CONNECTION_ID_HEADER, &connection_id)
         .header(ACP_SESSION_ID_HEADER, "test-session-1")
-        .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+        .header(ACP_PROTOCOL_VERSION_HEADER, "1")
         .send()
         .await
         .unwrap();
@@ -432,7 +536,7 @@ async fn streamable_http_session_load_uses_request_session_id_header() {
             .header(CONTENT_TYPE.as_str(), "application/json")
             .header(ACCEPT.as_str(), "application/json, text/event-stream")
             .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-            .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+            .header(ACP_PROTOCOL_VERSION_HEADER, "1")
             .header(ACP_SESSION_ID_HEADER, "test-session-1")
             .body(r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"test-session-1","cwd":".","mcpServers":[]}}"#)
             .send()
@@ -457,13 +561,13 @@ async fn streamable_http_session_load_falls_back_to_the_params_session_id() {
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -485,7 +589,7 @@ async fn streamable_http_session_load_falls_back_to_the_params_session_id() {
                     .header(CONTENT_TYPE, "application/json")
                     .header(ACCEPT, "application/json, text/event-stream")
                     .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "1")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"test-session-1","cwd":".","mcpServers":[]}}"#,
                     ))
@@ -512,13 +616,13 @@ async fn streamable_http_session_load_returns_accepted_before_backend_completes(
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -542,7 +646,7 @@ async fn streamable_http_session_load_returns_accepted_before_backend_completes(
                     .header(CONTENT_TYPE, "application/json")
                     .header(ACCEPT, "application/json, text/event-stream")
                     .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "1")
                     .header(ACP_SESSION_ID_HEADER, "test-session-1")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"test-session-1","cwd":".","mcpServers":[]}}"#,
@@ -611,7 +715,7 @@ async fn streamable_http_rejects_follow_up_requests_before_successful_initialize
     let initialize = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -658,7 +762,7 @@ async fn streamable_http_get_rejects_before_successful_initialize() {
     let initialize = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -701,13 +805,13 @@ async fn streamable_http_delete_terminates_initialized_connection() {
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -727,7 +831,7 @@ async fn streamable_http_delete_terminates_initialized_connection() {
                 .method("DELETE")
                 .uri(ACP_ENDPOINT)
                 .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-                .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                .header(ACP_PROTOCOL_VERSION_HEADER, "1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -746,13 +850,13 @@ async fn streamable_http_forwards_an_unknown_session_scoped_notification() {
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -774,7 +878,7 @@ async fn streamable_http_forwards_an_unknown_session_scoped_notification() {
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json, text/event-stream")
                 .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-                .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                .header(ACP_PROTOCOL_VERSION_HEADER, "1")
                 .header(ACP_SESSION_ID_HEADER, "ghost-session")
                 .body(Body::from(
                     r#"{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"ghost-session"}}"#,
@@ -800,13 +904,13 @@ async fn streamable_http_forwards_an_unknown_session_scoped_post() {
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -828,7 +932,7 @@ async fn streamable_http_forwards_an_unknown_session_scoped_post() {
                     .header(CONTENT_TYPE, "application/json")
                     .header(ACCEPT, "application/json, text/event-stream")
                     .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-                    .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+                    .header(ACP_PROTOCOL_VERSION_HEADER, "1")
                     .header(ACP_SESSION_ID_HEADER, "ghost-session")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"ghost-session","prompt":{"role":"user","content":[{"type":"text","text":"hi"}]}}}"#,
@@ -855,13 +959,13 @@ async fn streamable_http_rejects_mismatched_protocol_version_after_initialize() 
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -883,7 +987,7 @@ async fn streamable_http_rejects_mismatched_protocol_version_after_initialize() 
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json, text/event-stream")
                 .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-                .header(ACP_PROTOCOL_VERSION_HEADER, "1")
+                .header(ACP_PROTOCOL_VERSION_HEADER, "2")
                 .body(Body::from(r#"{"jsonrpc":"2.0","method":"initialized"}"#))
                 .unwrap(),
         )
@@ -901,12 +1005,12 @@ async fn streamable_http_rejects_mismatched_protocol_version_after_initialize() 
 }
 
 #[tokio::test]
-async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_listeners() {
+async fn streamable_http_allows_one_reader_per_scope_and_delivers_session_updates() {
     let nats_mock = AdvancedMockNatsClient::new();
     let notification_tx = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
     nats_mock.set_response(
         "acp.v1.global.agent.session.new",
         canonical_result(r#"{"sessionId":"test-session-1"}"#),
@@ -920,7 +1024,7 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
         .post(&url)
         .header(CONTENT_TYPE.as_str(), "application/json")
         .header(ACCEPT.as_str(), "application/json, text/event-stream")
-        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#)
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#)
         .send()
         .await
         .unwrap();
@@ -938,7 +1042,7 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
         .get(&url)
         .header(ACCEPT.as_str(), "text/event-stream")
         .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-        .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+        .header(ACP_PROTOCOL_VERSION_HEADER, "1")
         .send()
         .await
         .unwrap();
@@ -946,23 +1050,26 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
         .get(&url)
         .header(ACCEPT.as_str(), "text/event-stream")
         .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-        .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+        .header(ACP_PROTOCOL_VERSION_HEADER, "1")
         .send()
         .await
         .unwrap();
 
     assert_eq!(first_get.status(), StatusCode::OK);
-    assert_eq!(second_get.status(), StatusCode::OK);
+    assert_eq!(second_get.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        second_get.text().await.unwrap(),
+        "outbound stream already has a subscriber"
+    );
 
     let mut first_stream = first_get.bytes_stream();
-    let mut second_stream = second_get.bytes_stream();
 
     let session_new = client
         .post(&url)
         .header(CONTENT_TYPE.as_str(), "application/json")
         .header(ACCEPT.as_str(), "application/json, text/event-stream")
         .header(ACP_CONNECTION_ID_HEADER, &connection_id)
-        .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+        .header(ACP_PROTOCOL_VERSION_HEADER, "1")
         .body(r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}"#)
         .send()
         .await
@@ -971,20 +1078,26 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
     assert!(session_new.text().await.unwrap().is_empty());
 
     let first_session_event = next_json_sse_event(&mut first_stream).await;
-    let second_session_event = next_json_sse_event(&mut second_stream).await;
     assert_eq!(first_session_event["id"], 2);
-    assert_eq!(second_session_event["id"], 2);
 
     let session_id = "test-session-1".to_string();
     assert_eq!(first_session_event["result"]["sessionId"], session_id);
-    assert_eq!(second_session_event["result"]["sessionId"], session_id);
 
-    // The `session/new` reply above fanned out on the connection stream because its
-    // request carried no session id yet. A `session/update` always carries one, so
-    // upstream routes it to the session stream: still fan-out, but scoped to the
-    // session instead of reaching every listener on the connection.
     let mut first_session_stream = session_stream(&client, &url, &connection_id, &session_id).await;
-    let mut second_session_stream = session_stream(&client, &url, &connection_id, &session_id).await;
+    let duplicate_session_stream = client
+        .get(&url)
+        .header(ACCEPT.as_str(), "text/event-stream")
+        .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+        .header(ACP_SESSION_ID_HEADER, &session_id)
+        .header(ACP_PROTOCOL_VERSION_HEADER, "1")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate_session_stream.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        duplicate_session_stream.text().await.unwrap(),
+        "outbound stream already has a subscriber"
+    );
 
     let notification = SessionNotification::new(
         session_id.clone(),
@@ -1013,16 +1126,10 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
         "method": "session/update",
         "params": serde_json::to_value(notification).unwrap(),
     });
-    let (first_event, second_event) = tokio::join!(
-        next_json_sse_event(&mut first_session_stream),
-        next_json_sse_event(&mut second_session_stream)
-    );
-
-    assert_eq!(first_event, expected);
-    assert_eq!(second_event, expected);
+    assert_eq!(next_json_sse_event(&mut first_session_stream).await, expected);
 
     drop(first_stream);
-    drop(second_stream);
+    drop(first_session_stream);
     shutdown_tx.send(true).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(2), server_task)
         .await
@@ -1053,14 +1160,14 @@ async fn upstream_http_transport_round_trips_initialize_through_the_bridge() {
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
             "acp.v1.global.agent.initialize",
-            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":1}"#));
 
     let (app, shutdown_tx) = build_upstream_app(nats_mock);
 
     let response = app
         .clone()
         .oneshot(http_post_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
         ))
         .await
         .unwrap();
@@ -1074,7 +1181,7 @@ async fn upstream_http_transport_round_trips_initialize_through_the_bridge() {
     let body: Value = serde_json::from_str(&body_text(response).await).unwrap();
     assert_eq!(body["id"], 1, "response must correlate to the request id");
     assert_eq!(
-        body["result"]["protocolVersion"], 0,
+        body["result"]["protocolVersion"], 1,
         "the bridge's NATS reply must reach the HTTP caller"
     );
 
@@ -1104,7 +1211,7 @@ async fn draining_closes_an_upstream_transport_connection_cleanly() {
     let (_channel, connection) =
         agent_client_protocol::ConnectTo::<agent_client_protocol::Client>::into_channel_and_future(component);
 
-    let handle = tokio::spawn(connection);
+    let handle = tokio::spawn(connection.expect("the component supplies a connection driver"));
 
     // Let the bridge and client proxy come up before asking them to stop, so the
     // drain branch wins the select rather than racing startup.

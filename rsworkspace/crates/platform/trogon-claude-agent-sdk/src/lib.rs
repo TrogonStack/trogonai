@@ -76,6 +76,8 @@ mod float_digits;
 mod framing;
 mod home_directory;
 mod hooks;
+#[cfg(unix)]
+mod inherited_descriptors;
 mod js_json;
 mod js_object_order;
 mod js_regex;
