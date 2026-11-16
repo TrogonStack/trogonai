@@ -17,12 +17,11 @@ use std::{ffi::c_int, io};
 
 use crate::ArgvStyle;
 
-/// The first descriptor after stdin, stdout and stderr.
-const FIRST_AFTER_STDIO: c_int = 3;
+mod constants;
 
-/// The descriptor count CPython's `safe_get_max_fd` assumes when `sysconf(_SC_OPEN_MAX)` has no answer.
+use constants::FIRST_AFTER_STDIO;
 #[cfg(not(target_vendor = "apple"))]
-const PYTHON_OPEN_MAX_FALLBACK: c_int = 256;
+use constants::PYTHON_OPEN_MAX_FALLBACK;
 
 /// Whether the child keeps only its stdio: always under the Python dialect, and on Apple platforms under the
 /// TypeScript one.
