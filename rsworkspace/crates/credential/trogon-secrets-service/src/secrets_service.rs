@@ -93,21 +93,19 @@ impl SecretsService {
                 config.child_tokens.clone(),
             )
         };
-        let (store, publisher) = tokio::try_join!(
-            async {
-                LoginRetry::new(OPENBAO_LOGIN_RETRY_INITIAL, OPENBAO_LOGIN_RETRY_MAX)
-                    .log_in(&shutdown, login)
-                    .await
-                    .map_err(SecretsServiceError::OpenBaoLogin)
-            },
-            async {
-                InvalidationPublisher::new(stream.clone(), jetstream.clone(), sources.tenant_owners.clone())
-                    .listen(&shutdown)
-                    .await
-                    .map_err(SecretsServiceError::Publish)
-            },
-        )?;
-        let (Some(store), Some(publisher)) = (store, publisher) else {
+        let log_in = async {
+            LoginRetry::new(OPENBAO_LOGIN_RETRY_INITIAL, OPENBAO_LOGIN_RETRY_MAX)
+                .log_in(&shutdown, login)
+                .await
+                .map_err(SecretsServiceError::OpenBaoLogin)
+        };
+        let listen = async {
+            InvalidationPublisher::new(stream.clone(), jetstream.clone(), sources.tenant_owners.clone())
+                .listen(&shutdown)
+                .await
+                .map_err(SecretsServiceError::Publish)
+        };
+        let (Some(store), Some(publisher)) = tokio::try_join!(log_in, listen)? else {
             return Ok(());
         };
         let stamper = Stamper::new(SystemClock, UuidV7Generator);
