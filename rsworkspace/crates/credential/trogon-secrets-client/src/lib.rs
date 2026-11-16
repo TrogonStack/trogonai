@@ -46,6 +46,16 @@
 //! [`INVALIDATION_LOOKBACK`] back. Concurrent misses for one key each ask the
 //! service; they are not merged into one call.
 //!
+//! # Telemetry
+//!
+//! On the `trogon-secrets-client` meter, [`CachedReleaseClient`] counts
+//! `secrets.client.invalidation.position_losses`, under
+//! `secrets.client.invalidation.loss_reason`, each time its reader loses its
+//! place, and `secrets.client.release_cache.capacity_skips` for each release
+//! it serves without holding because the cache is full. Each loss of place is
+//! also a warning event, and reading again an info event; a full cache warns
+//! at most once a minute, with how many releases it turned away since.
+//!
 //! # Features
 //!
 //! - `test-support`: adds `FakeSecretsService`, a scripted stand-in for the
@@ -70,6 +80,7 @@ mod fake_secrets_service;
 mod fixtures;
 mod invalid_release_response_error;
 mod invalidation_consumer;
+mod invalidation_loss;
 mod invalidation_notice;
 mod invalidation_reader;
 mod invalidation_start_error;
@@ -87,6 +98,7 @@ mod release_client;
 mod release_client_config;
 mod release_destination;
 mod release_error;
+mod release_hold;
 mod release_invalidation;
 mod release_request;
 mod release_subject_error;
@@ -103,6 +115,7 @@ mod service_xkey;
 mod service_xkey_error;
 #[cfg(test)]
 mod stepped_clock;
+mod telemetry;
 mod tenant_account;
 mod tenant_account_error;
 mod unseal_error;
@@ -121,6 +134,7 @@ pub use fake_request_error::FakeRequestError;
 pub use fake_secrets_service::FakeSecretsService;
 pub use invalid_release_response_error::InvalidReleaseResponseError;
 pub use invalidation_consumer::InvalidationConsumer;
+pub(crate) use invalidation_loss::InvalidationLoss;
 pub use invalidation_notice::InvalidationNotice;
 pub(crate) use invalidation_reader::InvalidationReader;
 pub use invalidation_start_error::InvalidationStartError;
@@ -138,6 +152,7 @@ pub use release_client::ReleaseClient;
 pub use release_client_config::ReleaseClientConfig;
 pub use release_destination::ReleaseDestination;
 pub use release_error::ReleaseError;
+pub(crate) use release_hold::ReleaseHold;
 pub(crate) use release_invalidation::ReleaseInvalidation;
 pub use release_request::ReleaseRequest;
 pub use release_subject_error::ReleaseSubjectError;
