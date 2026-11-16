@@ -22,3 +22,11 @@ sh_test(
     # Runs the bootstrap in a container through Docker, which pulls its image.
     tags = ["requires-network"],
 )
+
+# Drives provision-audit.sh against a stand-in `nats` CLI, so it needs no
+# server, no container and no copy; jq comes from the host like Docker does.
+sh_test(
+    name = "provision_audit_test",
+    srcs = ["provision-audit.test.sh"],
+    data = ["provision-audit.sh"],
+)
