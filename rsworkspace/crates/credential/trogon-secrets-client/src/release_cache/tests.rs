@@ -31,7 +31,7 @@ fn in_a_minute() -> SystemTime {
 
 fn notice_for(tenant: &TenantAccount, credential_id: &str) -> ReleaseInvalidation {
     ReleaseInvalidation::from_subject(&format!(
-        "{tenant}.secrets.invalidation.v1.project~alpha.{credential_id}"
+        "secrets.invalidation.v1.{tenant}.project~alpha.{credential_id}"
     ))
 }
 

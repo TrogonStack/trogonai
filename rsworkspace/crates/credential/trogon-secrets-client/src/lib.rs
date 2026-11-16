@@ -28,7 +28,7 @@
 //! credential, destination, and location, and at most
 //! [`MAX_CACHED_RELEASES`] at once (ADR#0049, ADR#0023 Decision 6). Its own
 //! reader of [`INVALIDATION_STREAM`] drops every held copy of a credential
-//! named on `{tenant}.secrets.invalidation.v1.{owner_token}.{credential_id}`,
+//! named on `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`,
 //! and every held copy at all for a notice it cannot read. It refuses to
 //! start without that stream. While its reader has lost its place it holds
 //! nothing, and it reads again every [`INVALIDATION_RETRY_DELAY`] from

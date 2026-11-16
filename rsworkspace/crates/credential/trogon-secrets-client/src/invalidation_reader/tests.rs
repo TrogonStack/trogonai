@@ -23,7 +23,7 @@ fn starts_no_earlier_than_the_epoch() {
 fn reads_every_tenant_from_the_lookback_as_an_ordered_consumer_does() {
     let config = consumer_config(now());
 
-    assert_eq!(config.filter_subject, "*.secrets.invalidation.v1.>");
+    assert_eq!(config.filter_subject, "secrets.invalidation.v1.*.>");
     assert_eq!(
         config.deliver_policy,
         DeliverPolicy::ByStartTime {

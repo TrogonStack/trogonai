@@ -4,7 +4,7 @@ use super::constants::INVALIDATION_DOMAIN;
 use super::{ReleaseCacheKey, TenantAccount};
 
 /// Which held releases one invalidation notice drops, read from its subject
-/// `{tenant}.secrets.invalidation.v1.{owner_token}.{credential_id}`.
+/// `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`.
 ///
 /// The payload is never read: a notice drops every copy of its credential,
 /// for every host and location, whatever the reason it gives. A subject that
@@ -23,7 +23,7 @@ pub(crate) enum ReleaseInvalidation {
 impl ReleaseInvalidation {
     pub(crate) fn from_subject(subject: &str) -> Self {
         let tokens: Vec<&str> = subject.split('.').collect();
-        let [tenant, domain @ .., owner_token, credential_id] = tokens.as_slice() else {
+        let [domain @ .., tenant, owner_token, credential_id] = tokens.as_slice() else {
             return Self::Unreadable;
         };
         if domain != INVALIDATION_DOMAIN || owner_token.is_empty() {

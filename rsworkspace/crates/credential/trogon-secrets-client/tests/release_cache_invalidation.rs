@@ -64,14 +64,13 @@ fn releasing(fake: &FakeSecretsService, times: usize) {
     }
 }
 
-/// Creates the stream on `tenant`'s notices: a stream subject that starts
-/// with a wildcard overlaps the server's own subjects, so the server refuses
-/// it unless the stream sends no acks.
-async fn create_stream(jetstream: &jetstream::Context, tenant: &TenantAccount) {
+/// Creates the stream on every tenant's notices, as the secrets service
+/// expects it.
+async fn create_stream(jetstream: &jetstream::Context) {
     jetstream
         .create_stream(stream::Config {
             name: INVALIDATION_STREAM.to_owned(),
-            subjects: vec![format!("{tenant}.secrets.invalidation.v1.>")],
+            subjects: vec!["secrets.invalidation.v1.*.>".to_owned()],
             ..Default::default()
         })
         .await
@@ -122,7 +121,7 @@ async fn drops_the_named_credential_and_keeps_the_others() {
     let server = JetStreamTestServer::start().await;
     let jetstream = server.jetstream().await;
     let tenant = tenant();
-    create_stream(&jetstream, &tenant).await;
+    create_stream(&jetstream).await;
     let fake = FakeSecretsService::new();
     releasing(&fake, 3);
     let client = started(&fake, &jetstream).await.unwrap();
@@ -133,7 +132,7 @@ async fn drops_the_named_credential_and_keeps_the_others() {
 
     jetstream
         .publish(
-            format!("{tenant}.secrets.invalidation.v1.{OWNER_TOKEN}.{NAMED}"),
+            format!("secrets.invalidation.v1.{tenant}.{OWNER_TOKEN}.{NAMED}"),
             "fake-not-a-notice".into(),
         )
         .await
@@ -155,7 +154,7 @@ async fn holds_nothing_while_the_stream_is_gone_and_again_once_it_is_back() {
     let server = JetStreamTestServer::start().await;
     let jetstream = server.jetstream().await;
     let tenant = tenant();
-    create_stream(&jetstream, &tenant).await;
+    create_stream(&jetstream).await;
     let fake = FakeSecretsService::new();
     releasing(&fake, 4);
     let client = started(&fake, &jetstream).await.unwrap();
@@ -168,7 +167,7 @@ async fn holds_nothing_while_the_stream_is_gone_and_again_once_it_is_back() {
     client.release(&asked).await.unwrap();
     assert_eq!(fake.received().len(), 3);
 
-    create_stream(&jetstream, &tenant).await;
+    create_stream(&jetstream).await;
     until(|| async { client.mode() == ReleaseCacheMode::Caching }).await;
     client.release(&asked).await.unwrap();
     client.release(&asked).await.unwrap();

@@ -26,7 +26,7 @@ fn releasing(fake: &FakeSecretsService, times: usize) {
 }
 
 fn notice_subject(tenant: &TenantAccount, credential_id: &str) -> String {
-    format!("{tenant}.secrets.invalidation.v1.project~alpha.{credential_id}")
+    format!("secrets.invalidation.v1.{tenant}.project~alpha.{credential_id}")
 }
 
 fn of_credential(asked: &ReleaseRequest, credential_id: &str) -> ReleaseRequest {

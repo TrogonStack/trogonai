@@ -40,8 +40,8 @@ pub const INVALIDATION_RETRY_DELAY: Duration = Duration::from_secs(1);
 pub const INVALIDATION_STREAM: &str = "SECRETS_INVALIDATION";
 
 /// Every tenant's release invalidations:
-/// `{tenant}.secrets.invalidation.v1.{owner_token}.{credential_id}`.
-pub(crate) const INVALIDATION_FILTER: &str = "*.secrets.invalidation.v1.>";
+/// `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`.
+pub(crate) const INVALIDATION_FILTER: &str = "secrets.invalidation.v1.*.>";
 
-/// The tokens between the tenant and the owner in an invalidation subject.
+/// The tokens before the tenant in an invalidation subject.
 pub(crate) const INVALIDATION_DOMAIN: [&str; 3] = ["secrets", "invalidation", "v1"];

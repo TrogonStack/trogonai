@@ -7,7 +7,7 @@ use crate::{ReleaseCacheKey, ReleaseRequest, TenantAccount};
 const OTHER_CREDENTIAL_ID: &str = "1c7e3a4f-8d2b-4a6c-9e01-2f3b4c5d6e7f";
 
 fn subject(tenant: &TenantAccount, owner_token: &str, credential_id: &str) -> String {
-    format!("{tenant}.secrets.invalidation.v1.{owner_token}.{credential_id}")
+    format!("secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}")
 }
 
 fn key_for(tenant: &TenantAccount, owner: &str, credential_id: &str) -> ReleaseCacheKey {
@@ -29,8 +29,8 @@ fn cannot_read_a_subject_with_too_few_or_too_many_tokens() {
     let tenant = tenant();
 
     for subject in [
-        format!("{tenant}.secrets.invalidation.v1.{CREDENTIAL_ID}"),
-        format!("{tenant}.secrets.invalidation.v1.project~alpha.{CREDENTIAL_ID}.extra"),
+        format!("secrets.invalidation.v1.{tenant}.{CREDENTIAL_ID}"),
+        format!("secrets.invalidation.v1.{tenant}.project~alpha.{CREDENTIAL_ID}.extra"),
         String::new(),
     ] {
         assert_eq!(
@@ -46,7 +46,19 @@ fn cannot_read_a_subject_outside_the_invalidation_domain() {
 
     assert_eq!(
         ReleaseInvalidation::from_subject(&format!(
-            "{tenant}.secrets.invalidation.v2.project~alpha.{CREDENTIAL_ID}"
+            "secrets.invalidation.v2.{tenant}.project~alpha.{CREDENTIAL_ID}"
+        )),
+        ReleaseInvalidation::Unreadable
+    );
+}
+
+#[test]
+fn cannot_read_a_subject_that_puts_the_tenant_before_the_prefix() {
+    let tenant = tenant();
+
+    assert_eq!(
+        ReleaseInvalidation::from_subject(&format!(
+            "{tenant}.secrets.invalidation.v1.project~alpha.{CREDENTIAL_ID}"
         )),
         ReleaseInvalidation::Unreadable
     );
@@ -64,7 +76,7 @@ fn cannot_read_a_subject_with_an_empty_owner() {
 fn cannot_read_a_subject_whose_tenant_is_not_an_account() {
     assert_eq!(
         ReleaseInvalidation::from_subject(&format!(
-            "fake-tenant.secrets.invalidation.v1.project~alpha.{CREDENTIAL_ID}"
+            "secrets.invalidation.v1.fake-tenant.project~alpha.{CREDENTIAL_ID}"
         )),
         ReleaseInvalidation::Unreadable
     );
