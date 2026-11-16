@@ -13,8 +13,8 @@ use super::constants::{
     INVALIDATION_STREAM,
 };
 use super::{
-    InvalidationConsumer, InvalidationNotice, InvalidationStartError, InvalidationStream, InvalidationStreamSource,
-    ReleaseCache, ReleaseInvalidation,
+    InvalidationConsumer, InvalidationNotice, InvalidationStartError, InvalidationStream, InvalidationStreamError,
+    InvalidationStreamSource, ReleaseCache, ReleaseInvalidation,
 };
 
 type Consumer<J> = <<J as InvalidationStreamSource>::Stream as InvalidationStream>::Consumer;
@@ -32,6 +32,14 @@ type Notices<J> = <Consumer<J> as InvalidationConsumer>::Notices;
 /// [`INVALIDATION_POSITION_CHECK`]; then it drops every
 /// held copy and holds none, retrying every [`INVALIDATION_RETRY_DELAY`]
 /// until it reads again. It stops when dropped.
+///
+/// It never looks at stream sequences. A notice the stream removed before
+/// delivering it would leave the consumer sequences unbroken, so the reader
+/// refuses, at every subscribe, a stream configured to remove or rewrite a
+/// notice inside the lookback ([`InvalidationStreamError`]); within one it
+/// accepts, no notice leaves the stream there, and consumer sequences are
+/// enough. A refused stream stops the client from starting, and later keeps
+/// the reader retrying with nothing held.
 ///
 /// The client's own `pull::Ordered` is not used: it recreates its consumer
 /// from where it was without saying so, so a stream that was replaced, or
@@ -69,6 +77,7 @@ where
     C: EpochClock,
 {
     let stream = jetstream.get_stream(INVALIDATION_STREAM).await?;
+    InvalidationStreamError::check(&stream.config())?;
     let consumer = stream.create_consumer(consumer_config(clock.system_time())).await?;
     let notices = consumer.messages().await?;
     Ok((consumer, notices))

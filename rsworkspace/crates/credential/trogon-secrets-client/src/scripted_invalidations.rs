@@ -7,9 +7,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_nats::jetstream::consumer::pull::{self, MessagesError, MessagesErrorKind};
 use async_nats::jetstream::consumer::{StreamError, StreamErrorKind};
 use async_nats::jetstream::context::{ConsumerInfoError, ConsumerInfoErrorKind, GetStreamError, GetStreamErrorKind};
-use async_nats::jetstream::stream::{ConsumerError, ConsumerErrorKind};
+use async_nats::jetstream::stream::{self, ConsumerError, ConsumerErrorKind};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
+use super::fixtures::invalidation_stream_config;
 use super::{InvalidationConsumer, InvalidationStep, InvalidationStream, InvalidationStreamSource, ScriptedNotice};
 
 type Delivery = Result<ScriptedNotice, MessagesError>;
@@ -17,9 +18,11 @@ type Feed = UnboundedSender<Delivery>;
 
 /// Answers every lookup with itself and hands each reader a feed of its own;
 /// the test sends notices down the latest feed, numbered from one as a
-/// consumer numbers what it delivers.
-#[derive(Clone, Default)]
+/// consumer numbers what it delivers. The stream is configured as the
+/// secrets service creates it until a test configures it otherwise.
+#[derive(Clone)]
 pub(crate) struct ScriptedInvalidations {
+    stream_config: Arc<Mutex<stream::Config>>,
     refusals: Arc<Mutex<VecDeque<InvalidationStep>>>,
     streams: Arc<Mutex<Vec<String>>>,
     configs: Arc<Mutex<Vec<pull::Config>>>,
@@ -29,7 +32,26 @@ pub(crate) struct ScriptedInvalidations {
     position_checks: Arc<Mutex<usize>>,
 }
 
+impl Default for ScriptedInvalidations {
+    fn default() -> Self {
+        Self {
+            stream_config: Arc::new(Mutex::new(invalidation_stream_config())),
+            refusals: Arc::default(),
+            streams: Arc::default(),
+            configs: Arc::default(),
+            feed: Arc::default(),
+            delivered: Arc::default(),
+            held_back: Arc::default(),
+            position_checks: Arc::default(),
+        }
+    }
+}
+
 impl ScriptedInvalidations {
+    /// Configures the stream every later lookup finds as `config`.
+    pub(crate) fn configure_stream(&self, config: stream::Config) {
+        *lock(&self.stream_config) = config;
+    }
     /// Makes the next attempt fail at `step`.
     pub(crate) fn refuse(&self, step: InvalidationStep) {
         lock(&self.refusals).push_back(step);
@@ -132,6 +154,10 @@ impl InvalidationStreamSource for ScriptedInvalidations {
 
 impl InvalidationStream for ScriptedInvalidations {
     type Consumer = Self;
+
+    fn config(&self) -> stream::Config {
+        lock(&self.stream_config).clone()
+    }
 
     async fn create_consumer(&self, config: pull::Config) -> Result<Self, ConsumerError> {
         lock(&self.configs).push(config);

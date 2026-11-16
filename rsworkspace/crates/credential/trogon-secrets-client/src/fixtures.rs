@@ -3,6 +3,7 @@
 use std::num::NonZeroU16;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use async_nats::jetstream::stream::{self, DiscardPolicy, RetentionPolicy, StorageType};
 use buffa::MessageField;
 use buffa_types::google::protobuf::Timestamp;
 use nkeys::{KeyPair, XKey};
@@ -99,4 +100,22 @@ pub(crate) fn released_until(valid_until: SystemTime) -> ReleasedValue {
         now(),
     )
     .unwrap()
+}
+
+/// The invalidation stream as the secrets service creates it.
+pub(crate) fn invalidation_stream_config() -> stream::Config {
+    stream::Config {
+        name: crate::INVALIDATION_STREAM.to_owned(),
+        subjects: vec!["secrets.invalidation.v1.*.>".to_owned()],
+        storage: StorageType::File,
+        retention: RetentionPolicy::Limits,
+        discard: DiscardPolicy::Old,
+        max_age: Duration::from_secs(3_600),
+        duplicate_window: Duration::from_secs(120),
+        max_message_size: 1_024,
+        deny_delete: true,
+        deny_purge: true,
+        allow_direct: true,
+        ..Default::default()
+    }
 }

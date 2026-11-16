@@ -64,13 +64,22 @@ fn releasing(fake: &FakeSecretsService, times: usize) {
     }
 }
 
-/// Creates the stream on every tenant's notices, as the secrets service
-/// expects it.
+/// Creates the stream on every tenant's notices, configured as the secrets
+/// service creates it.
 async fn create_stream(jetstream: &jetstream::Context) {
     jetstream
         .create_stream(stream::Config {
             name: INVALIDATION_STREAM.to_owned(),
             subjects: vec!["secrets.invalidation.v1.*.>".to_owned()],
+            storage: stream::StorageType::File,
+            retention: stream::RetentionPolicy::Limits,
+            discard: stream::DiscardPolicy::Old,
+            max_age: Duration::from_secs(3_600),
+            duplicate_window: Duration::from_secs(120),
+            max_message_size: 1_024,
+            deny_delete: true,
+            deny_purge: true,
+            allow_direct: true,
             ..Default::default()
         })
         .await

@@ -36,7 +36,9 @@
 //! way when its credential is invalidated, or when the reader loses or
 //! regains its place, is neither held nor returned; the client asks once more
 //! and fails with [`ReleaseError::Invalidated`] if that one is overtaken too. It refuses to
-//! start without that stream. Every [`INVALIDATION_POSITION_CHECK`] without a
+//! start without that stream, or with one whose configuration could remove or
+//! rewrite a notice inside the lookback ([`InvalidationStreamError`]); the
+//! stream's capacity is left to its operator. Every [`INVALIDATION_POSITION_CHECK`] without a
 //! notice it asks the server how far its consumer delivered, and a notice
 //! delivered but still not received at the next look loses it its place.
 //! While its reader has lost its place it holds
@@ -74,6 +76,7 @@ mod invalidation_start_error;
 #[cfg(test)]
 mod invalidation_step;
 mod invalidation_stream;
+mod invalidation_stream_error;
 mod invalidation_stream_source;
 #[cfg(any(test, feature = "test-support"))]
 mod received_release;
@@ -124,6 +127,7 @@ pub use invalidation_start_error::InvalidationStartError;
 #[cfg(test)]
 pub(crate) use invalidation_step::InvalidationStep;
 pub use invalidation_stream::InvalidationStream;
+pub use invalidation_stream_error::InvalidationStreamError;
 pub use invalidation_stream_source::InvalidationStreamSource;
 #[cfg(any(test, feature = "test-support"))]
 pub use received_release::ReceivedRelease;

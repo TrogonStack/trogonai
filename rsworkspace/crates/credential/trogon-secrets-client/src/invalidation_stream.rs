@@ -9,6 +9,9 @@ use super::InvalidationConsumer;
 pub trait InvalidationStream: Send + Sync + 'static {
     type Consumer: InvalidationConsumer;
 
+    /// The configuration the stream had when it was looked up.
+    fn config(&self) -> stream::Config;
+
     fn create_consumer(
         &self,
         config: pull::Config,
@@ -17,6 +20,10 @@ pub trait InvalidationStream: Send + Sync + 'static {
 
 impl InvalidationStream for stream::Stream {
     type Consumer = Consumer<pull::Config>;
+
+    fn config(&self) -> stream::Config {
+        self.cached_info().config.clone()
+    }
 
     async fn create_consumer(&self, config: pull::Config) -> Result<Self::Consumer, stream::ConsumerError> {
         stream::Stream::create_consumer(self, config).await

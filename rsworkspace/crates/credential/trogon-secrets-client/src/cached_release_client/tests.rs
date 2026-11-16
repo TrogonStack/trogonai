@@ -6,11 +6,14 @@ use trogon_credential_domain::{CredentialId, CredentialKey};
 use trogon_std::SecretString;
 
 use super::CachedReleaseClient;
-use crate::fixtures::{BUNDLE_GENERATION, CREDENTIAL_ID, VALUE, now, request, runtime_service, secret, tenant};
+use crate::fixtures::{
+    BUNDLE_GENERATION, CREDENTIAL_ID, VALUE, invalidation_stream_config, now, request, runtime_service, secret, tenant,
+};
 use crate::{
     FakeOutcome, FakeSecretsService, INVALIDATION_POSITION_CHECK, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM,
-    InvalidationStartError, InvalidationStep, ReleaseCacheMode, ReleaseClient, ReleaseClientConfig, ReleaseError,
-    ReleaseRequest, ReleasedValue, ScriptedInvalidations, SteppedClock, TenantAccount,
+    InvalidationStartError, InvalidationStep, InvalidationStreamError, ReleaseCacheMode, ReleaseClient,
+    ReleaseClientConfig, ReleaseError, ReleaseRequest, ReleasedValue, ScriptedInvalidations, SteppedClock,
+    TenantAccount,
 };
 
 const OTHER_CREDENTIAL_ID: &str = "1c7e3a4f-8d2b-4a6c-9e01-2f3b4c5d6e7f";
@@ -115,6 +118,45 @@ async fn refuses_to_start_without_the_invalidation_stream() {
     assert!(matches!(refused, InvalidationStartError::Stream(_)));
     assert_eq!(refused.to_string(), "the invalidation stream could not be found");
     assert_eq!(invalidations.streams(), [INVALIDATION_STREAM]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn refuses_to_start_on_a_stream_that_could_drop_a_notice_inside_the_lookback() {
+    let invalidations = ScriptedInvalidations::default();
+    let mut config = invalidation_stream_config();
+    config.deny_purge = false;
+    invalidations.configure_stream(config);
+
+    let refused = started(&FakeSecretsService::new(), &invalidations).await.err().unwrap();
+
+    assert!(matches!(
+        refused,
+        InvalidationStartError::StreamConfig(InvalidationStreamError::PurgesAllowed)
+    ));
+    assert_eq!(
+        refused.to_string(),
+        "the invalidation stream lets its notices be purged"
+    );
+    assert!(invalidations.configs().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_holding_nothing_while_the_stream_could_drop_a_notice() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    let mut config = invalidation_stream_config();
+    config.max_age = Duration::from_secs(60);
+    invalidations.configure_stream(config);
+
+    invalidations.fail();
+    retry().await;
+    retry().await;
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    invalidations.configure_stream(invalidation_stream_config());
+    retry().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert_eq!(invalidations.configs().len(), 2);
 }
 
 #[tokio::test(start_paused = true)]
