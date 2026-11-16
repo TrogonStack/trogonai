@@ -1,12 +1,31 @@
 # Build and test with Bazel
 
-Bazel is available alongside the existing Cargo, Go, Buf, and pnpm workflows.
-Its current targets build the protobuf-to-WIT generator, test the Go workspace,
-build and test the foundation Rust crates (the platform, ARD, A2A pack and redaction,
-decider, and AAuth verifier crates), and generate WIT from the scheduler's
-`ScheduleStatus` schema. Existing CI remains responsible for the rest of the
-repository, Rust lint and coverage gates, Go race detection, and committed
-generated-code checks.
+Bazel is the repository's CI. The `CI Bazel` workflow builds, lints, and tests
+every target with `bazel coverage //...`, and its `Bazel result` check covers the
+Rust, Go, protobuf, TypeScript, documentation, ADR, workload identity, and
+workflow checks that used to run in one workflow per language.
+
+## What runs outside Bazel
+
+A few checks cannot run inside Bazel, so each keeps a small workflow of its own:
+
+| Workflow | Check | Why it is not a Bazel target |
+| --- | --- | --- |
+| `CI Dylint` | Repository Rust policy lints and their tests | The lint library links `rustc_private` crates from a pinned nightly with `rustc-dev`, which the Bazel Rust toolchain lacks. |
+| `CI Cargo` | Rust tests tagged `manual` or skipped in a `BUILD.bazel` | They shell out to Cargo, load components built by `cargo component`, or read files outside their Bazel package. |
+| `CI Buf Breaking` | `buf breaking` against the base branch | It compares against another revision of the repository. |
+| `CI pnpm Lockfiles` | `pnpm install --frozen-lockfile` for `docs` and `tsworkspace` | Bazel reads the lockfiles; it does not check them against each `package.json`. |
+| `CI Automation` | CI selection tests, the canary helper tests, and `bash -n` over the mise tasks | `.bazelignore` leaves `.config/mise/tasks` out of Bazel. |
+| `CI Bazel Fork Coverage` | Independently compare a fork's report and publish its PR comment | Publishing needs a trusted default-branch workflow with separate token permissions. |
+
+Fork coverage comparison also gates `Bazel result` using a read-only job in
+`CI Bazel`. See the [fork coverage contract](../reference/bazel-fork-coverage.md)
+for policy, provenance, publishing boundaries and stale-run handling.
+
+`CI Cargo` reads the `manual` tags and `--skip` arguments from each crate's
+`BUILD.bazel`, so tagging a test `manual` moves it there with no list to update.
+CodeQL, release, PR title, and Pages workflows are unrelated to the build and
+stay as they are.
 
 ## Run the native targets
 
@@ -41,10 +60,9 @@ mise run --skip-tools bazel:lock
 mise run --skip-tools bazel:setup
 ```
 
-Commit `.config/mise/mise.lock` with pin updates. It covers every configured repository tool,
-including the additional Go version and kubeconform used by CI Workload Identity.
+Commit `.config/mise/mise.lock` with pin updates. It covers every configured repository tool.
 The first Go version remains the default for local development and native Bazel
-builds. The lockfile uses format 3 for compatibility with CI's pinned mise release.
+builds. The lockfile uses format 3 so older pinned mise releases can still read it.
 
 The build task runs `bazel build //...`; the test task runs `bazel test //...`.
 Arguments are forwarded to Bazel, so a test can be selected without changing
@@ -82,7 +100,7 @@ when a member manifest, the lockfile, or a target directory changes, so the
 library, binaries, integration tests, examples, features, and workspace
 dependencies all come from Cargo. External dependencies come from crate_universe
 through the same `Cargo.toml`. Bazel builds each crate with all of its features,
-as the Cargo CI test run does.
+as `cargo test --all-features` does.
 
 What Cargo cannot express goes in the crate's `BUILD.bazel` as arguments to
 `workspace_crate`, so `Cargo.toml` stays Cargo-only: compile and run time data,
@@ -108,12 +126,13 @@ updating.
 Tests that start NATS through Docker run as part of `bazel test //...`, as they
 do under Cargo. Tests that scan sources outside their package, load wasm
 components built by `cargo component`, or shell out to Cargo (`trybuild`, the
-WIT feature build) are tagged `manual` and run only under Cargo.
+WIT feature build) are tagged `manual` and run in the `CI Cargo` workflow.
 
 The dylint library in `rsworkspace/dylints/trogonai_dylint` has no Bazel
 target. It is a separate Cargo workspace with its own lockfile that links
 `rustc_private` crates from a pinned nightly toolchain with `rustc-dev`, which
-the Bazel Rust toolchain does not provide; Cargo CI builds and tests it.
+the Bazel Rust toolchain does not provide; the `CI Dylint` workflow builds and
+tests it.
 
 ## Inspect dependencies
 
@@ -169,10 +188,10 @@ protocols, authentication, and read/write controls.
 ## Extend the migration
 
 Add native targets next to the code they build, including all consumed files,
-tools, and generated artifacts. Preserve the existing language checks until
-their Bazel equivalents have demonstrated parity. The current targets do not
-migrate the remaining Rust crates, TypeScript packages, full Buf module, release
-automation, or Dagger pipelines.
+tools, and generated artifacts. A new check belongs in Bazel; add a workflow of
+its own only when it cannot run as a Bazel target, and list it in
+[What runs outside Bazel](#what-runs-outside-bazel). Release automation and the
+Dagger pipelines are not Bazel targets.
 
 The root `MODULE.bazel` only declares the module, because Bazel requires it at
 the repository root. The root `BUILD.bazel` is empty and exists because

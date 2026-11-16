@@ -12,7 +12,7 @@ fn system_messages_keep_open_subtypes_metadata_and_optional_identity() -> Result
     };
     assert_eq!(message.subtype, "session_state_changed");
     assert!(message.session_id.is_none());
-    assert_eq!(message.clone().data, data);
+    assert_eq!(&message.clone().data, &data);
     let attributed = SystemMessage {
         subtype: "future_subtype".into(),
         session_id: Some(SessionId::from("session-one")),

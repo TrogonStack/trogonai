@@ -268,7 +268,7 @@ async fn scope_connects_runs_the_body_and_disconnects() -> TestResult {
             client.query(Prompt::from("x")).await?;
             while let Some(message) = client.next_message().await? {
                 if let Message::Result(result) = message {
-                    return Ok(result.result);
+                    return Ok(result.result.clone());
                 }
             }
             Err(Error::UnexpectedEof)

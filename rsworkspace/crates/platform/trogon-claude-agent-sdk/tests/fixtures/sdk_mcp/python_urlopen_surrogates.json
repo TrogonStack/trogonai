@@ -1,0 +1,432 @@
+{
+ "byte_names": false,
+ "cases": [
+  {
+   "uri": "data:\udc80;base64,e30=",
+   "ok": "{}",
+   "events": []
+  },
+  {
+   "uri": "data:\ud800;base64,e30=",
+   "error": [
+    "UnicodeEncodeError",
+    "'ascii' codec can't encode character '\\ud800' in position 0: ordinal not in range(128)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:text/plain;\udc80,{}",
+   "ok": "{}",
+   "events": []
+  },
+  {
+   "uri": "data:\udc80,%7B%7D",
+   "ok": "{}",
+   "events": []
+  },
+  {
+   "uri": "data:;base64\udc80,e30=",
+   "ok": "e30=",
+   "events": []
+  },
+  {
+   "uri": "data:\udc80;base64,e30",
+   "error": [
+    "Error",
+    "Incorrect padding"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:,{}\udc80",
+   "error": [
+    "UnicodeEncodeError",
+    "'utf-8' codec can't encode character '\\udc80' in position 2: surrogates not allowed"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:,\ud800",
+   "error": [
+    "UnicodeEncodeError",
+    "'utf-8' codec can't encode character '\\ud800' in position 0: surrogates not allowed"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:\udc80,%ZZ\udc80",
+   "error": [
+    "UnicodeEncodeError",
+    "'utf-8' codec can't encode character '\\udc80' in position 3: surrogates not allowed"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:\udc80",
+   "error": [
+    "ValueError",
+    "not enough values to unpack (expected 2, got 1)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:\u0001\udc80,{}",
+   "error": [
+    "ValueError",
+    "Control characters not allowed in data: mediatype"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:\udc80\u007f,{}",
+   "error": [
+    "ValueError",
+    "Control characters not allowed in data: mediatype"
+   ],
+   "events": []
+  },
+  {
+   "uri": "DATA:\udc80,{}",
+   "ok": "{}",
+   "events": []
+  },
+  {
+   "uri": "<data:\udc80,{}>",
+   "ok": "{}",
+   "events": []
+  },
+  {
+   "uri": " URL:data:\udc80,{} ",
+   "ok": "{}",
+   "events": []
+  },
+  {
+   "uri": "data:text/plain;charset=\udc80;base64,WzFd",
+   "ok": "[1]",
+   "events": []
+  },
+  {
+   "uri": "data:a\u2028\ud800,{}",
+   "error": [
+    "UnicodeEncodeError",
+    "'ascii' codec can't encode characters in position 1-2: ordinal not in range(128)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data: \ud800,{}",
+   "error": [
+    "UnicodeEncodeError",
+    "'ascii' codec can't encode character '\\ud800' in position 0: ordinal not in range(128)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:\udc80\ud800,{}",
+   "error": [
+    "UnicodeEncodeError",
+    "'ascii' codec can't encode character '\\ud800' in position 1: ordinal not in range(128)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:\u00e9\ud800,{}",
+   "error": [
+    "UnicodeEncodeError",
+    "'ascii' codec can't encode characters in position 0-1: ordinal not in range(128)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "data:\u00e9,{}",
+   "ok": "{}",
+   "events": []
+  },
+  {
+   "uri": "file://{dir}/a\udc80.json",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/a\\udc80.json'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://{dir}/b\udcc3.json",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/b\\udcc3.json'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://{dir}/a\udcff.json",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/a\\udcff.json'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file:a\ud800",
+   "error": [
+    "UnicodeEncodeError",
+    "'utf-8' codec can't encode character '\\ud800' in position 1: surrogates not allowed"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file:a\u0000\ud800",
+   "error": [
+    "UnicodeEncodeError",
+    "'utf-8' codec can't encode character '\\ud800' in position 2: surrogates not allowed"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file:a\ud800%00",
+   "error": [
+    "UnicodeEncodeError",
+    "'utf-8' codec can't encode character '\\ud800' in position 1: surrogates not allowed"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file:\udc80\udc81\ud800\ud801",
+   "error": [
+    "UnicodeEncodeError",
+    "'utf-8' codec can't encode characters in position 2-3: surrogates not allowed"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file:missing\udc80",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: 'missing\\udc80'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://{dir}/d\udc80",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/d\\udc80'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://{dir}/a\udc80%2Ejson",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/a\\udc80.json'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file:{dir}/a\udc80.json",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/a\\udc80.json'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://localhost{dir}/a\udc80.json",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/a\\udc80.json'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://h\udc80{dir}/plain.json",
+   "error": [
+    "UnicodeError",
+    "Invalid character '\\udc80'"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://h\udc80{dir}/a\udc80.json",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/a\\udc80.json'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://h\udc80//x\udc80",
+   "error": [
+    "URLError",
+    "<urlopen error file:// scheme is supported only on localhost>"
+   ],
+   "events": [
+    "socket.gethostbyname"
+   ]
+  },
+  {
+   "uri": "file:////h\udc80",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '//h\\udc80'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://{dir}/a\udc80.json\u0000",
+   "error": [
+    "ValueError",
+    "stat: embedded null character in path"
+   ],
+   "events": []
+  },
+  {
+   "uri": "file://{dir}/missing\udc80",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 2] No such file or directory: '{dir}/missing\\udc80'>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "http://127.0.0.1:9/\udc80",
+   "error": [
+    "UnicodeEncodeError",
+    "'ascii' codec can't encode character '\\udc80' in position 5: ordinal not in range(128)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "http://127.0.0.1:9/?\udc80",
+   "error": [
+    "UnicodeEncodeError",
+    "'ascii' codec can't encode character '\\udc80' in position 6: ordinal not in range(128)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "http://h\udc80/",
+   "error": [
+    "UnicodeEncodeError",
+    "'latin-1' codec can't encode character '\\udc80' in position 1: ordinal not in range(256)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "http://h\udc80:9/x",
+   "error": [
+    "UnicodeEncodeError",
+    "'latin-1' codec can't encode character '\\udc80' in position 1: ordinal not in range(256)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "http://127.0.0.1:9\udc80/",
+   "error": [
+    "InvalidURL",
+    "nonnumeric port: '9\udc80'"
+   ],
+   "events": []
+  },
+  {
+   "uri": "http://\udc80@127.0.0.1:9/",
+   "error": [
+    "UnicodeEncodeError",
+    "'latin-1' codec can't encode character '\\udc80' in position 0: ordinal not in range(256)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "https://127.0.0.1:9/\udc80",
+   "error": [
+    "UnicodeEncodeError",
+    "'ascii' codec can't encode character '\\udc80' in position 5: ordinal not in range(128)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "https://h\udc80/",
+   "error": [
+    "UnicodeEncodeError",
+    "'latin-1' codec can't encode character '\\udc80' in position 1: ordinal not in range(256)"
+   ],
+   "events": []
+  },
+  {
+   "uri": "http:\udc80",
+   "error": [
+    "URLError",
+    "<urlopen error no host given>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "http:///\udc80",
+   "error": [
+    "URLError",
+    "<urlopen error no host given>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "ftp://h\udc80/x",
+   "error": [
+    "UnicodeError",
+    "Invalid character '\\udc80'"
+   ],
+   "events": []
+  },
+  {
+   "uri": "ftp://u\udc80@127.0.0.1:9/x",
+   "error": [
+    "URLError",
+    "<urlopen error [Errno 61] Connection refused>"
+   ],
+   "events": [
+    "socket.connect",
+    "socket.getaddrinfo",
+    "socket.gethostbyname"
+   ]
+  },
+  {
+   "uri": "\udc80:x",
+   "error": [
+    "URLError",
+    "<urlopen error unknown url type: \udc80>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "x\udc80",
+   "error": [
+    "ValueError",
+    "unknown url type: 'x\\udc80'"
+   ],
+   "events": []
+  },
+  {
+   "uri": "/\udc80",
+   "error": [
+    "ValueError",
+    "unknown url type: '/\\udc80'"
+   ],
+   "events": []
+  },
+  {
+   "uri": "mailto:\udc80",
+   "error": [
+    "URLError",
+    "<urlopen error unknown url type: mailto>"
+   ],
+   "events": []
+  },
+  {
+   "uri": "Ma\udc80x:y",
+   "error": [
+    "URLError",
+    "<urlopen error unknown url type: ma\udc80x>"
+   ],
+   "events": []
+  }
+ ]
+}

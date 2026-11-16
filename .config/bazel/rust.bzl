@@ -3,7 +3,7 @@
 `workspace_crate()` looks its package up in `CRATES`, which the cargo_workspace
 module extension reads from `cargo metadata`, so a crate's BUILD.bazel holds no
 dependency, feature, or target lists. Bazel builds each crate with all of its
-features, as the Cargo CI test run does, plus any feature sets the crate lists
+features, as `cargo test --all-features` does, plus any feature sets the crate lists
 in `feature_variants`.
 
 What Cargo cannot express, such as test tags, skipped tests, and extra files,
@@ -18,8 +18,10 @@ core module; `decider.bzl` turns it into the component.
 
 load("@cargo_workspace//:crates.bzl", "CRATES")
 load("@crates//:defs.bzl", "all_crate_deps", crate_aliases = "aliases")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library", "rust_proc_macro", "rust_shared_library", "rust_test")
+load("//.config/bazel:compiler_failures.bzl", "compiler_failure")
 load("//.config/bazel:decider.bzl", "decider_component")
 
 _RUSTC_FLAGS = ["-Dwarnings"]
@@ -29,6 +31,59 @@ _TARGET_KEYS = {
     "examples": ["compile_data", "rustc_env", "tags"],
     "integration_tests": ["args", "compile_data", "data", "rustc_env", "tags"],
 }
+
+def workspace_compile_fail_tests(name, fixtures, compile_data = []):
+    """Checks every fixture against its existing trybuild diagnostic golden.
+
+    Args:
+        name: The Bazel test name.
+        fixtures: Rust fixture sources, each with a sibling `.stderr` file.
+        compile_data: Files read by procedural macros while compiling fixtures.
+    """
+    crate = CRATES[native.package_name()]
+    deps = all_crate_deps(normal = True, normal_dev = True) + crate["deps"] + crate["dev_deps"]
+    proc_macro_deps = all_crate_deps(proc_macro = True, proc_macro_dev = True) + crate["proc_macro_deps"] + crate["dev_proc_macro_deps"]
+    aliases = crate_aliases(normal = True, normal_dev = True, proc_macro = True, proc_macro_dev = True) | crate["aliases"]
+    args = []
+    data = []
+    for fixture in fixtures:
+        stem = fixture.rpartition("/")[2].removesuffix(".rs")
+        result = name + "_" + stem
+        golden = fixture.removesuffix(".rs") + ".stderr"
+        compiler_failure(
+            name = result,
+            src = fixture,
+            crate_name = stem,
+            edition = crate["edition"],
+            deps = deps,
+            proc_macro_deps = proc_macro_deps,
+            aliases = aliases,
+            compile_data = compile_data,
+            testonly = True,
+        )
+        args.extend([
+            "--fixture=$(rootpath {})".format(fixture),
+            "--case",
+            "$(rootpath {})".format(fixture),
+            "$(rootpath {})".format(golden),
+            "$(rootpath :{})".format(result),
+        ])
+        data.extend([fixture, golden, ":" + result])
+    py_test(
+        name = name,
+        srcs = ["//.config/bazel:compiler_failures.py"],
+        main = "//.config/bazel:compiler_failures.py",
+        args = args,
+        data = data,
+    )
+    py_test(
+        name = name + "_contract_test",
+        srcs = ["//.config/bazel:compiler_failures_test.py"],
+        main = "//.config/bazel:compiler_failures_test.py",
+        args = args,
+        data = data,
+        deps = ["//.config/bazel:compiler_failures_lib"],
+    )
 
 def _files(entries):
     """Resolves `compile_data` and `data` entries to globs and labels."""
@@ -81,7 +136,8 @@ def workspace_crate(
         binaries = {},
         integration_tests = {},
         examples = {},
-        feature_variants = {}):
+        feature_variants = {},
+        compile_fail_features = None):
     """Declares the library, binaries, tests, doctests, and examples Cargo builds for this package.
 
     Dependencies, features, and targets come from Cargo. The arguments carry only
@@ -104,6 +160,8 @@ def workspace_crate(
         feature_variants: Maps a variant name to another set of Cargo features.
             Each variant declares every target again with those features, named
             with a `_<variant>` suffix, for feature sets Cargo checks separately.
+        compile_fail_features: Cargo features used by compiler-failure fixtures,
+            whose diagnostic goldens depend on the package-scoped feature set.
 
     Under `binaries`, `integration_tests`, and `examples`, the `*` entry applies
     to every target of that kind. `compile_data` and `data` entries are globs
@@ -137,6 +195,11 @@ def workspace_crate(
     )
 
     variants = {"": crate["crate_features"]}
+    if compile_fail_features != None:
+        variants[""] = select({
+            "//.config/bazel:compile_fail": compile_fail_features,
+            "//conditions:default": crate["crate_features"],
+        })
     for variant, variant_features in feature_variants.items():
         variants["_" + variant] = variant_features
     for suffix, crate_features in variants.items():

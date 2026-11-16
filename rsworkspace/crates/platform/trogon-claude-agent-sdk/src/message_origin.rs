@@ -56,13 +56,21 @@ impl TryFrom<MessageOriginWire> for MessageOrigin {
 }
 
 impl From<MessageOrigin> for MessageOriginWire {
-    fn from(value: MessageOrigin) -> Self {
+    fn from(mut value: MessageOrigin) -> Self {
         Self {
-            kind: value.kind,
-            additional_fields: value.additional_fields,
+            kind: std::mem::take(&mut value.kind),
+            additional_fields: std::mem::take(&mut value.additional_fields),
         }
     }
 }
+
+impl crate::deep_json::OwnedValues for MessageOrigin {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        self.additional_fields.each_value(visit);
+    }
+}
+
+crate::deep_json::drop_values_iteratively!(MessageOrigin);
 
 #[cfg(test)]
 #[path = "message_origin_tests.rs"]
