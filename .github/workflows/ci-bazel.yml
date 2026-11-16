@@ -150,27 +150,15 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise
-        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
-        with:
-          install: false
-          cache: false
-
       - name: Watch verify's queue
-        run: mise run --skip-tools github:workflows:ci-bazel:watch-self-hosted-queue
-        env:
-          WATCHED_JOB: verify
+        uses: TrogonStack/github-actions/actions/runs-on-fallback-watch-queue@5a31768301365e9980bb9e5f020155b694a8148c # runs-on-fallback-watch-queue@v0.0.1
+        with:
+          job-name: verify
           # A verify takes about 16 minutes, so a job that lost its runner to
           # another run usually gets one back sooner than this.
-          QUEUE_LIMIT_SECONDS: '1200'
-          MAX_RUN_ATTEMPTS: '3'
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
+          queue-limit-seconds: '1200'
+          max-run-attempts: '3'
+          requeue-workflow: ci-requeue.yml
 
   # The gate writes to the storage branch and comments on the pull request, so
   # it runs apart from verify, which keeps a read-only token.
