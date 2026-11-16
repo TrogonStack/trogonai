@@ -32,6 +32,8 @@ pub enum InvalidationStreamMismatchError {
     MaxAge,
     #[error("stream '{INVALIDATION_STREAM}' must not let a notice set its own expiry")]
     MessageTtl,
+    #[error("stream '{INVALIDATION_STREAM}' must not be a counter stream, since a counter stream refuses every notice")]
+    MessageCounter,
     #[error("stream '{INVALIDATION_STREAM}' must not limit the notices kept per subject")]
     MaxMessagesPerSubject,
     #[error("stream '{INVALIDATION_STREAM}' must take messages of {INVALIDATION_MAX_MESSAGE_SIZE} bytes or more")]
