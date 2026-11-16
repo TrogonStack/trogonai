@@ -69,7 +69,7 @@ jobs:
       # here is a bad input and fails the job rather than leave runs-on unset.
       - name: Choose runner
         id: runner
-        uses: TrogonStack/github-actions/actions/runs-on-fallback@061bd4a6c2c8f85f4a47be758efa81ce300cd758 # TrogonStack/github-actions#34, unreleased
+        uses: TrogonStack/github-actions/actions/runs-on-fallback@8e288009db603e5a26cfa364c89ab7e798f4b4c1 # runs-on-fallback@v0.0.1
         with:
           github-token: ${{ steps.baton.outputs.token }}
           primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
