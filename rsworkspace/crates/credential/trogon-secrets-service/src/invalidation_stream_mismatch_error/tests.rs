@@ -61,7 +61,7 @@ fn each_message_names_the_rule_and_the_stream() {
         ),
         (
             InvalidationStreamMismatchError::MissingSubject,
-            "stream 'SECRETS_INVALIDATION' is missing the subject notices are published on: '*.secrets.invalidation.v1.>'",
+            "stream 'SECRETS_INVALIDATION' is missing the subject notices are published on: 'secrets.invalidation.v1.*.>'",
         ),
     ];
     for (error, message) in cases {

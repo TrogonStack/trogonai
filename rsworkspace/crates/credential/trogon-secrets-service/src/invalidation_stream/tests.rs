@@ -82,7 +82,7 @@ fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
 #[test]
 fn refuses_a_stream_whose_only_subject_is_another_one() {
     let mut actual = InvalidationStream::config(one());
-    actual.subjects = vec!["*.secrets.invalidation.v2.>".to_owned()];
+    actual.subjects = vec!["secrets.invalidation.v2.*.>".to_owned()];
 
     assert_eq!(
         InvalidationStream::validate(one(), &actual),
@@ -127,12 +127,24 @@ fn the_configuration_it_creates_is_one_it_accepts() {
 }
 
 #[test]
+fn every_subject_starts_with_a_literal_token_so_the_server_takes_it_with_publish_acks() {
+    // The server refuses a stream subject that collides with its own API
+    // namespaces unless the stream drops publish acks, and a leading wildcard
+    // collides with all of them (ADR#0081 Decision 3 amendment).
+    for subject in InvalidationStream::config(one()).subjects {
+        let first = subject.split('.').next().unwrap();
+
+        assert!(!matches!(first, "*" | ">") && !first.starts_with('$'), "{subject}");
+    }
+}
+
+#[test]
 fn config_holds_every_guarantee_the_contract_names() {
     for replicas in [one(), three()] {
         let config = InvalidationStream::config(replicas);
 
         assert_eq!(config.name, "SECRETS_INVALIDATION");
-        assert_eq!(config.subjects, ["*.secrets.invalidation.v1.>"]);
+        assert_eq!(config.subjects, ["secrets.invalidation.v1.*.>"]);
         assert_eq!(config.storage, StorageType::File);
         assert_eq!(config.retention, RetentionPolicy::Limits);
         assert_eq!(config.discard, DiscardPolicy::Old);
