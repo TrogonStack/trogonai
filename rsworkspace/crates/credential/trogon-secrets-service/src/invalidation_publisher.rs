@@ -12,8 +12,13 @@ use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer, JetStre
 use super::constants::{INVALIDATION_PUBLISHER_ACK_WAIT, INVALIDATION_PUBLISHER_DURABLE, INVALIDATION_RETRY_DELAY};
 use super::{
     CredentialEventDelivery, InvalidationNotice, InvalidationOutcome, InvalidationPublisherError,
-    InvalidationSourceError, OwnerTenants, error_chain,
+    InvalidationSourceError, ListeningInvalidationPublisher, OwnerTenants, error_chain,
 };
+
+pub(crate) type PublisherError<S> = InvalidationPublisherError<
+    <S as JetStreamCreateConsumer>::Error,
+    <<S as JetStreamCreateConsumer>::Consumer as JetStreamConsumer>::StreamError,
+>;
 
 /// Turns each credential event that ends a release into the notice telling its
 /// holders to drop their copies (ADR#0074), stored on the invalidation stream.
@@ -70,40 +75,61 @@ where
         }
     }
 
-    /// Publishes the notice of each credential event until `shutdown` is
-    /// cancelled. The event in hand when it is cancelled is settled first,
-    /// so its notice is not left stored but unacknowledged until the stream
-    /// delivers it again.
-    ///
-    /// A delivery that fails, or a settlement the credential stream does not
-    /// take, is logged and reading goes on: the stream delivers an unsettled
-    /// event again on its own.
+    /// Listens, then publishes the notice of each credential event until
+    /// `shutdown` is cancelled, as [`Self::listen`] and
+    /// [`ListeningInvalidationPublisher::run`] do.
     ///
     /// # Errors
     ///
     /// Returns [`InvalidationPublisherError`] when the durable consumer cannot
     /// be created, when it cannot start delivering, and when its deliveries
     /// end before `shutdown`.
-    pub async fn run(
+    pub async fn run(self, shutdown: CancellationToken) -> Result<(), PublisherError<S>> {
+        match self.listen(&shutdown).await? {
+            Some(listening) => listening.run(shutdown).await,
+            None => Ok(()),
+        }
+    }
+
+    /// Creates the durable consumer, or finds it, and starts its deliveries,
+    /// so every credential event appended once this returns reaches the
+    /// publisher: the durable reads only the events appended after it was
+    /// first created. Returns `None` when `shutdown` comes first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidationPublisherError`] when the durable consumer cannot
+    /// be created, or cannot start delivering.
+    pub async fn listen(
         self,
-        shutdown: CancellationToken,
-    ) -> Result<(), InvalidationPublisherError<S::Error, <S::Consumer as JetStreamConsumer>::StreamError>> {
+        shutdown: &CancellationToken,
+    ) -> Result<Option<ListeningInvalidationPublisher<S, P, O>>, PublisherError<S>> {
         let consumer = tokio::select! {
             biased;
-            () = shutdown.cancelled() => return Ok(()),
+            () = shutdown.cancelled() => return Ok(None),
             consumer = self.events.create_consumer(consumer_config()) => {
                 consumer.map_err(InvalidationPublisherError::Consumer)?
             }
         };
-        let mut deliveries = tokio::select! {
+        let deliveries = tokio::select! {
             biased;
-            () = shutdown.cancelled() => return Ok(()),
+            () = shutdown.cancelled() => return Ok(None),
             deliveries = consumer.messages() => deliveries.map_err(InvalidationPublisherError::Messages)?,
         };
         tracing::info!(
             durable = INVALIDATION_PUBLISHER_DURABLE,
             "invalidation publisher reading the credential stream"
         );
+        Ok(Some(ListeningInvalidationPublisher::new(self, deliveries)))
+    }
+
+    /// Settles each of `deliveries` until `shutdown` is cancelled, as
+    /// [`ListeningInvalidationPublisher::run`] says.
+    pub(crate) async fn read(
+        &self,
+        mut deliveries: <S::Consumer as JetStreamConsumer>::Messages,
+        shutdown: CancellationToken,
+    ) -> Result<(), PublisherError<S>> {
         loop {
             let delivery = tokio::select! {
                 biased;

@@ -70,9 +70,12 @@
 //! [`InvalidationPublisher`] is that caller: it reads the credential stream
 //! through the shared durable [`INVALIDATION_PUBLISHER_DURABLE`], stores each
 //! notice on the invalidation stream, and acknowledges the event only once the
-//! notice is stored. Each [`CredentialEventDelivery`] is settled by the policy
-//! on the publisher's docs, so an event it cannot publish is retried or
-//! terminated without holding back the revocations after it. A delivery that
+//! notice is stored. The durable reads only the events appended after it was
+//! first created, so [`InvalidationPublisher::listen`] creates it, as a
+//! [`ListeningInvalidationPublisher`], before the service serves a release.
+//! Each [`CredentialEventDelivery`] is settled by the policy on the
+//! publisher's docs, so an event it cannot publish is retried or terminated
+//! without holding back the revocations after it. A delivery that
 //! does not say where it was stored is a [`DeliveryInfoError`], and a publisher
 //! that stops reading before shutdown is an [`InvalidationPublisherError`].
 //!
@@ -109,6 +112,7 @@ mod invalidation_source_error;
 mod invalidation_stream;
 mod invalidation_stream_mismatch_error;
 mod jetstream_credential_states;
+mod listening_invalidation_publisher;
 mod login_retry;
 mod nats_section_wire;
 mod openbao_address;
@@ -194,6 +198,7 @@ pub use invalidation_source_error::InvalidationSourceError;
 pub use invalidation_stream::InvalidationStream;
 pub use invalidation_stream_mismatch_error::InvalidationStreamMismatchError;
 pub use jetstream_credential_states::JetStreamCredentialStates;
+pub use listening_invalidation_publisher::ListeningInvalidationPublisher;
 pub use openbao_address::OpenBaoAddress;
 pub use openbao_address_error::OpenBaoAddressError;
 pub use owner_holding::OwnerHolding;

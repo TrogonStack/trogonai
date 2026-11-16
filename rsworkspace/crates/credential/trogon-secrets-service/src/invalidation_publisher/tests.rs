@@ -817,6 +817,61 @@ async fn the_publisher_reads_new_events_through_its_shared_durable_and_acknowled
 }
 
 #[tokio::test]
+async fn an_event_appended_once_the_publisher_listens_is_published() {
+    let run = Run::new();
+    let (deliveries, delivered) = mpsc::unbounded::<Result<TestDelivery, MockError>>();
+    let events = TestEvents::delivering(delivered.boxed());
+    let listening = InvalidationPublisher::new(events.clone(), run.notices([]), holding_owner())
+        .listen(&CancellationToken::new())
+        .await
+        .unwrap()
+        .expect("listening before shutdown");
+    assert_eq!(
+        events.configs().len(),
+        1,
+        "listening returned before its durable existed"
+    );
+    let revocation = stored(1, message(&identity(), &revoked(&identity())));
+    let notice = notice_for(&revocation, &holding_owner());
+
+    deliveries.unbounded_send(Ok(run.delivery(revocation))).unwrap();
+    drop(deliveries);
+
+    ran_out(listening.run(CancellationToken::new()).await);
+    assert_eq!(run.steps(), [published(&notice), Step::Stored, Step::Acked(1)]);
+}
+
+#[tokio::test]
+async fn a_consumer_the_credential_stream_refuses_is_reported_by_listening() {
+    let run = Run::new();
+    let events = TestEvents::answering(Err(MockError("fake-consumer-refused".to_owned())));
+
+    let listening = InvalidationPublisher::new(events, run.notices([]), holding_owner())
+        .listen(&CancellationToken::new())
+        .await;
+
+    assert!(
+        matches!(&listening, Err(InvalidationPublisherError::Consumer(MockError(why))) if why == "fake-consumer-refused"),
+        "listening did not report the refused consumer"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_before_the_publisher_listens_creates_no_durable() {
+    let run = Run::new();
+    let events = TestEvents::delivering(stream::empty().boxed());
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+
+    let listening = InvalidationPublisher::new(events.clone(), run.notices([]), holding_owner())
+        .listen(&shutdown)
+        .await;
+
+    assert!(matches!(listening, Ok(None)), "listening went on after shutdown");
+    assert!(events.configs().is_empty());
+}
+
+#[tokio::test]
 async fn shutdown_stops_the_publisher_without_an_error() {
     let run = Run::new();
     let (_deliveries, delivered) = mpsc::unbounded::<Result<TestDelivery, MockError>>();

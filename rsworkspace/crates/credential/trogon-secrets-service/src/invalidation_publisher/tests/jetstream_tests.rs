@@ -395,6 +395,24 @@ async fn a_revocation_replayed_from_the_start_of_the_credential_stream_stores_on
 }
 
 #[tokio::test]
+async fn a_revocation_appended_as_soon_as_the_publisher_listens_is_announced() {
+    let streams = Streams::start().await;
+    let shutdown = CancellationToken::new();
+    let listening = InvalidationPublisher::new(streams.events.clone(), streams.jetstream.clone(), holding_owner())
+        .listen(&shutdown)
+        .await
+        .unwrap()
+        .expect("listening before shutdown");
+    let revocation = streams.append(&identity(), &revoked(&identity())).await;
+
+    let running = tokio::spawn(listening.run(shutdown.clone()));
+    streams.settled(revocation).await;
+    stop(shutdown, running).await;
+
+    streams.assert_announces(&identity(), REVOKED, revocation).await;
+}
+
+#[tokio::test]
 async fn a_restarted_publisher_resumes_from_its_durable_without_republishing_what_it_acknowledged() {
     let streams = Streams::start().await;
     let (shutdown, running) = streams.publishing().await;
