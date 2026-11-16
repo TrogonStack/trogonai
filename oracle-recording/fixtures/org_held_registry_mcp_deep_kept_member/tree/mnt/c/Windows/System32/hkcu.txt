@@ -1,0 +1,3 @@
+
+    Settings    REG_SZ    {"permissions":{"deny":["Read(./secrets/**)"]},"allowedMcpServers":[{"serverName":"u"}]}
+

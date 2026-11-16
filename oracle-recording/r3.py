@@ -1281,6 +1281,271 @@ def round6_xp_units():
             for which in XP6_PASSES.get(HOST, ()) for side in ("src", "xp")]
 
 
+# ---- round 7: the held copy with its depth under a top-level key, gated on a visibility control, and the fixtures ----
+# Round 6 held its depth under a member of an allowed server entry, which the schema read drops before the copy (oX,
+# sdk.mjs 165:30387), so only the clone bound. Round 7 holds it under a top-level `x` wrapped in `__proto__`, which the
+# schema read keeps. Each place first runs a control: the same document with a shallow `x`, read by a copy of the
+# pinned package with log-only hooks, must show `x` as an own data `__proto__` on a plain object at the parse (hm), the
+# clone (j7e), the schema output and the copy (oX), and print the same output as the pinned package.
+R7_TRACE_FUNCTIONS = (
+    'function __tr(t,k,v){try{const f=process.env.TRACE_LOG;if(f){process.getBuiltinModule("fs").appendFileSync(f,'
+    'JSON.stringify({label:String(t),stage:k,info:__ti(v)})+"\\n")}}catch(q){}return v}'
+    'function __ti(v){const s=v&&typeof v==="object"&&"loadState" in v?v.settings:v;if(!s||typeof s!=="object")'
+    'return{settings:null};const out={keys:Object.keys(s)};if(Object.prototype.hasOwnProperty.call(s,"x")){const x=s.x;'
+    'const d=x&&typeof x==="object"?Object.getOwnPropertyDescriptor(x,"__proto__"):undefined;out.x={json:'
+    'JSON.stringify(x),protoOwn:!!d,protoData:!!d&&"value" in d,protoEnumerable:!!d&&d.enumerable,plainPrototype:'
+    'x!==null&&typeof x==="object"&&Object.getPrototypeOf(x)===Object.prototype}}if("y" in s)out.y=JSON.stringify(s.y);'
+    'if(Array.isArray(s.allowedMcpServers))out.entries=s.allowedMcpServers.map(e=>e&&typeof e==="object"?'
+    'Object.keys(e):typeof e);return out}'
+)
+R7_PATCHES = [
+    ("function pm(", R7_TRACE_FUNCTIONS + "function pm("),
+    ("if(r)return oX(r);", 'if(r)return __tr(t,"copy-hit",oX(r));'),
+    ("return oX(o)}", 'return __tr(t,"copy",oX(o))}'),
+    ("function j7e(e,t){let n=Tr(e),", 'function j7e(e,t){let n=__tr(t,"clone",Tr(e)),'),
+    ("cP(CX(t,o),t,n).safeParse(n);", 'cP(CX(t,o),t,n).safeParse(n);__tr(t,"schema",s.success?s.data:null);'),
+    ("function hm(e,t,{userWritable:n=!1}={}){let r=Ya(e,!1);",
+     'function hm(e,t,{userWritable:n=!1}={}){let r=__tr(t,"parse",Ya(e,!1));'),
+]
+R7_STAGES = ("parse", "clone", "schema")
+R7_SHALLOW_X = '{"__proto__":[[null]]}'
+R7_PLACES = ("held_hkcu", "held_hklm")
+R7_STATE, R7_LOCK = {}, __import__("threading").Lock()
+
+
+def r7_sha256(location):
+    with open(location, "rb") as handle:
+        return __import__("hashlib").sha256(handle.read()).hexdigest()
+
+
+def r7_traced():
+    """A copy of the pinned package whose sdk.mjs carries the log-only hooks, with both hashes; every anchor must occur
+    exactly once."""
+    with R7_LOCK:
+        if "traced" not in R7_STATE:
+            target = os.path.join(os.path.dirname(OUT), "package-traced")
+            shutil.rmtree(target, ignore_errors=True)
+            shutil.copytree(PACKAGE, target)
+            bundle = os.path.join(target, "sdk.mjs")
+            with open(bundle, encoding="utf-8") as handle:
+                text = handle.read()
+            counts = {anchor: text.count(anchor) for anchor, _ in R7_PATCHES}
+            if any(count != 1 for count in counts.values()):
+                R7_STATE["traced"] = {"error": "an anchor does not occur exactly once", "counts": counts}
+            else:
+                for anchor, replacement in R7_PATCHES:
+                    text = text.replace(anchor, replacement)
+                with open(bundle, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(text)
+                R7_STATE["traced"] = {"package": target, "pinned_sha256": r7_sha256(os.path.join(PACKAGE, "sdk.mjs")),
+                                      "traced_sha256": r7_sha256(bundle)}
+        return R7_STATE["traced"]
+
+
+def r7_oracle(package, spec_path, env):
+    process = subprocess.run([NODE, MANAGED["ORACLE"], package, spec_path], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, env=env, timeout=600)
+    return process.returncode, process.stdout.decode("utf-8", "replace"), process.stderr.decode("utf-8", "replace")[-600:]
+
+
+def r7_document(x):
+    return '{"allowedMcpServers":[{"serverName":"h","x":null}],"x":' + x + ',"y":[{"a":null}]}'
+
+
+def r7_spec(place, x, root):
+    spec = D["registry_spec"](place, "x", ("raw", "null"), 0, root)
+    write(os.path.join(root, "mnt/c/Windows/System32", place[5:] + ".txt"), D["reg_text"](r7_document(x)))
+    return spec
+
+
+def r7_control(place):
+    """Whether the shallow document shows `x` reaching the copy at `place` as an own data `__proto__`, with the trace."""
+    traced = r7_traced()
+    if "error" in traced:
+        return False, traced
+    root = os.path.join(D["SCRATCH"], unique("v"))
+    spec_path, trace = root + ".json", root + ".trace"
+    env = {**D["EXTRA_ENV"], "TRACE_LOG": trace}
+
+    def fresh(package):
+        # The oracle writes each step's files under the root, so every run starts from a newly built root.
+        shutil.rmtree(root, ignore_errors=True)
+        spec = r7_spec(place, R7_SHALLOW_X, root)
+        spec["tools"] = "real"
+        with open(spec_path, "w", encoding="utf-8") as handle:
+            json.dump(spec, handle)
+        if os.path.exists(trace):
+            os.remove(trace)
+        return r7_oracle(package, spec_path, env)
+    try:
+        pinned = fresh(PACKAGE)
+        instrumented = fresh(traced["package"])
+        records = []
+        if os.path.exists(trace):
+            with open(trace, encoding="utf-8") as handle:
+                records = [json.loads(line) for line in handle if line.strip()]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        for location in (spec_path, trace):
+            if os.path.exists(location):
+                os.remove(location)
+    with_x = [record for record in records if "x" in record["info"]]
+
+    def shows(record):
+        x = record["info"]["x"]
+        return x["json"] == R7_SHALLOW_X and x["protoOwn"] and x["protoData"] and x["plainPrototype"]
+
+    stages = {stage: [shows(r) for r in with_x if r["stage"] == stage] for stage in (*R7_STAGES, "copy", "copy-hit")}
+    detail = {
+        "pinned_exit": pinned[0], "identical": pinned[0] == 0 and pinned == instrumented,
+        "instrumented_exit": instrumented[0], "stderr": instrumented[2] if instrumented[0] else "",
+        "stages": stages, "labels": sorted({record["label"] for record in with_x}), "records": records[:40],
+        "answer": pinned[1][:4000], **{k: v for k, v in traced.items() if k != "package"},
+    }
+    passed = (detail["identical"] and all(stages[stage] and all(stages[stage]) for stage in R7_STAGES)
+              and (stages["copy"] or stages["copy-hit"]) and all(stages["copy"] + stages["copy-hit"]))
+    return passed, detail
+
+
+def r7_answer(place, shape, flags, startup):
+    """The collapsed answer of the corrected held document holding `shape` under `x.__proto__` at `place`, the
+    rejection it surfaces, or None when the run failed."""
+    root = os.path.join(D["SCRATCH"], unique("k"))
+    spec_path = root + ".json"
+    try:
+        spec = r7_spec(place, reg5_text(shape, "__proto__"), root)
+        spec["tools"] = "real"
+        with open(spec_path, "w", encoding="utf-8") as handle:
+            json.dump(spec, handle)
+        answered = run_spec(spec_path, flags or REF, startup)
+        if isinstance(answered, dict):
+            return dumps({"error": answered["rejected"]}) if "rejected" in answered else None
+        text, failure = project(answered, root)
+        return None if failure is not None else text
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        if os.path.exists(spec_path):
+            os.remove(spec_path)
+
+
+def r7_fits(place):
+    references = {}
+
+    def fits(shape, flags, startup):
+        form = form_of(shape)
+        with REFERENCE_LOCK:
+            reference = references.get(form)
+        if reference is None:
+            reference = r7_answer(place, form, REF, STARTUP)
+            if reference is None or reference.startswith('{"error"'):
+                raise RuntimeError(f"the shallow form {form} has no answer: {reference}")
+            with REFERENCE_LOCK:
+                references[form] = reference
+        got = r7_answer(place, shape, flags, startup)
+        return None if got is None else got == reference
+    return fits
+
+
+R7_ABOVE = 2
+REG7 = [("reg7:H5:held_hkcu:copy", "held_hkcu"), ("reg7:H6:held_hklm:copy", "held_hklm")]
+
+
+def reg7_unit(place):
+    def go(pool, quiet):
+        visible, detail = r7_control(place)
+        if not visible:
+            return {"error": "the visibility control does not show x reaching the copy", "control": detail}
+        found = Search(pool, r7_fits(place), MODEL[HOST]["copy"], R7_ABOVE, "a", REG5_LEAVES["copy"]).run()
+        found["above"] = R7_ABOVE
+        found["control"] = detail
+        if "class" in found:
+            found["room_at_class"] = found["class"] - prefix(MODEL[HOST]["copy"], R7_ABOVE)
+        if found.get("far"):
+            found["far_answer"] = r7_answer(place, tuple(found["far"][0]), REF, STARTUP)
+        return found
+    return go
+
+
+# The fixture recorder: tests/resolve_settings_differential.rs's oracle run, step for step, printing what it stores as
+# expected.json (the oracle's stdout with the root as `$ROOT`, trailing whitespace trimmed).
+R7_FIXTURES = os.path.join(HERE, "fixtures")
+R7_SCRUBBED = ("CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CONFIG_DIR", "WSL_DISTRO_NAME", "WSL_INTEROP",
+               "CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION")
+
+
+def r7_substitute(value, root):
+    if isinstance(value, str):
+        return value.replace("$ROOT", root)
+    if isinstance(value, list):
+        return [r7_substitute(item, root) for item in value]
+    if isinstance(value, dict):
+        return {key: r7_substitute(item, root) for key, item in value.items()}
+    return value
+
+
+def r7_copy_tree(source, target):
+    os.makedirs(target, exist_ok=True)
+    for name in sorted(os.listdir(source)):
+        here = os.path.join(source, name)
+        there = os.path.join(target, ".claude" if name == "dot-claude" else name)
+        if os.path.isdir(here):
+            r7_copy_tree(here, there)
+        else:
+            shutil.copy(here, there)
+
+
+def r7_record(name):
+    with open(os.path.join(R7_FIXTURES, name, "case.json"), encoding="utf-8") as handle:
+        spec = json.load(handle)
+    scratch = tempfile.mkdtemp(prefix="f")
+    root = os.path.join(scratch, name)
+    try:
+        r7_copy_tree(os.path.join(R7_FIXTURES, name, "tree"), root)
+        os.makedirs(os.path.join(root, "work"), exist_ok=True)
+        os.makedirs(os.path.join(root, "home"), exist_ok=True)
+        env = {variable: None for variable in R7_SCRUBBED}
+        env["HOME"] = root + "/home"
+        for variable, value in (spec.get("env") or {}).items():
+            env[variable] = value.replace("$ROOT", root) if isinstance(value, str) else None
+        stepped = isinstance(spec.get("steps"), list)
+        steps = spec["steps"] if stepped else [{}]
+        document = {
+            "root": root, "platform": spec.get("platform"), "env": dict(sorted(env.items())),
+            "process": spec.get("process"),
+            "writable": dict(sorted((path.replace("$ROOT", root), answer)
+                                    for path, answer in (spec.get("writable") or {}).items())),
+            "rejections": True,
+            "cases": [{"name": f"{name}/{index}" if stepped else name, "at": step.get("at"), "files": step.get("files"),
+                       "durations": step.get("durations") or {}, "options": r7_substitute(spec["options"], root)}
+                      for index, step in enumerate(steps)],
+        }
+        spec_path = os.path.join(scratch, name + ".json")
+        with open(spec_path, "w", encoding="utf-8") as handle:
+            json.dump(document, handle)
+        code, stdout, stderr = r7_oracle(PACKAGE, spec_path, dict(os.environ))
+        if code != 0:
+            return {"error": "the oracle failed", "stderr": stderr}
+        expected = stdout.replace(root, "$ROOT").rstrip()
+        return {"expected": expected, "sha256": __import__("hashlib").sha256(expected.encode()).hexdigest()}
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def r7_instrument_unit():
+    def go(pool, quiet):
+        traced = r7_traced()
+        return {k: v for k, v in traced.items() if k != "package"}
+    return go
+
+
+def round7_units():
+    out = [("rec7:instrument", r7_instrument_unit())]
+    out += [(f"rec7:fixture:{name}", (lambda n: lambda pool, quiet: r7_record(n))(name))
+            for name in sorted(os.listdir(R7_FIXTURES)) if os.path.isfile(os.path.join(R7_FIXTURES, name, "case.json"))]
+    out += [(name, reg7_unit(place)) for name, place in REG7]
+    return out
+
+
 def units():
     out = [(f"proto:{o}", proto_unit(o)) for o in "ESOM"]
     if not WINDOWS:
@@ -1304,7 +1569,7 @@ def units():
         out += round5_windows_units()
         out += round6_xp_units()
     else:
-        out += unix_round4_units() + round5_unix_units() + round6_held_units() + round6_xp_units()
+        out += unix_round4_units() + round5_unix_units() + round6_held_units() + round6_xp_units() + round7_units()
         profile = MANAGED["PROFILES"].get(HOST, {})
         out += [(f"key:{key}", key_unit(key, guess)) for key, guess in GUESSES.get(HOST, {}).items() if key not in profile]
         out += [(f"key:{key}", key_unit(key, guess, profile)) for key, guess in PASS_KEYS.get(HOST, {}).items()]

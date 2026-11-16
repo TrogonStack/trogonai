@@ -3,13 +3,13 @@
 //
 // usage: node resolve_settings_oracle.mjs <package-dir> <spec.json>
 //
-// The spec holds {root, platform, env, process?, writable?, deep?, tools?, cases: [{name, options, at?, files?, durations?,
-// resume?}]}.
-// Machine-wide locations that the SDK reads (managed settings, managed preferences, /proc/version, plutil) are
-// remapped under `root`, and `process.platform` is replaced by `platform`, so every case runs the same way on any host.
-// The Windows managed folder (`C:\\Program Files\\ClaudeCode`) is one of them, recognized by its drive letter on any host.
-// On a Windows host the SDK joins those locations with backslashes and may resolve them onto the current drive, so they
-// are recognized in that form too, and `HOME` also sets `USERPROFILE`, where Node looks for the home folder there.
+// The spec holds {root, platform, env, process?, writable?, deep?, rejections?, tools?, cases: [{name, options, at?,
+// files?, durations?, resume?}]}. Machine-wide locations that the SDK reads (managed settings, managed preferences,
+// /proc/version, plutil) are remapped under `root`, and `process.platform` is replaced by `platform`, so every case
+// runs the same way on any host. The Windows managed folder (`C:\\Program Files\\ClaudeCode`) is one of them,
+// recognized by its drive letter on any host. On a Windows host the SDK joins those locations with backslashes and may
+// resolve them onto the current drive, so they are recognized in that form too, and `HOME` also sets `USERPROFILE`,
+// where Node looks for the home folder there.
 //
 // `process` pins the ids the process reports ({euid, uid, egid, gid, groups}; a missing or null field removes that
 // call, as on a platform without it), and `writable` answers write checks by the path asked about (`*` for every
@@ -18,6 +18,9 @@
 // `deep: true` prints the output without recursing, so a result nested past the stack `JSON.stringify` has still prints
 // (the same text `JSON.stringify` gives), and leaves out `filtered`, whose filter recurses as deep as the result. Only
 // what runs after `resolveSettings` returns changes, so the stack every call starts on stays the same.
+//
+// `rejections: true` prints a call that rejects with a `RangeError` as `{name, error: {name, message}}` in place of its
+// result, and goes on with the next call; without it the error ends the run.
 //
 // `tools` sets how a spawned program's end reaches its callback, which sets the stack everything after it runs on: V8
 // resumes a callback that libuv runs from its poll for I/O (a file request) deeper in the native stack than one it runs
@@ -235,7 +238,14 @@ for (const entry of spec.cases) {
   }
   durations = entry.durations || {};
   if (entry.resume === 'file') await fsp.stat(root);
-  const result = await settle(sdk.resolveSettings(entry.options));
+  let result;
+  try {
+    result = await settle(sdk.resolveSettings(entry.options));
+  } catch (error) {
+    if (!spec.rejections || !(error instanceof RangeError)) throw error;
+    out.push({ name: entry.name, error: { name: error.name, message: error.message } });
+    continue;
+  }
   out.push(spec.deep ? { name: entry.name, result } : { name: entry.name, result, filtered: sdk.filterEscalatingDefaultMode(result) });
 }
 // `JSON.stringify` of the plain data `resolveSettings` returns, with a work list in place of recursion: each entry is
