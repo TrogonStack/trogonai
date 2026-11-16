@@ -2,7 +2,7 @@ use crate::AgentHandler;
 use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
 use crate::error::AGENT_UNAVAILABLE;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{DisableProviderRequest, DisableProviderResponse};
+use agent_client_protocol::v1::schema::{DisableProviderRequest, DisableProviderResponse};
 
 fn request() -> DisableProviderRequest {
     DisableProviderRequest::new("anthropic")
@@ -26,7 +26,7 @@ async fn disable_provider_returns_error_when_nats_fails() {
 
     let err = bridge.disable_provider(request()).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(AGENT_UNAVAILABLE));
 }
 
 #[tokio::test]
@@ -36,7 +36,7 @@ async fn disable_provider_returns_error_when_response_is_invalid_json() {
 
     let err = bridge.disable_provider(request()).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]

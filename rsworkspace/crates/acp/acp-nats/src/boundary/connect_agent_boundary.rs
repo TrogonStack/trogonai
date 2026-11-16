@@ -1,10 +1,53 @@
 use super::boundary_exit::BoundaryExit;
 use super::eof_signal_reader::EofSignalReader;
 use crate::agent_handler::AgentHandler;
-use agent_client_protocol::schema::v1::{CancelRequestNotification, ClientNotification, ClientRequest};
-use agent_client_protocol::{Agent, ByteStreams, Client, ConnectTo, ConnectionTo, Dispatch, Error, Responder, Result};
+use agent_client_protocol::v1::schema::{CancelRequestNotification, ClientNotification, ClientRequest};
+use agent_client_protocol::v1::{ConnectionTo, Dispatch, Responder};
+use agent_client_protocol::{
+    Agent, ByteStreams, Client, ConnectTo, Error, ErrorCode, JsonRpcMessage, JsonRpcRequest, Result, UntypedMessage,
+};
 use std::future::Future;
 use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+enum BoundaryRequest {
+    Routed(Box<ClientRequest>),
+    Unsupported(UntypedMessage),
+}
+
+impl JsonRpcMessage for BoundaryRequest {
+    fn matches_method(_method: &str) -> bool {
+        true
+    }
+
+    fn method(&self) -> &str {
+        match self {
+            Self::Routed(request) => request.method(),
+            Self::Unsupported(request) => request.method(),
+        }
+    }
+
+    fn to_untyped_message(&self) -> Result<UntypedMessage> {
+        match self {
+            Self::Routed(request) => request.to_untyped_message(),
+            Self::Unsupported(request) => request.to_untyped_message(),
+        }
+    }
+
+    fn parse_message(method: &str, params: &serde_json::Value) -> Result<Self> {
+        match ClientRequest::parse_message(method, params) {
+            Ok(request) => Ok(Self::Routed(Box::new(request))),
+            Err(error) if error.code == ErrorCode::METHOD_NOT_FOUND => {
+                UntypedMessage::parse_message(method, params).map(Self::Unsupported)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl JsonRpcRequest for BoundaryRequest {
+    type Response = serde_json::Value;
+}
 
 /// Spawns `work` onto the connection's task actor and responds with the
 /// serialized result when it settles, honoring `$/cancel_request`.
@@ -41,59 +84,87 @@ fn log_notification_error(method: &'static str, result: Result<()>) {
 
 async fn handle_client_dispatch<A: AgentHandler + Send + Sync + 'static>(
     agent: Arc<A>,
-    dispatch: Dispatch<ClientRequest, ClientNotification>,
+    dispatch: Dispatch<BoundaryRequest, ClientNotification>,
     cx: ConnectionTo<Client>,
 ) -> Result<()> {
     match dispatch {
-        Dispatch::Request(request, responder) => match request {
-            ClientRequest::InitializeRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.initialize(req).await })
-            }
-            ClientRequest::AuthenticateRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.authenticate(req).await })
-            }
-            ClientRequest::LogoutRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.logout(req).await })
-            }
-            ClientRequest::NewSessionRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.new_session(req).await })
-            }
-            ClientRequest::LoadSessionRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.load_session(req).await })
-            }
-            ClientRequest::PromptRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.prompt(req).await })
-            }
-            ClientRequest::SetSessionModeRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.set_session_mode(req).await })
-            }
-            ClientRequest::SetSessionConfigOptionRequest(req) => {
-                respond_in_task(
+        Dispatch::Request(request, responder) => {
+            let request = match request {
+                BoundaryRequest::Routed(request) => Some(*request),
+                BoundaryRequest::Unsupported(_) => None,
+            };
+            match request {
+                Some(ClientRequest::AuthStatusRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.auth_status(req).await })
+                }
+                Some(ClientRequest::ArchiveSessionRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.archive_session(req).await })
+                }
+                Some(ClientRequest::UnarchiveSessionRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.unarchive_session(req).await })
+                }
+                Some(ClientRequest::SessionStatusRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.session_status(req).await })
+                }
+                Some(ClientRequest::SetSessionTitleRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.set_session_title(req).await })
+                }
+                Some(ClientRequest::ListProvidersRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.list_providers(req).await })
+                }
+                Some(ClientRequest::SetProviderRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.set_provider(req).await })
+                }
+                Some(ClientRequest::DisableProviderRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.disable_provider(req).await })
+                }
+                Some(ClientRequest::InitializeRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.initialize(req).await })
+                }
+                Some(ClientRequest::AuthenticateRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.authenticate(req).await })
+                }
+                Some(ClientRequest::LogoutRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.logout(req).await })
+                }
+                Some(ClientRequest::NewSessionRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.new_session(req).await })
+                }
+                Some(ClientRequest::LoadSessionRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.load_session(req).await })
+                }
+                Some(ClientRequest::PromptRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.prompt(req).await })
+                }
+                Some(ClientRequest::SetSessionModeRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.set_session_mode(req).await })
+                }
+                Some(ClientRequest::SetSessionConfigOptionRequest(req)) => respond_in_task(
                     &cx,
                     responder,
                     async move { agent.set_session_config_option(req).await },
-                )
+                ),
+                Some(ClientRequest::ForkSessionRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.fork_session(req).await })
+                }
+                Some(ClientRequest::ResumeSessionRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.resume_session(req).await })
+                }
+                Some(ClientRequest::CloseSessionRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.close_session(req).await })
+                }
+                Some(ClientRequest::DeleteSessionRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.delete_session(req).await })
+                }
+                Some(ClientRequest::ListSessionsRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.list_sessions(req).await })
+                }
+                Some(ClientRequest::ExtMethodRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.ext_method(req).await })
+                }
+                _ => responder.respond_with_error(Error::method_not_found()),
             }
-            ClientRequest::ForkSessionRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.fork_session(req).await })
-            }
-            ClientRequest::ResumeSessionRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.resume_session(req).await })
-            }
-            ClientRequest::CloseSessionRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.close_session(req).await })
-            }
-            ClientRequest::DeleteSessionRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.delete_session(req).await })
-            }
-            ClientRequest::ListSessionsRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.list_sessions(req).await })
-            }
-            ClientRequest::ExtMethodRequest(req) => {
-                respond_in_task(&cx, responder, async move { agent.ext_method(req).await })
-            }
-            _ => responder.respond_with_error(Error::method_not_found()),
-        },
+        }
         Dispatch::Notification(notification) => match notification {
             ClientNotification::CancelNotification(notif) => cx.spawn(async move {
                 log_notification_error("session/cancel", agent.cancel(notif).await);
@@ -111,9 +182,9 @@ async fn handle_client_dispatch<A: AgentHandler + Send + Sync + 'static>(
 
 /// Connects an [`AgentHandler`] implementation to a byte-stream boundary.
 ///
-/// Registers a single typed dispatch handler over the SDK's
-/// [`ClientRequest`]/[`ClientNotification`] enums, whose method table already
-/// covers every routed method, and delegates each variant to the
+/// Registers a single typed dispatch handler using the SDK's
+/// [`ClientRequest`]/[`ClientNotification`] method table, retaining unknown requests
+/// for rejection by the boundary, and delegates each known variant to the
 /// [`AgentHandler`] implementation, matching ADR#0020's "SDK builder
 /// callbacks adapt boundaries to bridge traits" decision. Methods the bridge
 /// does not route answer `method_not_found`; responses to the bridge's own
@@ -138,7 +209,7 @@ where
     let (incoming, eof_rx) = EofSignalReader::new(incoming);
 
     Agent
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |_notif: CancelRequestNotification, _cx| Ok(()),
             agent_client_protocol::on_receive_notification!(),
@@ -146,7 +217,7 @@ where
         .on_receive_dispatch(
             {
                 let agent = agent.clone();
-                async move |dispatch: Dispatch<ClientRequest, ClientNotification>, cx| {
+                async move |dispatch: Dispatch<BoundaryRequest, ClientNotification>, cx| {
                     handle_client_dispatch(agent.clone(), dispatch, cx).await
                 }
             },
@@ -185,7 +256,7 @@ where
     C: ConnectTo<Agent>,
 {
     Agent
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |_notif: CancelRequestNotification, _cx| Ok(()),
             agent_client_protocol::on_receive_notification!(),
@@ -193,7 +264,7 @@ where
         .on_receive_dispatch(
             {
                 let agent = agent.clone();
-                async move |dispatch: Dispatch<ClientRequest, ClientNotification>, cx| {
+                async move |dispatch: Dispatch<BoundaryRequest, ClientNotification>, cx| {
                     handle_client_dispatch(agent.clone(), dispatch, cx).await
                 }
             },
