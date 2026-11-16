@@ -47,8 +47,18 @@ jobs:
           install_args: bazel buf go kubeconform node rust cargo:wasm-tools ubi:open-telemetry/weaver github:rhysd/actionlint cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging cargo:cargo-deny
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
+      # Self-hosted sunny-go runners have a bazel-remote cache on their private
+      # network, so they skip the GitHub Actions Bazel caches below. Pushes to
+      # main are the only runs that receive the write password.
+      - name: Configure Bazel remote cache
+        id: remote-cache
+        run: mise run --skip-tools github:workflows:ci-bazel:remote-cache
+        env:
+          SUNNY_GO_CACHE_PASSWORD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.SUNNY_GO_CACHE_PASSWORD || '' }}
+
       - name: Restore Bazel cache
         id: bazel-cache
+        if: ${{ steps.remote-cache.outputs.enabled != 'true' }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -94,11 +104,11 @@ jobs:
       # Lint even when tests or the build fail, so their findings are not
       # hidden behind an unrelated failure.
       - name: Lint Bazel targets
-        if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' }}
+        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || (steps.remote-cache.outputs.enabled == 'true' && steps.remote-cache.outcome == 'success')) }}
         run: mise run --skip-tools github:workflows:ci-bazel:lint
 
       - name: Upload Bazel profiles
-        if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' }}
+        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || (steps.remote-cache.outputs.enabled == 'true' && steps.remote-cache.outcome == 'success')) }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bazel-profiles-${{ github.run_attempt }}
@@ -121,6 +131,12 @@ jobs:
             ${{ runner.temp }}/bazel-disk-cache
             ${{ runner.temp }}/bazel-repository-cache
           key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
+
+      # Runner homes outlive the job; the file holds the write credential on
+      # pushes to main. It is deleted even when the job fails or is cancelled.
+      - name: Remove Bazel remote cache config
+        if: ${{ always() }}
+        run: mise run --skip-tools github:workflows:ci-bazel:remote-cache-cleanup
 
   # Nothing reserves the self-hosted runner choose-runner saw idle, so verify
   # can wait behind another run, or for up to 24 hours if every self-hosted
