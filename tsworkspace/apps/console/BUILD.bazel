@@ -82,23 +82,35 @@ vite_bin.vite(
     out_dirs = ["dist"],
 )
 
+# Shared input copies must not inherit the test action's CPU reservation.
+js_library(
+    name = "test_inputs",
+    srcs = [
+        ":app_config",
+        ":routes",
+        ":sources",
+    ],
+)
+
 vitest_bin.vitest_test(
     name = "test",
     args = ["run"],
     chdir = package_name(),
+    copy_data_to_bin = False,
     data = [
-        ":app_config",
         ":node_modules",
-        ":routes",
-        ":sources",
+        ":test_inputs",
         "//tsworkspace:node_modules/vitest",
     ],
     env = {
+        "VITEST_MAX_WORKERS": "4",
         "VITE_ALLOW_OUTSIDE_ROOT": "1",
         "VITE_BAZEL_RUNFILES": "1",
     },
     # Native ESM and Vite must agree on the canonical paths of declared dependencies.
     patch_node_fs = False,
+    # Bazel must reserve the CPUs that Vitest's worker pool consumes.
+    tags = ["cpu:4"],
 )
 
 oxlint_bin.oxlint_test(
