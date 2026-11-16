@@ -19,18 +19,18 @@ jobs:
   # Sends verify to an idle self-hosted runner when one is free and to a hosted
   # runner otherwise. The selection lives in ci-selection.yml because the Baton
   # key is only readable from that workflow file.
-  runner:
+  choose-runner:
     uses: ./.github/workflows/ci-selection.yml
     with:
-      runner-jobs: verify
+      self-hosted-job-names: verify
     permissions:
       contents: read
       id-token: write
       pull-requests: read
 
   verify:
-    needs: runner
-    runs-on: ${{ fromJSON(needs.runner.outputs.runners).verify }}
+    needs: choose-runner
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-by-job).verify }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -244,7 +244,7 @@ jobs:
     # Branch rules require this job instead of verify, because a job named
     # verify also exists in other workflows and a cancelled run skips it.
     name: Bazel result
-    needs: [runner, verify, coverage, fork-coverage]
+    needs: [choose-runner, verify, coverage, fork-coverage]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -263,5 +263,5 @@ jobs:
         env:
           SELECTION_RESULT: success
           SELECTED: 'true'
-          JOB_RESULTS: ${{ needs.runner.result }} ${{ needs.verify.result }} ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && needs['fork-coverage'].result || needs.coverage.result }}
+          JOB_RESULTS: ${{ needs.choose-runner.result }} ${{ needs.verify.result }} ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && needs['fork-coverage'].result || needs.coverage.result }}
         run: mise run --skip-tools github:workflows:ci-bazel:result
