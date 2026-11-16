@@ -36,7 +36,10 @@
 //! way when its credential is invalidated, or when the reader loses or
 //! regains its place, is neither held nor returned; the client asks once more
 //! and fails with [`ReleaseError::Invalidated`] if that one is overtaken too. It refuses to
-//! start without that stream. While its reader has lost its place it holds
+//! start without that stream. Every [`INVALIDATION_POSITION_CHECK`] without a
+//! notice it asks the server how far its consumer delivered, and a notice
+//! delivered but still not received at the next look loses it its place.
+//! While its reader has lost its place it holds
 //! nothing, and it reads again every [`INVALIDATION_RETRY_DELAY`] from
 //! [`INVALIDATION_LOOKBACK`] back. Concurrent misses for one key each ask the
 //! service; they are not merged into one call.
@@ -104,8 +107,8 @@ mod unseal_error;
 pub(crate) use cached_release::CachedRelease;
 pub use cached_release_client::CachedReleaseClient;
 pub use constants::{
-    DEFAULT_RELEASE_TIMEOUT, INVALIDATION_LOOKBACK, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM, MAX_CACHED_RELEASES,
-    MAX_RELEASE_TIMEOUT, RELEASE_CACHE_JITTER, RELEASE_HOLD_BOUND,
+    DEFAULT_RELEASE_TIMEOUT, INVALIDATION_LOOKBACK, INVALIDATION_POSITION_CHECK, INVALIDATION_RETRY_DELAY,
+    INVALIDATION_STREAM, MAX_CACHED_RELEASES, MAX_RELEASE_TIMEOUT, RELEASE_CACHE_JITTER, RELEASE_HOLD_BOUND,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use fake_outcome::FakeOutcome;

@@ -5,16 +5,20 @@ use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pu
 use futures::{Stream, StreamExt};
 use time::OffsetDateTime;
 use tokio::task::AbortHandle;
+use tokio::time::Instant;
 use trogon_std::time::{EpochClock, GetElapsed};
 
-use super::constants::{INVALIDATION_FILTER, INVALIDATION_LOOKBACK, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM};
+use super::constants::{
+    INVALIDATION_FILTER, INVALIDATION_LOOKBACK, INVALIDATION_POSITION_CHECK, INVALIDATION_RETRY_DELAY,
+    INVALIDATION_STREAM,
+};
 use super::{
     InvalidationConsumer, InvalidationNotice, InvalidationStartError, InvalidationStream, InvalidationStreamSource,
     ReleaseCache, ReleaseInvalidation,
 };
 
-type Notices<J> =
-    <<<J as InvalidationStreamSource>::Stream as InvalidationStream>::Consumer as InvalidationConsumer>::Notices;
+type Consumer<J> = <<J as InvalidationStreamSource>::Stream as InvalidationStream>::Consumer;
+type Notices<J> = <Consumer<J> as InvalidationConsumer>::Notices;
 
 /// One client's own reader of release invalidations, read the way an ordered
 /// consumer reads: an ephemeral consumer of its own, never durable and never
@@ -23,7 +27,9 @@ type Notices<J> =
 ///
 /// It starts [`INVALIDATION_LOOKBACK`] back, so a notice sent while it was
 /// not reading is still heard. It loses its place on any error, any gap in
-/// what it was delivered, or the end of its consumer; then it drops every
+/// what it was delivered, the end of its consumer, or a notice the server
+/// says it delivered that has not arrived by the next
+/// [`INVALIDATION_POSITION_CHECK`]; then it drops every
 /// held copy and holds none, retrying every [`INVALIDATION_RETRY_DELAY`]
 /// until it reads again. It stops when dropped.
 ///
@@ -45,8 +51,8 @@ impl InvalidationReader {
         C: EpochClock + GetElapsed,
         C::Instant: Send,
     {
-        let notices = subscribe(&jetstream, &clock).await?;
-        let task = tokio::spawn(read(jetstream, clock, cache, notices));
+        let reading = subscribe(&jetstream, &clock).await?;
+        let task = tokio::spawn(read(jetstream, clock, cache, reading));
         Ok(Self(task.abort_handle()))
     }
 }
@@ -57,26 +63,28 @@ impl Drop for InvalidationReader {
     }
 }
 
-async fn subscribe<J, C>(jetstream: &J, clock: &C) -> Result<Notices<J>, InvalidationStartError>
+async fn subscribe<J, C>(jetstream: &J, clock: &C) -> Result<(Consumer<J>, Notices<J>), InvalidationStartError>
 where
     J: InvalidationStreamSource,
     C: EpochClock,
 {
     let stream = jetstream.get_stream(INVALIDATION_STREAM).await?;
     let consumer = stream.create_consumer(consumer_config(clock.system_time())).await?;
-    Ok(consumer.messages().await?)
+    let notices = consumer.messages().await?;
+    Ok((consumer, notices))
 }
 
-async fn read<J, C>(jetstream: J, clock: C, cache: Arc<Mutex<ReleaseCache<C>>>, mut notices: Notices<J>)
+async fn read<J, C>(jetstream: J, clock: C, cache: Arc<Mutex<ReleaseCache<C>>>, mut reading: (Consumer<J>, Notices<J>))
 where
     J: InvalidationStreamSource,
     C: EpochClock + GetElapsed,
     C::Instant: Send,
 {
     loop {
-        drain(&cache, &mut notices).await;
+        let (consumer, notices) = &mut reading;
+        drain(&cache, consumer, notices).await;
         cache.lock().unwrap_or_else(PoisonError::into_inner).suspend();
-        notices = loop {
+        reading = loop {
             tokio::time::sleep(INVALIDATION_RETRY_DELAY).await;
             if let Ok(reading) = subscribe(&jetstream, &clock).await {
                 break reading;
@@ -86,22 +94,50 @@ where
     }
 }
 
-/// Drops what each notice covers, until the consumer fails, skips one, or
-/// ends.
-async fn drain<S, N, C>(cache: &Mutex<ReleaseCache<C>>, notices: &mut S)
+/// Drops what each notice covers, until the consumer fails, skips one, ends,
+/// or delivered one that never arrived.
+///
+/// Every [`INVALIDATION_POSITION_CHECK`] with no notice since the last look,
+/// it asks the server how far `consumer` has delivered. A notice delivered
+/// past the last one received may still be on its way, so it is owed until
+/// the next look; still missing then, the reader has lost its place. Without
+/// this, a lost last notice would show only when a later one arrived.
+async fn drain<K, S, N, C>(cache: &Mutex<ReleaseCache<C>>, consumer: &K, notices: &mut S)
 where
-    C: GetElapsed,
+    K: InvalidationConsumer,
     S: Stream<Item = Result<N, pull::MessagesError>> + Unpin,
     N: InvalidationNotice,
+    C: GetElapsed,
 {
-    let mut expected = 1;
-    while let Some(Ok(notice)) = notices.next().await {
-        if !matches!(notice.consumer_sequence(), Ok(sequence) if sequence == expected) {
-            return;
+    let mut received = 0;
+    let mut arrived = false;
+    let mut owed = None;
+    let mut next_look = Instant::now() + INVALIDATION_POSITION_CHECK;
+    loop {
+        match tokio::time::timeout_at(next_look, notices.next()).await {
+            Ok(Some(Ok(notice))) => {
+                if !matches!(notice.consumer_sequence(), Ok(sequence) if sequence == received + 1) {
+                    return;
+                }
+                let notice = ReleaseInvalidation::from_subject(notice.subject());
+                cache.lock().unwrap_or_else(PoisonError::into_inner).invalidate(&notice);
+                received += 1;
+                arrived = true;
+            }
+            Ok(_) => return,
+            Err(_) => {
+                if owed.take().is_some_and(|owed| received < owed) {
+                    return;
+                }
+                if !std::mem::take(&mut arrived) {
+                    let Ok(delivered) = consumer.delivered().await else {
+                        return;
+                    };
+                    owed = (delivered > received).then_some(delivered);
+                }
+                next_look = Instant::now() + INVALIDATION_POSITION_CHECK;
+            }
         }
-        let notice = ReleaseInvalidation::from_subject(notice.subject());
-        cache.lock().unwrap_or_else(PoisonError::into_inner).invalidate(&notice);
-        expected += 1;
     }
 }
 

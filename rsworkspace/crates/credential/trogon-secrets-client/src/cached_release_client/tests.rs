@@ -8,9 +8,9 @@ use trogon_std::SecretString;
 use super::CachedReleaseClient;
 use crate::fixtures::{BUNDLE_GENERATION, CREDENTIAL_ID, VALUE, now, request, runtime_service, secret, tenant};
 use crate::{
-    FakeOutcome, FakeSecretsService, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM, InvalidationStartError,
-    InvalidationStep, ReleaseCacheMode, ReleaseClient, ReleaseClientConfig, ReleaseError, ReleaseRequest,
-    ReleasedValue, ScriptedInvalidations, SteppedClock, TenantAccount,
+    FakeOutcome, FakeSecretsService, INVALIDATION_POSITION_CHECK, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM,
+    InvalidationStartError, InvalidationStep, ReleaseCacheMode, ReleaseClient, ReleaseClientConfig, ReleaseError,
+    ReleaseRequest, ReleasedValue, ScriptedInvalidations, SteppedClock, TenantAccount,
 };
 
 const OTHER_CREDENTIAL_ID: &str = "1c7e3a4f-8d2b-4a6c-9e01-2f3b4c5d6e7f";
@@ -46,6 +46,11 @@ async fn releasing_in_background(
     let released = tokio::spawn(async move { client.release(&asked).await });
     settle().await;
     released
+}
+
+/// Lets the reader reach its next look at how far its consumer delivered.
+async fn next_position_check() {
+    tokio::time::sleep(INVALIDATION_POSITION_CHECK).await;
 }
 
 /// Lets a late reply in flight arrive.
@@ -466,4 +471,82 @@ async fn keeps_a_release_on_its_way_when_a_notice_names_another_credential() {
     assert_eq!(released.value().as_str(), VALUE);
     assert_eq!(held.value().as_str(), VALUE);
     assert_eq!(fake.received().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_its_place_while_quiet_and_caught_up() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+
+    next_position_check().await;
+    settle().await;
+    next_position_check().await;
+    settle().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert_eq!(invalidations.position_checks(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_its_place_when_a_delivered_notice_arrives_before_its_next_look() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    invalidations.hold_back(&notice_subject(&tenant(), OTHER_CREDENTIAL_ID));
+
+    next_position_check().await;
+    settle().await;
+    invalidations.deliver_held_back();
+    next_position_check().await;
+    settle().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert_eq!(invalidations.position_checks(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn asks_nothing_of_its_consumer_while_notices_keep_arriving() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    let subject = notice_subject(&tenant(), OTHER_CREDENTIAL_ID);
+
+    for _ in 0..20 {
+        invalidations.notify(&subject);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert_eq!(invalidations.position_checks(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn serves_uncached_once_a_delivered_notice_never_arrives() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 2);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+    client.release(&asked).await.unwrap();
+    invalidations.hold_back(&notice_subject(asked.tenant(), CREDENTIAL_ID));
+
+    next_position_check().await;
+    settle().await;
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    next_position_check().await;
+    settle().await;
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn serves_uncached_once_it_cannot_tell_how_far_its_consumer_delivered() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    invalidations.refuse(InvalidationStep::Position);
+
+    next_position_check().await;
+    settle().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
 }

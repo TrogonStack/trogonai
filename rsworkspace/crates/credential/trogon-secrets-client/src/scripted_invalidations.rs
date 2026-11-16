@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use async_nats::jetstream::consumer::pull::{self, MessagesError, MessagesErrorKind};
 use async_nats::jetstream::consumer::{StreamError, StreamErrorKind};
-use async_nats::jetstream::context::{GetStreamError, GetStreamErrorKind};
+use async_nats::jetstream::context::{ConsumerInfoError, ConsumerInfoErrorKind, GetStreamError, GetStreamErrorKind};
 use async_nats::jetstream::stream::{ConsumerError, ConsumerErrorKind};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
@@ -25,6 +25,8 @@ pub(crate) struct ScriptedInvalidations {
     configs: Arc<Mutex<Vec<pull::Config>>>,
     feed: Arc<Mutex<Option<Feed>>>,
     delivered: Arc<Mutex<u64>>,
+    held_back: Arc<Mutex<Vec<ScriptedNotice>>>,
+    position_checks: Arc<Mutex<usize>>,
 }
 
 impl ScriptedInvalidations {
@@ -43,6 +45,27 @@ impl ScriptedInvalidations {
     pub(crate) fn skip_one(&self, subject: &str) {
         self.number();
         self.notify(subject);
+    }
+
+    /// Counts a notice published on `subject` as delivered but keeps it from
+    /// the reader until [`ScriptedInvalidations::deliver_held_back`], as a
+    /// notice still on its way, or lost on it, is.
+    pub(crate) fn hold_back(&self, subject: &str) {
+        let sequence = self.number();
+        lock(&self.held_back).push(ScriptedNotice::new(subject, Some(sequence)));
+    }
+
+    /// Delivers every notice held back, in the order they were numbered.
+    pub(crate) fn deliver_held_back(&self) {
+        let held_back = std::mem::take(&mut *lock(&self.held_back));
+        for notice in held_back {
+            self.send(Ok(notice));
+        }
+    }
+
+    /// How many times a reader asked how far its consumer delivered.
+    pub(crate) fn position_checks(&self) -> usize {
+        *lock(&self.position_checks)
     }
 
     /// Delivers a notice whose place in the delivery cannot be read.
@@ -131,6 +154,14 @@ impl InvalidationConsumer for ScriptedInvalidations {
         lock(&self.feed).replace(feed);
         *lock(&self.delivered) = 0;
         Ok(notices)
+    }
+
+    async fn delivered(&self) -> Result<u64, ConsumerInfoError> {
+        *lock(&self.position_checks) += 1;
+        if self.refuses(InvalidationStep::Position) {
+            return Err(ConsumerInfoError::new(ConsumerInfoErrorKind::TimedOut));
+        }
+        Ok(*lock(&self.delivered))
     }
 }
 

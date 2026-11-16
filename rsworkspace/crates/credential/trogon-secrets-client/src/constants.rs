@@ -42,6 +42,12 @@ pub const INVALIDATION_LOOKBACK: Duration = Duration::from_secs(330);
 /// lost its place.
 pub const INVALIDATION_RETRY_DELAY: Duration = Duration::from_secs(1);
 
+/// How often the invalidation reader, when no notice arrived since it last
+/// looked, asks the server how far its consumer has delivered, so a notice
+/// delivered but never received is not missed until a later one shows the
+/// gap.
+pub const INVALIDATION_POSITION_CHECK: Duration = Duration::from_secs(5);
+
 /// The stream release invalidations are published to.
 pub const INVALIDATION_STREAM: &str = "SECRETS_INVALIDATION";
 
