@@ -28,6 +28,7 @@ pub(crate) struct ScriptedInvalidations {
     configs: Arc<Mutex<Vec<pull::Config>>>,
     feed: Arc<Mutex<Option<Feed>>>,
     delivered: Arc<Mutex<u64>>,
+    backlog: Arc<Mutex<u64>>,
     held_back: Arc<Mutex<Vec<ScriptedNotice>>>,
     position_checks: Arc<Mutex<usize>>,
 }
@@ -41,6 +42,7 @@ impl Default for ScriptedInvalidations {
             configs: Arc::default(),
             feed: Arc::default(),
             delivered: Arc::default(),
+            backlog: Arc::default(),
             held_back: Arc::default(),
             position_checks: Arc::default(),
         }
@@ -55,6 +57,12 @@ impl ScriptedInvalidations {
     /// Makes the next attempt fail at `step`.
     pub(crate) fn refuse(&self, step: InvalidationStep) {
         lock(&self.refusals).push_back(step);
+    }
+
+    /// Makes the stream hold `count` notices for the next consumer created,
+    /// which the test then delivers with [`ScriptedInvalidations::notify`].
+    pub(crate) fn replay(&self, count: u64) {
+        *lock(&self.backlog) = count;
     }
 
     /// Delivers a notice published on `subject` to the reader.
@@ -179,7 +187,12 @@ impl InvalidationConsumer for ScriptedInvalidations {
         let (feed, notices) = unbounded();
         lock(&self.feed).replace(feed);
         *lock(&self.delivered) = 0;
+        *lock(&self.backlog) = 0;
         Ok(notices)
+    }
+
+    fn backlog(&self) -> u64 {
+        *lock(&self.backlog)
     }
 
     async fn delivered(&self) -> Result<u64, ConsumerInfoError> {

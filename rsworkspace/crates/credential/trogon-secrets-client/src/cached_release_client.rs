@@ -26,9 +26,11 @@ use super::{
 /// drops every copy of a credential a notice names, for every host and
 /// location and whatever the reason; a notice whose subject it cannot read
 /// drops every copy. A release still on its way when such a notice arrives is
-/// neither held nor returned, and is asked for once more. While that reader has lost its place nothing is held
-/// and every release is asked for again. Clones share the cache and the
-/// reader, which stops when the last clone is dropped.
+/// neither held nor returned, and is asked for once more. While that reader
+/// has lost its place, or has not yet caught up with the notices its consumer
+/// replays on starting and on every return to reading, nothing is held and
+/// every release is asked for again. Clones share the cache and the reader,
+/// which stops when the last clone is dropped.
 ///
 /// It counts, on the `trogon-secrets-client` meter, each time its reader
 /// loses its place and each release it serves without holding because the
@@ -51,6 +53,12 @@ where
 {
     /// Starts reading invalidations from `jetstream`, and refuses to start
     /// when it cannot, since a copy it never hears revoked would keep serving.
+    ///
+    /// It returns once the reader has caught up with the notices already in
+    /// the stream, or a quiet look finds it owed nothing more, so the replay
+    /// is over before the first release, or once the reader has lost its
+    /// place before that, when it serves
+    /// [`ReleaseCacheMode::Uncached`] until it reads again.
     pub async fn start<J>(client: ReleaseClient<N, C>, jetstream: J) -> Result<Self, InvalidationStartError>
     where
         J: InvalidationStreamSource,
@@ -137,7 +145,7 @@ where
     }
 
     /// Whether releases are held right now, or all asked for again because
-    /// the invalidation reader lost its place.
+    /// the invalidation reader lost its place and has not caught up since.
     pub fn mode(&self) -> ReleaseCacheMode {
         self.cache().mode()
     }
