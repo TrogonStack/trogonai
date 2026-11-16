@@ -622,6 +622,20 @@ async fn does_not_start_until_its_backlog_is_drained() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn stops_reading_when_starting_is_given_up_before_its_backlog_is_drained() {
+    let invalidations = ScriptedInvalidations::default();
+    invalidations.replay(2);
+    let starting = starting(&FakeSecretsService::new(), &invalidations);
+    settle().await;
+    assert!(invalidations.is_read());
+
+    starting.abort();
+    settle().await;
+
+    assert!(!invalidations.is_read());
+}
+
+#[tokio::test(start_paused = true)]
 async fn starts_at_once_when_the_stream_holds_no_backlog() {
     let starting = starting(&FakeSecretsService::new(), &ScriptedInvalidations::default());
     settle().await;
