@@ -50,3 +50,12 @@ fn counts_each_release_served_without_being_held() {
         [(Vec::<String>::new(), 2)]
     );
 }
+
+#[test]
+fn debug_output_names_the_metrics_without_their_instruments() {
+    let recorded = RecordedMetrics::new();
+
+    let metrics = ReleaseCacheMetrics::new(&recorded.meter());
+
+    assert_eq!(format!("{metrics:?}"), "ReleaseCacheMetrics { .. }");
+}

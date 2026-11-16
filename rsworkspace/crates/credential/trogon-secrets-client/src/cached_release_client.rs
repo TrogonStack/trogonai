@@ -125,8 +125,9 @@ where
         if cache.put(ticket, key.clone(), released.clone(), now) == ReleaseHold::Full {
             self.metrics.record_capacity_skip();
             if let Some(turned_away) = cache.capacity_warning() {
+                let capacity = cache.capacity();
                 tracing::warn!(
-                    capacity = cache.capacity(),
+                    capacity,
                     turned_away,
                     "release cache is full; releases are served without being held"
                 );

@@ -105,8 +105,9 @@ async fn read<J, C>(
         let loss = drain(&cache, consumer, notices).await;
         cache.lock().unwrap_or_else(PoisonError::into_inner).suspend();
         metrics.record_position_loss(&loss);
+        let reason = loss.reason().as_str();
         tracing::warn!(
-            reason = loss.reason().as_str(),
+            reason,
             detail = %loss,
             "invalidation reader lost its place; releases are not held until it reads again"
         );
