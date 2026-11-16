@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use async_nats::jetstream::stream::{DiscardPolicy, PersistenceMode, RetentionPolicy, StorageType};
+use async_nats::jetstream::stream::{DiscardPolicy, PersistenceMode, RetentionPolicy, StorageType, SubjectTransform};
 
 use super::*;
 
@@ -15,7 +15,7 @@ fn three() -> NonZeroUsize {
 #[test]
 fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
     type Weaken = fn(&mut Config);
-    let cases: [(Weaken, InvalidationStreamMismatchError); 18] = [
+    let cases: [(Weaken, InvalidationStreamMismatchError); 19] = [
         (
             |c| c.storage = StorageType::Memory,
             InvalidationStreamMismatchError::Storage,
@@ -65,6 +65,15 @@ fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
             |c| c.duplicate_window = Duration::from_secs(119),
             InvalidationStreamMismatchError::DuplicateWindow,
         ),
+        (
+            |c| {
+                c.subject_transform = Some(SubjectTransform {
+                    source: "secrets.invalidation.v1.>".to_owned(),
+                    destination: "archived.>".to_owned(),
+                })
+            },
+            InvalidationStreamMismatchError::SubjectTransform,
+        ),
         (|c| c.num_replicas = 2, InvalidationStreamMismatchError::Replicas),
         (|c| c.subjects.clear(), InvalidationStreamMismatchError::MissingSubject),
     ];
@@ -87,6 +96,23 @@ fn refuses_a_stream_whose_only_subject_is_another_one() {
     assert_eq!(
         InvalidationStream::validate(one(), &actual),
         Err(InvalidationStreamMismatchError::MissingSubject)
+    );
+}
+
+#[test]
+fn refuses_a_transform_that_moves_stored_notices_off_the_subject_holders_read() {
+    // The stream still takes notices on its subject, but stores them under
+    // another one, so a holder filtering on the published subject reads none.
+    let mut actual = InvalidationStream::config(one());
+    actual.subject_transform = Some(SubjectTransform {
+        source: "secrets.invalidation.v1.>".to_owned(),
+        destination: "archived.>".to_owned(),
+    });
+
+    assert_eq!(actual.subjects, [INVALIDATION_SUBJECTS]);
+    assert_eq!(
+        InvalidationStream::validate(one(), &actual),
+        Err(InvalidationStreamMismatchError::SubjectTransform)
     );
 }
 
@@ -158,6 +184,7 @@ fn config_holds_every_guarantee_the_contract_names() {
         assert!(!config.allow_message_ttl);
         assert!(!config.no_ack);
         assert!(!config.sealed);
+        assert_eq!(config.subject_transform, None);
         assert_eq!(config.persist_mode, None);
         assert_eq!(config.max_messages, 0);
         assert_eq!(config.max_bytes, 0);

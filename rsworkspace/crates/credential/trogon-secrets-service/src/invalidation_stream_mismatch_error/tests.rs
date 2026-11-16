@@ -56,6 +56,10 @@ fn each_message_names_the_rule_and_the_stream() {
             "stream 'SECRETS_INVALIDATION' must keep a duplicate window of two minutes or longer",
         ),
         (
+            InvalidationStreamMismatchError::SubjectTransform,
+            "stream 'SECRETS_INVALIDATION' must not transform the subjects notices are stored on",
+        ),
+        (
             InvalidationStreamMismatchError::Replicas,
             "stream 'SECRETS_INVALIDATION' must keep at least the replicas the deployment asked for",
         ),

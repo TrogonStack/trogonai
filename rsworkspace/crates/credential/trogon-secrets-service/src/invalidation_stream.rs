@@ -34,6 +34,8 @@
 //!   shorter than two minutes, which the publisher's redelivery must fit in);
 //! - refuse a notice for its size (a maximum message size under the 1 KiB the
 //!   largest notice fits in with its headers);
+//! - store notices under another subject (`subject_transform`), so a holder
+//!   filtering on the subject a notice was published to would never read it;
 //! - leave out the subject, so a notice would be published to nothing.
 //!
 //! What is left alone is capacity and placement: the discard policy,
@@ -131,6 +133,9 @@ impl InvalidationStream {
         }
         if actual.duplicate_window < INVALIDATION_DUPLICATE_WINDOW {
             return Err(InvalidationStreamMismatchError::DuplicateWindow);
+        }
+        if actual.subject_transform.is_some() {
+            return Err(InvalidationStreamMismatchError::SubjectTransform);
         }
         if actual.num_replicas < replicas.get() {
             return Err(InvalidationStreamMismatchError::Replicas);
