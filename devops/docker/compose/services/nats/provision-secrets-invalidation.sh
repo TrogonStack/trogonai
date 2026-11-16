@@ -86,6 +86,7 @@ refuse_when "acknowledges before writing to disk, but invalidation requires the 
 refuse_when "expires notices before the 330 second replay window, but invalidation requires at least that" \
   "(.config.max_age // 0) > 0 and .config.max_age < $REPLAY_WINDOW_NS"
 refuse_when "lets a notice set its own expiry, but invalidation requires message TTL off" '.config.allow_msg_ttl // false'
+refuse_when "is a counter stream, which refuses every notice, but invalidation requires counters off" '.config.allow_msg_counter // false'
 refuse_when "limits the notices kept per subject, but invalidation requires no limit" '(.config.max_msgs_per_subject // -1) > 0'
 refuse_when "refuses messages over its size limit under 1024 bytes, but invalidation requires at least 1024" \
   '(.config.max_msg_size // -1) > 0 and .config.max_msg_size < 1024'
