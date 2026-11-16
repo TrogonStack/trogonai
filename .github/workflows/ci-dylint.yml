@@ -1,0 +1,64 @@
+name: CI Dylint
+
+# Bazel cannot run these lints: the dylint library links rustc_private crates
+# from a pinned nightly with rustc-dev, which the Bazel Rust toolchain lacks.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'rsworkspace/**'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
+      - '.github/actions/setup-rust/**'
+      - '.config/mise/tasks/github/actions/setup-rust/**'
+      - '.config/mise/tasks/github/workflows/ci-dylint/**'
+      - '.github/workflows/ci-dylint.yml'
+
+concurrency:
+  group: ci-dylint-${{ github.ref }}
+  # main runs are the only ones that save the cache every PR restores.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+  # Source-built mise tools (dylint-link) fetch crates from crates.io during
+  # install; raise retry tolerance for spurious network errors.
+  CARGO_NET_RETRY: '10'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+
+permissions:
+  contents: read
+
+jobs:
+  dylint:
+    name: Dylint
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          install-args: rust python cargo:cargo-dylint cargo:dylint-link
+          dylint-toolchain-dir: rsworkspace/dylints/trogonai_dylint
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-dylint
+          workspaces: rsworkspace -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Test repo Rust policy lints
+        run: mise run github:workflows:ci-dylint:dylint-tests
+
+      - name: Run repo Rust policy lints
+        run: mise run --skip-tools github:workflows:ci-dylint:rust-dylint

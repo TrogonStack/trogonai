@@ -2,12 +2,12 @@
 mod tests;
 
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::InitializeResponse;
+use agent_client_protocol::v1::schema::InitializeResponse;
 use trogon_channel::AgentPortError;
 
 use {
     acp_nats::AgentHandler,
-    agent_client_protocol::schema::v1::{
+    agent_client_protocol::v1::schema::{
         CancelNotification, CloseSessionRequest, ContentBlock, NewSessionRequest, PromptRequest, StopReason,
         TextContent,
     },
@@ -46,7 +46,7 @@ impl AgentPortError for AcpPortError {
         // pinned to a session the agent has forgotten, failing every future
         // message rather than just this one.
         match self {
-            Self::Rpc(error) => matches!(error.code, ErrorCode::InvalidParams | ErrorCode::ResourceNotFound),
+            Self::Rpc(error) => matches!(error.code, ErrorCode::INVALID_PARAMS | ErrorCode::RESOURCE_NOT_FOUND),
             Self::SessionId(_) => false,
         }
     }
@@ -236,7 +236,7 @@ struct SenderMeta<'a> {
 
 /// Structured twin of the context prefix, for agents that opt into reading
 /// `_meta` (see the architecture doc's `_meta` convention).
-fn prompt_meta(event: &InboundEvent) -> agent_client_protocol::schema::v1::Meta {
+fn prompt_meta(event: &InboundEvent) -> agent_client_protocol::v1::schema::Meta {
     let mut meta = serde_json::Map::new();
     let chat = ChatMeta {
         channel: event.endpoint.channel(),

@@ -51,6 +51,7 @@ const MACHINE: &str = include_str!("fixtures/auth_callbacks/run_machine.json");
 
 enum Step {
     Wait(u64),
+    InputClosed,
     State(&'static str),
     Said(&'static str),
     Result,
@@ -71,9 +72,18 @@ async fn write(stdout: &Stdout, frame: &Value) -> Result<(), Failure> {
 }
 
 /// Plays `steps` and notes the last `result` or session state it sent.
-async fn play(stdout: Stdout, steps: Vec<Step>, last: Arc<Mutex<&'static str>>) -> Result<(), Failure> {
+async fn play(
+    stdout: Stdout,
+    steps: Vec<Step>,
+    last: Arc<Mutex<&'static str>>,
+    mut input_closed: tokio::sync::watch::Receiver<bool>,
+) -> Result<(), Failure> {
     for step in steps {
         let (name, frame) = match step {
+            Step::InputClosed => {
+                input_closed.wait_for(|closed| *closed).await?;
+                continue;
+            }
             Step::Wait(millis) => {
                 tokio::time::sleep(Duration::from_millis(millis)).await;
                 continue;
@@ -136,6 +146,7 @@ async fn serve_from(
     let stdout: Stdout = Arc::new(tokio::sync::Mutex::new(process.stdout));
     let stderr = process.stderr;
     let last = Arc::new(Mutex::new("nothing"));
+    let (closed, input_closed) = tokio::sync::watch::channel(false);
     let mut steps = Some(steps);
     let mut player = None;
     while let Some(line) = lines.next_line().await? {
@@ -148,12 +159,22 @@ async fn serve_from(
             )
             .await?;
             if from_initialize && let Some(steps) = steps.take() {
-                player = Some(tokio::spawn(play(Arc::clone(&stdout), steps, Arc::clone(&last))));
+                player = Some(tokio::spawn(play(
+                    Arc::clone(&stdout),
+                    steps,
+                    Arc::clone(&last),
+                    input_closed.clone(),
+                )));
             }
         } else if frame["type"] == "user"
             && let Some(steps) = steps.take()
         {
-            player = Some(tokio::spawn(play(Arc::clone(&stdout), steps, Arc::clone(&last))));
+            player = Some(tokio::spawn(play(
+                Arc::clone(&stdout),
+                steps,
+                Arc::clone(&last),
+                input_closed.clone(),
+            )));
         }
     }
     let closed_after = if closing.load(Ordering::SeqCst) {
@@ -161,6 +182,7 @@ async fn serve_from(
     } else {
         *last.lock().map_err(|_| "lock poisoned")?
     };
+    let _ = closed.send(true);
     if let Some(player) = player {
         player.await??;
     }
@@ -279,20 +301,35 @@ async fn a_streamed_input_is_closed_when_written_unless_something_needs_the_cli_
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum InputClosure {
+    Written,
+    Result,
+    Idle,
+}
+
 /// Everything the CLI sends: the result comes in the middle, with messages on both sides of it.
-fn after_the_result() -> Vec<Step> {
-    vec![
+fn after_the_result(closes: InputClosure) -> Vec<Step> {
+    let mut steps = Vec::new();
+    if matches!(closes, InputClosure::Written) {
+        steps.push(Step::InputClosed);
+    }
+    steps.extend([
         Step::Wait(100),
         Step::State("running"),
         Step::Wait(100),
         Step::Said("A"),
         Step::Result,
-        Step::Wait(300),
-        Step::Said("BB"),
-        Step::State("idle"),
-        Step::Wait(300),
-        Step::Said("CCC"),
-    ]
+    ]);
+    if matches!(closes, InputClosure::Result) {
+        steps.push(Step::InputClosed);
+    }
+    steps.extend([Step::Wait(300), Step::Said("BB"), Step::State("idle")]);
+    if matches!(closes, InputClosure::Idle) {
+        steps.push(Step::InputClosed);
+    }
+    steps.extend([Step::Wait(300), Step::Said("CCC")]);
+    steps
 }
 
 fn python_options(needs: bool) -> ClaudeAgentOptions {
@@ -475,12 +512,12 @@ async fn a_single_prompt_keeps_yielding_after_its_result_like_sdk_mjs() -> TestR
     assert_seen(
         &captured,
         "post_turn_no_needs",
-        &query_to_the_end(options(false), after_the_result()).await?,
+        &query_to_the_end(options(false), after_the_result(InputClosure::Result)).await?,
     )?;
     assert_seen(
         &captured,
         "post_turn_needs",
-        &query_to_the_end(options(true), after_the_result()).await?,
+        &query_to_the_end(options(true), after_the_result(InputClosure::Idle)).await?,
     )?;
     Ok(())
 }
@@ -491,12 +528,12 @@ async fn a_streamed_input_keeps_yielding_after_its_result_like_sdk_mjs() -> Test
     assert_seen(
         &captured,
         "post_stream_no_needs",
-        &streamed_to_the_end(options(false), after_the_result()).await?,
+        &streamed_to_the_end(options(false), after_the_result(InputClosure::Written)).await?,
     )?;
     assert_seen(
         &captured,
         "post_stream_needs",
-        &streamed_to_the_end(options(true), after_the_result()).await?,
+        &streamed_to_the_end(options(true), after_the_result(InputClosure::Idle)).await?,
     )?;
     Ok(())
 }
@@ -507,12 +544,12 @@ async fn python_closes_stdin_once_the_prompt_is_written_and_keeps_yielding() -> 
     assert_seen(
         &captured,
         "python_post_no_needs",
-        &query_to_the_end(python_options(false), after_the_result()).await?,
+        &query_to_the_end(python_options(false), after_the_result(InputClosure::Written)).await?,
     )?;
     assert_seen(
         &captured,
         "python_post_needs",
-        &query_to_the_end(python_options(true), after_the_result()).await?,
+        &query_to_the_end(python_options(true), after_the_result(InputClosure::Idle)).await?,
     )?;
     Ok(())
 }
@@ -522,13 +559,17 @@ fn no_result() -> Vec<Step> {
     vec![Step::Wait(100), Step::Said("A")]
 }
 
+fn no_result_after_input_closes() -> Vec<Step> {
+    vec![Step::InputClosed, Step::Said("A")]
+}
+
 #[tokio::test]
 async fn without_a_result_stdin_closes_when_the_input_is_written_unless_something_needs_the_cli() -> TestResult {
     let captured = Captured::parse(POST)?;
     assert_seen(
         &captured,
         "none_stream_no_needs",
-        &streamed_to_the_end(options(false), no_result()).await?,
+        &streamed_to_the_end(options(false), no_result_after_input_closes()).await?,
     )?;
     assert_seen(
         &captured,
@@ -555,7 +596,7 @@ async fn python_without_a_result_closes_stdin_once_the_prompt_is_written_unless_
     assert_seen(
         &captured,
         "python_none_no_needs",
-        &query_to_the_end(python_options(false), no_result()).await?,
+        &query_to_the_end(python_options(false), no_result_after_input_closes()).await?,
     )?;
     assert_seen(
         &captured,

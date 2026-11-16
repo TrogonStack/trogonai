@@ -623,7 +623,11 @@ upstream SDKs).
   `Child` with piped stdin and stdout, so a container or remote shell can host the
   CLI. The forwarded signal is cancelled only when the client closes after its
   abort controller was cancelled, past the close grace. As in TypeScript, a
-  custom spawn gets no default debug file. `on_process_spawned` is TypeScript's
+  custom spawn gets no default debug file. The SDK's own spawn passes the child
+  only its stdio under the Python dialect on every platform, as
+  `Popen(close_fds=True)` does, and under the TypeScript dialect on Apple
+  platforms, as libuv's `posix_spawn` does; a custom spawn decides which
+  descriptors its child keeps. `on_process_spawned` is TypeScript's
   undeclared `onProcessSpawned`: after the SDK's own spawn it receives the pid
   and `spawn_sync_ms`, and a panic in it is logged and ignored.
 - `find_bundled_cli` ports Python's `<package>/_bundled/claude[.exe]` check, which

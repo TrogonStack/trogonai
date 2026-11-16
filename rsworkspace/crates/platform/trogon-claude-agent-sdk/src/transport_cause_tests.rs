@@ -47,6 +47,27 @@ fn an_io_kind_above_a_name_lookup_error_is_read_first() {
 }
 
 #[test]
+fn an_io_kind_wrapping_a_name_lookup_error_directly_is_read_first() {
+    let reset = io::Error::new(io::ErrorKind::ConnectionReset, lookup_failure());
+    assert_eq!(transport_cause(&reset), Some(TransportCause::Reset));
+    assert_eq!(
+        transport_cause(&layered(io::Error::new(
+            io::ErrorKind::ConnectionReset,
+            lookup_failure()
+        ))),
+        Some(TransportCause::Reset)
+    );
+    let refused = io::Error::new(io::ErrorKind::ConnectionRefused, lookup_failure());
+    assert_eq!(transport_cause(&refused), Some(TransportCause::Refused));
+}
+
+#[test]
+fn an_io_kind_wrapped_in_another_io_error_is_read() {
+    let reset = io::Error::other(io::Error::from(io::ErrorKind::ConnectionReset));
+    assert_eq!(transport_cause(&layered(reset)), Some(TransportCause::Reset));
+}
+
+#[test]
 fn a_refused_connection_is_refused() {
     let refused = io::Error::from(io::ErrorKind::ConnectionRefused);
     assert_eq!(transport_cause(&layered(refused)), Some(TransportCause::Refused));

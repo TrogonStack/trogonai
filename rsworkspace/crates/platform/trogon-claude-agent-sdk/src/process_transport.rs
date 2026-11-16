@@ -87,6 +87,14 @@ pub(crate) fn command(
     }
     #[cfg(unix)]
     {
+        if crate::inherited_descriptors::passes_only_stdio(options.argv_style) {
+            let limit = crate::inherited_descriptors::descriptor_limit();
+            // SAFETY: the closure only calls `close_range` and `fcntl`, which are async-signal-safe and allocate
+            // nothing.
+            unsafe {
+                command.pre_exec(move || crate::inherited_descriptors::keep_only_stdio(limit));
+            }
+        }
         let uid = match (&options.user, options.run_as_uid) {
             (Some(name), _) => Some(crate::run_as::lookup(name).map_err(Error::Io)?),
             (None, uid) => uid,

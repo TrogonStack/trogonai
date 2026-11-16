@@ -315,8 +315,9 @@ fn header_value(text: &str, for_fetch: bool) -> Option<HeaderValue> {
 /// - hyper's incomplete message, `socket hang up` / `ECONNRESET`: the `destroy` network golden and
 ///   `a_peer_that_closes_after_reading_is_a_socket_hang_up`;
 /// - a reset, aborted or ended connection, `socket hang up` / `ECONNRESET`:
-///   `a_reset_aborted_or_ended_connection_is_reset`, `an_io_kind_above_a_name_lookup_error_is_read_first` and
-///   `a_peer_that_resets_is_a_socket_hang_up`;
+///   `a_reset_aborted_or_ended_connection_is_reset`, `an_io_kind_above_a_name_lookup_error_is_read_first`,
+///   `an_io_kind_wrapping_a_name_lookup_error_directly_is_read_first`, `an_io_kind_wrapped_in_another_io_error_is_read`
+///   and `a_peer_that_resets_is_a_socket_hang_up`;
 /// - a refused connection, `connect ECONNREFUSED {host}:{port}`, or no message for `localhost`:
 ///   `a_refused_connection_is_refused` and the `refused` and `localhost` network goldens;
 /// - anything else, `Network Error` / `ERR_NETWORK`: `other_io_kinds_name_no_cause`,

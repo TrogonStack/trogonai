@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-#MISE description="Validate CI selection, workflow syntax, and canary helpers without building workspaces"
+#MISE description="Validate CI selection, canary helpers, and mise task shell syntax, which Bazel does not run"
 set -euo pipefail
 
 cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
 npm ci --prefix tests/github_actions --ignore-scripts --no-audit --no-fund
-node --test tests/github_actions/test_ci_selection.mjs tests/github_actions/test_ci_selector_process.mjs tests/github_actions/test_runs_on_fallback.mjs
+node --test tests/github_actions/test_ci_selection.mjs tests/github_actions/test_ci_selector_process.mjs tests/github_actions/test_bazel_fork_workflow.mjs
 python3 -m unittest discover -s tests/github_actions -p 'test_*.py'
-bash -n .config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip
-actionlint -shellcheck=''
+
+# .bazelignore leaves .config/mise/tasks out of Bazel, so parse every bash task here.
+status=0
+while IFS= read -r -d '' task; do
+  if head -n 1 "$task" | grep -Eq '^#!/usr/bin/env bash|^#!/bin/bash'; then
+    bash -n "$task" || status=1
+  fi
+done < <(git ls-files -z -- .config/mise/tasks)
+exit "$status"
