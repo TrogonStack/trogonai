@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_notification_params, decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ExtNotification, ExtRequest, ExtResponse};
+use agent_client_protocol::v1::schema::{ExtNotification, ExtRequest, ExtResponse};
 use async_nats::header::HeaderMap;
 use serde_json::value::RawValue;
 use std::sync::Arc;
@@ -20,7 +20,7 @@ pub enum ExtError {
 
 pub fn error_code_and_message(e: &ExtError) -> (ErrorCode, String) {
     match e {
-        ExtError::MalformedJson(inner) => (ErrorCode::ParseError, format!("Malformed ext request JSON: {}", inner)),
+        ExtError::MalformedJson(inner) => (ErrorCode::PARSE_ERROR, format!("Malformed ext request JSON: {}", inner)),
         ExtError::ClientError(inner) => (inner.code, inner.message.clone()),
     }
 }

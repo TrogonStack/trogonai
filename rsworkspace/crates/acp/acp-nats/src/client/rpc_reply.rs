@@ -1,4 +1,4 @@
-use crate::constants::{CONTENT_TYPE_JSON, CONTENT_TYPE_PLAIN};
+use crate::constants::CONTENT_TYPE_JSON;
 use crate::nats::{FlushClient, PublishClient, headers_with_trace_context};
 use crate::wire::{encode_agent_error, encode_success, merge_jsonrpc_headers};
 use agent_client_protocol::{Error, ErrorCode};
@@ -56,13 +56,8 @@ pub async fn publish_agent_error_reply<N: PublishClient + FlushClient>(
     error: &Error,
     context: &str,
 ) {
-    match encode_agent_error(response_id, error) {
-        Ok(encoded) => publish_wire_reply(nats, reply_to, encoded, context).await,
-        Err(e) => {
-            warn!(error = %e, context, "Failed to encode error reply");
-            publish_fallback_error_reply(nats, reply_to, context).await;
-        }
-    }
+    let encoded = encode_agent_error(response_id, error);
+    publish_wire_reply(nats, reply_to, encoded, context).await;
 }
 
 pub async fn publish_error_reply<N: PublishClient + FlushClient>(
@@ -87,36 +82,11 @@ async fn publish_internal_error_reply<N: PublishClient + FlushClient>(
         nats,
         reply_to,
         response_id,
-        ErrorCode::InternalError,
+        ErrorCode::INTERNAL_ERROR,
         "Internal error",
         context,
     )
     .await;
-}
-
-async fn publish_fallback_error_reply<N: PublishClient + FlushClient>(nats: &N, reply_to: &str, context: &str) {
-    let encoded = match encode_agent_error(
-        ResponseId::Null,
-        &Error::new(ErrorCode::InternalError.into(), "Internal error"),
-    ) {
-        Ok(encoded) => encoded,
-        Err(e) => {
-            warn!(error = %e, context, "Fallback wire encoding failed");
-            let mut headers = headers_with_trace_context();
-            headers.insert("Content-Type", CONTENT_TYPE_PLAIN);
-            if let Err(e) = nats
-                .publish_with_headers(reply_to.to_string(), headers, "Internal error".into())
-                .await
-            {
-                warn!(error = %e, context, "Failed to publish fallback reply");
-            }
-            if let Err(e) = nats.flush().await {
-                warn!(error = %e, context, "Failed to flush fallback reply");
-            }
-            return;
-        }
-    };
-    publish_wire_reply(nats, reply_to, encoded, context).await;
 }
 
 #[cfg(test)]
@@ -128,7 +98,7 @@ pub fn encode_success_for_test<Res: serde::Serialize>(
 }
 
 #[cfg(test)]
-pub fn encode_agent_error_for_test(response_id: ResponseId, error: &Error) -> Result<Encoded, crate::wire::WireError> {
+pub fn encode_agent_error_for_test(response_id: ResponseId, error: &Error) -> Encoded {
     encode_agent_error(response_id, error)
 }
 
