@@ -194,6 +194,7 @@ pub use invalidation_notice::InvalidationNotice;
 pub use invalidation_outcome::InvalidationOutcome;
 pub use invalidation_publisher::InvalidationPublisher;
 pub use invalidation_publisher_error::InvalidationPublisherError;
+pub(crate) use invalidation_publisher_error::PublisherError;
 pub use invalidation_source_error::InvalidationSourceError;
 pub use invalidation_stream::InvalidationStream;
 pub use invalidation_stream_mismatch_error::InvalidationStreamMismatchError;

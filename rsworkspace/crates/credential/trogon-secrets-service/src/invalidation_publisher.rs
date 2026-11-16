@@ -1,24 +1,12 @@
-use std::future::IntoFuture as _;
-
-use async_nats::HeaderMap;
-use async_nats::header::NATS_MESSAGE_ID;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, pull};
-use async_nats::jetstream::message::AckKind;
-use futures::StreamExt as _;
 use tokio_util::sync::CancellationToken;
 use trogon_credential_aggregate::CREDENTIAL_EVENT_SUBJECT_PREFIX;
 use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer, JetStreamPublisher};
 
-use super::constants::{INVALIDATION_PUBLISHER_ACK_WAIT, INVALIDATION_PUBLISHER_DURABLE, INVALIDATION_RETRY_DELAY};
+use super::constants::{INVALIDATION_PUBLISHER_ACK_WAIT, INVALIDATION_PUBLISHER_DURABLE};
 use super::{
-    CredentialEventDelivery, InvalidationNotice, InvalidationOutcome, InvalidationPublisherError,
-    InvalidationSourceError, ListeningInvalidationPublisher, OwnerTenants, error_chain,
+    CredentialEventDelivery, InvalidationPublisherError, ListeningInvalidationPublisher, OwnerTenants, PublisherError,
 };
-
-pub(crate) type PublisherError<S> = InvalidationPublisherError<
-    <S as JetStreamCreateConsumer>::Error,
-    <<S as JetStreamCreateConsumer>::Consumer as JetStreamConsumer>::StreamError,
->;
 
 /// Turns each credential event that ends a release into the notice telling its
 /// holders to drop their copies (ADR#0074), stored on the invalidation stream.
@@ -120,128 +108,11 @@ where
             durable = INVALIDATION_PUBLISHER_DURABLE,
             "invalidation publisher reading the credential stream"
         );
-        Ok(Some(ListeningInvalidationPublisher::new(self, deliveries)))
-    }
-
-    /// Settles each of `deliveries` until `shutdown` is cancelled, as
-    /// [`ListeningInvalidationPublisher::run`] says.
-    pub(crate) async fn read(
-        &self,
-        mut deliveries: <S::Consumer as JetStreamConsumer>::Messages,
-        shutdown: CancellationToken,
-    ) -> Result<(), PublisherError<S>> {
-        loop {
-            let delivery = tokio::select! {
-                biased;
-                () = shutdown.cancelled() => return Ok(()),
-                delivery = deliveries.next() => delivery,
-            };
-            match delivery {
-                Some(Ok(delivery)) => self.settle(&delivery).await,
-                Some(Err(error)) => {
-                    tracing::warn!(error = %error, "credential event delivery failed; reading on");
-                }
-                None => {
-                    tracing::error!(
-                        durable = INVALIDATION_PUBLISHER_DURABLE,
-                        "credential event deliveries ended before shutdown"
-                    );
-                    return Err(InvalidationPublisherError::MessagesEnded);
-                }
-            }
-        }
-    }
-
-    async fn settle(&self, delivery: &impl CredentialEventDelivery) {
-        let message = match delivery.stored() {
-            Ok(message) => message,
-            Err(error) => {
-                let error = error_chain(&error);
-                tracing::error!(
-                    error = %error,
-                    "credential event delivery does not say where it was stored; retrying it"
-                );
-                retry(delivery, None).await;
-                return;
-            }
-        };
-        let sequence = message.sequence;
-        match InvalidationOutcome::of(message, &self.owners) {
-            Ok(InvalidationOutcome::Publish(notice)) => self.publish(delivery, sequence, &notice).await,
-            Ok(InvalidationOutcome::NothingToPublish) => acknowledge(delivery, sequence).await,
-            Ok(InvalidationOutcome::OwnerHeldByNoTenant { credential }) => {
-                let credential_id = credential.credential_id();
-                let owner_id = credential.owner_id();
-                tracing::warn!(
-                    stream_sequence = sequence,
-                    credential_id = %credential_id,
-                    owner_id = %owner_id,
-                    "credential event ends a release whose owner no tenant holds; no notice published"
-                );
-                acknowledge(delivery, sequence).await;
-            }
-            Err(error) if retried(&error) => {
-                let error = error_chain(&error);
-                tracing::warn!(
-                    stream_sequence = sequence,
-                    error = %error,
-                    "credential event is not readable by this build yet; retrying it"
-                );
-                retry(delivery, Some(sequence)).await;
-            }
-            Err(error) => {
-                let error = error_chain(&error);
-                tracing::error!(
-                    stream_sequence = sequence,
-                    error = %error,
-                    "credential event is not readable; terminated without a notice"
-                );
-                settle_with(delivery, Some(sequence), AckKind::Term).await;
-            }
-        }
-    }
-
-    async fn publish(&self, delivery: &impl CredentialEventDelivery, sequence: u64, notice: &InvalidationNotice) {
-        let mut headers = HeaderMap::new();
-        headers.insert(NATS_MESSAGE_ID, notice.message_id());
-        let stored = match self
-            .notices
-            .publish_with_headers(notice.subject().to_owned(), headers, notice.payload().to_vec().into())
-            .await
-        {
-            Ok(confirmation) => confirmation.into_future().await.map(drop),
-            Err(error) => Err(error),
-        };
-        match stored {
-            Ok(()) => acknowledge(delivery, sequence).await,
-            Err(error) => {
-                let subject = notice.subject();
-                let error = error_chain(&error);
-                tracing::warn!(
-                    stream_sequence = sequence,
-                    subject,
-                    error = %error,
-                    "invalidation notice was not stored; retrying its credential event"
-                );
-                retry(delivery, Some(sequence)).await;
-            }
-        }
-    }
-}
-
-/// Whether a credential event this build cannot read is delivered again
-/// rather than terminated. Only an unknown event type can read differently on
-/// a later delivery, by reaching a newer build; every other failure is in the
-/// stored event itself.
-fn retried(error: &InvalidationSourceError) -> bool {
-    match error {
-        InvalidationSourceError::UnknownEventType { .. } => true,
-        InvalidationSourceError::Unrecorded(_)
-        | InvalidationSourceError::Undecodable(_)
-        | InvalidationSourceError::InvalidEvent(_)
-        | InvalidationSourceError::NoSubject(_)
-        | InvalidationSourceError::EventFromAnotherSubject { .. }
-        | InvalidationSourceError::NotAppendedAfterEpoch { .. } => false,
+        Ok(Some(ListeningInvalidationPublisher::new(
+            self.notices,
+            self.owners,
+            deliveries,
+        )))
     }
 }
 
@@ -253,31 +124,6 @@ fn consumer_config() -> pull::Config {
         ack_policy: AckPolicy::Explicit,
         ack_wait: INVALIDATION_PUBLISHER_ACK_WAIT,
         ..Default::default()
-    }
-}
-
-async fn acknowledge(delivery: &impl CredentialEventDelivery, sequence: u64) {
-    if let Err(error) = delivery.ack().await {
-        tracing::warn!(
-            stream_sequence = sequence,
-            error = %error,
-            "credential event was not acknowledged; the stream delivers it again"
-        );
-    }
-}
-
-async fn retry(delivery: &impl CredentialEventDelivery, sequence: Option<u64>) {
-    settle_with(delivery, sequence, AckKind::Nak(Some(INVALIDATION_RETRY_DELAY))).await;
-}
-
-async fn settle_with(delivery: &impl CredentialEventDelivery, sequence: Option<u64>, kind: AckKind) {
-    if let Err(error) = delivery.ack_with(kind).await {
-        tracing::warn!(
-            stream_sequence = sequence,
-            settlement = ?kind,
-            error = %error,
-            "credential event was not settled; the stream delivers it again"
-        );
     }
 }
 

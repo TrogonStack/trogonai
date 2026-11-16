@@ -1,4 +1,13 @@
+use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer};
+
 use super::constants::INVALIDATION_PUBLISHER_DURABLE;
+
+/// The [`InvalidationPublisherError`] of a publisher reading credential events
+/// through `S`.
+pub(crate) type PublisherError<S> = InvalidationPublisherError<
+    <S as JetStreamCreateConsumer>::Error,
+    <<S as JetStreamCreateConsumer>::Consumer as JetStreamConsumer>::StreamError,
+>;
 
 /// Why the invalidation publisher stopped reading the credential stream before
 /// it was told to.
