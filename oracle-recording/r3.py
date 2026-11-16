@@ -118,8 +118,8 @@ def shapes_at(table, above, target, major, leaf_names):
 def run_spec(spec_path, flags, startup):
     command = [NODE, *probe_flags(flags), MANAGED["ORACLE"], PACKAGE, spec_path]
     with tempfile.TemporaryFile() as errors:
-        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=errors,
-                                 env={"PAD": "x" * MANAGED["pad"](command, startup), **D["EXTRA_ENV"]})
+        process = D["spawn"](command, {"PAD": "x" * MANAGED["pad"](command, startup)}, stdout=subprocess.PIPE,
+                             stderr=errors)
         errors.seek(0)
         stderr = errors.read().decode("utf-8", "replace")
     if process.returncode != 0:
@@ -1345,8 +1345,8 @@ def r7_traced():
 
 def r7_oracle(package, spec_path, env):
     command = [NODE, *probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), MANAGED["ORACLE"], package, spec_path]
-    process = subprocess.run(command, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, env=env, timeout=600)
+    # Fixture recordings start Node with its defaults and no PAD: their answers do not depend on the depth budget.
+    process = D["spawn"](command, env, unpadded=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
     return process.returncode, process.stdout.decode("utf-8", "replace"), process.stderr.decode("utf-8", "replace")[-600:]
 
 
@@ -1593,7 +1593,14 @@ R8_LABELS = {"parent": ("managedSettings", "parent managed settings"),
 R8_SHALLOW = '{"x":{"__proto__":[[null]]},"model":"m"}'
 # name: (key, wrap, pass, major, above)
 R8_PASSES = {"walk": ("model", None, "walk", "o", 1), "clone": ("model", None, "clone", "a", 1),
-             "copy": ("x", "__proto__", "copy", "a", 2)}
+             "copy": ("x", "__proto__", "copy", "a", 2), "cachedcopy": ("x", "__proto__", "copy", "a", 2)}
+# `copy` is the first, missed pm call's copy, found from the trace; `cachedcopy` the second, cached call's copy, which
+# runs deeper and which the pinned answer shows (Update 66). Only the passes the pinned answer tells apart are goldens.
+R8_GOLDEN_PASSES = ("walk", "clone", "cachedcopy")
+# The stages a label logs when the cached copy runs out (the cached copy's far shape, the first copy's near shape) and
+# when the first copy runs out (the first copy's far shape).
+R8_CACHED_OUT = ["pm:miss", "clone", "walk", "schema", "copy", "pm:hit"]
+R8_FIRST_OUT = ["pm:miss", "clone", "walk", "schema"]
 # The stage the far shape must stop at: both the object-major (walk) and the array-major (clone) forms overflow
 # inside the j7e structuredClone, which runs before the walk; the copy overflows after the schema read.
 R8_ATTRIBUTION = {"walk": (None, "clone"), "clone": (None, "clone"), "copy": ("schema", "copy")}
@@ -1649,12 +1656,11 @@ def r8_run(package, label, document, flags, startup, trace=None):
         with open(spec_path, "w", encoding="utf-8") as handle:
             handle.write(r8_spec(label, document, root))
         command = [NODE, *probe_flags(flags), MANAGED["ORACLE"], package, spec_path]
-        env = {"PAD": "x" * MANAGED["pad"](command, startup), **D["EXTRA_ENV"]}
-        if trace is not None:
-            env["TRACE_LOG"] = trace
-            if os.path.exists(trace):
-                os.remove(trace)
-        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=600)
+        # TRACE_LOG takes its share of the budget from PAD, so traced and pinned runs start with the same bytes.
+        env = D["padded_env"](MANAGED["pad"], command, startup, {} if trace is None else {"TRACE_LOG": trace})
+        if trace is not None and os.path.exists(trace):
+            os.remove(trace)
+        process = D["spawn"](command, env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
         stdout, stderr = process.stdout.decode("utf-8", "replace"), process.stderr.decode("utf-8", "replace")
         if process.returncode != 0:
             found = re.search(r"^(\w*Error): (.*)$", stderr.replace("\r\n", "\n"), re.M)
@@ -1727,17 +1733,71 @@ def r8_fits(label, which):
     return fits
 
 
+def r8_stages(records, label):
+    name = R8_LABELS[label][1]
+    return [r.get("stage") or ("pm:" + r["pm"]) for r in records if r.get("label") == name]
+
+
+def r8_first_fits(label):
+    """Whether the first copy of `label` finishes at a shape: the traced run logs its copy stage. The pinned answer
+    cannot tell, since a first-copy near shape runs out in the second, cached copy with the same RangeError."""
+    traced = r8_traced()
+    if "error" in traced:
+        raise RuntimeError(f"no traced package: {traced}")
+
+    def fits(shape, flags, startup):
+        trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
+        answer = r8_run(traced["package"], label, r8_text("copy", shape), flags or REF, startup, trace)[0]
+        stages = r8_stages(r8_records(trace), label)
+        if "copy" in stages:
+            return True
+        return False if (answer or "").startswith('{"error":"RangeError') else None
+    return fits
+
+
 def r8_attribution(label, which, shape):
     """The stages the traced package reached for `label` at a shape past the edge, and whether they match the pass."""
     traced = r8_traced()
     trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
     answer, raw = r8_run(traced["package"], label, r8_text(which, shape), REF, STARTUP, trace)
-    records = r8_records(trace)
-    name = R8_LABELS[label][1]
-    stages = [r.get("stage") or ("pm:" + r["pm"]) for r in records if r.get("label") == name]
-    present, missing = R8_ATTRIBUTION[which]
-    matches = (present is None or present in stages) and missing not in stages
+    stages = r8_stages(r8_records(trace), label)
+    if which == "cachedcopy":
+        matches = stages == R8_CACHED_OUT and raw[0] == 1
+    else:
+        present, missing = R8_ATTRIBUTION[which]
+        matches = (present is None or present in stages) and missing not in stages
     return {"answer": answer, "stages": stages, "matches": matches, "exit": raw[0]}
+
+
+def r8_copy_events(label, found):
+    """The first copy's events file of `label` on this host: the pinned and the traced run of each profile pair
+    entry, with the stages the trace logged. The near entry must run out in the cached copy, the far one in the
+    first copy, and both packages must answer the same."""
+    traced = r8_traced()
+    records, failures = [], []
+    for side, entry in zip(("near", "far"), profile_pair(found)):
+        shape, startup = tuple(entry[:3]), entry[3]
+        text = r8_text("copy", shape)
+        pinned_answer, pinned_raw = r8_run(PACKAGE, label, text, REF, startup)
+        trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
+        traced_answer, traced_raw = r8_run(traced["package"], label, text, REF, startup, trace)
+        stages = r8_stages(r8_records(trace), label)
+        agree = pinned_answer is not None and pinned_answer == traced_answer and pinned_raw[0] == traced_raw[0]
+        records.append({"host": HOST, "label": label, "side": side, "shape": list(shape), "startup": startup,
+                        "pinned_sha256": traced["pinned_sha256"], "traced_sha256": traced["traced_sha256"],
+                        "stages": stages, "exit": traced_raw[0], "pinned_exit": pinned_raw[0], "answer": pinned_answer,
+                        "answers_agree": agree})
+        want = R8_CACHED_OUT if side == "near" else R8_FIRST_OUT
+        if stages != want:
+            failures.append(f"the {side} entry logs {stages}, not {want}")
+        if not agree:
+            failures.append(f"the pinned and traced runs of the {side} entry answer otherwise")
+    folder = os.path.join(os.path.dirname(OUT), "pm8_copy")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"{label}.events.jsonl")
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("".join(json.dumps(record, sort_keys=True) + "\n" for record in records))
+    return {"path": path, "records": records, "failures": failures}
 
 
 def pm8_unit(label, which):
@@ -1746,8 +1806,8 @@ def pm8_unit(label, which):
         if not visible:
             return {"error": "the control does not show the document reaching every stage", "control": detail}
         _, _, model_pass, major, above = R8_PASSES[which]
-        found = Search(pool, r8_fits(label, which), MODEL[HOST][model_pass], above, major,
-                       REG5_LEAVES[model_pass]).run()
+        fits = r8_first_fits(label) if which == "copy" else r8_fits(label, which)
+        found = Search(pool, fits, MODEL[HOST][model_pass], above, major, REG5_LEAVES[model_pass]).run()
         found["above"] = above
         found["control"] = detail
         if "class" in found:
@@ -1760,6 +1820,16 @@ def pm8_unit(label, which):
                 found["error"] = "the far answer is not the uncaught RangeError"
             elif not found["attribution"]["matches"]:
                 found["error"] = "the far shape stops at a different stage"
+        if "error" in found or "class" not in found:
+            return found
+        if which == "copy":
+            found["events"] = r8_copy_events(label, found)
+            if found["events"]["failures"]:
+                found["error"] = "the first copy's events break the registered stage lists"
+        elif which == "cachedcopy":
+            found["near_answer"] = r8_run(PACKAGE, label, r8_text(which, tuple(found["near"][0])), REF, STARTUP)[0]
+            if found["near_answer"] is None or found["near_answer"].startswith('{"error"'):
+                found["error"] = "the near shape does not answer"
         return found
     return go
 
@@ -1893,6 +1963,8 @@ def mg8_port():
     finally:
         sys.argv = saved
     port["ORACLE"] = MANAGED["ORACLE"]
+    port["subprocess"] = D["Spawner"]
+    port["pad"] = D["budgeted"](port["pad"], port["STARTUP_BYTES"])
     return port
 
 
@@ -1972,11 +2044,16 @@ def mg8_unit():
         port = mg8_port()
         profile = dict(port["PROFILES"].get(HOST, {}))
         out = {"located": {}, "pm": {}}
+        if set(port["PM_FORMS"]) != set(R8_GOLDEN_PASSES):
+            return {"error": f"the recorder's passes {sorted(port['PM_FORMS'])} are not {R8_GOLDEN_PASSES}", **out}
         for label in R8_LABELS:
+            # Every pass gates, the first copy and its events included; only the golden passes fill the profile.
             for which in R8_PASSES:
                 found = units.get(f"pm8:{label}:{which}")
                 if not found or "error" in found or "class" not in found:
                     return {"error": f"pm8:{label}:{which} has no class to fill", **out}
+            for which in R8_GOLDEN_PASSES:
+                found = units[f"pm8:{label}:{which}"]
                 profile[f"pm_{label}_{which}"] = profile_pair(found)
                 out["pm"][f"pm_{label}_{which}"] = profile[f"pm_{label}_{which}"]
         for key in MG8_LOCATE:

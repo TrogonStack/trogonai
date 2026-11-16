@@ -56,9 +56,12 @@ once that copy runs out while the machine policy still loads it: a profile names
 The managed settings a parent process hands over (`parent`) and the remote managed settings (`remote`) arrive as
 options, and each is read under a label of its own: cloned, walked, read through the schema and copied, with
 nothing catching an overflow. `pm_<place>_<pass>` nests a value where the clone (`clone`, arrays under `model`), the
-walk (`walk`, objects under `model`) or the copy (`copy`, arrays under `__proto__` inside `x`, which the schema read
-keeps) runs out first: a profile names the shape that fits and the one that does not, each as
-`[objects, arrays, leaf, startup_bytes]`. `xp_login` pins the login organization in the managed settings file next
+walk (`walk`, objects under `model`) or the copy (`cachedcopy`, arrays under `__proto__` inside `x`, which the schema
+read keeps) runs out first: a profile names the shape that fits and the one that does not, each as
+`[objects, arrays, leaf, startup_bytes]`. Each resolve reads these options twice, and the second read finds the
+first one's result in a cache keyed by the object and copies it again from a deeper stack, so the copy a resolve
+shows is that second, cached one: the first copy's boundary answers the same RangeError on both sides and is
+recorded as the stages of a trace instead. `xp_login` pins the login organization in the managed settings file next
 to nested objects, with remote managed settings present, so the remote tier reads the managed settings again on a
 stack of its own: a profile names the last level that read keeps the pin.
 
@@ -213,7 +216,7 @@ def proto_cases(name):
 
 # Where each handed-over pass puts its nested value: under `model`, which every pass reaches, or under `__proto__`
 # inside `x`, which only the copy enters.
-PM_FORMS = {"walk": ("model", None), "clone": ("model", None), "copy": ("x", "__proto__")}
+PM_FORMS = {"walk": ("model", None), "clone": ("model", None), "cachedcopy": ("x", "__proto__")}
 
 
 def pm_document(which, objects, arrays, leaf):

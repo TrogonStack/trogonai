@@ -40,16 +40,71 @@ if WINDOWS and not started({"PAD": "x"}):
     EXTRA_ENV = {"SYSTEMROOT": os.environ["SYSTEMROOT"]}
 
 
+ORACLE_NAME = "resolve_settings_oracle.mjs"
+# The startup budget the last `pad` on this thread sized PAD for, with the command it sized it for.
+PADDED = threading.local()
+
+
+def entry_bytes(text):
+    return len(text.encode("utf-8")) + 9
+
+
+def startup_bytes(command, env):
+    """What the command line and environment of a run take, counted as the recorders' `pad` counts them. EXTRA_ENV,
+    which only Windows needs to start Node, has stayed outside that count in every round, so it is left out here."""
+    names = [name for name in env if not (name in EXTRA_ENV and env[name] == EXTRA_ENV[name])]
+    return (sum(entry_bytes(arg) for arg in command) + entry_bytes(f"executable_path={command[0]}")
+            + sum(entry_bytes(f"{name}={env[name]}") for name in names))
+
+
+def budgeted(pad, default):
+    """`pad`, remembering the budget it sized PAD for so that the spawn that follows on this thread can check it."""
+    def sized(command, *startup):
+        value = pad(command, *startup)
+        PADDED.budget = (list(command), startup[0] if startup else default)
+        return value
+    return sized
+
+
+def padded_env(pad, command, startup, extra=None):
+    """The environment of a run that sets `extra` (TRACE_LOG and the like) beside PAD: PAD shrinks by what those
+    variables take, so the whole command line and environment still fill `startup`."""
+    extra = dict(extra or {})
+    env = {"PAD": "x" * pad(command, startup - sum(entry_bytes(f"{n}={v}") for n, v in extra.items())), **extra}
+    PADDED.budget = (list(command), startup)
+    return env
+
+
+def spawn(command, env, unpadded=False, **kwargs):
+    """`subprocess.run` for every Node probe, with EXTRA_ENV added. A run with PAD must take exactly the startup budget
+    its PAD was sized for on this thread, counting every variable it sets, TRACE_LOG included; a run without PAD
+    must say so (fixture recordings, which record Node's defaults)."""
+    budget, PADDED.budget = getattr(PADDED, "budget", None), None
+    if "PAD" in env:
+        if unpadded or budget is None or budget[0] != list(command):
+            raise RuntimeError("a padded probe starts Node with a PAD that was not sized for its command")
+        took = startup_bytes(command, env)
+        if took != budget[1]:
+            raise RuntimeError(f"a probe's command line and environment take {took} bytes, not the {budget[1]} its "
+                               f"PAD was sized for: {sorted(env)}")
+    elif not unpadded:
+        raise RuntimeError("a probe starts Node without PAD and does not say that it records Node's defaults")
+    return subprocess.run(command, env={**env, **EXTRA_ENV}, **kwargs)
+
+
 class Spawner:
-    """`subprocess` as the recorders call it, with `EXTRA_ENV` added to every environment they pass."""
+    """`subprocess` as the recorders call it: their oracle runs go through `spawn`, every other run gets EXTRA_ENV."""
 
     PIPE = subprocess.PIPE
 
     @staticmethod
-    def run(*args, **kwargs):
-        if kwargs.get("env") is not None:
-            kwargs["env"] = {**kwargs["env"], **EXTRA_ENV}
-        return subprocess.run(*args, **kwargs)
+    def run(command, **kwargs):
+        env = kwargs.pop("env", None)
+        if any(os.path.basename(str(arg)) == ORACLE_NAME for arg in command):
+            return spawn(command, env if env is not None else {}, **kwargs)
+        if env is not None:
+            env = {**env, **EXTRA_ENV}
+        return subprocess.run(command, env=env, **kwargs)
 
 
 def load(name):
@@ -66,6 +121,7 @@ def load(name):
     finally:
         sys.argv = saved
     space["subprocess"] = Spawner
+    space["pad"] = budgeted(space["pad"], space["STARTUP_BYTES"])
     return space
 
 
@@ -208,7 +264,7 @@ def registry_spec(place, key, shape, n, root):
 def oracle_run(spec_path, flags):
     command = [NODE, *probe_flags(flags), ORACLE, PACKAGE, spec_path]
     with tempfile.TemporaryFile() as errors:
-        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=errors, env={"PAD": "x" * MANAGED["pad"](command), **EXTRA_ENV})
+        process = spawn(command, {"PAD": "x" * MANAGED["pad"](command)}, stdout=subprocess.PIPE, stderr=errors)
         errors.seek(0)
         stderr = errors.read().decode("utf-8", "replace").replace("\r\n", "\n")
     if process.returncode == 0:

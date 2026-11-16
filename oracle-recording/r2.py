@@ -69,7 +69,7 @@ def oracle(spec_path, flags):
     """The raw result entries of the oracle run of `spec_path`, or the error it rejects with."""
     command = [NODE, *D["probe_flags"](flags), ORACLE, PACKAGE, spec_path]
     with tempfile.TemporaryFile() as errors:
-        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=errors, env={"PAD": "x" * MANAGED["pad"](command), **D["EXTRA_ENV"]})
+        process = D["spawn"](command, {"PAD": "x" * MANAGED["pad"](command)}, stdout=subprocess.PIPE, stderr=errors)
         errors.seek(0)
         stderr = errors.read().decode("utf-8", "replace").replace("\r\n", "\n")
     if process.returncode == 0:
