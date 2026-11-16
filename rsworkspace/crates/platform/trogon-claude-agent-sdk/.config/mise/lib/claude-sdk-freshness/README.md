@@ -197,6 +197,23 @@ python3 -I run_end_machine_goldens.py <python-src> run_machine.json
 
 The Python recorder needs the pinned package's dependencies (`anyio`, `mcp`, `jsonschema`).
 
+## FTP goldens
+
+`python_ftp_goldens.py` opens and reads each FTP case of
+`tests/fixtures/sdk_mcp/python_ftp.json` with CPython's `urlopen` against a scripted loopback
+server and writes what it answered or raised, with the lines the client sent on each control
+connection. A reply that follows a data connection waits 200 milliseconds, so it never reaches
+the client in the same read as the reply before the data, and a case the client fails early ends
+at the reply it fails on, so no read races the client's close. Every run records the same bytes.
+
+```sh
+mise run claude-sdk:ftp-goldens          # regenerate python_ftp.json
+mise run claude-sdk:ftp-goldens --check  # fail when python_ftp.json differs
+```
+
+The task runs CPython 3.12.16 and refuses any other platform than macOS, whose `errno` and
+resolver texts the goldens keep.
+
 ## Scheduled issue reporting
 
 [The workflow](../../../../../../../../.github/workflows/claude-sdk-freshness.yml) follows the
