@@ -316,7 +316,7 @@ fn extract<H: ExtractHost>(host: &H, embedded: &Path) -> Result<PathBuf, String>
 /// otherwise the file is copied to `{tmpdir}/claude-agent-sdk-{uid}/claude-agent-sdk-{sha256[..16]}/<name>` (see
 /// `safeTempBase` for the Windows root) and that path is returned. A copy that is already there is reused only
 /// after it is read back and found to be a plain file with the same bytes. Any failure is reported through
-/// [`EmitWarning`] with the upstream text and the input path is returned.
+/// [`EmitWarning`](crate::adapters::EmitWarning) with the upstream text and the input path is returned.
 pub fn extract_from_bunfs_with<H: ExtractHost>(embedded_path: &Path, host: &H) -> PathBuf {
     let text = embedded_path.to_string_lossy();
     if !text.contains("$bunfs") && !text.contains("~BUN") {

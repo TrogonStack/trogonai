@@ -1,8 +1,18 @@
-load("//.config/bazel:rust.bzl", "workspace_crate")
+load("//.config/bazel:rust.bzl", "workspace_compile_fail_tests", "workspace_crate")
 
 workspace_crate(
     integration_tests = {
-        # trybuild shells out to cargo to build the fixtures, which Bazel cannot provide.
+        # Retain Cargo/trybuild and its nightly diagnostics alongside the native contract.
         "compile_fail": {"tags": ["manual"]},
     },
+)
+
+workspace_compile_fail_tests(
+    name = "compile_fail_bazel_test",
+    compile_data = ["//rsworkspace/crates/decider/trogon-decider-wit:wit"],
+    dependency_overrides = {
+        "//rsworkspace/crates/platform/trogonai-proto:trogonai-proto": "//rsworkspace/crates/platform/trogonai-proto:trogonai-proto_compile_fail",
+        "//rsworkspace/crates/scheduler/trogon-scheduler-domain:trogon-scheduler-domain": "//rsworkspace/crates/scheduler/trogon-scheduler-domain:trogon-scheduler-domain_compile_fail",
+    },
+    fixtures = glob(["tests/ui/*.rs"]),
 )

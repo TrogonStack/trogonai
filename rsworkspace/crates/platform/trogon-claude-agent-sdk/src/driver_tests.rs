@@ -387,6 +387,143 @@ async fn a_queued_prompt_that_cannot_be_written_stops_the_flush() -> Result<(), 
 }
 
 #[tokio::test(start_paused = true)]
+async fn shutdown_queue_flushes_prompts_in_order_without_applying_other_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let (control, mut controlled) = oneshot::channel();
+    let (first, first_written) = oneshot::channel();
+    let (finish, mut input_finished) = oneshot::channel();
+    let (second, second_written) = oneshot::channel();
+    for command in [
+        Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("first queued prompt").into()),
+            response: first,
+        },
+        Command::FinishInput {
+            completion: Completion::Run,
+            written: None,
+            response: finish,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("second queued prompt").into()),
+            response: second,
+        },
+    ] {
+        assert!(fixture.commands.try_send(command).is_ok());
+    }
+    fixture.shutdown.send(()).map_err(|_| Error::DriverStopped)?;
+    let (terminal, terminated) = oneshot::channel();
+    fixture.driver.run(Ok(()), terminal).await;
+
+    assert!(matches!(terminated.await?, Ok(())));
+    assert!(matches!(first_written.await?, Ok(())));
+    assert!(matches!(second_written.await?, Ok(())));
+    for expected in ["first queued prompt", "second queued prompt"] {
+        let frame: serde_json::Value = serde_json::from_str(&fixture.harness.written.try_recv()?)?;
+        assert_eq!(
+            frame,
+            serde_json::json!({
+                "type": "user",
+                "message": {"role": "user", "content": expected},
+                "parent_tool_use_id": null,
+            })
+        );
+    }
+    assert!(fixture.harness.written.recv().await.is_none());
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(matches!(
+        input_finished.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_queue_stops_at_first_write_failure_without_draining_later_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.shutdown_seen = true;
+    fixture.harness.written.close();
+    let (control, mut controlled) = oneshot::channel();
+    let (first, mut first_written) = oneshot::channel();
+    let (second, mut second_written) = oneshot::channel();
+    let (finish, mut input_finished) = oneshot::channel();
+    for command in [
+        Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("failed queued prompt").into()),
+            response: first,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("later queued prompt").into()),
+            response: second,
+        },
+        Command::FinishInput {
+            completion: Completion::Run,
+            written: None,
+            response: finish,
+        },
+    ] {
+        assert!(fixture.commands.try_send(command).is_ok());
+    }
+
+    let unapplied = fixture.driver.write_queued_prompts().await;
+
+    assert!(matches!(
+        unapplied.as_slice(),
+        [Command::Control {
+            operation: ControlOperation::Interrupt,
+            ..
+        }]
+    ));
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        first_written.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(matches!(
+        second_written.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        input_finished.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::Prompt { input, .. }) if input.to_wire_json()?["message"]["content"] == "later queued prompt"
+    ));
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::FinishInput { .. })
+    ));
+    assert!(fixture.driver.commands.try_recv().is_none());
+    assert_eq!(fixture.driver.next_id, 0);
+    assert!(fixture.driver.run_state.input_done.is_none());
+    drop(unapplied);
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
 async fn closing_the_command_port_ends_the_loop_without_another_cli_frame() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     let (replacement, _receiver) = crate::channel::channel(None);
@@ -661,8 +798,12 @@ async fn the_request_counter_wraps_by_default() -> Result<(), Box<dyn std::error
     let mut fixture = DriverFixture::new()?;
     fixture.driver.argv_style = crate::ArgvStyle::Python;
     fixture.driver.next_id = u64::MAX;
-    assert!(fixture.driver.next_request_id()?.as_str().starts_with("req_0_"));
-    assert!(fixture.driver.next_request_id()?.as_str().starts_with("req_1_"));
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_0_"));
+    assert_eq!(fixture.driver.next_id, 0);
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_1_"));
+    assert_eq!(fixture.driver.next_id, 1);
     fixture.finish().await
 }
 
