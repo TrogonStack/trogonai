@@ -5,6 +5,7 @@ mod support;
 
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use buffa::Message as _;
@@ -42,8 +43,13 @@ fn schedules_wasm() -> Vec<u8> {
 }
 
 fn schedules_module() -> WasmDeciderModule {
-    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
-    WasmDeciderModule::load(engine, &schedules_wasm()).expect("module loads")
+    static MODULE: OnceLock<WasmDeciderModule> = OnceLock::new();
+    MODULE
+        .get_or_init(|| {
+            let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+            WasmDeciderModule::load(engine, &schedules_wasm()).expect("module loads")
+        })
+        .clone()
 }
 
 fn create_command(id: &str) -> CommandEnvelope {
