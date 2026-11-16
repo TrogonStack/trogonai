@@ -15,9 +15,9 @@ use trogon_decider_runtime::{Event, EventId, Headers, StreamPosition};
 use super::replay::is_empty_replay_range;
 use super::{
     NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE, PublishStreamError, StreamStoreError, StreamSubject,
-    SubjectScope, SubjectScopeError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream,
-    build_publish_message, event_header_name, event_header_value, headers_from_nats_headers, read_stream,
-    read_stream_range, subject_current_position, validate_event_headers,
+    SubjectScope, SubjectScopeError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, acknowledge_batch_member_publish,
+    append_stream, build_publish_message, event_header_name, event_header_value, headers_from_nats_headers,
+    read_stream, read_stream_range, subject_current_position, validate_event_headers,
 };
 
 #[test]
@@ -421,6 +421,35 @@ async fn append_stream_maps_ack_error_to_publish_error() {
         .expect_err("ack error should propagate");
 
     assert!(matches!(error, StreamStoreError::Publish(_)));
+}
+
+fn member_ack(duplicate: bool) -> jetstream::publish::PublishAck {
+    jetstream::publish::PublishAck {
+        stream: "events".to_string(),
+        sequence: 1,
+        domain: String::new(),
+        duplicate,
+        value: None,
+    }
+}
+
+#[tokio::test]
+async fn batch_member_stored_on_its_own_is_accepted() {
+    acknowledge_batch_member_publish(std::future::ready(Ok(member_ack(false))))
+        .await
+        .expect("a stored member should be accepted");
+}
+
+#[tokio::test]
+async fn batch_member_reported_as_duplicate_is_refused() {
+    let error = acknowledge_batch_member_publish(std::future::ready(Ok(member_ack(true))))
+        .await
+        .expect_err("a duplicate member should be refused");
+
+    assert!(matches!(
+        error,
+        StreamStoreError::Publish(PublishStreamError::DuplicateEventId)
+    ));
 }
 
 #[tokio::test]
