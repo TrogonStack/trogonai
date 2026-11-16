@@ -2,7 +2,7 @@
 //! permission mode approves tool calls first (`Ltt` in `sdk.mjs`, `_get_can_use_tool_shadowed_warning` in
 //! `types.py`). Advisory only: the connection proceeds.
 
-use crate::{ClaudeAgentOptions, OptionError, Skills, process_options::ArgvStyle, skills::is_python_whitespace};
+use crate::{ClaudeAgentOptions, OptionError, Skills, process_options::ArgvStyle, python_json::is_python_whitespace};
 
 /// Python `_whole_tool_allowed`: the tool an entry allows outright, when it has no specifier or an empty or lone
 /// wildcard one.

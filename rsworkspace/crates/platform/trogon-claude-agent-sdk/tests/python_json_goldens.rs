@@ -1,106 +1,100 @@
 //! Checks `python_json_loads` and `python_json_dumps` against what Python's `json.loads` and `json.dumps` did with
 //! the same text in CPython (`.config/mise/lib/claude-sdk-freshness/python_json_goldens.py` writes the goldens).
 
+use serde::de::DeserializeOwned;
 use serde_json::Value;
-use trogon_claude_agent_sdk::{
-    ExactIntegerError, PythonJsonError, PythonJsonValue, PythonNumber, python_json_dumps, python_json_loads,
-};
+use trogon_claude_agent_sdk::{PythonJsonError, PythonJsonValue, PythonNumber, python_json_dumps, python_json_loads};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const GOLDENS: &str = include_str!("fixtures/python_json/goldens.json");
 
-fn entries(section: &str) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
+fn section<T: DeserializeOwned>(name: &str) -> Result<T, Box<dyn std::error::Error>> {
     let mut goldens: Value = serde_json::from_str(GOLDENS)?;
-    match goldens.get_mut(section).map(Value::take) {
-        Some(Value::Array(entries)) => Ok(entries),
-        _ => Err(format!("goldens have no {section} list").into()),
-    }
+    Ok(serde_json::from_value(
+        goldens.get_mut(name).map(Value::take).unwrap_or_default(),
+    )?)
 }
 
-fn pairs(section: &str) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
-    entries(section)?
-        .into_iter()
-        .map(|entry| match entry.as_array().map(Vec::as_slice) {
-            Some([Value::String(input), Value::String(output)]) => Ok((input.clone(), output.clone())),
-            _ => Err(format!("malformed {section} entry {entry}").into()),
-        })
-        .collect()
+/// What `json.loads` followed by `json.dumps` gives for `source`, in the goldens' terms: `ok` with the printed
+/// value, or the kind of exception with its message.
+fn outcome(source: &str) -> (String, String, String) {
+    let (kind, payload) = match python_json_loads(source) {
+        Ok(value) => ("ok", python_json_dumps(&value)),
+        Err(error @ PythonJsonError::Decode(_)) => ("decode", error.to_string()),
+        Err(error @ PythonJsonError::Integer(_)) => ("integer", error.to_string()),
+        Err(error @ PythonJsonError::Recursion(_)) => ("recursion", error.to_string()),
+    };
+    (source.to_owned(), kind.to_owned(), payload)
 }
 
 #[test]
 fn every_double_prints_like_json_dumps() -> TestResult {
-    let numbers = pairs("numbers")?;
+    let numbers: Vec<(String, String)> = section("numbers")?;
     assert!(numbers.len() > 5000, "the corpus shrank to {} numbers", numbers.len());
-    let mut mismatches = Vec::new();
-    for (bits, expected) in numbers {
-        let double = f64::from_bits(u64::from_str_radix(&bits, 16)?);
-        let printed = python_json_dumps(&PythonJsonValue::Number(PythonNumber::Float(double)));
-        if printed != expected {
-            mismatches.push(format!("{bits}: printed {printed}, json.dumps printed {expected}"));
-        }
-    }
-    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+    let printed = numbers
+        .iter()
+        .map(|(bits, _)| {
+            u64::from_str_radix(bits, 16).map(|pattern| {
+                let double = PythonNumber::Float(f64::from_bits(pattern));
+                (bits.clone(), python_json_dumps(&PythonJsonValue::Number(double)))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(printed, numbers);
     Ok(())
 }
 
 #[test]
 fn every_document_prints_like_json_dumps_after_json_loads() -> TestResult {
-    let documents = pairs("documents")?;
+    let documents: Vec<(String, String)> = section("documents")?;
     assert!(
         documents.len() > 400,
         "the corpus shrank to {} documents",
         documents.len()
     );
-    let mut mismatches = Vec::new();
-    for (source, expected) in documents {
-        match python_json_loads(&source) {
-            Ok(value) => {
-                let printed = python_json_dumps(&value);
-                if printed != expected {
-                    mismatches.push(format!("{source}: printed {printed}, json.dumps printed {expected}"));
-                }
-            }
-            Err(error) => mismatches.push(format!("{source}: refused with {error}, json.loads read it")),
-        }
-    }
-    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+    let read: Vec<_> = documents.iter().map(|(source, _)| outcome(source)).collect();
+    let expected: Vec<_> = documents
+        .into_iter()
+        .map(|(source, printed)| (source, "ok".to_owned(), printed))
+        .collect();
+    assert_eq!(read, expected);
     Ok(())
-}
-
-/// The digit limit and digit count CPython's `ValueError` names, read back from its recorded message.
-fn digit_counts(message: &str) -> Option<(usize, usize)> {
-    let (_, after_limit) = message.split_once('(')?;
-    let (limit, rest) = after_limit.split_once(' ')?;
-    let (_, after_has) = rest.split_once("value has ")?;
-    let (digits, _) = after_has.split_once(' ')?;
-    Some((limit.parse().ok()?, digits.parse().ok()?))
 }
 
 #[test]
 fn every_refused_text_is_refused_like_json_loads_refuses_it() -> TestResult {
-    let refused = entries("refused")?;
+    let refused: Vec<(String, String, String)> = section("refused")?;
     assert!(refused.len() > 20, "the corpus shrank to {} refusals", refused.len());
-    let mut mismatches = Vec::new();
-    for entry in refused {
-        let Some([Value::String(source), Value::String(kind), message]) = entry.as_array().map(Vec::as_slice) else {
-            return Err(format!("malformed refused entry {entry}").into());
-        };
-        let outcome = python_json_loads(source);
-        let matched = match (kind.as_str(), &outcome) {
-            ("syntax", Err(PythonJsonError::Syntax(_))) | ("bom", Err(PythonJsonError::ByteOrderMark)) => true,
-            ("integer", Err(PythonJsonError::Integer(ExactIntegerError::TooManyDigits { limit, digits }))) => {
-                message.as_str().and_then(digit_counts) == Some((*limit, *digits))
-            }
-            _ => false,
-        };
-        if !matched {
-            let shown: String = source.chars().take(40).collect();
-            mismatches.push(format!(
-                "{shown:?}: read as {outcome:?}, json.loads refused it with {kind} {message}"
-            ));
-        }
-    }
-    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+    let read: Vec<_> = refused.iter().map(|(source, _, _)| outcome(source)).collect();
+    assert_eq!(read, refused);
+    Ok(())
+}
+
+#[test]
+fn every_fuzzed_text_reads_like_json_loads_reads_it() -> TestResult {
+    let fuzzed: Vec<(String, String, String)> = section("fuzzed")?;
+    assert!(fuzzed.len() > 3000, "the corpus shrank to {} texts", fuzzed.len());
+    let read: Vec<_> = fuzzed.iter().map(|(source, _, _)| outcome(source)).collect();
+    assert_eq!(read, fuzzed);
+    Ok(())
+}
+
+#[test]
+fn nesting_past_the_limit_raises_the_recursion_error_json_loads_raises() -> TestResult {
+    let recursion: Vec<(String, usize, String)> = section("recursion")?;
+    assert_eq!(recursion.len(), 4);
+    let read: Vec<_> = recursion
+        .iter()
+        .map(|(opening, count, _)| {
+            let (_, kind, message) = outcome(&opening.repeat(*count));
+            (opening.clone(), *count, format!("{kind} {message}"))
+        })
+        .collect();
+    let expected: Vec<_> = recursion
+        .into_iter()
+        .map(|(opening, count, message)| (opening, count, format!("recursion {message}")))
+        .collect();
+    assert_eq!(read, expected);
     Ok(())
 }

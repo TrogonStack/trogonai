@@ -2,7 +2,7 @@
 #MISE description="Refresh the repository mise tool lockfile"
 set -euo pipefail
 
-# CI Workload Identity pins a mise release that reads lockfile format 3.
+# Start new lockfiles at format 3 so older pinned mise releases can read them.
 if [[ ! -f .config/mise/mise.lock ]]; then
   printf 'lockfile_version = 3\n' > .config/mise/mise.lock
 fi

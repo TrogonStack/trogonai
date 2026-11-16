@@ -34,7 +34,7 @@ async fn run_until_it_ends(options: ClaudeAgentOptions) -> Result<Vec<String>, B
         let mut results = Vec::new();
         while let Some(message) = response.next_message().await? {
             if let Message::Result(result) = message {
-                results.push(result.result.unwrap_or_default());
+                results.push(result.result.clone().unwrap_or_default());
             }
         }
         Ok::<_, Error>(results)

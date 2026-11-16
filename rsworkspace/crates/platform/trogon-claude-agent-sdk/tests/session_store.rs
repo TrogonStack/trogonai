@@ -713,11 +713,11 @@ async fn timed_out_mirror_append_is_reported_and_never_retried() -> TestResult {
     Ok(())
 }
 
-struct FailingStore {
+struct FailingAppendStore {
     calls: Arc<AtomicUsize>,
     started: Arc<Mutex<Vec<tokio::time::Instant>>>,
 }
-impl SessionStore for FailingStore {
+impl SessionStore for FailingAppendStore {
     fn append<'a>(&'a self, _: &'a SessionKey, _: &'a [SessionEntry]) -> SessionStoreFuture<'a, ()> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -739,7 +739,7 @@ async fn definite_mirror_failure_is_retried_with_a_bounded_attempt_count() -> Te
     let calls = Arc::new(AtomicUsize::new(0));
     let started = Arc::new(Mutex::new(Vec::new()));
     let options = options(
-        Arc::new(FailingStore {
+        Arc::new(FailingAppendStore {
             calls: calls.clone(),
             started: started.clone(),
         }),

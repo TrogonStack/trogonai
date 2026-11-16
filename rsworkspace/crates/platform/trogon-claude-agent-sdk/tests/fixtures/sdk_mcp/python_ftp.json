@@ -1,0 +1,5242 @@
+{
+ "cases": [
+  {
+   "name": "a file",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a file in directories",
+   "url": "ftp://127.0.0.1:{PORT}/d%31/d2/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD d1/d2\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "credentials",
+   "url": "ftp://us%65r:pw@127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER user\r\n",
+     "PASS pw\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a user without a password",
+   "url": "ftp://user@127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER user\r\n",
+     "PASS \r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "type a",
+   "url": "ftp://127.0.0.1:{PORT}/a.json;type=a",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE A\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "type D upper case attribute",
+   "url": "ftp://127.0.0.1:{PORT}/a.json;TYPE=D",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "257 \"/\"\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 list\r\n"
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "e30=",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE A\r\n",
+     "TYPE A\r\n",
+     "PWD\r\n",
+     "CWD a.json\r\n",
+     "CWD /\r\n",
+     "PASV\r\n",
+     "LIST a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "type x is ignored",
+   "url": "ftp://127.0.0.1:{PORT}/a.json;type=x;y",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a directory URL lists",
+   "url": "ftp://127.0.0.1:{PORT}/dir/",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "125 list\r\n"
+     ],
+     [
+      "data",
+      "[1]"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "WzFd",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD dir\r\n",
+     "TYPE A\r\n",
+     "TYPE A\r\n",
+     "PASV\r\n",
+     "LIST\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a greeting that waits",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "pause",
+      400
+     ],
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a multi-line greeting",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220-one\r\n220 not the end\r\n220-two\r\n220 end\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 331 password>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "CWD .\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a greeting with bare line ends",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 a\r"
+     ],
+     [
+      "pause",
+      200
+     ],
+     [
+      "send",
+      "\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a greeting ending in a lone CR",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 a\r331 b\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a busy server",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "421 Service not available\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 421 Service not available>"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a refusing greeting",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "500 no\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 500 no>"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "an odd greeting",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "600 what\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 600 what>"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a greeting the server closes before",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "close"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error >"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a greeting too long",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      [
+       [
+        "220 ",
+        1
+       ],
+       [
+        "x",
+        9000
+       ],
+       [
+        "\r\n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error got more than 8192 bytes>"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a greeting of exactly the limit",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      [
+       [
+        "220 ",
+        1
+       ],
+       [
+        "x",
+        8187
+       ],
+       [
+        "\r\n",
+        1
+       ]
+      ]
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a greeting that is not UTF-8",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 \u00ff\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "UnicodeDecodeError",
+    "text": "'utf-8' codec can't decode byte 0xff in position 4: invalid start byte"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a greeting in UTF-8",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 caf\u00c3\u00a9\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a login refused",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "530 Login incorrect.\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 530 Login incorrect.>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a login that needs an account",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 pw\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "332 acct\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "ACCT \r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a login answered 1xx",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 what\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 150 what>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a directory refused",
+   "url": "ftp://127.0.0.1:{PORT}/d/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 no dir\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 550 no dir>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD d\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a type the server refuses then accepts after reconnecting",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "500 bad\r\n"
+     ]
+    ],
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n"
+    ],
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a type refused twice",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "500 bad\r\n"
+     ]
+    ],
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "504 bad\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 504 bad>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n"
+    ],
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "passive mode refused",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "500 no pasv\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error <urlopen error ftp error: 500 no pasv>>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "passive mode answered 2xx without numbers",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 nothing\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 227 nothing>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "passive mode answered 200",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 ({PASV})\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 200 ({PASV})>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a passive address the client ignores",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 =10,9,8,7,{PASV}\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 x\r\n"
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [Errno 61] Connection refused>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     ""
+    ]
+   ]
+  },
+  {
+   "name": "a file the server lacks lists a directory instead",
+   "url": "ftp://127.0.0.1:{PORT}/sub",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 not a file\r\n"
+     ],
+     [
+      "drop"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "257 \"/h\"\"o\" is cwd\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 list\r\n"
+     ],
+     [
+      "data",
+      "[2]"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "WzJd",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR sub\r\n",
+     "TYPE A\r\n",
+     "PWD\r\n",
+     "CWD sub\r\n",
+     "CWD /h\"o\r\n",
+     "PASV\r\n",
+     "LIST sub\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a file the server lacks and no directory",
+   "url": "ftp://127.0.0.1:{PORT}/sub",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 not a file\r\n"
+     ],
+     [
+      "drop"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "257 /odd\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 no such\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error <urlopen error ftp error: error_perm('550 no such')>>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR sub\r\n",
+     "TYPE A\r\n",
+     "PWD\r\n",
+     "CWD sub\r\n",
+     "CWD .\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a pwd that is not 257",
+   "url": "ftp://127.0.0.1:{PORT}/sub",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 not a file\r\n"
+     ],
+     [
+      "drop"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 here\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 no such\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error <urlopen error ftp error: error_perm('550 no such')>>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR sub\r\n",
+     "TYPE A\r\n",
+     "PWD\r\n",
+     "CWD sub\r\n",
+     "CWD .\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval refused otherwise",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "530 not you\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error <urlopen error ftp error: 530 not you>>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval refused for now",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "451 later\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 451 later>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval answered 2xx first",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 early\r\n"
+     ],
+     [
+      "send",
+      "150 now\r\n"
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "e30=",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval answered 2xx twice",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 early\r\n"
+     ],
+     [
+      "send",
+      "250 again\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 250 again>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval size with too many digits",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      [
+       [
+        "150 x (",
+        1
+       ],
+       [
+        "1",
+        4301
+       ],
+       [
+        " BYTES)\r\n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "ValueError",
+    "text": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a passive port past 65535",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 (127,0,0,1,256,1)\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [Errno 8] nodename nor servname provided, or not known>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a passive port of huge digits",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      [
+       [
+        "227 (127,0,0,1,",
+        1
+       ],
+       [
+        "9",
+        30
+       ],
+       [
+        ",1)\r\n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [Errno 8] nodename nor servname provided, or not known>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a passive port nothing listens on",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 (127,0,0,1,0,1)\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [Errno 61] Connection refused>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a directory with a newline",
+   "url": "ftp://127.0.0.1:{PORT}/d%0A/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "ValueError",
+    "text": "an illegal newline character should not be contained"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a closing reply that never comes",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 x\r\n"
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "close"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "e30=",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a greeting one past the limit",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      [
+       [
+        "220 ",
+        1
+       ],
+       [
+        "x",
+        8188
+       ],
+       [
+        "\r\n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error got more than 8192 bytes>"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a greeting of multibyte characters at the limit",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      [
+       [
+        "220 ",
+        1
+       ],
+       [
+        "\u00c3\u00a9",
+        8187
+       ],
+       [
+        "\r\n",
+        1
+       ]
+      ]
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a greeting of multibyte characters past the limit",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      [
+       [
+        "220 ",
+        1
+       ],
+       [
+        "\u00c3\u00a9",
+        8188
+       ],
+       [
+        "\r\n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error got more than 8192 bytes>"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a greeting with a bad continuation byte",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 \u00c3(\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "UnicodeDecodeError",
+    "text": "'utf-8' codec can't decode byte 0xc3 in position 4: invalid continuation byte"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a greeting cut inside a character",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 \u00c3"
+     ],
+     [
+      "close"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "UnicodeDecodeError",
+    "text": "'utf-8' codec can't decode byte 0xc3 in position 0: unexpected end of data"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a greeting with a character split across reads",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 caf\u00c3"
+     ],
+     [
+      "pause",
+      200
+     ],
+     [
+      "send",
+      "\u00a9\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a bad byte in a later read",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220-a\r\n"
+     ],
+     [
+      "pause",
+      200
+     ],
+     [
+      "send",
+      "b\u00ff\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "UnicodeDecodeError",
+    "text": "'utf-8' codec can't decode byte 0xff in position 1: invalid start byte"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a bad byte after a split character",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220-a\u00c3"
+     ],
+     [
+      "pause",
+      200
+     ],
+     [
+      "send",
+      "\u00a9\u00e2\u0082(\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "UnicodeDecodeError",
+    "text": "'utf-8' codec can't decode bytes in position 2-3: invalid continuation byte"
+   },
+   "commands": [
+    []
+   ]
+  },
+  {
+   "name": "a passive number with too many digits",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      [
+       [
+        "227 (127,0,0,1,",
+        1
+       ],
+       [
+        "1",
+        4301
+       ],
+       [
+        ",1)\r\n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "ValueError",
+    "text": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a passive number at the digit limit",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      [
+       [
+        "227 (127,0,0,1,",
+        1
+       ],
+       [
+        "1",
+        4300
+       ],
+       [
+        ",1)\r\n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "ValueError",
+    "text": "Exceeds the limit (4300 digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval size at the digit limit",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      [
+       [
+        "150 x (",
+        1
+       ],
+       [
+        "1",
+        4300
+       ],
+       [
+        " BYTES)\r\n",
+        1
+       ]
+      ]
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "e30=",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "an http URL through an ftp proxy",
+   "url": "http://example.invalid/a.json",
+   "env": [
+    [
+     "http_proxy",
+     "ftp://127.0.0.1:{PORT}"
+    ]
+   ],
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "open_error": {
+    "class": "AttributeError",
+    "text": "'_io.BufferedReader' object has no attribute 'msg'"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD http://example.invalid\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "an https URL through an ftp proxy",
+   "url": "https://example.invalid/a.json",
+   "env": [
+    [
+     "https_proxy",
+     "ftp://127.0.0.1:{PORT}"
+    ]
+   ],
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ]
+    ]
+   ],
+   "open_error": {
+    "class": "BadStatusLine",
+    "text": "220 ready\r\n"
+   },
+   "commands": [
+    [
+     "CONNECT example.invalid:443 HTTP/1.1\r\n",
+     "Host: example.invalid:443\r\n",
+     "\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "an ftp URL through an ftp proxy",
+   "url": "ftp://example.invalid/a.json",
+   "env": [
+    [
+     "ftp_proxy",
+     "ftp://127.0.0.1:{PORT}"
+    ]
+   ],
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD ftp://example.invalid\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a refused server",
+   "url": "ftp://127.0.0.1:1/a.json",
+   "script": [],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error [Errno 61] Connection refused>"
+   },
+   "commands": []
+  },
+  {
+   "name": "a parent directory",
+   "url": "ftp://127.0.0.1:{PORT}/../a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 up\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CDUP\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a parent directory without CDUP",
+   "url": "ftp://127.0.0.1:{PORT}/../a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "500 unknown\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CDUP\r\n",
+     "CWD ..\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a parent directory refused",
+   "url": "ftp://127.0.0.1:{PORT}/../a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 no\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 550 no>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CDUP\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a type answered with a byte that is not UTF-8",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 \u00ff\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "UnicodeDecodeError",
+    "text": "'utf-8' codec can't decode byte 0xff in position 4: invalid start byte"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a directory listing refused for now",
+   "url": "ftp://127.0.0.1:{PORT}/sub",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 not a file\r\n"
+     ],
+     [
+      "drop"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "257 \"/\"\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "450 busy\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 450 busy>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR sub\r\n",
+     "TYPE A\r\n",
+     "PWD\r\n",
+     "CWD sub\r\n",
+     "CWD /\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a directory listing whose way back fails",
+   "url": "ftp://127.0.0.1:{PORT}/sub",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 not a file\r\n"
+     ],
+     [
+      "drop"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "257 \"/\"\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 no\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "421 bye\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error 421 bye>"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR sub\r\n",
+     "TYPE A\r\n",
+     "PWD\r\n",
+     "CWD sub\r\n",
+     "CWD /\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a directory listing of an unterminated name",
+   "url": "ftp://127.0.0.1:{PORT}/sub",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "550 not a file\r\n"
+     ],
+     [
+      "drop"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "257 \"/abc\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 list\r\n"
+     ],
+     [
+      "data",
+      "[3]"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "WzNd",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR sub\r\n",
+     "TYPE A\r\n",
+     "PWD\r\n",
+     "CWD sub\r\n",
+     "CWD /abc\r\n",
+     "PASV\r\n",
+     "LIST sub\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a closing reply that is not UTF-8",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 x\r\n"
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "pause",
+      200
+     ],
+     [
+      "send",
+      "226 \u00ff\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "read_error": {
+    "class": "UnicodeDecodeError",
+    "text": "'utf-8' codec can't decode byte 0xff in position 4: invalid start byte"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a closing reply refused",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 x\r\n"
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "send",
+      "451 abort\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "e30=",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "an anonymous password of a dash",
+   "url": "ftp://anonymous:-@127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS -anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "an empty user with a password",
+   "url": "ftp://:pw@127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS pw\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a named user with an empty password",
+   "url": "ftp://user:@127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER user\r\n",
+     "PASS \r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval size the last parenthesis gives",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      [
+       [
+        "150 x (",
+        1
+       ],
+       [
+        "1",
+        4301
+       ],
+       [
+        " bytes) (2 bytes)\r\n",
+        1
+       ]
+      ]
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "e30=",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval size on a continuation line",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      [
+       [
+        "150-a\r\n150 b (",
+        1
+       ],
+       [
+        "1",
+        4301
+       ],
+       [
+        " bytes)\r\n",
+        1
+       ]
+      ]
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "e30=",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a retrieval size after a bad parenthesis",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      [
+       [
+        "150 x (",
+        1
+       ],
+       [
+        "1",
+        4301
+       ],
+       [
+        " bytes) (3 bites)\r\n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "ValueError",
+    "text": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a file name in UTF-8",
+   "url": "ftp://127.0.0.1:{PORT}/caf%C3%A9.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR caf\u00c3\u00a9.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a file name with a carriage return",
+   "url": "ftp://127.0.0.1:{PORT}/a%0D.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "ValueError",
+    "text": "an illegal newline character should not be contained"
+   },
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a multi-line reply that another code does not end",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220-a\r\n221 b\r\n220-c\r\n220 d\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a passive reply after other digits",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 ready\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "331 password\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 7,8 then ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 x\r\n"
+     ],
+     [
+      "data",
+      "{}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "e30=",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a reply split after a carriage return",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      "220 a\r"
+     ],
+     [
+      "pause",
+      200
+     ],
+     [
+      "send",
+      "331 b\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "230 in\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "250 ok\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "200 type\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "227 Entering Passive Mode ({PASV})\r\n"
+     ],
+     [
+      "recv"
+     ],
+     [
+      "send",
+      "150 opening (13 bytes)\r\n"
+     ],
+     [
+      "data",
+      "{\"ftp\": true}"
+     ],
+     [
+      "send",
+      "226 done\r\n"
+     ]
+    ]
+   ],
+   "env": [],
+   "body": "eyJmdHAiOiB0cnVlfQ==",
+   "commands": [
+    [
+     "USER anonymous\r\n",
+     "PASS anonymous@\r\n",
+     "CWD .\r\n",
+     "TYPE I\r\n",
+     "PASV\r\n",
+     "RETR a.json\r\n"
+    ]
+   ]
+  },
+  {
+   "name": "a carriage return the close leaves at the limit",
+   "url": "ftp://127.0.0.1:{PORT}/a.json",
+   "script": [
+    [
+     [
+      "send",
+      [
+       [
+        "220-",
+        1
+       ],
+       [
+        "x",
+        8188
+       ],
+       [
+        "\r",
+        1
+       ]
+      ]
+     ],
+     [
+      "pause",
+      200
+     ],
+     [
+      "close"
+     ]
+    ]
+   ],
+   "env": [],
+   "open_error": {
+    "class": "URLError",
+    "text": "<urlopen error got more than 8192 bytes>"
+   },
+   "commands": [
+    []
+   ]
+  }
+ ]
+}

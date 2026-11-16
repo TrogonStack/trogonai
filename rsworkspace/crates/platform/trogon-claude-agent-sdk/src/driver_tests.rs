@@ -8,7 +8,10 @@ use std::{
 use tokio::sync::mpsc;
 
 use super::*;
-use crate::{ToolPermissionRequest, ToolSet, environment_plan::Inherited, process_transport::command};
+use crate::{
+    ToolPermissionRequest, ToolSet, environment_plan::Inherited, process_transport::command,
+    python_c_stack::PythonCStack,
+};
 
 /// A transport the test scripts: documents the driver writes arrive on `written`, and objects sent on
 /// `incoming` are what the driver reads.
@@ -384,6 +387,143 @@ async fn a_queued_prompt_that_cannot_be_written_stops_the_flush() -> Result<(), 
 }
 
 #[tokio::test(start_paused = true)]
+async fn shutdown_queue_flushes_prompts_in_order_without_applying_other_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let (control, mut controlled) = oneshot::channel();
+    let (first, first_written) = oneshot::channel();
+    let (finish, mut input_finished) = oneshot::channel();
+    let (second, second_written) = oneshot::channel();
+    for command in [
+        Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("first queued prompt").into()),
+            response: first,
+        },
+        Command::FinishInput {
+            completion: Completion::Run,
+            written: None,
+            response: finish,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("second queued prompt").into()),
+            response: second,
+        },
+    ] {
+        assert!(fixture.commands.try_send(command).is_ok());
+    }
+    fixture.shutdown.send(()).map_err(|_| Error::DriverStopped)?;
+    let (terminal, terminated) = oneshot::channel();
+    fixture.driver.run(Ok(()), terminal).await;
+
+    assert!(matches!(terminated.await?, Ok(())));
+    assert!(matches!(first_written.await?, Ok(())));
+    assert!(matches!(second_written.await?, Ok(())));
+    for expected in ["first queued prompt", "second queued prompt"] {
+        let frame: serde_json::Value = serde_json::from_str(&fixture.harness.written.try_recv()?)?;
+        assert_eq!(
+            frame,
+            serde_json::json!({
+                "type": "user",
+                "message": {"role": "user", "content": expected},
+                "parent_tool_use_id": null,
+            })
+        );
+    }
+    assert!(fixture.harness.written.recv().await.is_none());
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(matches!(
+        input_finished.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_queue_stops_at_first_write_failure_without_draining_later_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.shutdown_seen = true;
+    fixture.harness.written.close();
+    let (control, mut controlled) = oneshot::channel();
+    let (first, mut first_written) = oneshot::channel();
+    let (second, mut second_written) = oneshot::channel();
+    let (finish, mut input_finished) = oneshot::channel();
+    for command in [
+        Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("failed queued prompt").into()),
+            response: first,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("later queued prompt").into()),
+            response: second,
+        },
+        Command::FinishInput {
+            completion: Completion::Run,
+            written: None,
+            response: finish,
+        },
+    ] {
+        assert!(fixture.commands.try_send(command).is_ok());
+    }
+
+    let unapplied = fixture.driver.write_queued_prompts().await;
+
+    assert!(matches!(
+        unapplied.as_slice(),
+        [Command::Control {
+            operation: ControlOperation::Interrupt,
+            ..
+        }]
+    ));
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        first_written.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(matches!(
+        second_written.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        input_finished.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::Prompt { input, .. }) if input.to_wire_json()?["message"]["content"] == "later queued prompt"
+    ));
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::FinishInput { .. })
+    ));
+    assert!(fixture.driver.commands.try_recv().is_none());
+    assert_eq!(fixture.driver.next_id, 0);
+    assert!(fixture.driver.run_state.input_done.is_none());
+    drop(unapplied);
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
 async fn closing_the_command_port_ends_the_loop_without_another_cli_frame() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     let (replacement, _receiver) = crate::channel::channel(None);
@@ -441,7 +581,7 @@ async fn an_abandoned_message_consumer_stops_publication() -> Result<(), Box<dyn
 async fn a_stale_panicked_callback_cannot_terminate_the_current_session() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     let id = ControlRequestId::from("stale-panic");
-    fixture.driver.spawn_callback(
+    fixture.driver.spawn_callback::<_, serde_json::Value>(
         id.clone(),
         crate::CancellationToken::new(),
         Some(Duration::from_secs(1)),
@@ -556,7 +696,13 @@ fn tool_lists_reach_the_cli_verbatim() -> Result<(), Error> {
         tools: ToolSet::Only(vec![crate::BuiltinToolName::from("Read Bash")]),
         ..ClaudeAgentOptions::default()
     };
-    let command = command(&options, std::path::Path::new("claude"), &Inherited::new(), None)?;
+    let command = command(
+        &options,
+        std::path::Path::new("claude"),
+        &Inherited::new(),
+        None,
+        PythonCStack::CLIENT_CONNECT,
+    )?;
     let arguments: Vec<_> = command
         .as_std()
         .get_args()
@@ -603,7 +749,7 @@ fn argv_delivery_leaves_the_initialize_request_without_plugins() -> Result<(), E
 }
 
 fn derived_label_in(options: &ClaudeAgentOptions, inherited: &Inherited, cli: &std::path::Path) -> Option<String> {
-    let command = command(options, cli, inherited, None).ok()?;
+    let command = command(options, cli, inherited, None, PythonCStack::CLIENT_CONNECT).ok()?;
     command
         .as_std()
         .get_envs()
@@ -652,8 +798,12 @@ async fn the_request_counter_wraps_by_default() -> Result<(), Box<dyn std::error
     let mut fixture = DriverFixture::new()?;
     fixture.driver.argv_style = crate::ArgvStyle::Python;
     fixture.driver.next_id = u64::MAX;
-    assert!(fixture.driver.next_request_id()?.as_str().starts_with("req_0_"));
-    assert!(fixture.driver.next_request_id()?.as_str().starts_with("req_1_"));
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_0_"));
+    assert_eq!(fixture.driver.next_id, 0);
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_1_"));
+    assert_eq!(fixture.driver.next_id, 1);
     fixture.finish().await
 }
 
@@ -833,7 +983,7 @@ async fn backpressure_stops_reading_and_overflow_reaches_the_caller() -> Result<
     let reader = async {
         let mut seen = Vec::new();
         while let Some(Message::System(message)) = fixture.messages.recv().await {
-            seen.push(message.subtype);
+            seen.push(message.subtype.clone());
             if seen.len() == 5 {
                 break;
             }
@@ -854,7 +1004,7 @@ async fn a_duplicate_in_flight_request_is_skipped_or_run_by_policy() -> Result<(
         crate::CancellationToken::new(),
         None,
         wire::callback_error_response(&id, "fallback").map(Some),
-        pending(),
+        pending::<Result<Option<serde_json::Value>, ProtocolError>>(),
     );
     assert!(!fixture.driver.admit_callback(&id).await?);
     assert_eq!(fixture.driver.running_callbacks(), 1);
@@ -983,5 +1133,109 @@ fn the_initialize_request_carries_managed_settings_after_the_plugins() -> Result
             ..Default::default()
         },
     )?;
+    Ok(())
+}
+
+/// Deeper than the native stack of a test thread holds a recursive walk over.
+const DEEP: usize = 200_000;
+
+/// `levels` arrays around `null`, built without recursion.
+fn deep_value(levels: usize) -> serde_json::Value {
+    (0..levels).fold(serde_json::Value::Null, |inner, _| {
+        serde_json::Value::Array(vec![inner])
+    })
+}
+
+/// How many arrays `value` opens before its first item that is not one.
+fn array_depth(mut value: &serde_json::Value) -> usize {
+    let mut levels = 0;
+    while let Some(inner) = value.as_array().and_then(|items| items.first()) {
+        levels += 1;
+        value = inner;
+    }
+    levels
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_message_nested_past_the_native_stack_is_decoded_routed_and_dropped() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut fixture = DriverFixture::new()?;
+    let field = |key: &str, value: serde_json::Value| (key.to_owned(), value);
+    let result = JsonObject::from_iter([
+        field("type", "result".into()),
+        field("subtype", "error_during_execution".into()),
+        field("duration_ms", 1.into()),
+        field("duration_api_ms", 1.into()),
+        field("is_error", true.into()),
+        field("num_turns", 1.into()),
+        field("session_id", "s".into()),
+        field("extra", deep_value(DEEP)),
+    ]);
+    let system = JsonObject::from_iter([
+        field("type", "system".into()),
+        field("subtype", "deep".into()),
+        field("payload", deep_value(DEEP)),
+    ]);
+    for object in [result, system] {
+        let frame = fixture.driver.decode_message(object)?;
+        fixture.driver.frame(frame).await?;
+    }
+    assert!(fixture.driver.last_error_result.is_none());
+    let Some(Message::Result(result)) = fixture.messages.recv().await else {
+        return Err("expected the result".into());
+    };
+    assert_eq!(result.additional_fields.get("extra").map(array_depth), Some(DEEP));
+    let Some(Message::System(system)) = fixture.messages.recv().await else {
+        return Err("expected the system message".into());
+    };
+    assert_eq!(system.data.get("payload").map(array_depth), Some(DEEP));
+    drop((result, system));
+    fixture.finish().await
+}
+
+/// Python `close()` leaves each unanswered request to run out its own timeout, whatever kind of request it is, and
+/// one sent without a timeout waits until the caller stops waiting, never answering on its own.
+#[tokio::test(start_paused = true)]
+async fn requests_left_at_python_close_run_out_their_own_timeouts() -> Result<(), Box<dyn std::error::Error>> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let (response, initialize) = oneshot::channel();
+    ControlResponder::Initialize { first: true, response }.time_out_at(Some(deadline));
+    let (response, control) = oneshot::channel();
+    ControlResponder::Control {
+        operation: ControlOperation::SetModel,
+        response,
+    }
+    .time_out_at(Some(deadline));
+    assert!(matches!(
+        initialize.await?,
+        Err(Error::ControlTimeout {
+            operation: ControlOperation::Initialize
+        })
+    ));
+    assert!(matches!(
+        control.await?,
+        Err(Error::ControlTimeout {
+            operation: ControlOperation::SetModel
+        })
+    ));
+    assert!(Instant::now() >= deadline);
+
+    let (response, mut raw) = oneshot::channel();
+    ControlResponder::Raw {
+        operation: ControlOperation::Interrupt,
+        response,
+    }
+    .time_out_at(None);
+    tokio::time::advance(Duration::from_secs(86_400)).await;
+    assert!(matches!(raw.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+    drop(raw);
+    let metrics = tokio::runtime::Handle::current().metrics();
+    for _ in 0..8 {
+        if metrics.num_alive_tasks() == 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(metrics.num_alive_tasks(), 0);
     Ok(())
 }

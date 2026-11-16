@@ -2,7 +2,7 @@ use super::Bridge;
 use super::rpc_call::jsonrpc_call;
 use crate::nats::{RequestClient, global};
 use agent_client_protocol::Result;
-use agent_client_protocol::schema::v1::{ListProvidersRequest, ListProvidersResponse};
+use agent_client_protocol::v1::schema::{ListProvidersRequest, ListProvidersResponse};
 use tracing::{info, instrument};
 use trogon_semconv::span::ACP_PROVIDERS_LIST;
 use trogon_std::time::GetElapsed;

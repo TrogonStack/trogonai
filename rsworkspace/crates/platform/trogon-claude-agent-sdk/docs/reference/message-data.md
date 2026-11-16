@@ -37,9 +37,9 @@ kind is representable without being treated as a human-origin authorization.
 | --- | --- | --- | --- |
 | Content::Text / Content::Blocks | UserMessage.content: str or list[ContentBlock] | SDKUserMessage.message: MessageParam | String or Vec<ContentBlock>; no envelope decoding. |
 | Text / Thinking | TextBlock / ThinkingBlock | SDKAssistantMessage.message: BetaMessage | String text, or thinking and signature strings. |
-| ToolUse | ToolUseBlock.id/name/input | BetaMessage content tool-use blocks | ToolUseId/ToolName wrappers and JsonObject input. |
-| ToolResult | ToolResultBlock.tool_use_id/content/is_error | MessageParam content tool-result blocks | ToolUseId, raw JSON content, and separate NotReported/Success/Error status. |
-| ServerToolUse / ServerToolResult | ServerToolUseBlock / ServerToolResultBlock (from `server_tool_use` and `advisor_tool_result`) | BetaMessage server tool blocks | ToolUseId, name, JsonObject input; raw JSON result content. |
+| ToolUse | ToolUseBlock.id/name/input | BetaMessage content tool-use blocks | ToolUseId/ToolName wrappers and DeepJsonObject input, a JsonObject that drops at any nesting. |
+| ToolResult | ToolResultBlock.tool_use_id/content/is_error | MessageParam content tool-result blocks | ToolUseId, raw JSON content as DeepJsonValue, and separate NotReported/Success/Error status. |
+| ServerToolUse / ServerToolResult | ServerToolUseBlock / ServerToolResultBlock (from `server_tool_use` and `advisor_tool_result`) | BetaMessage server tool blocks | ToolUseId, name, DeepJsonObject input; raw JSON result content as DeepJsonValue. |
 | Unknown | Any block kind Python does not parse | TypeScript content references contain a broader block family | The block `type` and the block without it. TypeScript decoding keeps every block it cannot type here; Python decoding skips them as `parse_message` does. |
 
 ToolResultStatus distinguishes absent error status from explicit success and

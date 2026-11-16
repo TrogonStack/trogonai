@@ -1,0 +1,14 @@
+{
+  "python": "3.12.16",
+  "depth": [
+    {"caller": "module", "loads": 9997, "error": "maximum recursion depth exceeded while decoding a JSON object from a unicode string", "value_sha256": "1a033d7ada1c1fcf58f246f1adaeb0c0a787c41b146fbe2efac89ef7afd6fa01", "value_length": 70013},
+    {"caller": "client_connect", "loads": 9993, "error": "maximum recursion depth exceeded while decoding a JSON object from a unicode string", "value_sha256": "1d7caa4fca151d46cb83e69f342f1cd328d440863ad67d4d3a52af8718893370", "value_length": 69985},
+    {"caller": "query", "loads": 9987, "error": "maximum recursion depth exceeded while decoding a JSON object from a unicode string", "value_sha256": "ac31c55ef8e3273033652bed328731ff13773a44fb5d25b482ed36eeb0eba33f", "value_length": 69943}
+  ],
+  "surrogates": [
+    ["{\"x\": \"\\udc00\"}", "{\"x\": \"\\udc00\", \"sandbox\": {\"enabled\": true}}"],
+    ["{\"\\ud800k\": \"a\\ud83d\"}", "{\"\\ud800k\": \"a\\ud83d\", \"sandbox\": {\"enabled\": true}}"],
+    ["{\"x\": \"\\udc00\\ud800\", \"y\": [\"\\udfff\"]}", "{\"x\": \"\\udc00\\ud800\", \"y\": [\"\\udfff\"], \"sandbox\": {\"enabled\": true}}"],
+    ["{\"x\": \"\\ud83d\\ude00\"}", "{\"x\": \"\\ud83d\\ude00\", \"sandbox\": {\"enabled\": true}}"]
+  ]
+}

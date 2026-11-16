@@ -1,0 +1,6060 @@
+{
+ "python": "3.12.16",
+ "source": "claude-agent-sdk 0.2.181 through ClaudeSDKClient against a stub CLI that sends the mcp_message requests, jsonschema 4.26.0, on Darwin. Each case ran in a fresh process whose script imports claude_agent_sdk and connects, then called the tools of one server in order; answers use the OK / ERR / RPCERR text format of python_schema.json.",
+ "assumptions": [
+  "{\"$nest\": [n, leaf]} stands for leaf nested under n lists, in a schema or in arguments, and $nest(n,1) in an answer for the repr of 1 nested under n lists, so the file stays small; no schema here uses a $nest keyword.",
+  "The schemas nest lists about ten thousand levels deep, where comparing two of them passes CPython 3.12's C recursion limit of 10000 checks before the frame limit: list.sort in _utils.uniq, which check_schema runs for the enum of drafts 3 and 4, raises RecursionError with the text 'maximum recursion depth exceeded in comparison', and the repr of the value in a message raises it with 'while getting the repr of an object'.",
+  "The first call of a process pays C recursion checks the second call does not: CPython runs an instruction generic on its first execution and specialized after, and the generic sorted call and FOR_ITER over a generator hold checks the specialized ones do not. The warmup cases call another tool first, which runs the generic instructions of check_schema and iter_errors.",
+  "Arguments nest past 9986 levels only in cases this file leaves out: the stub CLI's own json.loads of the call passes its recursion limit there."
+ ],
+ "cases": [
+  {
+   "name": "enum d4 9991",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum d4 9992",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum d4 9993",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum d4 9994",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum d4 9995",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum d4 9996",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "enum": [
+      {
+       "$nest": [
+        9996,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9996,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "min repr d4 9987",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "minimum": {
+      "$nest": [
+       9987,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "min repr d4 9988",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "minimum": {
+      "$nest": [
+       9988,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "min repr d4 9989",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "minimum": {
+      "$nest": [
+       9989,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "min repr d4 9990",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "minimum": {
+      "$nest": [
+       9990,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "min repr d4 9991",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "minimum": {
+      "$nest": [
+       9991,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "min repr d4 9992",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "minimum": {
+      "$nest": [
+       9992,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "min repr d4 9993",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "minimum": {
+      "$nest": [
+       9993,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "min repr d4 9994",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {},
+     "minimum": {
+      "$nest": [
+       9994,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "enum nested d4 9991",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {
+      "a": {
+       "properties": {
+        "b": {
+         "enum": [
+          {
+           "$nest": [
+            9991,
+            1
+           ]
+          },
+          {
+           "$nest": [
+            9991,
+            2
+           ]
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum nested d4 9992",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {
+      "a": {
+       "properties": {
+        "b": {
+         "enum": [
+          {
+           "$nest": [
+            9992,
+            1
+           ]
+          },
+          {
+           "$nest": [
+            9992,
+            2
+           ]
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum nested d4 9993",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {
+      "a": {
+       "properties": {
+        "b": {
+         "enum": [
+          {
+           "$nest": [
+            9993,
+            1
+           ]
+          },
+          {
+           "$nest": [
+            9993,
+            2
+           ]
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum nested d4 9994",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {
+      "a": {
+       "properties": {
+        "b": {
+         "enum": [
+          {
+           "$nest": [
+            9994,
+            1
+           ]
+          },
+          {
+           "$nest": [
+            9994,
+            2
+           ]
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum nested d4 9995",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {
+      "a": {
+       "properties": {
+        "b": {
+         "enum": [
+          {
+           "$nest": [
+            9995,
+            1
+           ]
+          },
+          {
+           "$nest": [
+            9995,
+            2
+           ]
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum nested d4 9996",
+   "tools": {
+    "t": {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "type": "object",
+     "properties": {
+      "a": {
+       "properties": {
+        "b": {
+         "enum": [
+          {
+           "$nest": [
+            9996,
+            1
+           ]
+          },
+          {
+           "$nest": [
+            9996,
+            2
+           ]
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "cold enum d4 9988",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9988,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9988,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "cold enum d4 9989",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9989,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9989,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "cold enum d4 9990",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9990,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9990,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "cold enum d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "same leaf d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "str leaf d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        "ab"
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        "ab"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "char leaf d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        "a"
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        "a"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "mixed d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        2
+       ]
+      },
+      0
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "dict leaf d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        {
+         "a": 1
+        }
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        {
+         "a": 2
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum d3 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-03/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum d6 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-06/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "enum d7 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-07/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "same leaf d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        1
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "str leaf d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        "ab"
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        "ab"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "char leaf d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        "a"
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        "a"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "mixed d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        2
+       ]
+      },
+      0
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "dict leaf d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        {
+         "a": 1
+        }
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        {
+         "a": 2
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum d3 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-03/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum d6 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-06/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "enum d7 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-07/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "same leaf d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        1
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "str leaf d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        "ab"
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        "ab"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "char leaf d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        "a"
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        "a"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "mixed d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        2
+       ]
+      },
+      0
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "dict leaf d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        {
+         "a": 1
+        }
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        {
+         "a": 2
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum d3 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-03/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "enum d6 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-06/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "enum d7 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-07/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "same leaf d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        1
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "str leaf d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        "ab"
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        "ab"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "char leaf d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        "a"
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        "a"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "mixed d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        2
+       ]
+      },
+      0
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "dict leaf d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        {
+         "a": 1
+        }
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        {
+         "a": 2
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum d3 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-03/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum d6 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-06/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "enum d7 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-07/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "same leaf d4 9995",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        1
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "str leaf d4 9995",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        "ab"
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        "ab"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "char leaf d4 9995",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        "a"
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        "a"
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "mixed d4 9995",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        2
+       ]
+      },
+      0
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "dict leaf d4 9995",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        {
+         "a": 1
+        }
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        {
+         "a": 2
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum d3 9995",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-03/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "enum d6 9995",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-06/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "enum d7 9995",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-07/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9995,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9995,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "items enum d4 9989",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "enum": [
+       {
+        "$nest": [
+         9989,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9989,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "not enum d4 9989",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "not": {
+      "enum": [
+       {
+        "$nest": [
+         9989,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9989,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "allof enum d4 9989",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "allOf": [
+      {
+       "enum": [
+        {
+         "$nest": [
+          9989,
+          1
+         ]
+        },
+        {
+         "$nest": [
+          9989,
+          2
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "warmup enum d4 9989",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9989,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9989,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "items enum d4 9990",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "enum": [
+       {
+        "$nest": [
+         9990,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9990,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "not enum d4 9990",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "not": {
+      "enum": [
+       {
+        "$nest": [
+         9990,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9990,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "allof enum d4 9990",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "allOf": [
+      {
+       "enum": [
+        {
+         "$nest": [
+          9990,
+          1
+         ]
+        },
+        {
+         "$nest": [
+          9990,
+          2
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "warmup enum d4 9990",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9990,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9990,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "items enum d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "enum": [
+       {
+        "$nest": [
+         9991,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9991,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "not enum d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "not": {
+      "enum": [
+       {
+        "$nest": [
+         9991,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9991,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "allof enum d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "allOf": [
+      {
+       "enum": [
+        {
+         "$nest": [
+          9991,
+          1
+         ]
+        },
+        {
+         "$nest": [
+          9991,
+          2
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "warmup enum d4 9991",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9991,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9991,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "items enum d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "enum": [
+       {
+        "$nest": [
+         9992,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9992,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "not enum d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "not": {
+      "enum": [
+       {
+        "$nest": [
+         9992,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9992,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "allof enum d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "allOf": [
+      {
+       "enum": [
+        {
+         "$nest": [
+          9992,
+          1
+         ]
+        },
+        {
+         "$nest": [
+          9992,
+          2
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "warmup enum d4 9992",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9992,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9992,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "items enum d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "enum": [
+       {
+        "$nest": [
+         9993,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9993,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "not enum d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "not": {
+      "enum": [
+       {
+        "$nest": [
+         9993,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9993,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "allof enum d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "allOf": [
+      {
+       "enum": [
+        {
+         "$nest": [
+          9993,
+          1
+         ]
+        },
+        {
+         "$nest": [
+          9993,
+          2
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "warmup enum d4 9993",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9993,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9993,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "items enum d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "enum": [
+       {
+        "$nest": [
+         9994,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9994,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "not enum d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "not": {
+      "enum": [
+       {
+        "$nest": [
+         9994,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9994,
+         2
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "allof enum d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "allOf": [
+      {
+       "enum": [
+        {
+         "$nest": [
+          9994,
+          1
+         ]
+        },
+        {
+         "$nest": [
+          9994,
+          2
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "warmup enum d4 9994",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "enum": [
+      {
+       "$nest": [
+        9994,
+        1
+       ]
+      },
+      {
+       "$nest": [
+        9994,
+        2
+       ]
+      }
+     ]
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "ERR maximum recursion depth exceeded in comparison",
+    "ERR maximum recursion depth exceeded in comparison"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9984",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9984,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9984",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9984,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9984",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9985",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9985,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9985",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9985,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9985",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9986",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9986,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9986",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9986,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9986",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9987",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9987,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9987",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9987,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9987",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9987,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9988",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9988,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9988",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9988,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9988",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9988,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9989",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9989,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9989",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9989,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9989",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9989,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9990",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9990,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9990",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9990,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9990",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9990,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9991,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9991",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9991,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9991",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9991,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9992,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9992",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9992,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9992",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9992,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9993,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "warmup min d4 9993",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9993,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "RPCERR {\"code\": 0, \"message\": \"maximum recursion depth exceeded\"}"
+   ]
+  },
+  {
+   "name": "items min d4 9993",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9993,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "cold d2020 min 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "minimum": {
+      "$nest": [
+       9994,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "warmup min d4 9994",
+   "tools": {
+    "w": {
+     "type": "object"
+    },
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "minimum": {
+      "$nest": [
+       9994,
+       1
+      ]
+     }
+    }
+   },
+   "calls": [
+    [
+     "w",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: 'type' is a required property",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "items min d4 9994",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {},
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "items": {
+      "minimum": {
+       "$nest": [
+        9994,
+        1
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {}
+    ],
+    [
+     "t",
+     {}
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR maximum recursion depth exceeded while getting the repr of an object"
+   ]
+  },
+  {
+   "name": "args uniq 9980",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "uniqueItems": true
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9980,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9980,
+         2
+        ]
+       }
+      ]
+     }
+    ],
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9980,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9980,
+         2
+        ]
+       }
+      ]
+     }
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "args uniq 9981",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "uniqueItems": true
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9981,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9981,
+         2
+        ]
+       }
+      ]
+     }
+    ],
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9981,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9981,
+         2
+        ]
+       }
+      ]
+     }
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "args uniq 9982",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "uniqueItems": true
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9982,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9982,
+         2
+        ]
+       }
+      ]
+     }
+    ],
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9982,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9982,
+         2
+        ]
+       }
+      ]
+     }
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "args uniq 9983",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "uniqueItems": true
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9983,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9983,
+         2
+        ]
+       }
+      ]
+     }
+    ],
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9983,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9983,
+         2
+        ]
+       }
+      ]
+     }
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "args uniq 9984",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "uniqueItems": true
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9984,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9984,
+         2
+        ]
+       }
+      ]
+     }
+    ],
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9984,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9984,
+         2
+        ]
+       }
+      ]
+     }
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "args uniq 9985",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "uniqueItems": true
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9985,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9985,
+         2
+        ]
+       }
+      ]
+     }
+    ],
+    [
+     "t",
+     {
+      "x": [
+       {
+        "$nest": [
+         9985,
+         1
+        ]
+       },
+       {
+        "$nest": [
+         9985,
+         2
+        ]
+       }
+      ]
+     }
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded",
+    "ERR maximum recursion depth exceeded"
+   ]
+  },
+  {
+   "name": "args type 9980",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9980,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9980,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9980,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9980,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args anyof type 9980",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "anyOf": [
+        {
+         "type": "string"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9980,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9980,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9980,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9980,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args not type 9980",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9980,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9980,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "OK",
+    "OK"
+   ]
+  },
+  {
+   "name": "args not not type 9980",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "not": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9980,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9980,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9980,1) should not be valid under {'not': {'type': 'string'}}",
+    "ERR Input validation error: $nest(9980,1) should not be valid under {'not': {'type': 'string'}}"
+   ]
+  },
+  {
+   "name": "args type 9981",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9981,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9981,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9981,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9981,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args anyof type 9981",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "anyOf": [
+        {
+         "type": "string"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9981,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9981,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9981,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9981,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args not type 9981",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9981,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9981,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "OK",
+    "OK"
+   ]
+  },
+  {
+   "name": "args not not type 9981",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "not": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9981,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9981,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9981,1) should not be valid under {'not': {'type': 'string'}}",
+    "ERR Input validation error: $nest(9981,1) should not be valid under {'not': {'type': 'string'}}"
+   ]
+  },
+  {
+   "name": "args type 9982",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9982,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9982,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9982,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9982,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args anyof type 9982",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "anyOf": [
+        {
+         "type": "string"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9982,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9982,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9982,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9982,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args not type 9982",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9982,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9982,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "OK",
+    "OK"
+   ]
+  },
+  {
+   "name": "args not not type 9982",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "not": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9982,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9982,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9982,1) should not be valid under {'not': {'type': 'string'}}",
+    "ERR Input validation error: $nest(9982,1) should not be valid under {'not': {'type': 'string'}}"
+   ]
+  },
+  {
+   "name": "args type 9983",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9983,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9983,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9983,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9983,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args anyof type 9983",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "anyOf": [
+        {
+         "type": "string"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9983,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9983,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9983,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9983,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args not type 9983",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9983,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9983,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "OK",
+    "OK"
+   ]
+  },
+  {
+   "name": "args not not type 9983",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "not": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9983,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9983,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9983,1) should not be valid under {'not': {'type': 'string'}}",
+    "ERR Input validation error: $nest(9983,1) should not be valid under {'not': {'type': 'string'}}"
+   ]
+  },
+  {
+   "name": "args type 9984",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9984,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9984,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args anyof type 9984",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "anyOf": [
+        {
+         "type": "string"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9984,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9984,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args not type 9984",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "OK",
+    "OK"
+   ]
+  },
+  {
+   "name": "args not not type 9984",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "not": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9984,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9984,1) should not be valid under {'not': {'type': 'string'}}",
+    "ERR Input validation error: $nest(9984,1) should not be valid under {'not': {'type': 'string'}}"
+   ]
+  },
+  {
+   "name": "args type 9985",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9985,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9985,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args anyof type 9985",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "anyOf": [
+        {
+         "type": "string"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9985,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9985,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args not type 9985",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "OK",
+    "OK"
+   ]
+  },
+  {
+   "name": "args not not type 9985",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "not": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9985,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9985,1) should not be valid under {'not': {'type': 'string'}}",
+    "ERR Input validation error: $nest(9985,1) should not be valid under {'not': {'type': 'string'}}"
+   ]
+  },
+  {
+   "name": "args type 9986",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9986,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9986,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args anyof type 9986",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "anyOf": [
+        {
+         "type": "string"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR Input validation error: $nest(9986,1) is not of type 'string'",
+    "ERR Input validation error: $nest(9986,1) is not of type 'string'"
+   ]
+  },
+  {
+   "name": "args not type 9986",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "OK",
+    "OK"
+   ]
+  },
+  {
+   "name": "args not not type 9986",
+   "tools": {
+    "t": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "not": {
+        "not": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   },
+   "calls": [
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    ],
+    [
+     "t",
+     {
+      "x": {
+       "$nest": [
+        9986,
+        1
+       ]
+      }
+     }
+    ]
+   ],
+   "answers": [
+    "ERR maximum recursion depth exceeded while getting the repr of an object",
+    "ERR Input validation error: $nest(9986,1) should not be valid under {'not': {'type': 'string'}}"
+   ]
+  }
+ ]
+}
