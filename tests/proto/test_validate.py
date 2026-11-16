@@ -4,6 +4,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -46,7 +47,9 @@ class ValidatorTest(unittest.TestCase):
         cls.fixtures.parent.mkdir(parents=True)
         cls.cases = json.loads(FIXTURES.read_text())
         cls.wrapper = cls.root / "buf-wrapper"
-        cls.wrapper.write_text("#!" + sys.executable + "\n" + '''
+        # Bazel's interpreter path can exceed the kernel's shebang limit.
+        launcher = "#!/bin/sh\n'''exec' {} \"$0\" \"$@\"\n' '''\n".format(shlex.quote(sys.executable))
+        cls.wrapper.write_text(launcher + '''
 import json, os, pathlib, subprocess, sys
 args = sys.argv[1:]
 payload = sys.stdin.buffer.read() if args[0] == "convert" else None
