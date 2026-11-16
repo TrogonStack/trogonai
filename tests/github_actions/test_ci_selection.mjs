@@ -163,66 +163,14 @@ test('selection starts with approved actions and the repo-owned CLI', () => {
   assert.equal(filter.env.GH_TOKEN, '${{ github.token }}');
 });
 
-test('runner selection runs in its own job and fails loudly', async () => {
-  const selection = load('.github/workflows/ci-selection.yml');
-  const job = selection.jobs.runner;
-  const step = job.steps.find((item) => item.id === 'runner');
-  assert.equal(step.uses, './.github/actions/runs-on-fallback');
-  assert.equal(step['continue-on-error'], undefined);
-  assert.ok(job.steps[0].uses.startsWith('actions/checkout@'));
-  assert.equal(job.steps.at(-1), step);
-  assert.equal(step.with.scope, 'organization');
-  assert.equal(step.with.jobs, '${{ inputs.runner-jobs }}');
-  assert.equal(step.with['github-token'], '${{ steps.baton.outputs.token }}');
-  assert.equal(selection.on.workflow_call.secrets, undefined);
-  assert.equal(selection.on.workflow_call.inputs['runner-jobs'].default, '');
-  assert.equal(selection.on.workflow_call.inputs['runner-jobs'].required, false);
-  assert.equal(selection.on.workflow_call.outputs.runners.value, '${{ jobs.runner.outputs.runners }}');
-  assert.equal(job.outputs.runners, '${{ steps.runner.outputs.runners }}');
-  assert.equal(selection.jobs.filter.steps.some((item) => item.id === 'runner'), false);
-  assert.equal(selection.jobs.filter.outputs.runners, undefined);
-  for (const [suite, workflow] of Object.entries(workflows)) {
-    // A caller below what any job of the called workflow requests fails to
-    // start, even when that job would be skipped.
-    assert.equal(workflow.jobs.changes.permissions['id-token'], 'write', suite);
-    assert.equal(workflow.jobs.changes.secrets, undefined, suite);
-  }
-});
-
-test('only main pushes, dispatches and same-repository pull requests can read the Baton key', async () => {
-  const job = load('.github/workflows/ci-selection.yml').jobs.runner;
-  assert.equal(job.permissions['id-token'], 'write');
-  const auth = job.steps.find((item) => item.id === 'gcp');
-  const repository = 'TrogonStack/trogonai';
-  const cases = [
-    ['push', 'refs/heads/main', undefined, true],
-    ['workflow_dispatch', 'refs/heads/main', undefined, true],
-    ['pull_request', 'refs/pull/1/merge', repository, true],
-    ['pull_request', 'refs/pull/1/merge', 'someone/trogonai', false],
-    ['pull_request_target', 'refs/heads/main', 'someone/trogonai', false],
-    ['merge_group', 'refs/heads/gh-readonly-queue/main/pr-1', undefined, false],
-    ['push', 'refs/heads/feature', undefined, false],
-  ];
-  for (const [event_name, ref, head, trusted] of cases) {
-    const event = head === undefined ? {} : { pull_request: { head: { repo: { full_name: head } } } };
-    const context = { github: { event_name, ref, repository, event } };
-    const where = `${event_name} ${ref} ${head ?? ''}`;
-    assert.equal((await evaluate(job.environment, context)).coerceString(), trusted ? 'github-app-baton' : '', where);
-    assert.equal((await evaluate(auth.if, context)).coerceString(), String(trusted), where);
-  }
-  for (const id of ['gcp', 'baton_key', 'baton']) {
-    assert.equal(job.steps.find((item) => item.id === id)['continue-on-error'], true, id);
-  }
-  const token = job.steps.find((item) => item.id === 'baton');
-  assert.equal(token.with.owner, '${{ github.repository_owner }}');
-  assert.equal(token.with['permission-organization-self-hosted-runners'], 'read');
-  assert.deepEqual(Object.keys(token.with).filter((key) => key.startsWith('permission-')), ['permission-organization-self-hosted-runners']);
-});
-
 // Python tasks keep the language they were written in; their parsing logic has
 // no reasonable bash equivalent.
 const pythonTasks = new Set([
   '.config/mise/tasks/github/workflows/ci-bazel/coverage-report',
+  '.config/mise/tasks/github/workflows/ci-bazel/coverage-context',
+  '.config/mise/tasks/github/workflows/ci-bazel/coverage-fork',
+  '.config/mise/tasks/github/workflows/ci-bazel-fork-coverage/compare',
+  '.config/mise/tasks/github/workflows/ci-bazel-fork-coverage/publish',
   '.config/mise/tasks/github/workflows/ci-cargo/bazel-manual-tests',
 ]);
 

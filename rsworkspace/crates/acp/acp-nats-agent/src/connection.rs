@@ -6,11 +6,12 @@ use acp_nats::wire::{
     encode_agent_error, encode_success, req_id_from_request_headers, response_id_from_request_headers,
 };
 use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject};
-use agent_client_protocol::schema::v1::{
-    AuthenticateRequest, CancelNotification, CloseSessionRequest, DeleteSessionRequest, DisableProviderRequest,
-    ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest, ListProvidersRequest, ListSessionsRequest,
-    LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest, ResumeSessionRequest, SetProviderRequest,
-    SetSessionConfigOptionRequest, SetSessionModeRequest,
+use agent_client_protocol::v1::schema::{
+    ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
+    DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
+    ListProvidersRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest,
+    ResumeSessionRequest, SessionStatusRequest, SetProviderRequest, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, SetSessionTitleRequest, UnarchiveSessionRequest,
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
@@ -266,6 +267,15 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
             )
             .await
         }
+        GlobalAgentMethod::AuthStatus => {
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method().as_str(),
+                nats,
+                |req: AuthStatusRequest| agent.auth_status(req),
+            )
+            .await
+        }
         GlobalAgentMethod::Logout => {
             handle_jsonrpc_request(msg, method.protocol_method().as_str(), nats, |req: LogoutRequest| {
                 agent.logout(req)
@@ -388,6 +398,30 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync
             })
             .await
         }
+        SessionAgentMethod::Archive => {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ArchiveSessionRequest| {
+                agent.archive_session(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Unarchive => {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: UnarchiveSessionRequest| {
+                agent.unarchive_session(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Status => {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SessionStatusRequest| {
+                agent.session_status(req)
+            })
+            .await
+        }
+        SessionAgentMethod::SetTitle => {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SetSessionTitleRequest| {
+                agent.set_session_title(req)
+            })
+            .await
+        }
         SessionAgentMethod::Delete => {
             handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: DeleteSessionRequest| {
                 agent.delete_session(req)
@@ -433,11 +467,11 @@ where
         Ok(req) => req,
         Err(e) => {
             let error = agent_client_protocol::Error::new(
-                agent_client_protocol::ErrorCode::InvalidParams.into(),
+                agent_client_protocol::ErrorCode::INVALID_PARAMS,
                 format!("Failed to deserialize request: {e}"),
             );
             let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &error)?;
+            let encoded = encode_agent_error(id, &error);
             let _ = reply_wire(nats, reply_to, encoded).await;
             return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
                 "{e}"
@@ -452,7 +486,7 @@ where
             reply_wire(nats, reply_to, encoded).await
         }
         Err(err) => {
-            let encoded = encode_agent_error(response_id, &err)?;
+            let encoded = encode_agent_error(response_id, &err);
             reply_wire(nats, reply_to, encoded).await
         }
     }
@@ -509,11 +543,11 @@ where
         Ok(req) => req,
         Err(e) => {
             let error = agent_client_protocol::Error::new(
-                agent_client_protocol::ErrorCode::InvalidParams.into(),
+                agent_client_protocol::ErrorCode::INVALID_PARAMS,
                 format!("Failed to deserialize request: {e}"),
             );
             let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &error)?;
+            let encoded = encode_agent_error(id, &error);
             let _ = reply_wire(nats, reply_to, encoded).await;
             return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
                 "{e}"
@@ -537,7 +571,7 @@ where
                         reply_wire(nats, reply_to, encoded).await
                     }
                     Err(err) => {
-                        let encoded = encode_agent_error(response_id, &err)?;
+                        let encoded = encode_agent_error(response_id, &err);
                         reply_wire(nats, reply_to, encoded).await
                     }
                 };
@@ -708,6 +742,30 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
         SessionAgentMethod::Close => {
             handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: CloseSessionRequest| {
                 agent.close_session(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Archive => {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ArchiveSessionRequest| {
+                agent.archive_session(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Unarchive => {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: UnarchiveSessionRequest| {
+                agent.unarchive_session(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Status => {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SessionStatusRequest| {
+                agent.session_status(req)
+            })
+            .await
+        }
+        SessionAgentMethod::SetTitle => {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SetSessionTitleRequest| {
+                agent.set_session_title(req)
             })
             .await
         }

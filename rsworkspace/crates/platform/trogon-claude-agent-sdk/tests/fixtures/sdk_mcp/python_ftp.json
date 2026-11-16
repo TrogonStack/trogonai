@@ -725,49 +725,6 @@
      [
       "send",
       "331 password\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "230 in\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "250 ok\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "200 type\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "227 Entering Passive Mode ({PASV})\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "150 opening (13 bytes)\r\n"
-     ],
-     [
-      "data",
-      "{\"ftp\": true}"
-     ],
-     [
-      "send",
-      "226 done\r\n"
      ]
     ]
    ],
@@ -3555,56 +3512,6 @@
      [
       "send",
       "220 ready\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "331 password\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "230 in\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "250 ok\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "200 type\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "227 Entering Passive Mode ({PASV})\r\n"
-     ],
-     [
-      "recv"
-     ],
-     [
-      "send",
-      "150 opening (13 bytes)\r\n"
-     ],
-     [
-      "data",
-      "{\"ftp\": true}"
-     ],
-     [
-      "send",
-      "226 done\r\n"
      ]
     ]
    ],
@@ -4351,6 +4258,10 @@
      [
       "data",
       "{}"
+     ],
+     [
+      "pause",
+      200
      ],
      [
       "send",

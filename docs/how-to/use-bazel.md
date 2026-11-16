@@ -16,6 +16,11 @@ A few checks cannot run inside Bazel, so each keeps a small workflow of its own:
 | `CI Buf Breaking` | `buf breaking` against the base branch | It compares against another revision of the repository. |
 | `CI pnpm Lockfiles` | `pnpm install --frozen-lockfile` for `docs` and `tsworkspace` | Bazel reads the lockfiles; it does not check them against each `package.json`. |
 | `CI Automation` | CI selection tests, the canary helper tests, and `bash -n` over the mise tasks | `.bazelignore` leaves `.config/mise/tasks` out of Bazel. |
+| `CI Bazel Fork Coverage` | Independently compare a fork's report and publish its PR comment | Publishing needs a trusted default-branch workflow with separate token permissions. |
+
+Fork coverage comparison also gates `Bazel result` using a read-only job in
+`CI Bazel`. See the [fork coverage contract](../reference/bazel-fork-coverage.md)
+for policy, provenance, publishing boundaries and stale-run handling.
 
 `CI Cargo` reads the `manual` tags and `--skip` arguments from each crate's
 `BUILD.bazel`, so tagging a test `manual` moves it there with no list to update.
