@@ -49,5 +49,6 @@ async fn provision_is_idempotent() {
     let ctx = MockJetStreamContext::new();
     provision_streams(&ctx, &p("acp")).await.unwrap();
     provision_streams(&ctx, &p("acp")).await.unwrap();
-    assert_eq!(ctx.created_streams().len(), 10);
+    assert_eq!(ctx.created_streams().len(), 5);
+    assert_eq!(ctx.stream_writes(), 5);
 }

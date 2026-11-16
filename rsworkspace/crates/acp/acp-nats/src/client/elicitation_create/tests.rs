@@ -169,7 +169,7 @@ fn sample_wire_error() -> crate::wire::WireError {
 #[test]
 fn error_code_and_message_invalid_request_returns_invalid_params() {
     let ec_err = ElicitationCreateError::InvalidRequest(sample_wire_error());
-    let (code, _) = error_code_and_message(&ec_err);
+    let agent_client_protocol::Error { code, .. } = agent_client_protocol::Error::from(&ec_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
 }
 
@@ -179,7 +179,7 @@ fn error_code_and_message_session_mismatch_returns_invalid_params() {
         params: "session-other".to_string(),
         subject: "session-001".to_string(),
     };
-    let (code, message) = error_code_and_message(&ec_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&ec_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(
         message,
@@ -191,7 +191,7 @@ fn error_code_and_message_session_mismatch_returns_invalid_params() {
 fn error_code_and_message_client_error_preserves_client_code() {
     let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "denied");
     let ec_err = ElicitationCreateError::ClientError(client_err);
-    let (code, message) = error_code_and_message(&ec_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&ec_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "denied");
 }

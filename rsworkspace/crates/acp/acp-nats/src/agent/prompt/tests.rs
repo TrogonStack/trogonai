@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::Config;
+use agent_client_protocol::v1::schema::StopReason;
 use jsonrpc_nats::{Message, encode};
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::*;
@@ -104,15 +105,12 @@ async fn prompt_js_success() {
 }
 
 #[tokio::test]
-async fn prompt_js_cancel() {
-    let (mock, js, bridge) = mock_bridge();
+async fn prompt_js_cancelled_runner_response() {
+    let (_mock, js, bridge) = mock_bridge();
 
-    let cancel_tx = mock.inject_messages();
-
-    let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+    let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
-
-    cancel_tx.unbounded_send(make_nats_msg(b"", None)).unwrap();
+    reply_success_when_published(&js, resp_tx, &PromptResponse::new(StopReason::Cancelled));
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_ok());
@@ -302,14 +300,14 @@ async fn prompt_js_resp_consumer_creation_failure() {
 }
 
 #[tokio::test]
-async fn prompt_js_cancel_subscribe_failure() {
-    let (_mock, js, bridge) = mock_bridge();
-    // Don't inject cancel_tx — subscribe will fail (no streams in mock)
-    let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+async fn prompt_does_not_require_a_cancellation_broadcast_subscription() {
+    let (mock, js, bridge) = mock_bridge();
+    let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
+    reply_success_when_published(&js, resp_tx, &PromptResponse::new(StopReason::EndTurn));
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
-    assert!(result.is_err());
-    assert!(result.unwrap_err().message.contains("subscribe cancelled"));
+    assert_eq!(result.unwrap().stop_reason, StopReason::EndTurn);
+    assert!(mock.subscribed_to().is_empty());
 }
 
 #[tokio::test]

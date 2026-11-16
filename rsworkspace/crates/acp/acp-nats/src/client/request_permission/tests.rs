@@ -142,7 +142,7 @@ async fn request_permission_returns_invalid_request_when_session_id_mismatch() {
 fn error_code_and_message_invalid_request_returns_invalid_params() {
     let err = serde_json::from_slice::<RequestPermissionRequest>(b"not json").unwrap_err();
     let rp_err = RequestPermissionError::InvalidRequest(err);
-    let (code, _) = error_code_and_message(&rp_err);
+    let agent_client_protocol::Error { code, .. } = agent_client_protocol::Error::from(&rp_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
 }
 
@@ -150,7 +150,7 @@ fn error_code_and_message_invalid_request_returns_invalid_params() {
 fn error_code_and_message_client_error_preserves_client_code() {
     let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "denied");
     let rp_err = RequestPermissionError::ClientError(client_err);
-    let (code, message) = error_code_and_message(&rp_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&rp_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "denied");
 }

@@ -5,6 +5,9 @@ mod compat;
 mod component;
 mod config;
 mod constants;
+mod operation;
+mod provision_command_error;
+mod stream_provisioning;
 
 use component::NatsAgentComponent;
 use tokio::sync::watch;
@@ -22,7 +25,12 @@ use {
 #[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
     let args = config::Args::parse();
+    let operation = args.operation;
     let server_config = config::config_from_args(args, &SystemEnv)?;
+    if let Some(operation::Operation::Provision) = operation {
+        let server_config = config::apply_timeout_overrides(server_config, &SystemEnv);
+        return provision(&server_config.acp).await;
+    }
     trogon_telemetry::init_logger(
         ServiceName::AcpNatsServer,
         [ResourceAttribute::acp_prefix(server_config.acp.acp_prefix())],
@@ -75,6 +83,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     result.map_err(Into::into)
+}
+
+async fn provision(config: &acp_nats::Config) -> anyhow::Result<()> {
+    let timeout = acp_nats::nats_connect_timeout(&SystemEnv);
+    let client = trogon_nats::connect_once(config.nats(), config.nats().auth.clone(), timeout).await?;
+    let mut context = async_nats::jetstream::new(client);
+    context.set_timeout(config.operation_timeout());
+    stream_provisioning::run(&context, config.acp_prefix_ref()).await?;
+    Ok(())
 }
 
 /// Builds the served router: the SDK's transport, plus the behaviors it omits.

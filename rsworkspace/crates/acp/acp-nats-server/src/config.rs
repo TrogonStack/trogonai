@@ -4,12 +4,16 @@ use std::net::IpAddr;
 use trogon_std::env::ReadEnv;
 
 use crate::constants::{DEFAULT_HOST, DEFAULT_PORT};
+use crate::operation::Operation;
 
 #[derive(Parser, Debug)]
 #[command(name = "acp-nats-server")]
 #[command(about = "ACP transport server bridging agent-client protocol to NATS", long_about = None)]
 pub struct Args {
-    #[arg(long = "acp-prefix")]
+    #[command(subcommand)]
+    pub operation: Option<Operation>,
+
+    #[arg(long = "acp-prefix", global = true)]
     pub acp_prefix: Option<String>,
 
     #[arg(long)]

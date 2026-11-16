@@ -4,6 +4,7 @@ use trogon_std::env::InMemoryEnv;
 
 fn config_from_env(env: &InMemoryEnv) -> ServerConfig {
     let args = Args {
+        operation: None,
         acp_prefix: None,
         host: None,
         port: None,
@@ -24,6 +25,21 @@ fn test_default_config() {
 }
 
 #[test]
+fn provisioning_accepts_the_prefix_before_or_after_the_subcommand() {
+    for arguments in [
+        ["acp-nats-server", "--acp-prefix", "operator_prefix", "provision"],
+        ["acp-nats-server", "provision", "--acp-prefix", "operator_prefix"],
+    ] {
+        let args = Args::try_parse_from(arguments).unwrap();
+        assert!(matches!(args.operation, Some(Operation::Provision)));
+        assert_eq!(
+            config_from_args(args, &InMemoryEnv::new()).unwrap().acp.acp_prefix(),
+            "operator_prefix"
+        );
+    }
+}
+
+#[test]
 fn test_acp_prefix_from_env_provider() {
     let env = InMemoryEnv::new();
     env.set("ACP_PREFIX", "custom-prefix");
@@ -35,6 +51,7 @@ fn test_acp_prefix_from_env_provider() {
 fn test_acp_prefix_from_args() {
     let env = InMemoryEnv::new();
     let args = Args {
+        operation: None,
         acp_prefix: Some("cli-prefix".to_string()),
         host: None,
         port: None,
@@ -48,6 +65,7 @@ fn test_args_override_env() {
     let env = InMemoryEnv::new();
     env.set("ACP_PREFIX", "env-prefix");
     let args = Args {
+        operation: None,
         acp_prefix: Some("cli-prefix".to_string()),
         host: None,
         port: None,
@@ -72,6 +90,7 @@ fn test_nats_config_from_env() {
 fn test_custom_host_and_port() {
     let env = InMemoryEnv::new();
     let args = Args {
+        operation: None,
         acp_prefix: None,
         host: Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
         port: Some(9090),
@@ -95,6 +114,7 @@ fn test_new_server_env_vars_override_defaults() {
 fn test_invalid_acp_prefix_maps_to_server_config_error() {
     let env = InMemoryEnv::new();
     let args = Args {
+        operation: None,
         acp_prefix: Some("acp.*".into()),
         host: None,
         port: None,
@@ -112,6 +132,7 @@ fn test_invalid_new_server_env_var_fails() {
     env.set("ACP_SERVER_PORT", "abc");
     let error = config_from_args(
         Args {
+            operation: None,
             acp_prefix: None,
             host: None,
             port: None,

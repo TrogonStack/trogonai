@@ -1,7 +1,48 @@
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":compiler_failures.bzl", "fixture_feature_setting")
+load(":coverage.bzl", "rust_coverage_tools")
+
+rust_binary(
+    name = "coverage_test_runner",
+    testonly = True,
+    srcs = ["coverage_test_runner.rs"],
+    edition = "2024",
+    rustc_flags = ["-Cinstrument-coverage"],
+)
+
+rust_binary(
+    name = "coverage_test_child",
+    testonly = True,
+    srcs = ["coverage_test_child.rs"],
+    edition = "2024",
+    rustc_flags = ["-Cinstrument-coverage"],
+)
+
+rust_coverage_tools(
+    name = "coverage_tools",
+    testonly = True,
+)
+
+py_test(
+    name = "rust_coverage_test",
+    srcs = ["rust_coverage_test.py"],
+    args = [
+        "--collector=$(rootpath @rules_rust//rust/coverage:collect_rust_coverage)",
+        "--runner=$(rootpath :coverage_test_runner)",
+        "--child=$(rootpath :coverage_test_child)",
+        "--tools=$(rootpath :coverage_tools)",
+    ],
+    data = [
+        ":coverage_test_child",
+        ":coverage_test_runner",
+        ":coverage_tools",
+        "@rules_rust//rust/coverage:collect_rust_coverage",
+    ],
+)
 
 fixture_feature_setting(
     name = "compile_fail_features",

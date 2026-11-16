@@ -27,6 +27,7 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal", "telemetry-http"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["process"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = { workspace = true }

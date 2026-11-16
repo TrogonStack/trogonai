@@ -18,14 +18,16 @@ pub enum ElicitationCreateError {
     ClientError(#[source] agent_client_protocol::Error),
 }
 
-pub fn error_code_and_message(e: &ElicitationCreateError) -> (ErrorCode, String) {
-    match e {
-        ElicitationCreateError::InvalidRequest(inner) => (
-            ErrorCode::INVALID_PARAMS,
-            format!("Invalid elicitation/create request: {}", inner),
-        ),
-        ElicitationCreateError::SessionMismatch { .. } => (ErrorCode::INVALID_PARAMS, e.to_string()),
-        ElicitationCreateError::ClientError(inner) => (inner.code, inner.message.clone()),
+impl From<&ElicitationCreateError> for agent_client_protocol::Error {
+    fn from(error: &ElicitationCreateError) -> Self {
+        match error {
+            ElicitationCreateError::InvalidRequest(inner) => Self::new(
+                ErrorCode::INVALID_PARAMS,
+                format!("Invalid elicitation/create request: {}", inner),
+            ),
+            ElicitationCreateError::SessionMismatch { .. } => Self::new(ErrorCode::INVALID_PARAMS, error.to_string()),
+            ElicitationCreateError::ClientError(inner) => inner.clone(),
+        }
     }
 }
 
@@ -57,21 +59,14 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
             rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "elicitation/create reply").await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let error = agent_client_protocol::Error::from(&e);
             warn!(
                 error = %e,
                 session_id = %session_id,
                 "Failed to handle elicitation/create"
             );
-            rpc_reply::publish_error_reply(
-                nats,
-                reply_to,
-                response_id,
-                code,
-                &message,
-                "elicitation/create error reply",
-            )
-            .await;
+            rpc_reply::publish_agent_error_reply(nats, reply_to, response_id, &error, "elicitation/create error reply")
+                .await;
         }
     }
 }

@@ -1,0 +1,108 @@
+diff --git a/rust/coverage/collect_rust_coverage.rs b/rust/coverage/collect_rust_coverage.rs
+--- a/rust/coverage/collect_rust_coverage.rs
++++ b/rust/coverage/collect_rust_coverage.rs
+@@ -15,6 +15,7 @@
+ //! - `RUNFILES_DIR` (optional): Location of the test's runfiles. Not set in split
+ //!   coverage postprocessing mode (`--experimental_split_coverage_postprocessing`).
+ //! - `TEST_BINARY`: Runfiles-relative path to the test binary (used when `RUNFILES_DIR` is absent).
++//! - `RUST_COVERAGE_OBJECTS` (optional): Newline-separated runfiles-relative paths to additional instrumented binaries.
+ //! - `VERBOSE_COVERAGE`: Print debug info from the coverage scripts
+ //!
+ //! The script looks in $COVERAGE_DIR for the Rust metadata coverage files
+@@ -48,10 +49,10 @@
+     runfiles_dir.join(path)
+ }
+-
+-fn find_test_binary(execroot: &Path, runfiles_dir: &Path) -> PathBuf {
++
++fn find_runfiles_binary(execroot: &Path, runfiles_dir: &Path, binary_path: &str) -> PathBuf {
+     let test_binary = runfiles_dir
+         .join(env::var("TEST_WORKSPACE").unwrap())
+-        .join(env::var("TEST_BINARY").unwrap());
+-
++        .join(binary_path);
++
+     if !test_binary.exists() {
+         let configuration = runfiles_dir
+@@ -72,11 +73,9 @@
+                 path
+             });
+-
+-        let test_binary = execroot
+-            .join(configuration)
+-            .join(env::var("TEST_BINARY").unwrap());
+-
++
++        let test_binary = execroot.join(configuration).join(binary_path);
++
+         debug_log!(
+-            "TEST_BINARY is not found in runfiles. Falling back to: {}",
++            "Coverage binary is not found in runfiles. Falling back to: {}",
+             test_binary.display()
+         );
+@@ -142,7 +141,7 @@
+         None => execroot.join(&llvm_profdata_path),
+     };
+     let test_binary = match runfiles_dir {
+-        Some(ref rd) => find_test_binary(&execroot, rd),
++        Some(ref rd) => find_runfiles_binary(&execroot, rd, &env::var("TEST_BINARY").unwrap()),
+         None => {
+             let bin_dir = config_bin_dir(&execroot, &coverage_dir);
+             let test_binary = execroot
+@@ -152,7 +151,7 @@
+             test_binary
+         }
+     };
+-    let profraw_files: Vec<PathBuf> = fs::read_dir(coverage_dir)
++    let profraw_files: Vec<PathBuf> = fs::read_dir(&coverage_dir)
+         .unwrap()
+         .flatten()
+         .filter_map(|entry| {
+@@ -206,6 +205,20 @@
+         .stdout(process::Stdio::piped())
+         .stderr(process::Stdio::piped());
+-
++
++    for binary_path in env::var("RUST_COVERAGE_OBJECTS")
++        .unwrap_or_default()
++        .lines()
++        .filter(|path| !path.is_empty())
++    {
++        let binary = match runfiles_dir {
++            Some(ref rd) => find_runfiles_binary(&execroot, rd, binary_path),
++            None => execroot
++                .join(config_bin_dir(&execroot, &coverage_dir))
++                .join(binary_path),
++        };
++        llvm_cov_cmd.arg("-object").arg(binary);
++    }
++
+     debug_log!("Spawning {:#?}", llvm_cov_cmd);
+     let child = llvm_cov_cmd
+         .spawn()
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -2254,7 +2254,7 @@
+     executable = crate_info.output if crate_info.type == "bin" or crate_info.is_test else None
+-
++
+     instrumented_files_kwargs = {
+-        "dependency_attributes": ["deps", "crate"],
++        "dependency_attributes": ["deps", "crate", "data"],
+         "extensions": ["rs"],
+         "source_attributes": ["srcs"],
+     }
+diff --git a/crate_universe/extensions.bzl b/crate_universe/extensions.bzl
+--- a/crate_universe/extensions.bzl
++++ b/crate_universe/extensions.bzl
+@@ -651,7 +651,8 @@
+             config_path = config_file,
+             output_dir = tag_path.get_child("splicing-output"),
+             debug_workspace_dir = tag_path.get_child("splicing-workspace"),
+-            skip_cargo_lockfile_overwrite = cfg.skip_cargo_lockfile_overwrite,
++            # Normalize the synthetic workspace here; suppress source writeback in generate.
++            skip_cargo_lockfile_overwrite = False,
+             nonhermetic_root_bazel_workspace_dir = nonhermetic_root_bazel_workspace_dir,
+             repository_name = cfg.name,
+         )

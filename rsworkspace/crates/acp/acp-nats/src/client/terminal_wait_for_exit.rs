@@ -27,14 +27,16 @@ fn invalid_params_error(message: impl Into<String>) -> TerminalWaitForExitError 
     ))
 }
 
-pub fn error_code_and_message(e: &TerminalWaitForExitError) -> (ErrorCode, String) {
-    match e {
-        TerminalWaitForExitError::InvalidParams(inner) => (inner.code, inner.message.clone()),
-        TerminalWaitForExitError::TimedOut => (
-            ErrorCode::INTERNAL_ERROR,
-            "Timed out waiting for terminal exit".to_string(),
-        ),
-        TerminalWaitForExitError::ClientError(inner) => (inner.code, inner.message.clone()),
+impl From<&TerminalWaitForExitError> for agent_client_protocol::Error {
+    fn from(error: &TerminalWaitForExitError) -> Self {
+        match error {
+            TerminalWaitForExitError::InvalidParams(inner) | TerminalWaitForExitError::ClientError(inner) => {
+                inner.clone()
+            }
+            TerminalWaitForExitError::TimedOut => {
+                Self::new(ErrorCode::INTERNAL_ERROR, "Timed out waiting for terminal exit")
+            }
+        }
     }
 }
 
@@ -70,18 +72,17 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
                 .await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let error = agent_client_protocol::Error::from(&e);
             warn!(
                 error = %e,
                 session_id = %expected_session_id,
                 "Failed to handle terminal/wait_for_exit"
             );
-            rpc_reply::publish_error_reply(
+            rpc_reply::publish_agent_error_reply(
                 nats,
                 reply_to,
                 response_id,
-                code,
-                &message,
+                &error,
                 "terminal/wait_for_exit error reply",
             )
             .await;

@@ -1,5 +1,5 @@
 use tracing::info;
-use trogon_nats::jetstream::JetStreamContext;
+use trogon_nats::jetstream::{JetStreamContext, ProvisionedStreamField};
 
 use super::streams;
 
@@ -17,10 +17,12 @@ pub async fn provision_streams<J: JetStreamContext>(
 ) -> Result<(), ProvisionError<J::Error>> {
     for config in streams::all_configs(prefix) {
         let name = config.name.clone();
-        js.get_or_create_stream(config).await.map_err(|source| ProvisionError {
-            stream: name.clone(),
-            source,
-        })?;
+        js.create_or_reconcile_stream(config, &[ProvisionedStreamField::Subjects])
+            .await
+            .map_err(|source| ProvisionError {
+                stream: name.clone(),
+                source,
+            })?;
         info!(stream = %name, "Provisioned JetStream stream");
     }
     Ok(())

@@ -17,13 +17,15 @@ pub enum TerminalCreateError {
     ClientError(#[source] agent_client_protocol::Error),
 }
 
-pub fn error_code_and_message(e: &TerminalCreateError) -> (ErrorCode, String) {
-    match e {
-        TerminalCreateError::InvalidRequest(inner) => (
-            ErrorCode::INVALID_PARAMS,
-            format!("Invalid terminal/create request: {}", inner),
-        ),
-        TerminalCreateError::ClientError(inner) => (inner.code, inner.message.clone()),
+impl From<&TerminalCreateError> for agent_client_protocol::Error {
+    fn from(error: &TerminalCreateError) -> Self {
+        match error {
+            TerminalCreateError::InvalidRequest(inner) => Self::new(
+                ErrorCode::INVALID_PARAMS,
+                format!("Invalid terminal/create request: {}", inner),
+            ),
+            TerminalCreateError::ClientError(inner) => inner.clone(),
+        }
     }
 }
 
@@ -53,21 +55,14 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
             rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "terminal_create reply").await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let error = agent_client_protocol::Error::from(&e);
             warn!(
                 error = %e,
                 session_id = %session_id,
                 "Failed to handle terminal/create"
             );
-            rpc_reply::publish_error_reply(
-                nats,
-                reply_to,
-                response_id,
-                code,
-                &message,
-                "terminal_create error reply",
-            )
-            .await;
+            rpc_reply::publish_agent_error_reply(nats, reply_to, response_id, &error, "terminal_create error reply")
+                .await;
         }
     }
 }
