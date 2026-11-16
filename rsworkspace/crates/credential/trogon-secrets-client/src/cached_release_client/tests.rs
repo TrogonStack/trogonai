@@ -1,0 +1,337 @@
+use std::time::{Duration, SystemTime};
+
+use trogon_credential_domain::{CredentialId, CredentialKey};
+use trogon_std::time::FixedEpochClock;
+
+use super::CachedReleaseClient;
+use crate::fixtures::{BUNDLE_GENERATION, CREDENTIAL_ID, VALUE, clock, now, request, runtime_service, secret, tenant};
+use crate::{
+    FakeOutcome, FakeSecretsService, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM, InvalidationStartError,
+    InvalidationStep, ReleaseCacheMode, ReleaseClient, ReleaseClientConfig, ReleaseError, ReleaseRequest,
+    ScriptedInvalidations, TenantAccount,
+};
+
+const OTHER_CREDENTIAL_ID: &str = "1c7e3a4f-8d2b-4a6c-9e01-2f3b4c5d6e7f";
+
+type Client = CachedReleaseClient<FakeSecretsService, FixedEpochClock>;
+
+fn in_a_minute() -> SystemTime {
+    now() + Duration::from_secs(60)
+}
+
+fn releasing(fake: &FakeSecretsService, times: usize) {
+    for _ in 0..times {
+        fake.script(FakeOutcome::release(secret(), in_a_minute(), BUNDLE_GENERATION));
+    }
+}
+
+fn notice_subject(tenant: &TenantAccount, credential_id: &str) -> String {
+    format!("{tenant}.secrets.invalidation.v1.project~alpha.{credential_id}")
+}
+
+fn of_credential(asked: &ReleaseRequest, credential_id: &str) -> ReleaseRequest {
+    ReleaseRequest::new(
+        asked.tenant().clone(),
+        CredentialKey::new(
+            asked.credential().owner_id().clone(),
+            CredentialId::new(credential_id).unwrap(),
+        ),
+        asked.destination().clone(),
+        asked.location().clone(),
+        asked.correlation_id().clone(),
+    )
+}
+
+async fn started(
+    fake: &FakeSecretsService,
+    invalidations: &ScriptedInvalidations,
+) -> Result<Client, InvalidationStartError> {
+    let client = ReleaseClient::new(
+        fake.clone(),
+        clock(),
+        ReleaseClientConfig::new(runtime_service(), fake.service_xkey()),
+    );
+    CachedReleaseClient::start(client, invalidations.clone()).await
+}
+
+/// Lets the reader act on everything sent to it, without reaching its retry.
+async fn settle() {
+    tokio::time::sleep(Duration::from_millis(1)).await;
+}
+
+/// Lets the reader reach its next retry.
+async fn retry() {
+    tokio::time::sleep(INVALIDATION_RETRY_DELAY + Duration::from_millis(1)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn refuses_to_start_without_the_invalidation_stream() {
+    let invalidations = ScriptedInvalidations::default();
+    invalidations.refuse(InvalidationStep::Stream);
+
+    let refused = started(&FakeSecretsService::new(), &invalidations).await.err().unwrap();
+
+    assert!(matches!(refused, InvalidationStartError::Stream(_)));
+    assert_eq!(refused.to_string(), "the invalidation stream could not be found");
+    assert_eq!(invalidations.streams(), [INVALIDATION_STREAM]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn refuses_to_start_when_it_cannot_create_its_consumer() {
+    let invalidations = ScriptedInvalidations::default();
+    invalidations.refuse(InvalidationStep::Consumer);
+
+    let refused = started(&FakeSecretsService::new(), &invalidations).await.err().unwrap();
+
+    assert!(matches!(refused, InvalidationStartError::Consumer(_)));
+    assert_eq!(refused.to_string(), "the invalidation consumer could not be created");
+}
+
+#[tokio::test(start_paused = true)]
+async fn refuses_to_start_when_it_cannot_read_its_consumer() {
+    let invalidations = ScriptedInvalidations::default();
+    invalidations.refuse(InvalidationStep::Messages);
+
+    let refused = started(&FakeSecretsService::new(), &invalidations).await.err().unwrap();
+
+    assert!(matches!(refused, InvalidationStartError::Messages(_)));
+    assert_eq!(refused.to_string(), "the invalidation consumer could not be read");
+}
+
+#[tokio::test(start_paused = true)]
+async fn does_not_hold_a_failed_release() {
+    let fake = FakeSecretsService::new();
+    fake.script(FakeOutcome::unavailable());
+    releasing(&fake, 1);
+    let client = started(&fake, &ScriptedInvalidations::default()).await.unwrap();
+    let asked = request(&tenant());
+
+    assert!(matches!(
+        client.release(&asked).await.unwrap_err(),
+        ReleaseError::Unavailable
+    ));
+    assert_eq!(client.release(&asked).await.unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn asks_again_once_an_invalidation_names_the_credential() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 2);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+    client.release(&asked).await.unwrap();
+
+    invalidations.notify(&notice_subject(asked.tenant(), CREDENTIAL_ID));
+    settle().await;
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn asks_again_for_everything_after_a_notice_it_cannot_read() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 2);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+    client.release(&asked).await.unwrap();
+
+    invalidations.notify("fake-subject");
+    settle().await;
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_serving_other_credentials_after_an_invalidation() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 2);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let named = request(&tenant());
+    let other = of_credential(&named, OTHER_CREDENTIAL_ID);
+    client.release(&named).await.unwrap();
+    client.release(&other).await.unwrap();
+
+    invalidations.notify(&notice_subject(named.tenant(), CREDENTIAL_ID));
+    settle().await;
+    client.release(&other).await.unwrap();
+
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn serves_uncached_while_its_reader_has_lost_its_place() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 3);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+    client.release(&asked).await.unwrap();
+
+    invalidations.fail();
+    settle().await;
+    client.release(&asked).await.unwrap();
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    assert_eq!(fake.received().len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn serves_uncached_once_its_feed_ends() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 2);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+    client.release(&asked).await.unwrap();
+
+    invalidations.end();
+    settle().await;
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn serves_uncached_once_a_notice_goes_missing() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 2);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+    client.release(&asked).await.unwrap();
+
+    invalidations.skip_one(&notice_subject(asked.tenant(), OTHER_CREDENTIAL_ID));
+    settle().await;
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn serves_uncached_once_a_notice_cannot_be_placed() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 2);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+    client.release(&asked).await.unwrap();
+
+    invalidations.notify_unplaced(&notice_subject(asked.tenant(), OTHER_CREDENTIAL_ID));
+    settle().await;
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_its_place_while_notices_arrive_in_order() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    let subject = notice_subject(&tenant(), OTHER_CREDENTIAL_ID);
+
+    invalidations.notify(&subject);
+    invalidations.notify(&subject);
+    settle().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+}
+
+#[tokio::test(start_paused = true)]
+async fn counts_a_new_consumer_from_its_first_notice() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    let subject = notice_subject(&tenant(), OTHER_CREDENTIAL_ID);
+    invalidations.notify(&subject);
+    invalidations.fail();
+    retry().await;
+
+    invalidations.notify(&subject);
+    settle().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_retrying_until_it_reads_again() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    invalidations.refuse(InvalidationStep::Stream);
+    invalidations.refuse(InvalidationStep::Consumer);
+    invalidations.refuse(InvalidationStep::Messages);
+
+    invalidations.fail();
+    for _ in 0..3 {
+        retry().await;
+        assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    }
+    retry().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert!(invalidations.is_read());
+    assert_eq!(invalidations.streams().len(), 5);
+    let configs = invalidations.configs();
+    assert_eq!(configs.len(), 4);
+    assert!(
+        configs
+            .iter()
+            .all(|config| config.deliver_policy == configs[0].deliver_policy)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn holds_releases_again_once_it_reads_again() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 1);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+
+    invalidations.fail();
+    retry().await;
+    client.release(&asked).await.unwrap();
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert_eq!(fake.received().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn serves_a_held_release_without_asking_again() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 1);
+    let client = started(&fake, &ScriptedInvalidations::default()).await.unwrap();
+    let asked = request(&tenant());
+
+    let first = client.release(&asked).await.unwrap();
+    let second = client.clone().release(&asked).await.unwrap();
+
+    assert_eq!(first.value().as_str(), VALUE);
+    assert_eq!(second.value().as_str(), VALUE);
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert_eq!(fake.received().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stops_reading_once_the_last_clone_is_dropped() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    let clone = client.clone();
+
+    drop(client);
+    settle().await;
+    assert!(invalidations.is_read());
+
+    drop(clone);
+    settle().await;
+    assert!(!invalidations.is_read());
+}

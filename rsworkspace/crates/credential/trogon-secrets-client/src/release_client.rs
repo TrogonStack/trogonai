@@ -45,6 +45,10 @@ where
         &self.config
     }
 
+    pub(crate) const fn clock(&self) -> &C {
+        &self.clock
+    }
+
     /// Asks for `release` and opens the value the service sealed to this
     /// call, or says why there is none.
     pub async fn release(&self, release: &ReleaseRequest) -> Result<ReleasedValue, ReleaseError> {
