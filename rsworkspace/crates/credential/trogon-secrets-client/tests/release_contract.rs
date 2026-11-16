@@ -139,9 +139,18 @@ impl Deployment {
 
     /// A plain subscriber beside the queue group, on the subscription the
     /// service serves, so a test sees each call as it reached the service.
+    ///
+    /// The call goes out on another connection, so the server must hold the
+    /// tap before it routes the call. A flush only empties the socket. A
+    /// request no one serves, sent after the subscribe on the same
+    /// connection, comes back only once the server has read both.
     async fn tap(&self) -> Subscriber {
         let tap = self.platform.subscribe(RELEASE_SUBSCRIPTION).await.unwrap();
-        self.platform.flush().await.unwrap();
+        let unserved = self.platform.request("release-contract.tap", Bytes::new()).await;
+        assert!(
+            matches!(&unserved, Err(error) if error.kind() == RequestErrorKind::NoResponders),
+            "the server did not answer the tap's round trip: {unserved:?}"
+        );
         tap
     }
 
