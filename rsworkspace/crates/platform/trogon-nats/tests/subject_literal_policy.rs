@@ -173,7 +173,7 @@ fn the_detector_recognizes_the_shapes_it_must() {
 
     for line in [
         r#"    // acp.v1.session.s1.agent.prompt is the subject"#,
-        r#"    use agent_client_protocol::schema::v1::PromptRequest;"#,
+        r#"    use agent_client_protocol::v1::schema::PromptRequest;"#,
         r#"    let version = "1.0";"#,
         r#"    let pkg = trogonai.scheduler.v1.Schedule;"#,
         r#"    let not_a_version = "a.vx.b";"#,

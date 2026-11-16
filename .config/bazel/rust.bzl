@@ -3,7 +3,7 @@
 `workspace_crate()` looks its package up in `CRATES`, which the cargo_workspace
 module extension reads from `cargo metadata`, so a crate's BUILD.bazel holds no
 dependency, feature, or target lists. Bazel builds each crate with all of its
-features, as the Cargo CI test run does, plus any feature sets the crate lists
+features, as `cargo test --all-features` does, plus any feature sets the crate lists
 in `feature_variants`.
 
 What Cargo cannot express, such as test tags, skipped tests, and extra files,
@@ -18,8 +18,10 @@ core module; `decider.bzl` turns it into the component.
 
 load("@cargo_workspace//:crates.bzl", "CRATES")
 load("@crates//:defs.bzl", "all_crate_deps", crate_aliases = "aliases")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_rust//cargo:defs.bzl", "extract_cargo_lints")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library", "rust_proc_macro", "rust_shared_library", "rust_test")
+load("//.config/bazel:compiler_failures.bzl", "compiler_failure")
 load("//.config/bazel:decider.bzl", "decider_component")
 
 _RUSTC_FLAGS = ["-Dwarnings"]
@@ -29,6 +31,86 @@ _TARGET_KEYS = {
     "examples": ["compile_data", "rustc_env", "tags"],
     "integration_tests": ["args", "compile_data", "data", "rustc_env", "tags"],
 }
+
+def workspace_compile_fail_library(crate_features, dependency_overrides = {}):
+    """Isolates a fixture's feature set without reconfiguring its dependency graph.
+
+    Args:
+        crate_features: The library features used by the diagnostic goldens.
+        dependency_overrides: Workspace dependencies requiring fixture libraries.
+    """
+    crate = CRATES[native.package_name()]
+    library = crate["library"]
+    rust_library(
+        name = crate["name"] + "_compile_fail",
+        srcs = native.glob(["src/**/*.rs"]),
+        aliases = crate_aliases(normal = True, proc_macro = True) | crate["aliases"],
+        crate_features = crate_features,
+        crate_name = library["crate_name"],
+        crate_root = library["root"],
+        edition = crate["edition"],
+        proc_macro_deps = all_crate_deps(proc_macro = True) + crate["proc_macro_deps"],
+        rustc_env = {"CARGO_PKG_NAME": crate["name"]},
+        lint_config = ":" + crate["name"] + "_lints",
+        rustc_flags = _RUSTC_FLAGS,
+        version = crate["version"],
+        visibility = ["//visibility:public"],
+        deps = all_crate_deps(normal = True) + [dependency_overrides.get(dep, dep) for dep in crate["deps"]],
+    )
+
+def workspace_compile_fail_tests(name, fixtures, compile_data = [], dependency_overrides = {}):
+    """Checks every fixture against its existing trybuild diagnostic golden.
+
+    Args:
+        name: The Bazel test name.
+        fixtures: Rust fixture sources, each with a sibling `.stderr` file.
+        compile_data: Files read by procedural macros while compiling fixtures.
+        dependency_overrides: Workspace dependencies requiring fixture libraries.
+    """
+    crate = CRATES[native.package_name()]
+    deps = all_crate_deps(normal = True, normal_dev = True) + [dependency_overrides.get(dep, dep) for dep in crate["deps"] + crate["dev_deps"]]
+    proc_macro_deps = all_crate_deps(proc_macro = True, proc_macro_dev = True) + crate["proc_macro_deps"] + crate["dev_proc_macro_deps"]
+    aliases = crate_aliases(normal = True, normal_dev = True, proc_macro = True, proc_macro_dev = True) | crate["aliases"]
+    args = []
+    data = []
+    for fixture in fixtures:
+        stem = fixture.rpartition("/")[2].removesuffix(".rs")
+        result = name + "_" + stem
+        golden = fixture.removesuffix(".rs") + ".stderr"
+        compiler_failure(
+            name = result,
+            src = fixture,
+            crate_name = stem,
+            edition = crate["edition"],
+            deps = deps,
+            proc_macro_deps = proc_macro_deps,
+            aliases = aliases,
+            compile_data = compile_data,
+            testonly = True,
+        )
+        args.extend([
+            "--fixture=$(rootpath {})".format(fixture),
+            "--case",
+            "$(rootpath {})".format(fixture),
+            "$(rootpath {})".format(golden),
+            "$(rootpath :{})".format(result),
+        ])
+        data.extend([fixture, golden, ":" + result])
+    py_test(
+        name = name,
+        srcs = ["//.config/bazel:compiler_failures.py"],
+        main = "//.config/bazel:compiler_failures.py",
+        args = args,
+        data = data,
+    )
+    py_test(
+        name = name + "_contract_test",
+        srcs = ["//.config/bazel:compiler_failures_test.py"],
+        main = "//.config/bazel:compiler_failures_test.py",
+        args = args,
+        data = data,
+        deps = ["//.config/bazel:compiler_failures_lib"],
+    )
 
 def _files(entries):
     """Resolves `compile_data` and `data` entries to globs and labels."""
