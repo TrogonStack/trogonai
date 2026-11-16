@@ -17,64 +17,16 @@ permissions:
 
 jobs:
   # Sends verify to an idle self-hosted runner when one is free and to a hosted
-  # runner otherwise. Listing self-hosted runners needs the Baton app, whose key
-  # is readable from main and from pull requests opened from a branch of this
-  # repository. Fork pull requests declare no environment, get no token or
-  # runner labels, and stay on hosted runners.
+  # runner otherwise. The selection lives in ci-selection.yml because the Baton
+  # key is only readable from that workflow file.
   runner:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'github-app-baton' || '' }}
+    uses: ./.github/workflows/ci-selection.yml
+    with:
+      runner-jobs: verify
     permissions:
       contents: read
       id-token: write
-    outputs:
-      runners: ${{ steps.runner.outputs.runners }}
-    steps:
-      # The three Baton steps may fail without failing CI: the action then
-      # gets no token and keeps verify on a hosted runner, as it does for an
-      # API error, and the step summary says so.
-      - name: Google Cloud auth
-        id: gcp
-        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        continue-on-error: true
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          project_id: ${{ vars.BATON_PROJECT_ID }}
-          workload_identity_provider: ${{ vars.BATON_WORKLOAD_IDENTITY_PROVIDER }}
-
-      - name: Baton key
-        id: baton_key
-        if: ${{ steps.gcp.outcome == 'success' }}
-        continue-on-error: true
-        uses: google-github-actions/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262 # v3.0.0
-        with:
-          secrets: |-
-            private_key:${{ vars.BATON_PRIVATE_KEY_SECRET }}
-
-      # The installation holds no repository, so the token is the
-      # organization's: its only permission is reading self-hosted runners.
-      - name: Baton token
-        id: baton
-        if: ${{ steps.baton_key.outcome == 'success' }}
-        continue-on-error: true
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          client-id: ${{ vars.BATON_APP_CLIENT_ID }}
-          private-key: ${{ steps.baton_key.outputs.private_key }}
-          owner: ${{ github.repository_owner }}
-          permission-organization-self-hosted-runners: read
-
-      # Falls back on its own for a missing token and API errors, so a failure
-      # here is a bad input and fails the job rather than leave runs-on unset.
-      - name: Choose runner
-        id: runner
-        uses: TrogonStack/github-actions/actions/runs-on-fallback@8e288009db603e5a26cfa364c89ab7e798f4b4c1 # runs-on-fallback@v0.0.1
-        with:
-          github-token: ${{ steps.baton.outputs.token }}
-          primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
-          scope: organization
-          jobs: verify
+      pull-requests: read
 
   verify:
     needs: runner
