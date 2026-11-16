@@ -25,14 +25,21 @@ impl From<ReleaseFaultError> for Refusal {
 /// Mirrors how the gateway answers the same store errors: a version the store
 /// no longer reads is a denial, as a revocation racing the fold would be, while
 /// a version the store never had means the stream and the store disagree.
+///
+/// A backend that cannot be reached is a fault the requester may retry. The
+/// release only reads, so a write or generate error answering a read means the
+/// store broke its contract, and no retry will get past that.
 impl From<SecretStoreError> for Refusal {
     fn from(error: SecretStoreError) -> Self {
         match error {
             SecretStoreError::Unreadable { .. } => Self::Denied(DenialReason::VersionUnreadable),
             SecretStoreError::Missing { credential } => Self::Faulted(ReleaseFaultError::StoreMissing { credential }),
-            error @ (SecretStoreError::BackendUnavailable { .. }
-            | SecretStoreError::Unwritable { .. }
-            | SecretStoreError::InvalidGenerated { .. }) => Self::Faulted(ReleaseFaultError::StoreUnavailable(error)),
+            error @ SecretStoreError::BackendUnavailable { .. } => {
+                Self::Faulted(ReleaseFaultError::StoreUnavailable(error))
+            }
+            error @ (SecretStoreError::Unwritable { .. } | SecretStoreError::InvalidGenerated { .. }) => {
+                Self::Faulted(ReleaseFaultError::StoreContractBroken(error))
+            }
         }
     }
 }

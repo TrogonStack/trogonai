@@ -446,11 +446,8 @@ async fn a_version_the_store_never_had_is_an_integrity_failure() {
 }
 
 #[tokio::test]
-async fn an_unreachable_or_refusing_store_is_unavailable() {
+async fn a_read_answered_with_a_write_or_generate_error_is_internal() {
     let errors = [
-        SecretStoreError::BackendUnavailable {
-            message: "connection refused".to_owned(),
-        },
         SecretStoreError::Unwritable {
             credential: version_one(),
             status: CredentialStatus::Revoked,
@@ -466,8 +463,20 @@ async fn an_unreachable_or_refusing_store_is_unavailable() {
 
         let result = harness.release().await;
 
-        harness.assert_faulted(result, CredentialReleaseError::Unavailable, "store_unavailable");
+        harness.assert_faulted(result, CredentialReleaseError::Internal, "store_contract_broken");
     }
+}
+
+#[tokio::test]
+async fn an_unreachable_store_is_unavailable() {
+    let mut harness = Harness::new().await;
+    harness.store = TestStore::Failing(SecretStoreError::BackendUnavailable {
+        message: "connection refused".to_owned(),
+    });
+
+    let result = harness.release().await;
+
+    harness.assert_faulted(result, CredentialReleaseError::Unavailable, "store_unavailable");
 }
 
 #[tokio::test]
