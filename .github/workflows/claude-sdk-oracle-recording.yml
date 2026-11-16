@@ -13,19 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         host:
-          # Unix: the registry reads resumed from a file request, each to its class, dealt over shards; on linux arm64
-          # also the pre-registered xp:tool top-up.
-          - { runner: macos-latest, label: darwin-arm64, shards: 3, only: "^reg5:" }
-          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 2, only: "^reg5:" }
-          - { runner: ubuntu-latest, label: linux-x64, shards: 2, only: "^reg5:" }
-          # Windows: the chain clone edge at 1837 and 1838, and the empty object leaf walk into an object path.
-          - { runner: windows-latest, label: windows-x64, shards: 3, only: "^(chain5|eoleaf5):" }
-        shard: [1, 2, 3]
-        exclude:
-          - host: { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 2, only: "^reg5:" }
-            shard: 3
-          - host: { runner: ubuntu-latest, label: linux-x64, shards: 2, only: "^reg5:" }
-            shard: 3
+          # Unix: the held clone with the text padded past the parse cache, to check its split against the walk's.
+          - { runner: macos-latest, label: darwin-arm64-pad, shards: 1, only: "^reg5:H[34]p:" }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64-pad, shards: 1, only: "^reg5:H[34]p:" }
+          - { runner: ubuntu-latest, label: linux-x64-pad, shards: 1, only: "^reg5:H[34]p:" }
+        shard: [1]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360
     defaults:

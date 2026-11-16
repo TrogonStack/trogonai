@@ -1025,6 +1025,10 @@ REG5 = [
     ("reg5:K1:hkcu:walk", "hkcu", "model", "walk", "o", 1, None),
     ("reg5:K2:hkcu:clone", "hkcu", "model", "clone", "a", 1, None),
     ("reg5:K3:hkcu:copy", "hkcu", "x", "copy", "a", 2, "__proto__"),
+    # The clone of the held reads with the text padded past the 8192 unit parse cache by a 7000 character key, so the
+    # nested read clones again one frame deeper; its split must agree with the walk's.
+    ("reg5:H3p:held_hkcu:clone", "held_hkcu", "x", "clone", "a", (3, 1), "p" * 7000),
+    ("reg5:H4p:held_hklm:clone", "held_hklm", "x", "clone", "a", (3, 1), "p" * 7000),
 ]
 REG5_LEAVES = {"walk": ["null_array"], "clone": ["null_array"], "copy": ["null_array", "empty_array"]}
 REFERENCES, REFERENCE_LOCK = {}, __import__("threading").Lock()
