@@ -455,7 +455,7 @@ async fn a_revocation_appended_while_the_service_runs_reaches_its_holder_as_one_
         .await
         .unwrap();
     let mut invalidations = jetstream.get_stream(INVALIDATION_STREAM).await.unwrap();
-    let notice_subject = format!("{tenant}.secrets.invalidation.v1.{OWNER}.{}", identity.id());
+    let notice_subject = format!("secrets.invalidation.v1.{tenant}.{OWNER}.{}", identity.id());
 
     let notice = tokio::time::timeout(SERVING_WITHIN, async {
         loop {

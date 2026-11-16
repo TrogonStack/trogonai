@@ -143,7 +143,7 @@ impl Streams {
     /// credential for `reason`, names the event stored at `sequence`, and
     /// carries nothing else.
     async fn assert_announces(&self, identity: &CredentialIdentity, reason: ReleaseInvalidationReason, sequence: u64) {
-        let subject = format!("{}.secrets.invalidation.v1.{OWNER}.{}", *HOLDER, identity.id());
+        let subject = format!("secrets.invalidation.v1.{}.{OWNER}.{}", *HOLDER, identity.id());
         let notice = self
             .notices
             .get_last_raw_message_by_subject(&subject)
