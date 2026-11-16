@@ -1,3 +1,4 @@
+mod archive;
 mod cancel;
 mod close;
 mod delete;
@@ -7,7 +8,11 @@ mod prompt;
 mod resume;
 mod set_config_option;
 mod set_mode;
+mod set_title;
+mod status;
+mod unarchive;
 
+pub use archive::ArchiveSubject;
 pub use cancel::CancelSubject;
 pub use close::CloseSubject;
 pub use delete::DeleteSubject;
@@ -17,3 +22,6 @@ pub use prompt::PromptSubject;
 pub use resume::ResumeSubject;
 pub use set_config_option::SetConfigOptionSubject;
 pub use set_mode::SetModeSubject;
+pub use set_title::SetTitleSubject;
+pub use status::StatusSubject;
+pub use unarchive::UnarchiveSubject;
