@@ -28,7 +28,7 @@
 //! | Test type | Backing | `Send + Sync` |
 //! |-----------|---------|---------------|
 //! | `FixedDirs` | `HashMap` | Yes |
-//! | `MemFs` | `RefCell<HashMap>` | No |
+//! | `MemFs` | `Arc<Mutex<HashMap>>` | Yes |
 //! | `InMemoryEnv` | `RefCell<HashMap>` | No |
 //! | `MockClock` | `Arc<Mutex<…>>` | Yes |
 //!
