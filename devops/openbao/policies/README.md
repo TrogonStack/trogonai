@@ -115,9 +115,13 @@ carries the same id under `auth.metadata.correlation_id` whether or not the
 header is registered. Audit devices themselves are declared in the server
 configuration; OpenBao 2.5 no longer enables them through the API.
 
-The secret id reaches the service as a file it reads at startup, so no standing
-OpenBao credential lives in a config file, per
+The secret id reaches the service as a file, so no standing OpenBao credential
+lives in a config file, per
 [ADR#0023](../../../docs/adr/0023-secret-management-and-key-custody-direction.md).
+The service checks the file at startup and reads it again at every login, so
+the platform can rotate the secret id in place: issue a new one, write it to
+the file, then destroy the old one. A login that finds the file missing or
+blank fails naming only the path, and the service retries it.
 
 The `OpenBaoReleaseReader` container tests in `trogon-secret-store` load both
 `secrets-service-*.hcl` files as written here and assert that the login token

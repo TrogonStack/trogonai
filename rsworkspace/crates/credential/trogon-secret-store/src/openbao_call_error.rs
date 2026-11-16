@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use super::SecretStoreError;
+use super::{OpenBaoAppRoleError, SecretStoreError};
 
 /// One OpenBao HTTP call that did not succeed.
 ///
@@ -19,6 +19,8 @@ pub(crate) enum OpenBaoCallError {
     InvalidEndpoint(#[source] url::ParseError),
     #[error("OpenBao granted a token that expires in {}s, too soon to send", ttl.as_secs())]
     UnusableLease { ttl: Duration },
+    #[error(transparent)]
+    SecretId(#[from] OpenBaoAppRoleError),
 }
 
 impl OpenBaoCallError {

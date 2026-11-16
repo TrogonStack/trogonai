@@ -2,6 +2,7 @@ use std::env::VarError;
 use std::error::Error;
 use std::ffi::OsString;
 use std::path::Path;
+use std::sync::Arc;
 
 use nkeys::{KeyPair, XKey};
 use trogon_secret_store::OpenBaoAppRoleError;
@@ -94,8 +95,8 @@ fn contents(seed: &str) -> [(&'static str, String); 4] {
     ]
 }
 
-fn files(seed: &str) -> MemFs {
-    let fs = MemFs::new();
+fn files(seed: &str) -> Arc<MemFs> {
+    let fs = Arc::new(MemFs::new());
     for (path, contents) in contents(seed) {
         fs.insert(path, contents);
     }
@@ -103,8 +104,8 @@ fn files(seed: &str) -> MemFs {
 }
 
 /// [`files`] with no file at `missing`.
-fn without(seed: &str, missing: &str) -> MemFs {
-    let fs = MemFs::new();
+fn without(seed: &str, missing: &str) -> Arc<MemFs> {
+    let fs = Arc::new(MemFs::new());
     for (path, contents) in contents(seed) {
         if path != missing {
             fs.insert(path, contents);
@@ -113,7 +114,7 @@ fn without(seed: &str, missing: &str) -> MemFs {
     fs
 }
 
-fn with(fs: MemFs, path: &str, contents: &str) -> MemFs {
+fn with(fs: Arc<MemFs>, path: &str, contents: &str) -> Arc<MemFs> {
     fs.insert(path, contents);
     fs
 }
@@ -122,7 +123,7 @@ fn seed() -> String {
     XKey::new().seed().unwrap()
 }
 
-fn refused(config: &ServiceConfig, env: &impl ReadEnv, fs: &MemFs) -> ReleaseSourcesError {
+fn refused(config: &ServiceConfig, env: &impl ReadEnv, fs: &Arc<MemFs>) -> ReleaseSourcesError {
     ReleaseSources::load(config, env, fs).unwrap_err()
 }
 

@@ -7,10 +7,10 @@ use trogon_credential_domain::{
 use super::*;
 use crate::constants::RELEASE_REQUEST_TIMEOUT;
 use crate::openbao_harness::{
-    AuditedOpenBao, RELEASE_READ_POLICY, RELEASE_TOKEN_ROLE, ScriptedOpenBao, StepClock, approle, child_tokens, grant,
-    refusal,
+    APPROLE_TOKEN_TTL, AuditedOpenBao, RELEASE_READ_POLICY, RELEASE_TOKEN_ROLE, ScriptedOpenBao, StepClock, approle,
+    approle_reading, child_tokens, grant, refusal, secret_id_file, secret_id_file_holding,
 };
-use crate::{OpenBaoSecretStoreConfigError, SecretStorePut, SecretStoreRevoke};
+use crate::{OpenBaoAppRoleError, OpenBaoSecretStoreConfigError, SecretStorePut, SecretStoreRevoke};
 
 const LOGIN_TOKEN: &str = "fake-login-token";
 const CHILD_TOKEN: &str = "fake-child-token";
@@ -74,6 +74,34 @@ async fn a_refused_login_builds_no_reader() {
     .unwrap_err();
 
     assert!(matches!(error, OpenBaoLoginError::Refused { message } if message.contains("invalid role or secret ID")));
+}
+
+#[tokio::test]
+async fn a_login_whose_secret_id_file_is_gone_builds_no_reader_and_calls_nothing() {
+    let openbao = ScriptedOpenBao::start([grant(LOGIN_TOKEN, 60, true)]).await;
+    let fs = secret_id_file_holding("fake-secret-id");
+    let approle = approle_reading("fake-role-id", &fs);
+    fs.remove(&secret_id_file());
+
+    let error = OpenBaoReleaseReader::login(
+        openbao.address(),
+        OpenBaoTransport::PlaintextAllowed,
+        OpenBaoMount::default(),
+        approle,
+        child_tokens(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(
+        &error,
+        OpenBaoLoginError::SecretId(OpenBaoAppRoleError::SecretIdUnreadable { path, .. }) if *path == secret_id_file()
+    ));
+    assert_eq!(
+        error.to_string(),
+        "failed to read the OpenBao AppRole secret id from /run/secrets/openbao-secret-id: file not found"
+    );
+    assert!(openbao.calls().await.is_empty());
 }
 
 #[tokio::test]
@@ -379,6 +407,36 @@ async fn openbao_reader_reads_the_precise_material() {
 
     assert_eq!(read.as_plaintext().unwrap().as_str(), MATERIAL);
     assert_eq!(again.as_plaintext().unwrap().as_str(), MATERIAL);
+}
+
+#[tokio::test]
+async fn openbao_reader_recovers_on_a_relogin_once_the_rotated_secret_id_is_written() {
+    let openbao = AuditedOpenBao::start().await;
+    let credential = seeded(&openbao, "tenant-1").await;
+    let retired = openbao.issue_secret_id().await;
+    let fs = secret_id_file_holding(&retired);
+    let clock = StepClock::new();
+    let reader = OpenBaoReleaseReader::login_with_clock(
+        openbao.address(),
+        OpenBaoTransport::PlaintextAllowed,
+        OpenBaoMount::default(),
+        approle_reading(&openbao.role_id().await, &fs),
+        child_tokens(),
+        clock.shared(),
+    )
+    .await
+    .unwrap();
+    reader.get_correlated(&credential, &correlation_id()).await.unwrap();
+
+    let rotated = openbao.issue_secret_id().await;
+    openbao.destroy_secret_id(&retired).await;
+    clock.advance(APPROLE_TOKEN_TTL);
+    let refused = reader.get_correlated(&credential, &correlation_id()).await.unwrap_err();
+    fs.insert(secret_id_file(), format!("{rotated}\n"));
+    let read = reader.get_correlated(&credential, &correlation_id()).await.unwrap();
+
+    assert!(matches!(refused, SecretStoreError::BackendUnavailable { .. }));
+    assert_eq!(read.as_plaintext().unwrap().as_str(), MATERIAL);
 }
 
 #[tokio::test]

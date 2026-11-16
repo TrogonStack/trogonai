@@ -70,7 +70,7 @@ impl OpenBaoSecretStore {
         let http = http_client(RELEASE_REQUEST_TIMEOUT)?;
         let session = OpenBaoAppRoleSession::start(approle, clock, &http, &address)
             .await
-            .map_err(OpenBaoLoginError::refused)?;
+            .map_err(OpenBaoLoginError::failed)?;
         Ok(Self {
             address,
             tokens: OpenBaoTokenSource::AppRole(Arc::new(session)),

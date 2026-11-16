@@ -1,11 +1,16 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::StatusCode;
+use trogon_std::fs::MemFs;
 use trogon_std::log_capture::{CapturedEvents, CapturedLogs, LevelFilter};
 
 use super::*;
+use crate::OpenBaoAppRoleError;
 use crate::constants::{RENEWAL_WINDOW_DIVISOR, TOKEN_EXPIRY_MARGIN};
-use crate::openbao_harness::{ScriptedOpenBao, StepClock, approle, grant, refusal};
+use crate::openbao_harness::{
+    ScriptedOpenBao, StepClock, approle, approle_reading, grant, refusal, secret_id_file, secret_id_file_holding,
+};
 
 const LOGIN_PATH: &str = "/v1/auth/approle/login";
 const RENEW_PATH: &str = "/v1/auth/token/renew-self";
@@ -13,9 +18,14 @@ const FIRST_TOKEN: &str = "fake-login-token-1";
 const SECOND_TOKEN: &str = "fake-login-token-2";
 const TTL_SECS: u64 = 60;
 const CAPPED_RENEWAL_WARNING: &str = "OpenBao capped the login token renewal at its max TTL; logging in again";
+const SECRET_ID: &str = "fake-secret-id";
+const ROTATED_SECRET_ID: &str = "fake-rotated-secret-id";
+const SECRET_ID_GONE: &str =
+    "failed to read the OpenBao AppRole secret id from /run/secrets/openbao-secret-id: file not found";
+const SECRET_ID_BLANK: &str = "the OpenBao AppRole secret id file /run/secrets/openbao-secret-id is empty";
 
 fn fake_approle() -> OpenBaoAppRole {
-    approle("fake-role-id", "fake-secret-id")
+    approle("fake-role-id", SECRET_ID)
 }
 
 async fn started(openbao: &ScriptedOpenBao, clock: &StepClock) -> OpenBaoAppRoleSession {
@@ -29,6 +39,24 @@ async fn token(session: &OpenBaoAppRoleSession, openbao: &ScriptedOpenBao) -> Re
         .token(&reqwest::Client::new(), &openbao.url())
         .await
         .map(|token| token.as_str().to_string())
+}
+
+/// A session started on a login that cannot be renewed, so the next token it
+/// hands out inside the renewal window comes from a fresh login that reads the
+/// secret id file in `fs` again.
+async fn started_on_a_fixed_lease(
+    fs: &Arc<MemFs>,
+    openbao: &ScriptedOpenBao,
+    clock: &StepClock,
+) -> OpenBaoAppRoleSession {
+    OpenBaoAppRoleSession::start(
+        approle_reading("fake-role-id", fs),
+        clock.shared(),
+        &reqwest::Client::new(),
+        &openbao.url(),
+    )
+    .await
+    .unwrap()
 }
 
 /// Moves the clock into the renewal window but leaves the token usable.
@@ -79,6 +107,100 @@ async fn a_refused_login_refuses_to_start() {
 }
 
 #[tokio::test]
+async fn a_first_login_whose_secret_id_file_is_gone_refuses_to_start_without_calling_openbao() {
+    let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, true)]).await;
+    let fs = secret_id_file_holding(SECRET_ID);
+    let approle = approle_reading("fake-role-id", &fs);
+    fs.remove(&secret_id_file());
+
+    let error = OpenBaoAppRoleSession::start(
+        approle,
+        StepClock::new().shared(),
+        &reqwest::Client::new(),
+        &openbao.url(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(
+        &error,
+        OpenBaoCallError::SecretId(OpenBaoAppRoleError::SecretIdUnreadable { path, .. }) if *path == secret_id_file()
+    ));
+    assert_eq!(error.to_string(), SECRET_ID_GONE);
+    assert!(openbao.calls().await.is_empty());
+}
+
+#[tokio::test]
+async fn a_relogin_after_the_secret_id_file_is_deleted_fails_naming_only_its_path() {
+    let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, false)]).await;
+    let clock = StepClock::new();
+    let fs = secret_id_file_holding(SECRET_ID);
+    let session = started_on_a_fixed_lease(&fs, &openbao, &clock).await;
+    openbao.answer_next([grant(SECOND_TOKEN, TTL_SECS, false)]).await;
+    fs.remove(&secret_id_file());
+    into_renewal_window(&clock);
+
+    let error = token(&session, &openbao).await.unwrap_err();
+
+    assert!(matches!(&error, SecretStoreError::BackendUnavailable { message } if message == SECRET_ID_GONE));
+    assert_eq!(error.to_string(), format!("secret store error: {SECRET_ID_GONE}"));
+    assert_eq!(openbao.paths().await, [LOGIN_PATH]);
+}
+
+#[tokio::test]
+async fn a_relogin_after_the_secret_id_file_is_blanked_fails_naming_only_its_path() {
+    let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, false)]).await;
+    let clock = StepClock::new();
+    let fs = secret_id_file_holding(SECRET_ID);
+    let session = started_on_a_fixed_lease(&fs, &openbao, &clock).await;
+    openbao.answer_next([grant(SECOND_TOKEN, TTL_SECS, false)]).await;
+    fs.insert(secret_id_file(), " \n");
+    into_renewal_window(&clock);
+
+    let error = token(&session, &openbao).await.unwrap_err();
+
+    assert!(matches!(&error, SecretStoreError::BackendUnavailable { message } if message == SECRET_ID_BLANK));
+    assert_eq!(error.to_string(), format!("secret store error: {SECRET_ID_BLANK}"));
+    assert_eq!(openbao.paths().await, [LOGIN_PATH]);
+}
+
+#[tokio::test]
+async fn a_relogin_sends_the_secret_id_the_file_holds_at_that_moment() {
+    let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, false)]).await;
+    let clock = StepClock::new();
+    let fs = secret_id_file_holding(SECRET_ID);
+    let session = started_on_a_fixed_lease(&fs, &openbao, &clock).await;
+    openbao.answer_next([grant(SECOND_TOKEN, TTL_SECS, false)]).await;
+    fs.insert(secret_id_file(), format!("{ROTATED_SECRET_ID}\n"));
+    into_renewal_window(&clock);
+
+    assert_eq!(token(&session, &openbao).await.unwrap(), SECOND_TOKEN);
+    let calls = openbao.calls().await;
+    assert_eq!(openbao.paths().await, [LOGIN_PATH, LOGIN_PATH]);
+    assert_eq!(calls[0].body["secret_id"], SECRET_ID);
+    assert_eq!(calls[1].body["secret_id"], ROTATED_SECRET_ID);
+}
+
+#[tokio::test]
+async fn a_session_whose_secret_id_file_went_missing_logs_in_once_it_is_provisioned_again() {
+    let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, false)]).await;
+    let clock = StepClock::new();
+    let fs = secret_id_file_holding(SECRET_ID);
+    let session = started_on_a_fixed_lease(&fs, &openbao, &clock).await;
+    fs.remove(&secret_id_file());
+    into_renewal_window(&clock);
+    assert!(token(&session, &openbao).await.is_err());
+
+    openbao.answer_next([grant(SECOND_TOKEN, TTL_SECS, false)]).await;
+    fs.insert(secret_id_file(), format!("{ROTATED_SECRET_ID}\n"));
+
+    assert_eq!(token(&session, &openbao).await.unwrap(), SECOND_TOKEN);
+    let calls = openbao.calls().await;
+    assert_eq!(openbao.paths().await, [LOGIN_PATH, LOGIN_PATH]);
+    assert_eq!(calls[1].body["secret_id"], ROTATED_SECRET_ID);
+}
+
+#[tokio::test]
 async fn a_login_sends_the_role_and_secret_id_without_a_token() {
     let openbao = ScriptedOpenBao::start([grant(FIRST_TOKEN, TTL_SECS, true)]).await;
 
@@ -87,7 +209,7 @@ async fn a_login_sends_the_role_and_secret_id_without_a_token() {
     let calls = openbao.calls().await;
     assert_eq!(calls[0].token, None);
     assert_eq!(calls[0].body["role_id"], "fake-role-id");
-    assert_eq!(calls[0].body["secret_id"], "fake-secret-id");
+    assert_eq!(calls[0].body["secret_id"], SECRET_ID);
 }
 
 #[tokio::test]
@@ -313,5 +435,5 @@ fn debug_never_shows_the_secret_id() {
         lease: Mutex::new(None),
     };
 
-    assert!(!format!("{session:?}").contains("fake-secret-id"));
+    assert!(!format!("{session:?}").contains(SECRET_ID));
 }

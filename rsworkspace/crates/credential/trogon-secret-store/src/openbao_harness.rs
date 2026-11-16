@@ -39,6 +39,8 @@ const AUDIT_LOG_PATH: &str = "/tmp/openbao-audit.log";
 const AUDIT_CONFIG_PATH: &str = "/etc/openbao/audit.hcl";
 const APPROLE_NAME: &str = "secrets-service";
 const SECRET_ID_FILE: &str = "/run/secrets/openbao-secret-id";
+/// How long a login token of the secrets service's AppRole lives.
+pub(crate) const APPROLE_TOKEN_TTL: Duration = Duration::from_secs(60);
 pub(crate) const LOGIN_POLICY: &str = "secrets_service_login";
 pub(crate) const RELEASE_READ_POLICY: &str = "secrets_service_release_read";
 pub(crate) const RELEASE_TOKEN_ROLE: &str = "secrets_service_release";
@@ -78,12 +80,28 @@ impl GetNow for StepClock {
     }
 }
 
+/// Where every AppRole the tests build reads its secret id from.
+pub(crate) fn secret_id_file() -> PathBuf {
+    PathBuf::from(SECRET_ID_FILE)
+}
+
+/// An in-memory file system whose [`secret_id_file`] holds `secret_id` the way
+/// a provisioner writes it, with a trailing newline.
+pub(crate) fn secret_id_file_holding(secret_id: &str) -> Arc<MemFs> {
+    let fs = Arc::new(MemFs::new());
+    fs.insert(SECRET_ID_FILE, format!("{secret_id}\n"));
+    fs
+}
+
+/// An AppRole that reads its secret id from `fs`, which the test keeps so it
+/// can rotate or remove the file between logins.
+pub(crate) fn approle_reading(role_id: &str, fs: &Arc<MemFs>) -> OpenBaoAppRole {
+    OpenBaoAppRole::from_secret_id_file(role_id, &secret_id_file(), Arc::clone(fs) as _).unwrap()
+}
+
 /// An AppRole whose secret id is read from an in-memory file.
 pub(crate) fn approle(role_id: &str, secret_id: &str) -> OpenBaoAppRole {
-    let fs = MemFs::new();
-    let path = PathBuf::from(SECRET_ID_FILE);
-    fs.insert(path.clone(), format!("{secret_id}\n"));
-    OpenBaoAppRole::from_secret_id_file(role_id, &path, &fs).unwrap()
+    approle_reading(role_id, &secret_id_file_holding(secret_id))
 }
 
 pub(crate) fn child_tokens() -> OpenBaoChildTokens {
@@ -267,7 +285,7 @@ impl AuditedOpenBao {
             json!({
                 "token_policies": [LOGIN_POLICY],
                 "token_no_default_policy": true,
-                "token_ttl": "60s",
+                "token_ttl": format!("{}s", APPROLE_TOKEN_TTL.as_secs()),
                 "token_max_ttl": "120s",
             }),
         )
@@ -285,6 +303,10 @@ impl AuditedOpenBao {
     }
 
     pub(crate) async fn approle(&self) -> OpenBaoAppRole {
+        approle(&self.role_id().await, &self.issue_secret_id().await)
+    }
+
+    pub(crate) async fn role_id(&self) -> String {
         let (_, role) = self
             .call(
                 OPENBAO_ROOT_TOKEN,
@@ -293,6 +315,12 @@ impl AuditedOpenBao {
                 None,
             )
             .await;
+        role["data"]["role_id"].as_str().unwrap().to_string()
+    }
+
+    /// Issues a new secret id for the AppRole, the way the deployment platform
+    /// does before it writes one to the service's secret id file.
+    pub(crate) async fn issue_secret_id(&self) -> String {
         let (_, secret) = self
             .call(
                 OPENBAO_ROOT_TOKEN,
@@ -301,10 +329,17 @@ impl AuditedOpenBao {
                 Some(json!({})),
             )
             .await;
-        approle(
-            role["data"]["role_id"].as_str().unwrap(),
-            secret["data"]["secret_id"].as_str().unwrap(),
+        secret["data"]["secret_id"].as_str().unwrap().to_string()
+    }
+
+    /// Destroys `secret_id`, so OpenBao refuses every later login with it.
+    pub(crate) async fn destroy_secret_id(&self, secret_id: &str) {
+        self.root_ok(
+            "POST",
+            &format!("auth/approle/role/{APPROLE_NAME}/secret-id/destroy"),
+            json!({ "secret_id": secret_id }),
         )
+        .await;
     }
 
     /// Logs in with `approle` directly, returning the raw login token.
@@ -314,7 +349,7 @@ impl AuditedOpenBao {
                 "",
                 "POST",
                 "auth/approle/login",
-                Some(json!({ "role_id": approle.role_id(), "secret_id": approle.secret_id().as_str() })),
+                Some(json!({ "role_id": approle.role_id(), "secret_id": approle.read_secret_id().unwrap().as_str() })),
             )
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");

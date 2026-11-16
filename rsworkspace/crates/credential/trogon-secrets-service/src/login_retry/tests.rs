@@ -1,11 +1,12 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::{Ready, pending, ready};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use trogon_secret_store::{OpenBaoLoginError, OpenBaoSecretStoreConfigError};
+use trogon_secret_store::{OpenBaoAppRoleError, OpenBaoLoginError, OpenBaoSecretStoreConfigError};
 use trogon_std::log_capture::{CapturedEvent, CapturedEvents, LevelFilter};
 
 use super::LoginRetry;
@@ -16,6 +17,8 @@ const RETRY: LoginRetry = LoginRetry::new(INITIAL, MAX);
 const STORE: &str = "fake-store";
 const REFUSAL: &str = "OpenBao returned 503 Service Unavailable: fake-sealed";
 const RETRYING: &str = "OpenBao refused the AppRole login; retrying";
+const SECRET_ID_FILE: &str = "/run/secrets/fake-secret-id";
+const SECRET_ID_RETRYING: &str = "could not read the OpenBao AppRole secret id; retrying";
 
 type Outcome = Result<&'static str, OpenBaoLoginError>;
 
@@ -23,6 +26,12 @@ fn refused() -> Outcome {
     Err(OpenBaoLoginError::Refused {
         message: REFUSAL.to_owned(),
     })
+}
+
+fn secret_id_blank() -> Outcome {
+    Err(OpenBaoLoginError::SecretId(OpenBaoAppRoleError::EmptySecretId {
+        path: PathBuf::from(SECRET_ID_FILE),
+    }))
 }
 
 /// Answers each login attempt with the next scripted outcome, and records when
@@ -64,12 +73,16 @@ impl ScriptedLogin {
     }
 }
 
-fn retries(events: &CapturedEvents) -> Vec<CapturedEvent> {
+fn logged(events: &CapturedEvents, message: &str) -> Vec<CapturedEvent> {
     events
         .events()
         .into_iter()
-        .filter(|event| event.message() == Some(RETRYING))
+        .filter(|event| event.message() == Some(message))
         .collect()
+}
+
+fn retries(events: &CapturedEvents) -> Vec<CapturedEvent> {
+    logged(events, RETRYING)
 }
 
 #[tokio::test(start_paused = true)]
@@ -92,6 +105,37 @@ async fn a_login_openbao_cannot_be_configured_for_refuses_at_once_without_a_retr
     );
     assert_eq!(login.attempts(), 1);
     assert_eq!(started.elapsed(), Duration::ZERO);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_login_whose_secret_id_file_cannot_be_read_is_retried_naming_only_the_file() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let login = ScriptedLogin::answering([secret_id_blank(), Ok(STORE)]);
+
+    let outcome = RETRY.log_in(&CancellationToken::new(), || login.attempt()).await;
+
+    assert_eq!(outcome.unwrap(), Some(STORE));
+    assert_eq!(login.waits(), [INITIAL]);
+    let retries = logged(&events, SECRET_ID_RETRYING);
+    assert_eq!(retries.len(), 1);
+    assert_eq!(retries[0].field("attempt"), Some("1"));
+    assert_eq!(retries[0].field("retry_in"), Some("1s"));
+    assert_eq!(
+        retries[0].field("error"),
+        Some(format!("the OpenBao AppRole secret id file {SECRET_ID_FILE} is empty").as_str())
+    );
+    assert!(logged(&events, RETRYING).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_delay_keeps_doubling_when_a_refusal_follows_an_unreadable_secret_id() {
+    let login = ScriptedLogin::answering([secret_id_blank(), refused(), secret_id_blank(), Ok(STORE)]);
+
+    let outcome = RETRY.log_in(&CancellationToken::new(), || login.attempt()).await;
+
+    assert_eq!(outcome.unwrap(), Some(STORE));
+    assert_eq!(login.waits(), [INITIAL, INITIAL * 2, MAX]);
 }
 
 #[tokio::test(start_paused = true)]
