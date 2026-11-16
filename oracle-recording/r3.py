@@ -52,6 +52,7 @@ finally:
 D, MANAGED = R2["D"], R2["MANAGED"]
 HOST, WINDOWS, DARWIN = D["HOST"], D["WINDOWS"], sys.platform == "darwin"
 REF, CROSS = R2["REF"], R2["CROSS"]
+probe_flags, DEFAULT_FLAGS = D["probe_flags"], D["DEFAULT_FLAGS"]
 unique, write, wsl, win32, project, dumps = D["unique"], D["write"], R2["wsl"], R2["win32"], R2["project"], R2["dumps"]
 STARTUP = MANAGED["STARTUP_BYTES"]
 WORKERS = max(2, os.cpu_count() or 2)
@@ -115,7 +116,7 @@ def shapes_at(table, above, target, major, leaf_names):
 
 
 def run_spec(spec_path, flags, startup):
-    command = [NODE, *flags, MANAGED["ORACLE"], PACKAGE, spec_path]
+    command = [NODE, *probe_flags(flags), MANAGED["ORACLE"], PACKAGE, spec_path]
     with tempfile.TemporaryFile() as errors:
         process = subprocess.run(command, stdout=subprocess.PIPE, stderr=errors,
                                  env={"PAD": "x" * MANAGED["pad"](command, startup), **D["EXTRA_ENV"]})
@@ -483,7 +484,7 @@ def key_unit(key, guess, others=None):
                 spec = MANAGED["prepare"](name, files)
                 # The answers carry documents as JSON strings, so a nest of objects arrives escaped and needs its own
                 # collapse before a level can match the next.
-                text = re.sub(r'(?:\{\\"x\\":){2,}', '{\\"x\\":*', dumps(MANAGED["run"](spec, flags)))
+                text = re.sub(r'(?:\{\\"x\\":){2,}', '{\\"x\\":*', dumps(MANAGED["run"](spec, probe_flags(flags))))
                 return R2["collapse"](text)
             except SystemExit:
                 return "fail"
@@ -545,7 +546,7 @@ def answer_unit(make, low=50, high=6000):
             name = unique("w")
             try:
                 spec = MANAGED["prepare"](name, make(level))
-                text = re.sub(r'(?:\{\\"x\\":){2,}', '{\\"x\\":*', dumps(MANAGED["run"](spec, REF)))
+                text = re.sub(r'(?:\{\\"x\\":){2,}', '{\\"x\\":*', dumps(MANAGED["run"](spec, probe_flags(REF))))
                 return R2["collapse"](text)
             except SystemExit:
                 return "fail"
@@ -728,7 +729,7 @@ def top_at(make):
     def at(level):
         name = unique("t")
         try:
-            return squash(DEPTH["run"](top_spec(name, make(level)), REF))
+            return squash(DEPTH["run"](top_spec(name, make(level)), probe_flags(REF)))
         except SystemExit:
             return "fail"
         finally:
@@ -1139,7 +1140,7 @@ def eoleaf5_control(make):
     ends at `{}`."""
     name = unique("v")
     try:
-        answered = DEPTH["run"](top_spec(name, make(EOLEAF5_CONTROL)), REF)
+        answered = DEPTH["run"](top_spec(name, make(EOLEAF5_CONTROL)), probe_flags(REF))
     except SystemExit:
         return False, "the control run failed"
     finally:
@@ -1343,7 +1344,8 @@ def r7_traced():
 
 
 def r7_oracle(package, spec_path, env):
-    process = subprocess.run([NODE, MANAGED["ORACLE"], package, spec_path], stdout=subprocess.PIPE,
+    command = [NODE, *probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), MANAGED["ORACLE"], package, spec_path]
+    process = subprocess.run(command, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, env=env, timeout=600)
     return process.returncode, process.stdout.decode("utf-8", "replace"), process.stderr.decode("utf-8", "replace")[-600:]
 
@@ -1646,7 +1648,7 @@ def r8_run(package, label, document, flags, startup, trace=None):
     try:
         with open(spec_path, "w", encoding="utf-8") as handle:
             handle.write(r8_spec(label, document, root))
-        command = [NODE, *flags, MANAGED["ORACLE"], package, spec_path]
+        command = [NODE, *probe_flags(flags), MANAGED["ORACLE"], package, spec_path]
         env = {"PAD": "x" * MANAGED["pad"](command, startup), **D["EXTRA_ENV"]}
         if trace is not None:
             env["TRACE_LOG"] = trace
@@ -1720,7 +1722,7 @@ def r8_fits(label, which):
                 raise RuntimeError(f"the shallow form {form} has no answer: {reference}")
             with REFERENCE_LOCK:
                 references[form] = reference
-        got = r8_run(PACKAGE, label, r8_text(which, shape), flags, startup)[0]
+        got = r8_run(PACKAGE, label, r8_text(which, shape), flags or REF, startup)[0]
         return None if got is None else got == reference
     return fits
 
@@ -1915,7 +1917,7 @@ def mg8_locate(pool, port, key):
         case_name, files = mg8_case_at(port, key, level)[:2]
         name = case_name.rsplit("_", 1)[0] + "_" + unique("g")
         try:
-            return mg8_collapse(port["run"](port["prepare"](name, files), flags))
+            return mg8_collapse(port["run"](port["prepare"](name, files), probe_flags(flags)))
         except SystemExit:
             return "fail"
         finally:

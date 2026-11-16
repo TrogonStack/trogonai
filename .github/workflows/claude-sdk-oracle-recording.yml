@@ -13,11 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         host:
-          # Unix: the handed-over managed settings passes, the TS answers of the parity fixtures and the parse
-          # cache order, then the managed goldens of each host.
-          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8|rec8|mg8):" }
-          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 1, only: "^(pm8|rec8|mg8):" }
-          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8|rec8|mg8):" }
+          # Unix: the handed-over managed settings passes and the parse cache order fixture, whose drop-ins now
+          # answer their write check so no walk reaches the host's own root, then the managed goldens of each host.
+          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|mg8:|rec8:events:org_held_registry_parse_cache_order$)" }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 1, only: "^(pm8:|mg8:|rec8:events:org_held_registry_parse_cache_order$)" }
+          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|mg8:|rec8:events:org_held_registry_parse_cache_order$)" }
         shard: [1]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360

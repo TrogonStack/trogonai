@@ -74,6 +74,15 @@ MANAGED = load("ts_managed_settings_goldens.py")
 ORACLE = MANAGED["ORACLE"]
 REF = MANAGED["REFERENCE_FLAGS"]
 CROSS = MANAGED["CROSS_CHECK_FLAGS"]
+# What a recording run that wants Node's own defaults starts it with; a run names it, never gets it by omission.
+DEFAULT_FLAGS = []
+
+
+def probe_flags(flags, override=CROSS):
+    """`flags`, checked before they reach a command line: the reference flags, or the one override the probe names."""
+    if flags is None or (list(flags) != REF and list(flags) != list(override)):
+        raise RuntimeError(f"a probe would start Node with {flags!r}, not the reference flags or {override!r}")
+    return flags
 COUNTER = iter(range(10**9))
 LOCK = threading.Lock()
 
@@ -101,7 +110,7 @@ def recorder_probe(space, files_of):
         name = unique("c")
         try:
             spec = space["prepare"](name, files_of(level))
-            return kind(space["run"](spec, flags))
+            return kind(space["run"](spec, probe_flags(flags)))
         except SystemExit:
             return json.dumps({"fail": True})
         finally:
@@ -197,7 +206,7 @@ def registry_spec(place, key, shape, n, root):
 
 
 def oracle_run(spec_path, flags):
-    command = [NODE, *flags, ORACLE, PACKAGE, spec_path]
+    command = [NODE, *probe_flags(flags), ORACLE, PACKAGE, spec_path]
     with tempfile.TemporaryFile() as errors:
         process = subprocess.run(command, stdout=subprocess.PIPE, stderr=errors, env={"PAD": "x" * MANAGED["pad"](command), **EXTRA_ENV})
         errors.seek(0)

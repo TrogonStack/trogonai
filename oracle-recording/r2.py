@@ -67,7 +67,7 @@ def dumps(value):
 
 def oracle(spec_path, flags):
     """The raw result entries of the oracle run of `spec_path`, or the error it rejects with."""
-    command = [NODE, *flags, ORACLE, PACKAGE, spec_path]
+    command = [NODE, *D["probe_flags"](flags), ORACLE, PACKAGE, spec_path]
     with tempfile.TemporaryFile() as errors:
         process = subprocess.run(command, stdout=subprocess.PIPE, stderr=errors, env={"PAD": "x" * MANAGED["pad"](command), **D["EXTRA_ENV"]})
         errors.seek(0)
