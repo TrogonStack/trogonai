@@ -15,7 +15,7 @@ fn three() -> NonZeroUsize {
 #[test]
 fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
     type Weaken = fn(&mut Config);
-    let cases: [(Weaken, InvalidationStreamMismatchError); 19] = [
+    let cases: [(Weaken, InvalidationStreamMismatchError); 20] = [
         (
             |c| c.storage = StorageType::Memory,
             InvalidationStreamMismatchError::Storage,
@@ -48,6 +48,10 @@ fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
         (
             |c| c.allow_message_ttl = true,
             InvalidationStreamMismatchError::MessageTtl,
+        ),
+        (
+            |c| c.allow_message_counter = true,
+            InvalidationStreamMismatchError::MessageCounter,
         ),
         (
             |c| c.max_messages_per_subject = 1,
@@ -182,6 +186,7 @@ fn config_holds_every_guarantee_the_contract_names() {
         assert!(config.allow_direct);
         assert!(!config.allow_rollup);
         assert!(!config.allow_message_ttl);
+        assert!(!config.allow_message_counter);
         assert!(!config.no_ack);
         assert!(!config.sealed);
         assert_eq!(config.subject_transform, None);

@@ -44,6 +44,10 @@ fn each_message_names_the_rule_and_the_stream() {
             "stream 'SECRETS_INVALIDATION' must not let a notice set its own expiry",
         ),
         (
+            InvalidationStreamMismatchError::MessageCounter,
+            "stream 'SECRETS_INVALIDATION' must not be a counter stream, since a counter stream refuses every notice",
+        ),
+        (
             InvalidationStreamMismatchError::MaxMessagesPerSubject,
             "stream 'SECRETS_INVALIDATION' must not limit the notices kept per subject",
         ),
