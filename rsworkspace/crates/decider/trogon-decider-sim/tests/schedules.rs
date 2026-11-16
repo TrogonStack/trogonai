@@ -1,6 +1,8 @@
 //! Integration tests against the scheduler schedules WASM bundle.
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use std::sync::OnceLock;
+
 use buffa::Message as _;
 use buffa::MessageField;
 use buffa::MessageName as _;
@@ -20,6 +22,19 @@ const OTHER_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181beb";
 
 fn schedules_wasm() -> Vec<u8> {
     SimFixture::schedules().bytes().to_vec()
+}
+
+/// The fixture compiled once for the whole test process on the default budget.
+///
+/// Compiling the component costs more than everything else a test here does,
+/// and Cranelift runs unoptimized in debug and coverage builds, so compiling it
+/// per test pushed this binary toward its timeout. Tests share the host the way
+/// production shares one engine per process; every instantiation still gets
+/// its own store and guest instance. A test that needs a different budget loads
+/// its own host with `SimHost::load_with_config`.
+fn schedules_host() -> &'static SimHost {
+    static HOST: OnceLock<SimHost> = OnceLock::new();
+    HOST.get_or_init(|| SimHost::load(&schedules_wasm()).expect("schedules component loads"))
 }
 
 fn create_command(id: &str) -> CommandEnvelope {
@@ -169,7 +184,7 @@ fn schedules_fixture_has_no_external_imports() {
 
 #[test]
 fn descriptor_lists_create_command() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let descriptor = instance.descriptor().unwrap();
@@ -184,7 +199,7 @@ fn descriptor_lists_create_command() {
 
 #[test]
 fn stream_id_returns_schedule_id() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let stream = instance
@@ -196,7 +211,7 @@ fn stream_id_returns_schedule_id() {
 
 #[test]
 fn run_wasm_resolves_the_first_steps_stream_id() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let mut scenario = ScenarioIr::new("resolve stream id");
@@ -214,7 +229,7 @@ fn run_wasm_resolves_the_first_steps_stream_id() {
 
 #[test]
 fn run_wasm_reports_no_stream_id_for_an_empty_scenario() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let scenario = ScenarioIr::new("no steps");
@@ -224,7 +239,7 @@ fn run_wasm_reports_no_stream_id_for_an_empty_scenario() {
 
 #[test]
 fn sim_host_applies_the_production_engine_config_by_default() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     assert_eq!(host.config(), WasmEngineConfig::default());
 }
 
@@ -288,7 +303,7 @@ fn a_runaway_decider_traps_on_a_memory_ceiling_like_production_would() {
 
 #[test]
 fn then_accepted_passes_for_create() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
@@ -300,7 +315,7 @@ fn then_accepted_passes_for_create() {
 
 #[test]
 fn then_accepted_reports_rejection_mismatch() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -316,7 +331,7 @@ fn then_accepted_reports_rejection_mismatch() {
 
 #[test]
 fn then_accepted_reports_fault_mismatch() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -329,7 +344,7 @@ fn then_accepted_reports_fault_mismatch() {
 
 #[test]
 fn then_error_matches_fault_code() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
@@ -341,7 +356,7 @@ fn then_error_matches_fault_code() {
 
 #[test]
 fn then_error_matches_rejection() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
@@ -353,7 +368,7 @@ fn then_error_matches_rejection() {
 
 #[test]
 fn then_error_reports_rejection_mismatch() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -369,7 +384,7 @@ fn then_error_reports_rejection_mismatch() {
 
 #[test]
 fn then_error_reports_fault_mismatch() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -385,7 +400,7 @@ fn then_error_reports_fault_mismatch() {
 
 #[test]
 fn then_error_reports_unexpected_events() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -401,7 +416,7 @@ fn then_error_reports_unexpected_events() {
 
 #[test]
 fn then_rejected_passes_for_missing_pause() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
@@ -413,7 +428,7 @@ fn then_rejected_passes_for_missing_pause() {
 
 #[test]
 fn then_rejected_reports_event_count() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -429,7 +444,7 @@ fn then_rejected_reports_event_count() {
 
 #[test]
 fn then_rejected_reports_fault_mismatch() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -442,7 +457,7 @@ fn then_rejected_reports_fault_mismatch() {
 
 #[test]
 fn then_events_reports_count_mismatch() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -458,7 +473,7 @@ fn then_events_reports_count_mismatch() {
 
 #[test]
 fn then_events_reports_payload_mismatch() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -474,7 +489,7 @@ fn then_events_reports_payload_mismatch() {
 
 #[test]
 fn then_events_reports_fault() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -490,7 +505,7 @@ fn then_events_reports_fault() {
 
 #[test]
 fn run_requires_a_command() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new().run(&mut instance).unwrap_err();
@@ -499,7 +514,7 @@ fn run_requires_a_command() {
 
 #[test]
 fn run_requires_a_then_expectation() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -511,7 +526,7 @@ fn run_requires_a_then_expectation() {
 
 #[test]
 fn then_events_reports_rejection() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -524,7 +539,7 @@ fn then_events_reports_rejection() {
 
 #[test]
 fn then_trap_reports_events_mismatch_when_no_trap_occurs() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -537,7 +552,7 @@ fn then_trap_reports_events_mismatch_when_no_trap_occurs() {
 
 #[test]
 fn default_scenario_matches_new() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::default()
@@ -549,7 +564,7 @@ fn default_scenario_matches_new() {
 
 #[test]
 fn create_schedule_from_initial_state() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
@@ -561,7 +576,7 @@ fn create_schedule_from_initial_state() {
 
 #[test]
 fn pause_existing_schedule() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     SimScenario::new()
@@ -586,7 +601,7 @@ fn pause_existing_schedule() {
 
 #[test]
 fn evolve_skips_events_outside_this_deciders_set() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     // An envelope outside the schedules event set must be skipped without affecting state
@@ -605,7 +620,7 @@ fn evolve_skips_events_outside_this_deciders_set() {
 
 #[test]
 fn multi_step_scenario_feeds_events_forward_within_one_session() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     // Each step's `then_events` output is folded into the same open session
@@ -624,7 +639,7 @@ fn multi_step_scenario_feeds_events_forward_within_one_session() {
 
 #[test]
 fn multi_step_scenario_reports_which_step_failed() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new()
@@ -648,7 +663,7 @@ fn multi_step_scenario_reports_which_step_failed() {
 
 #[test]
 fn snapshot_round_trips_into_a_restored_session() {
-    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let host = schedules_host();
     let mut instance = host.instantiate(()).unwrap();
 
     // Fold a creation into one session, then capture its snapshot.
