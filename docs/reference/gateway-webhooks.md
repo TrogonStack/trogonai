@@ -114,10 +114,11 @@ are refused in either clock direction. The signing secret uses a `whsec_` prefix
 followed by a base64-encoded 32-byte key. Verification uses the original
 request bytes, including whitespace and non-UTF-8 payloads.
 
-For either mode, `webhook-id` is a bounded delivery identifier supplied by the
-sender. Reuse it when retrying the same delivery. Duplicate authentication or
-delivery headers are refused. Authentication headers are never forwarded to
-consumers.
+For either mode, `webhook-id` must contain 1 to 128 visible ASCII characters
+excluding `.`. Rejecting this separator keeps the signed ID, timestamp, and
+body unambiguous; the body may still contain periods. Reuse the identifier when
+retrying the same delivery. Duplicate authentication or delivery headers are
+refused. Authentication headers are never forwarded to consumers.
 
 ## Delivery contract
 

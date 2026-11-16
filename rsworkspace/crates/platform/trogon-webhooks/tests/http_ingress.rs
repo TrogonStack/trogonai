@@ -301,6 +301,58 @@ async fn signed_delivery_preserves_non_utf8_bytes_and_rejects_tampering() {
 }
 
 #[tokio::test]
+async fn signed_delivery_rejects_reframing_the_body_as_part_of_the_delivery_id() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::HmacSha256,
+        EndpointStatus::Enabled,
+        4096,
+        1,
+    ));
+    let key = uuid::Uuid::new_v4().as_bytes().repeat(2);
+    let signing_secret = SecretString::new(format!("whsec_{}", STANDARD.encode(&key))).unwrap();
+    let publisher = MockJetStreamPublisher::new();
+    let router = app(registry, signing_secret, publisher.clone());
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string();
+    let original_body = format!("x.{timestamp}.changed");
+    let forged_id = format!("delivery-1.{timestamp}.x");
+    let forged_body = "changed";
+    assert_eq!(
+        format!("delivery-1.{timestamp}.{original_body}"),
+        format!("{forged_id}.{timestamp}.{forged_body}")
+    );
+    let captured_headers = sign_headers(&key, original_body.as_bytes(), &timestamp);
+    let mut original = Request::builder()
+        .method("POST")
+        .uri(format!("/webhooks/{ENDPOINT}"))
+        .body(Body::from(original_body.clone()))
+        .unwrap();
+    *original.headers_mut() = captured_headers.clone();
+    assert_eq!(
+        router.clone().oneshot(original).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    let mut forged = Request::builder()
+        .method("POST")
+        .uri(format!("/webhooks/{ENDPOINT}"))
+        .body(Body::from(forged_body))
+        .unwrap();
+    *forged.headers_mut() = captured_headers;
+    forged.headers_mut().insert("webhook-id", forged_id.parse().unwrap());
+    assert_eq!(router.oneshot(forged).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    let event = v1::WebhookReceived::decode_from_slice(&messages[0].payload).unwrap();
+    assert_eq!(event.delivery_id, "delivery-1");
+    assert_eq!(event.body.as_slice(), original_body.as_bytes());
+}
+
+#[tokio::test]
 async fn signed_delivery_rejects_stale_future_and_duplicate_signature_headers() {
     let registry = Registry::default();
     registry.insert(endpoint(
@@ -367,7 +419,9 @@ async fn delivery_identity_is_required_bounded_and_unambiguous() {
     whitespace
         .headers_mut()
         .insert("webhook-id", "contains space".parse().unwrap());
-    for input in [missing, duplicate, long, empty, whitespace] {
+    let mut dotted = request(ENDPOINT, &token, b"{}");
+    dotted.headers_mut().insert("webhook-id", "delivery.1".parse().unwrap());
+    for input in [missing, duplicate, long, empty, whitespace, dotted] {
         assert_eq!(
             router.clone().oneshot(input).await.unwrap().status(),
             StatusCode::BAD_REQUEST
