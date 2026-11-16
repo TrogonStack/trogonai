@@ -642,6 +642,42 @@ impl WritePrecondition {
     }
 }
 
+/// Why the invalidation reader lost its place in the invalidation stream
+pub const SECRETS_CLIENT_INVALIDATION_LOSS_REASON: &str = "secrets.client.invalidation.loss_reason";
+
+/// Allowed values for the `secrets.client.invalidation.loss_reason` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SecretsClientInvalidationLossReason {
+    /// The consumer failed while its notices were being read
+    Failed,
+    /// A notice arrived out of turn, so one before it was skipped
+    Gap,
+    /// A notice arrived without saying where it falls in what the consumer delivered
+    Unplaced,
+    /// The consumer stopped delivering notices
+    Ended,
+    /// A notice the server says it delivered never arrived
+    Missing,
+    /// The server could not say how far the consumer delivered
+    PositionUnknown,
+}
+
+impl SecretsClientInvalidationLossReason {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Failed => "failed",
+            Self::Gap => "gap",
+            Self::Unplaced => "unplaced",
+            Self::Ended => "ended",
+            Self::Missing => "missing",
+            Self::PositionUnknown => "position_unknown",
+        }
+    }
+}
+
 /// Standard OTel server.address. Emitted by http.server.request
 pub const SERVER_ADDRESS: &str = "server.address";
 

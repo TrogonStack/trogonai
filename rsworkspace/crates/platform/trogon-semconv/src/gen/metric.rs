@@ -582,3 +582,43 @@ pub fn build_scheduler_processor_redeliveries(
         .with_unit("{record}")
         .build()
 }
+
+/// Times the invalidation reader lost its place and stopped holding releases until it read again
+///
+/// Instrument: `counter`. Unit: `{loss}`.
+pub const SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES: &str = "secrets.client.invalidation.position_losses";
+
+/// Times the invalidation reader lost its place and stopped holding releases until it read again
+///
+/// Instrument: `counter`. Unit: `{loss}`.
+pub fn build_secrets_client_invalidation_position_losses(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES)
+        .with_description(
+            "Times the invalidation reader lost its place and stopped holding releases until it read again.",
+        )
+        .with_unit("{loss}")
+        .build()
+}
+
+/// Releases served without being held because the release cache was full of copies that still serve
+///
+/// Instrument: `counter`. Unit: `{release}`.
+pub const SECRETS_CLIENT_RELEASE_CACHE_CAPACITY_SKIPS: &str = "secrets.client.release_cache.capacity_skips";
+
+/// Releases served without being held because the release cache was full of copies that still serve
+///
+/// Instrument: `counter`. Unit: `{release}`.
+pub fn build_secrets_client_release_cache_capacity_skips(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(SECRETS_CLIENT_RELEASE_CACHE_CAPACITY_SKIPS)
+        .with_description(
+            "Releases served without being held because the release cache was full of copies that still serve.",
+        )
+        .with_unit("{release}")
+        .build()
+}
