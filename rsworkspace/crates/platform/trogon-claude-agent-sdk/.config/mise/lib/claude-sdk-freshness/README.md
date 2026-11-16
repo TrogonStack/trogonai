@@ -202,9 +202,10 @@ The Python recorder needs the pinned package's dependencies (`anyio`, `mcp`, `js
 `python_ftp_goldens.py` opens and reads each FTP case of
 `tests/fixtures/sdk_mcp/python_ftp.json` with CPython's `urlopen` against a scripted loopback
 server and writes what it answered or raised, with the lines the client sent on each control
-connection. A reply that follows a data connection waits 200 milliseconds, so it never reaches
-the client in the same read as the reply before the data, and a case the client fails early ends
-at the reply it fails on, so no read races the client's close. Every run records the same bytes.
+connection. A case the client fails early ends at the reply it fails on, so no read races the
+client's close. Only the case whose closing reply is not UTF-8 waits 200 milliseconds before that
+reply: CPython raises opening or reading depending on whether it arrives in the same read as the
+reply before the data, and the client sends nothing in between that the server could wait for.
 
 ```sh
 mise run claude-sdk:ftp-goldens          # regenerate python_ftp.json

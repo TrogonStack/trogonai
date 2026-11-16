@@ -15,10 +15,9 @@ client refused, the server records the lines the client still sends until it clo
 port and `{PASV}` for the data address the passive replies name. A case records the body `response.read()` answered,
 the error opening raised, or the error reading or closing the response raised, and the lines of each connection.
 
-A reply that follows a data step waits `SETTLE` first. ftplib reads its control connection through a buffered text
-reader, so a closing reply already queued behind the reply before the data is decoded with that reply, which turns
-a closing reply that is not UTF-8 into an error opening rather than reading; whether the two arrive together is a
-race of the loopback, not something the client decides.
+ftplib reads its control connection through a buffered text reader, so a closing reply that arrives in the same read
+as the reply before the data is decoded with it. That changes nothing while both are UTF-8, so only the case whose
+closing reply is not UTF-8 depends on whether they arrive apart, and it waits `SETTLE` before that reply.
 
 A case the client fails before the script runs out ends at the reply it fails on whenever a read would follow a
 later reply. The client closes as it fails, and a read after a reply sent past that close records an empty line or
@@ -80,19 +79,23 @@ def pause(milliseconds):
 CLOSE = ["close"]
 
 SETTLE = pause(200)
-"""The wait between a data step and the reply after it."""
+"""The wait before a closing reply that is not UTF-8, so it arrives in a read of its own.
 
-
-def closing(reply):
-    """The reply that follows a data step, sent once the client has read the reply before the data."""
-    return [SETTLE, send(reply)]
+It is a wait and not a handshake because, in CPython 3.12.16, the client sends nothing between reading the reply
+before the data and reading the closing reply. `FTP.ntransfercmd` reads the `150` (Lib/ftplib.py:359-369).
+`ftpwrapper.retrfile` then wraps the data socket in `addclosehook(conn.makefile('rb'), self.file_close)` and calls
+`conn.close()` (Lib/urllib/request.py:2504-2506), which leaves the socket open while the file holds it
+(Lib/socket.py:491-495, 501-505). The response only reads the data, and closing it runs `file_close`, whose
+`endtransfer` reads the closing reply with `voidresp` (Lib/urllib/request.py:2510-2525) before `addclosehook.close`
+closes the data file (Lib/urllib/response.py:45-54). Whether CPython raises opening or reading therefore depends on
+how TCP splits the reads, and the golden records the branch where the two replies arrive in separate reads."""
 
 
 LOGIN = [send("220 ready\r\n"), RECV, send("331 password\r\n"), RECV, send("230 in\r\n"), RECV]
 AUTHENTICATE = [send("331 password\r\n"), RECV, send("230 in\r\n"), RECV]
 SETUP = [send("250 ok\r\n"), RECV, send("200 type\r\n"), RECV]
 PASSIVE = [send("227 Entering Passive Mode ({PASV})\r\n"), RECV]
-FILE = [send("150 opening (13 bytes)\r\n"), data('{"ftp": true}'), *closing("226 done\r\n")]
+FILE = [send("150 opening (13 bytes)\r\n"), data('{"ftp": true}'), send("226 done\r\n")]
 
 
 def case(name, url, *connections):
@@ -112,12 +115,12 @@ CASES = [
     case('type a', 'ftp://127.0.0.1:{PORT}/a.json;type=a', [*LOGIN, *SETUP, *PASSIVE, *FILE]),
     case('type D upper case attribute', 'ftp://127.0.0.1:{PORT}/a.json;TYPE=D',
         [*LOGIN, *SETUP, send('200 type\r\n'), RECV, send('257 "/"\r\n'), RECV, send('250 ok\r\n'), RECV,
-         send('250 ok\r\n'), RECV, *PASSIVE, send('150 list\r\n'), data('{}'), *closing('226 done\r\n')],
+         send('250 ok\r\n'), RECV, *PASSIVE, send('150 list\r\n'), data('{}'), send('226 done\r\n')],
     ),
     case('type x is ignored', 'ftp://127.0.0.1:{PORT}/a.json;type=x;y', [*LOGIN, *SETUP, *PASSIVE, *FILE]),
     case('a directory URL lists', 'ftp://127.0.0.1:{PORT}/dir/',
         [*LOGIN, *SETUP, send('200 type\r\n'), RECV, *PASSIVE, send('125 list\r\n'), data('[1]'),
-         *closing('226 done\r\n')],
+         send('226 done\r\n')],
     ),
     case('a greeting that waits', 'ftp://127.0.0.1:{PORT}/a.json', [pause(400), *LOGIN, *SETUP, *PASSIVE, *FILE]),
     case('a multi-line greeting', 'ftp://127.0.0.1:{PORT}/a.json',
@@ -165,12 +168,12 @@ CASES = [
     case('passive mode answered 200', 'ftp://127.0.0.1:{PORT}/a.json', [*LOGIN, *SETUP, send('200 ({PASV})\r\n')]),
     case('a passive address the client ignores', 'ftp://127.0.0.1:{PORT}/a.json',
         [*LOGIN, *SETUP, send('227 =10,9,8,7,{PASV}\r\n'), RECV, send('150 x\r\n'), data('{}'),
-         *closing('226 done\r\n')],
+         send('226 done\r\n')],
     ),
     case('a file the server lacks lists a directory instead', 'ftp://127.0.0.1:{PORT}/sub',
         [*LOGIN, *SETUP, *PASSIVE, send('550 not a file\r\n'), DROP, RECV, send('200 type\r\n'), RECV,
          send('257 "/h""o" is cwd\r\n'), RECV, send('250 ok\r\n'), RECV, send('250 ok\r\n'), RECV, *PASSIVE,
-         send('150 list\r\n'), data('[2]'), *closing('226 done\r\n')],
+         send('150 list\r\n'), data('[2]'), send('226 done\r\n')],
     ),
     case('a file the server lacks and no directory', 'ftp://127.0.0.1:{PORT}/sub',
         [*LOGIN, *SETUP, *PASSIVE, send('550 not a file\r\n'), DROP, RECV, send('200 type\r\n'), RECV,
@@ -187,7 +190,7 @@ CASES = [
         [*LOGIN, *SETUP, *PASSIVE, send('451 later\r\n')],
     ),
     case('a retrieval answered 2xx first', 'ftp://127.0.0.1:{PORT}/a.json',
-        [*LOGIN, *SETUP, *PASSIVE, send('200 early\r\n'), send('150 now\r\n'), data('{}'), *closing('226 done\r\n')],
+        [*LOGIN, *SETUP, *PASSIVE, send('200 early\r\n'), send('150 now\r\n'), data('{}'), send('226 done\r\n')],
     ),
     case('a retrieval answered 2xx twice', 'ftp://127.0.0.1:{PORT}/a.json',
         [*LOGIN, *SETUP, *PASSIVE, send('200 early\r\n'), send('250 again\r\n')],
@@ -238,7 +241,7 @@ CASES = [
     ),
     case('a retrieval size at the digit limit', 'ftp://127.0.0.1:{PORT}/a.json',
         [*LOGIN, *SETUP, *PASSIVE, send([['150 x (', 1], ['1', 4300], [' BYTES)\r\n', 1]]), data('{}'),
-         *closing('226 done\r\n')],
+         send('226 done\r\n')],
     ),
     proxied('an http URL through an ftp proxy', 'http://example.invalid/a.json', 'http_proxy',
             [*LOGIN, *SETUP, *PASSIVE, *FILE]),
@@ -268,13 +271,13 @@ CASES = [
     case('a directory listing of an unterminated name', 'ftp://127.0.0.1:{PORT}/sub',
         [*LOGIN, *SETUP, *PASSIVE, send('550 not a file\r\n'), DROP, RECV, send('200 type\r\n'), RECV,
          send('257 "/abc\r\n'), RECV, send('250 ok\r\n'), RECV, send('250 ok\r\n'), RECV, *PASSIVE,
-         send('150 list\r\n'), data('[3]'), *closing('226 done\r\n')],
+         send('150 list\r\n'), data('[3]'), send('226 done\r\n')],
     ),
     case('a closing reply that is not UTF-8', 'ftp://127.0.0.1:{PORT}/a.json',
-        [*LOGIN, *SETUP, *PASSIVE, send('150 x\r\n'), data('{}'), *closing('226 \xff\r\n')],
+        [*LOGIN, *SETUP, *PASSIVE, send('150 x\r\n'), data('{}'), SETTLE, send('226 \xff\r\n')],
     ),
     case('a closing reply refused', 'ftp://127.0.0.1:{PORT}/a.json',
-        [*LOGIN, *SETUP, *PASSIVE, send('150 x\r\n'), data('{}'), *closing('451 abort\r\n')],
+        [*LOGIN, *SETUP, *PASSIVE, send('150 x\r\n'), data('{}'), send('451 abort\r\n')],
     ),
     case('an anonymous password of a dash', 'ftp://anonymous:-@127.0.0.1:{PORT}/a.json',
         [*LOGIN, *SETUP, *PASSIVE, *FILE],
@@ -285,11 +288,11 @@ CASES = [
     ),
     case('a retrieval size the last parenthesis gives', 'ftp://127.0.0.1:{PORT}/a.json',
         [*LOGIN, *SETUP, *PASSIVE, send([['150 x (', 1], ['1', 4301], [' bytes) (2 bytes)\r\n', 1]]), data('{}'),
-         *closing('226 done\r\n')],
+         send('226 done\r\n')],
     ),
     case('a retrieval size on a continuation line', 'ftp://127.0.0.1:{PORT}/a.json',
         [*LOGIN, *SETUP, *PASSIVE, send([['150-a\r\n150 b (', 1], ['1', 4301], [' bytes)\r\n', 1]]), data('{}'),
-         *closing('226 done\r\n')],
+         send('226 done\r\n')],
     ),
     case('a retrieval size after a bad parenthesis', 'ftp://127.0.0.1:{PORT}/a.json',
         [*LOGIN, *SETUP, *PASSIVE, send([['150 x (', 1], ['1', 4301], [' bytes) (3 bites)\r\n', 1]])],
@@ -303,7 +306,7 @@ CASES = [
     ),
     case('a passive reply after other digits', 'ftp://127.0.0.1:{PORT}/a.json',
         [*LOGIN, *SETUP, send('227 7,8 then ({PASV})\r\n'), RECV, send('150 x\r\n'), data('{}'),
-         *closing('226 done\r\n')],
+         send('226 done\r\n')],
     ),
     case('a reply split after a carriage return', 'ftp://127.0.0.1:{PORT}/a.json',
         [send('220 a\r'), pause(200), send('331 b\r\n'), RECV, RECV, send('230 in\r\n'), RECV, *SETUP, *PASSIVE, *FILE],
@@ -392,11 +395,21 @@ def raised(error):
     return {"class": type(error).__name__, "text": str(error)}
 
 
-def outcome(url):
+def opener(env):
+    """The opener of a case. One without proxy variables gets an empty proxy mapping, since `getproxies` falls back to
+    the macOS system settings once the environment names no proxy. One with them keeps the mapping `ProxyHandler`
+    reads from the environment, because `proxy_bypass` reads the environment too and only falls back to the system
+    settings when it names no proxy."""
+    if env:
+        return urllib.request.build_opener()
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def outcome(url, env):
     """What opening and reading the URL gave. Each error is written down inside its `except` clause, so its traceback
     and the connections it holds are freed as the clause ends."""
     try:
-        response = urllib.request.build_opener().open(url)
+        response = opener(env).open(url)
     except Exception as error:
         return {"open_error": raised(error)}
     try:
@@ -421,7 +434,7 @@ def record(case):
     for name in [name for name in os.environ if name.lower().endswith("_proxy")]:
         del os.environ[name]
     os.environ.update({name: filled(value) for name, value in case["env"]})
-    result = outcome(filled(case["url"]))
+    result = outcome(filled(case["url"]), case["env"])
     server.thread.join()
     for error in result.values():
         if isinstance(error, dict):
