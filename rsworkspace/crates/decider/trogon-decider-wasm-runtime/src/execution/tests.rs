@@ -2,8 +2,7 @@ use trogon_std::NowV7;
 use uuid::Uuid;
 
 use super::*;
-use crate::WasmEngineConfig;
-use crate::test_fixture::schedules_bytes;
+use crate::test_fixture::schedules_module;
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
@@ -106,8 +105,7 @@ fn replay_epoch_ticks_saturates_instead_of_overflowing() {
 
 #[test]
 fn a_zero_tick_epoch_deadline_traps_as_deadline_exceeded() {
-    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
-    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let module = schedules_module();
 
     let engine = module.engine();
     let mut store = engine.new_store();
@@ -177,8 +175,7 @@ fn instantiated_session(
 
 #[test]
 fn dropping_a_session_without_a_fresh_budget_traps_on_an_exhausted_leftover() {
-    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
-    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let module = schedules_module();
     let (mut store, bindings, session) = instantiated_session(&module);
 
     // Simulate the leftover budget a prior `decide` or `snapshot` call could
@@ -195,8 +192,7 @@ fn dropping_a_session_without_a_fresh_budget_traps_on_an_exhausted_leftover() {
 
 #[test]
 fn drop_session_after_decide_recovers_from_an_exhausted_leftover_budget() {
-    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
-    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let module = schedules_module();
     let (mut store, bindings, session) = instantiated_session(&module);
 
     module
@@ -210,8 +206,7 @@ fn drop_session_after_decide_recovers_from_an_exhausted_leftover_budget() {
 
 #[test]
 fn conclude_session_runs_the_destructor_on_a_domain_error_outcome() {
-    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
-    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let module = schedules_module();
     let (mut store, bindings, session) = instantiated_session(&module);
     let context = test_phase_context(&module);
 
@@ -233,8 +228,7 @@ fn conclude_session_runs_the_destructor_on_a_domain_error_outcome() {
 
 #[test]
 fn conclude_session_skips_a_guest_that_already_trapped() {
-    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
-    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let module = schedules_module();
     let (mut store, bindings, session) = instantiated_session(&module);
     let context = test_phase_context(&module);
 
@@ -256,8 +250,7 @@ fn conclude_session_skips_a_guest_that_already_trapped() {
 
 #[test]
 fn drop_session_discarding_trap_swallows_a_destructor_failure() {
-    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
-    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let module = schedules_module();
     let (mut store, bindings, session) = instantiated_session(&module);
     let context = test_phase_context(&module);
 
