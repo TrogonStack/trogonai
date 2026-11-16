@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     while let Some(message) = query.next_message().await? {
         if let Message::Assistant(message) = message {
-            for block in message.content {
+            for block in &message.content {
                 if let ContentBlock::Text { text } = block {
                     println!("{text}");
                 }

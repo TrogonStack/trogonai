@@ -5,13 +5,9 @@
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct CredentialWriteFailed {
-    /// Field 1: `credential_id`
-    #[serde(
-        rename = "credentialId",
-        alias = "credential_id",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub credential_id: ::buffa::alloc::string::String,
+    /// Field 1: `key`
+    #[serde(rename = "key")]
+    pub key: ::buffa::MessageField<CredentialKey, ::buffa::Inline<CredentialKey>>,
     /// Field 2: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
     pub reason: ::buffa::alloc::string::String,
@@ -19,7 +15,7 @@ pub struct CredentialWriteFailed {
 impl ::core::fmt::Debug for CredentialWriteFailed {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("CredentialWriteFailed")
-            .field("credential_id", &self.credential_id)
+            .field("key", &self.key)
             .field("reason", &self.reason)
             .finish()
     }
@@ -47,22 +43,36 @@ impl ::buffa::Message for CredentialWriteFailed {
     /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
     /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.credential_id) as u64;
+        if self.key.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.key.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         size += 1u64 + ::buffa::types::string_encoded_len(&self.reason) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.credential_id, buf);
+        if self.key.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                1u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.key.write_to(__cache, buf);
+        }
         ::buffa::types::put_string_field(2u32, &self.reason, buf);
     }
     fn merge_field(
@@ -81,7 +91,11 @@ impl ::buffa::Message for CredentialWriteFailed {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.credential_id, buf)?;
+                ::buffa::Message::merge_length_delimited(
+                    self.key.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
             }
             2u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -97,7 +111,7 @@ impl ::buffa::Message for CredentialWriteFailed {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_id.clear();
+        self.key = ::buffa::MessageField::none();
         self.reason.clear();
     }
 }

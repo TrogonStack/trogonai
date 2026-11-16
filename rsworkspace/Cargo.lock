@@ -7226,6 +7226,8 @@ dependencies = [
  "regex",
  "regress",
  "reqwest 0.12.28",
+ "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -7235,6 +7237,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
+ "typed-arena",
  "unicode-general-category",
  "unicode-normalization",
  "url",
@@ -7247,6 +7250,28 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "trogon-credential-aggregate"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa",
+ "thiserror 2.0.21",
+ "trogon-credential-domain",
+ "trogon-decider-nats",
+ "trogon-nats",
+ "trogonai-proto",
+]
+
+[[package]]
+name = "trogon-credential-domain"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "trogon-nats",
+ "uuid",
 ]
 
 [[package]]
@@ -7522,10 +7547,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-config-value",
+ "trogon-credential-aggregate",
+ "trogon-credential-domain",
  "trogon-decider",
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-secret-store",
  "trogon-semconv",
  "trogon-service-config",
  "trogon-std",
@@ -7725,6 +7753,63 @@ dependencies = [
  "trogon-scheduler-domain",
  "trogonai-proto",
  "wit-bindgen 0.63.0",
+]
+
+[[package]]
+name = "trogon-secret-store"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "hex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "testcontainers-modules",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "trogon-credential-domain",
+ "trogon-std",
+ "url",
+]
+
+[[package]]
+name = "trogon-secrets-service"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "clap",
+ "futures",
+ "grpc-nats-micro",
+ "nkeys",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-util",
+ "toml 1.1.8+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-audit",
+ "trogon-credential-aggregate",
+ "trogon-credential-domain",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
+ "trogon-identity-types",
+ "trogon-nats",
+ "trogon-secret-store",
+ "trogon-service-config",
+ "trogon-std",
+ "trogonai-proto",
+ "url",
+ "uuid",
 ]
 
 [[package]]

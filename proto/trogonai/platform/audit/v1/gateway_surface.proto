@@ -10,4 +10,7 @@ enum GatewaySurface {
   GATEWAY_SURFACE_A2A_INGRESS = 1;
   // The egress proxy admitting an agent's outbound connection.
   GATEWAY_SURFACE_EGRESS = 2;
+  // The secrets service deciding whether a runtime service receives a
+  // credential.
+  GATEWAY_SURFACE_SECRETS_RELEASE = 3;
 }

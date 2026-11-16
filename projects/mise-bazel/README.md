@@ -28,6 +28,7 @@ rust.toolchain(versions = [])
 register_toolchains(
     "@mise_rust//:rust_toolchain",
     "@mise_rust//:cargo_toolchain",
+    "@mise_rust//:rustfmt_toolchain",
 )
 
 # Registered in the root module, ahead of the toolchains rules_nodejs
@@ -49,14 +50,19 @@ installation hint.
 | any executable tool | `@mise//tools/<executable>`, for example `@mise//tools/buf` |
 | `go` | `@mise_go//:ROOT`, for `go_sdk.wrap` in `rules_go` |
 | `node` | `@mise_node//:node_toolchain` and `@mise_node//:node_runtime_toolchain` for `rules_nodejs`, and so for `rules_js` and `rules_ts`, plus `@mise_node//:ROOT` |
-| `rust` | `@mise_rust//:rust_toolchain` and `@mise_rust//:cargo_toolchain` for `rules_rust`, plus `@mise_rust//:ROOT` for crate_universe `host_tools` |
+| `rust` | `@mise_rust//:rust_toolchain`, `@mise_rust//:cargo_toolchain` and `@mise_rust//:rustfmt_toolchain` for `rules_rust`, plus `@mise_rust//:ROOT` for crate_universe `host_tools` |
 
 The version comes from the tool's entry in the configuration. When an entry
 lists several versions, the first one is used. The executable name defaults to
 the last segment of the tool name, so `ubi:open-telemetry/weaver` provides
 `weaver`, and an `exe` option overrides it.
 
-The Rust toolchain supports macOS ARM64 and Linux x86-64 hosts. The Node.js
+The Rust toolchain supports macOS ARM64 and Linux x86-64 hosts. Each target
+in the rust entry's `targets` option, such as
+`rust = { version = "...", targets = "wasm32-unknown-unknown" }`, also gets
+`@mise_rust//:rust_toolchain_<target>`, which compiles for that target on the
+host. Register it next to `@mise_rust//:rust_toolchain`. Only
+`wasm32-unknown-unknown` is supported so far. The Node.js
 toolchain supports macOS and Linux hosts on ARM64 and x86-64.
 
 Bazel does not watch files in repositories that another module extension

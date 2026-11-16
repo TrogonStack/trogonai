@@ -61,6 +61,15 @@ impl ToolPermissionRequest {
     }
 }
 
+impl crate::deep_json::OwnedValues for ToolPermissionRequest {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        crate::deep_json::OwnedValues::each_value(&mut self.input, visit);
+        crate::deep_json::OwnedValues::each_value(&mut self.suggestions, visit);
+        crate::deep_json::OwnedValues::each_value(&mut self.additional_fields, visit);
+        crate::deep_json::OwnedValues::each_value(&mut self.raw_request, visit);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct McpServerProvenance {
     pub name: String,

@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut response = query(Prompt::from("Use the example echo tool to echo hello."), options).await?;
     while let Some(message) = response.next_message().await? {
         if let Message::Result(result) = message {
-            println!("{}", result.result.unwrap_or_default());
+            println!("{}", result.result.as_deref().unwrap_or_default());
         }
     }
     Ok(())

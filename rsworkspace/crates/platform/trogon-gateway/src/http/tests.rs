@@ -1,10 +1,8 @@
 use super::*;
 use crate::config::load;
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::datadog::constants as datadog_constants;
 use crate::source::github::constants::{HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE};
 use crate::source::gitlab::GitLabSigningToken;
@@ -18,7 +16,6 @@ use crate::source::slack::constants as slack_constants;
 use crate::source::telegram::constants as telegram_constants;
 use crate::source::twitter::constants as twitter_constants;
 use crate::source::zoom::constants as zoom_constants;
-use crate::source_integration_id::SourceIntegrationId;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::Engine;
@@ -26,9 +23,13 @@ use base64::engine::general_purpose::STANDARD;
 use hmac::{KeyInit, Mac};
 use std::io::Write;
 use tower::ServiceExt;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore};
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
 type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
@@ -464,12 +465,14 @@ async fn runtime_credentials(
     let store = MockOpenBaoSecretStore::default();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                source,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    source,
+                    integration_id.clone(),
+                ),
+                kind,
             ),
-            kind,
             trogon_std::SecretString::new(secret).unwrap(),
         )
         .await
@@ -477,7 +480,7 @@ async fn runtime_credentials(
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
     registry.resolver(store)
 }

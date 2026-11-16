@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::{PythonNumbers, finite_number, normalize_numbers, python_number, same_value_zero};
+use super::{PythonNumbers, finite_number, normalize_numbers, python_number, python_value, same_value_zero};
 use crate::{python_json_value::PythonNumber, settings_dialect::SettingsDialect};
 
 fn printed(text: &str, dialect: SettingsDialect) -> String {
@@ -103,4 +103,13 @@ fn a_set_keeps_one_of_each_number_by_the_double_it_stands_for() {
     assert!(!same_value_zero(&one, &Value::from(2)));
     assert!(!same_value_zero(&Value::from(1), &Value::from("1")));
     assert!(same_value_zero(&Value::from("a"), &Value::from("a")));
+}
+
+#[test]
+fn a_python_read_settings_value_keeps_its_bools_strings_and_nulls_and_drops_lone_surrogates() {
+    let read = |text: &str| python_value(crate::python_json_load::python_json_loads(text).expect("json"));
+    let text = r#"{"on": true, "off": false, "name": "x", "none": null, "list": ["y"]}"#;
+    assert_eq!(read(text), Some(serde_json::from_str::<Value>(text).expect("json")));
+    assert_eq!(read(r#"{"name": "\ud800"}"#), None);
+    assert_eq!(read(r#"{"\ud800": 1}"#), None);
 }

@@ -1,7 +1,6 @@
-use crate::credential::commands::domain::CredentialRef;
-use crate::source_integration_id::SourceIntegrationId;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use trogon_credential_domain::{CredentialRef, SourceIntegrationId};
 
 #[derive(Clone, Default)]
 pub struct TelegramRegisteredWebhookCredentials {

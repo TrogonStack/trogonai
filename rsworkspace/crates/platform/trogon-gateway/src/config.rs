@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
-use crate::secret_store::{StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError};
 use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
@@ -33,10 +31,15 @@ use crate::source::telegram::config::{
 use crate::source::twitter::config::TwitterConsumerSecret;
 use crate::source::zoom::config::ZoomConfig as ZoomSourceConfig;
 use crate::source::zoom::zoom_secret_token::ZoomSecretToken;
-use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
+use crate::static_config_secret_store::{
+    StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError,
+};
 use axum::http::HeaderName;
 use confique::Config;
 use trogon_config_value::{ConfigValue, ConfigValueError};
+use trogon_credential_domain::{
+    CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceIntegrationIdError, SourceKind,
+};
 #[cfg(test)]
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
