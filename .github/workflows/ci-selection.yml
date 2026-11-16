@@ -41,13 +41,14 @@ jobs:
     outputs:
       runners: ${{ steps.runner.outputs.runners }}
     steps:
-      # Gives an empty token when anything fails, and skips everything when
-      # the job declared no environment, since the provider then reads empty.
-      # Either way the next step keeps every job on a hosted runner.
+      # empty-token: a failure gives an empty token, and a run that declared
+      # no environment reads the provider empty and skips every step. Either
+      # way the next step keeps every job on a hosted runner.
       - name: Baton token
         id: baton
-        uses: TrogonStack/github-actions/actions/github-app-token/gcp@1d8ff339e81c50c253a962709250af6db8753e2e # TrogonStack/github-actions#36, unreleased
+        uses: TrogonStack/github-actions/actions/github-app-token/gcp@e3a1b91807b6b6f37a3b8abfcc24d8e39ebb7ec9 # TrogonStack/github-actions#36, unreleased
         with:
+          on-failure: empty-token
           workload-identity-provider: ${{ vars.BATON_WORKLOAD_IDENTITY_PROVIDER }}
           project-id: ${{ vars.BATON_PROJECT_ID }}
           private-key-secret: ${{ vars.BATON_PRIVATE_KEY_SECRET }}
