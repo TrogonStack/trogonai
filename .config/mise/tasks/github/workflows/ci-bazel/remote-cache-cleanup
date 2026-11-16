@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Delete the generated remote cache Bazel config and its credential"
+set -euo pipefail
+
+rm -f "${RUNNER_TEMP:?}/bazel-remote.bazelrc"

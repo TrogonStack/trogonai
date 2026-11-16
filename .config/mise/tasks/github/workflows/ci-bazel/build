@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-#MISE description="Build every Bazel target using the GitHub Actions caches"
+#MISE description="Build every Bazel target using the runner's Bazel cache"
 set -euo pipefail
+
+# shellcheck source=../../../../lib/bazel-ci.sh
+source "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/.config/mise/lib/bazel-ci.sh"
 
 mkdir -p "${RUNNER_TEMP:?}/bazel-profiles"
 
 # The coverage config matches the test run, so the targets it already built
 # come from the cache instead of building again without instrumentation.
 # --keep_going so one broken target does not hide the results of all others.
-exec bazel build \
+bazel_ci build \
   --config=ci \
   --config=coverage \
   --keep_going \
   --profile="$RUNNER_TEMP/bazel-profiles/build.profile.gz" \
-  --disk_cache="${RUNNER_TEMP:?}/bazel-disk-cache" \
-  --repository_cache="${RUNNER_TEMP:?}/bazel-repository-cache" \
   //...
