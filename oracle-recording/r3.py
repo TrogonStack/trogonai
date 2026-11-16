@@ -2038,35 +2038,47 @@ def mg8_old_gate(entries):
             "old_observed": previous.get("observed", [])}
 
 
+def mg8_profile(pool, port, out):
+    """This host's profile, from the recorder's PROFILES, this job's pm8 classes and the located keys, into
+    `out["profile"]`; the reason when a gate fails."""
+    units = R8_STATE.get("units", {})
+    profile = dict(port["PROFILES"].get(HOST, {}))
+    out.setdefault("located", {})
+    out.setdefault("pm", {})
+    if set(port["PM_FORMS"]) != set(R8_GOLDEN_PASSES):
+        return f"the recorder's passes {sorted(port['PM_FORMS'])} are not {R8_GOLDEN_PASSES}"
+    for label in R8_LABELS:
+        # Every pass gates, the first copy and its events included; only the golden passes fill the profile.
+        for which in R8_PASSES:
+            found = units.get(f"pm8:{label}:{which}")
+            if not found or "error" in found or "class" not in found:
+                return f"pm8:{label}:{which} has no class to fill"
+        for which in R8_GOLDEN_PASSES:
+            found = units[f"pm8:{label}:{which}"]
+            profile[f"pm_{label}_{which}"] = profile_pair(found)
+            out["pm"][f"pm_{label}_{which}"] = profile[f"pm_{label}_{which}"]
+    for key in MG8_LOCATE:
+        found = mg8_locate(pool, port, key)
+        out["located"][key] = found
+        if "error" in found:
+            return f"{key}: {found['error']}"
+        profile[key] = found["level"]
+    profile["org_cache_limit"] = profile["org_cache_split"]
+    absent = [key for keys, _ in port["GROUPS"] for key in keys.split() if key not in profile]
+    if absent:
+        return f"the profile lacks {absent}"
+    out["profile"] = profile
+    return None
+
+
 def mg8_unit():
     def go(pool, quiet):
-        units = R8_STATE.get("units", {})
         port = mg8_port()
-        profile = dict(port["PROFILES"].get(HOST, {}))
         out = {"located": {}, "pm": {}}
-        if set(port["PM_FORMS"]) != set(R8_GOLDEN_PASSES):
-            return {"error": f"the recorder's passes {sorted(port['PM_FORMS'])} are not {R8_GOLDEN_PASSES}", **out}
-        for label in R8_LABELS:
-            # Every pass gates, the first copy and its events included; only the golden passes fill the profile.
-            for which in R8_PASSES:
-                found = units.get(f"pm8:{label}:{which}")
-                if not found or "error" in found or "class" not in found:
-                    return {"error": f"pm8:{label}:{which} has no class to fill", **out}
-            for which in R8_GOLDEN_PASSES:
-                found = units[f"pm8:{label}:{which}"]
-                profile[f"pm_{label}_{which}"] = profile_pair(found)
-                out["pm"][f"pm_{label}_{which}"] = profile[f"pm_{label}_{which}"]
-        for key in MG8_LOCATE:
-            found = mg8_locate(pool, port, key)
-            out["located"][key] = found
-            if "error" in found:
-                return {"error": f"{key}: {found['error']}", **out}
-            profile[key] = found["level"]
-        profile["org_cache_limit"] = profile["org_cache_split"]
-        absent = [key for keys, _ in port["GROUPS"] for key in keys.split() if key not in profile]
-        if absent:
-            return {"error": f"the profile lacks {absent}", **out}
-        out["profile"] = profile
+        failed = mg8_profile(pool, port, out)
+        if failed:
+            return {"error": failed, **out}
+        profile = out["profile"]
         cases = [case for keys, make in port["GROUPS"] for case in make(*(profile[key] for key in keys.split()))]
         cases += port["FIXED"] + port["org_cases"]()
         port["CASES"] = cases
@@ -2122,6 +2134,294 @@ def mg8_unit():
     return go
 
 
+# ---- band8: the default-flag margins of every boundary pair (PLAN Update 71) ----
+BAND8_RUNS = 25
+BAND8_STEPS = 8
+BAND8_CLEAN_IN_A_ROW = 2
+# A side whose reference region holds one level needs as many clean runs there as two levels give elsewhere.
+BAND8_RUNS_ALONE = BAND8_CLEAN_IN_A_ROW * BAND8_RUNS
+BAND8_ESTABLISHED = os.path.join(HERE, "band8_established.json")
+# How far past a class the next class a pass reaches can be: no model step is wider than this.
+BAND8_CLASS_REACH = 64
+
+
+class Band8Stop(Exception):
+    """A pair that cannot go on: an unexpected answer, a crash, no output, or a gate."""
+
+
+def band8_shape_pass(keys):
+    """The model table, containers above, major axis and leaves of the pass a proto or pm group measures."""
+    if keys.startswith("proto_"):
+        return MODEL[HOST]["copy"], 2, "a", ["null_array", "empty_array"]
+    which = keys.rsplit("_", 1)[1]
+    _, _, model_pass, major, above = R8_PASSES[which]
+    return MODEL[HOST][model_pass], above, major, REG5_LEAVES[model_pass]
+
+
+def band8_pairs(port, profile):
+    """Every boundary pair GROUPS makes with `profile`: its id, the near and far case, and how a side steps."""
+    pairs = []
+    for keys, make in port["GROUPS"]:
+        if keys == "partial_drop":
+            continue
+        names = keys.split()
+        args = [profile[key] for key in names]
+        made = make(*args)
+        for index in range(0, len(made), 2):
+            near, far = made[index], made[index + 1]
+            if keys == "org_cache_limit":
+                level = args[0] + 1
+                pairs.append({"id": keys, "axis": "level", "near": near, "far": far, "limit": True,
+                              "near_level": level, "far_level": level,
+                              "both_at": lambda n, make=make: make(n - 1)})
+            elif isinstance(args[0], list):
+                first, second = args[0]
+                at = lambda entry, make=make: make([entry, entry])[0]
+                if at(first)[0] != near[0] or at(second)[0] != far[0]:
+                    raise Band8Stop(f"{keys}: the stepped cases do not rebuild the pair {[near[0], far[0]]}")
+                if first[:3] == second[:3]:
+                    pairs.append({"id": keys, "axis": "startup", "near": near, "far": far,
+                                  "near_level": first[3], "far_level": second[3],
+                                  "near_at": lambda n, at=at, first=first: at([*first[:3], n]),
+                                  "far_at": lambda n, at=at, first=first: at([*first[:3], n])})
+                else:
+                    table, above, major, leaves = band8_shape_pass(keys)
+                    pairs.append({"id": keys, "axis": "class", "near": near, "far": far,
+                                  "near_level": cost(table, above, tuple(first[:3])),
+                                  "far_level": cost(table, above, tuple(second[:3])),
+                                  "pass": [table, above, major, leaves],
+                                  "near_at": lambda c, at=at, first=first, p=(table, above, major, leaves):
+                                      at([*shapes_at(p[0], p[1], c, p[2], p[3])[0], first[3]]),
+                                  "far_at": lambda c, at=at, second=second, p=(table, above, major, leaves):
+                                      at([*shapes_at(p[0], p[1], c, p[2], p[3])[0], second[3]])})
+            else:
+                pair_names = [near[0], far[0]]
+                stepped = []
+                for position in range(len(names)):
+                    moved = list(args)
+                    moved[position] += 1
+                    if [case[0] for case in make(*moved)[index:index + 2]] != pair_names:
+                        stepped.append(position)
+                if len(stepped) != 1:
+                    raise Band8Stop(f"{keys}: {len(stepped)} keys rename the pair {pair_names}, not one")
+                position = stepped[0]
+
+                def case_at(n, side, make=make, args=args, position=position, index=index):
+                    moved = list(args)
+                    moved[position] = n if side == 0 else n - 1
+                    return make(*moved)[index + side]
+                level = args[position]
+                if case_at(level, 0)[0] != near[0] or case_at(level + 1, 1)[0] != far[0]:
+                    raise Band8Stop(f"{keys}: the stepped cases do not rebuild the pair {pair_names}")
+                pairs.append({"id": near[0].rsplit("_", 1)[0], "axis": "level", "near": near, "far": far,
+                              "near_level": level, "far_level": level + 1,
+                              "near_at": lambda n, case_at=case_at: case_at(n, 0),
+                              "far_at": lambda n, case_at=case_at: case_at(n, 1)})
+    ids = [pair["id"] for pair in pairs]
+    if len(set(ids)) != len(ids):
+        raise Band8Stop(f"two pairs share an id: {ids}")
+    return pairs
+
+
+def band8_next(pair, level, side):
+    """The next level of `pair` away from the other side: one level, one startup byte, or the next class the pass
+    reaches."""
+    step = -1 if side == "near" else 1
+    if pair["axis"] != "class":
+        return level + step
+    table, above, major, leaves = pair["pass"]
+    for distance in range(1, BAND8_CLASS_REACH + 1):
+        candidate = level + 16 * step * distance
+        if shapes_at(table, above, candidate, major, leaves):
+            return candidate
+    raise Band8Stop(f"{pair['id']}: no class within {BAND8_CLASS_REACH} classes past {level}")
+
+
+class Band8Runs:
+    """Runs one case in a folder of its own and keeps the folder check's tally."""
+
+    def __init__(self, port):
+        self.port, self.lock, self.folders, self.refusals, self.runs = port, __import__("threading").Lock(), set(), 0, 0
+
+    def once(self, case, flags):
+        folder = tempfile.mkdtemp()
+        with self.lock:
+            self.runs += 1
+            self.folders.add(folder)
+        try:
+            answered = self.port["run"](self.port["prepare"](case[0], case[1], folder), flags,
+                                        self.port["case_startup"](case))
+            return mg8_collapse(answered) if isinstance(answered, dict) else None
+        except RuntimeError as error:
+            if "share the working folder" in str(error):
+                with self.lock:
+                    self.refusals += 1
+            return None
+        except (Exception, SystemExit):
+            return None
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def tally(self):
+        return {"runs": self.runs, "distinct_folders": len(self.folders), "refusals": self.refusals,
+                "running_after": len(self.port["RUNNING"])}
+
+
+def band8_answer(runs, case):
+    """The side answer: REF and CROSS must agree."""
+    reference = runs.once(case, probe_flags(REF))
+    checked = runs.once(case, probe_flags(CROSS))
+    if reference is None or checked != reference:
+        raise Band8Stop(f"{case[0]}: the reference and cross-check flags answer otherwise")
+    return reference
+
+
+def band8_cases(pair, side, level, answers):
+    """The cases a side has at `level`, each with its own answer, the opposite answer and the entry it stands for."""
+    if pair.get("limit"):
+        made = pair["both_at"](level)
+        return [(made[0], answers["near"], answers["far"], "near"), (made[1], answers["far"], answers["near"], "far")]
+    own, other = (answers["near"], answers["far"]) if side == "near" else (answers["far"], answers["near"])
+    # The pair level is the pair's own case; past it, the case the axis makes there.
+    case = pair[side] if level == pair[f"{side}_level"] else pair[f"{side}_at"](level)
+    return [(case, own, other, side)]
+
+
+def band8_region(runs, pair, side, answers, write_event):
+    """The levels from L0 outward through L8 whose reference answer is the side's own, from one REF run each, and
+    the bound line the events keep for them."""
+    level, region, crossing = pair[f"{side}_level"], [], None
+    for _ in range(BAND8_STEPS + 1):
+        for case, own, _other, which in band8_cases(pair, side, level, answers):
+            answered = runs.once(case, probe_flags(REF))
+            if answered is None:
+                raise Band8Stop(f"{case[0]}: the reference run at level {level} crashed or gave no answer")
+            if answered != own:
+                crossing = {"level": level, "case": case[0], "entry": which, "answer": answered}
+                break
+        if crossing:
+            break
+        region.append(level)
+        level = band8_next(pair, level, side)
+    width = min(len(region), BAND8_STEPS)
+    bound = (f"bounded by reference crossing at level {crossing['level']}" if crossing
+             else f"no reference crossing through L{BAND8_STEPS}")
+    write_event({"bound": {"host": HOST, "pair": pair["id"], "side": side, "axis": pair["axis"], "width": width,
+                           "region": region, "bound": bound, "crossing": crossing}})
+    return region, width
+
+
+def band8_level(runs, pool, pair, side, level, answers, write_event, hashes, count=None):
+    """One measured level: `count` default-flag runs of each case the side has there, plus a REF and a CROSS run
+    each, which never count. True when every case shows no opposite answer."""
+    cases = band8_cases(pair, side, level, answers)
+    count = count or BAND8_RUNS
+    clean = True
+    for case, own, other, which in cases:
+        for flags in (REF, CROSS):
+            if runs.once(case, probe_flags(flags)) != own:
+                raise Band8Stop(f"{case[0]}: the {'reference' if flags == REF else 'cross-check'} flags do not give "
+                                f"the {which} answer at level {level}")
+        answered = list(pool.map(lambda _, case=case: runs.once(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS)),
+                                 range(count)))
+        same = sum(1 for one in answered if one == own)
+        opposite = sum(1 for one in answered if one == other)
+        unexpected = len(answered) - same - opposite
+        write_event({"host": HOST, "pair": pair["id"], "side": which, "axis": pair["axis"], "level": level,
+                     "case": case[0], "startup": runs.port["case_startup"](case), "runs": len(answered),
+                     "clean": same, "opposite": opposite, "unexpected": unexpected, "flags": list(DEFAULT_FLAGS),
+                     **hashes})
+        if unexpected:
+            raise Band8Stop(f"{case[0]}: {unexpected} of {len(answered)} default-flag runs gave neither answer or none")
+        if 2 * same <= len(answered):
+            raise Band8Stop(f"{case[0]}: the default flags do not give the reference answer in most runs at level "
+                            f"{level} ({same} of {len(answered)})")
+        clean = clean and opposite == 0
+    return clean
+
+
+def band8_side(runs, pool, pair, side, established, answers, write_event, hashes):
+    """The margin of one side: 50 consecutive clean default-flag runs inside its reference region. With two levels
+    or more there, the outer of the first two consecutive clean levels in L0 .. L8; with one, L0 at 50 runs."""
+    region, width = band8_region(runs, pair, side, answers, write_event)
+    if width == 0:
+        raise Band8Stop(f"{pair['id']} {side}: the reference answer already differs at L0")
+    if width == 1:
+        clean = band8_level(runs, pool, pair, side, region[0], answers, write_event, hashes, BAND8_RUNS_ALONE)
+        if not clean:
+            raise Band8Stop(f"{pair['id']} {side}: L0 is the only level inside the region and it is not clean")
+        return {"margin": region[0], "measured": [[region[0], clean]], "established": established, "width": width}
+    streak, measured = (1, []) if established else (0, [])
+    for level in region[1 if established else 0:BAND8_STEPS + 1]:
+        clean = band8_level(runs, pool, pair, side, level, answers, write_event, hashes)
+        measured.append([level, clean])
+        streak = streak + 1 if clean else 0
+        if streak == BAND8_CLEAN_IN_A_ROW:
+            return {"margin": level, "measured": measured, "established": established, "width": width}
+    raise Band8Stop(f"{pair['id']} {side}: no two clean levels in a row inside the region of {width} levels, "
+                    f"by L{BAND8_STEPS}")
+
+
+def band8_unit():
+    def go(pool, quiet):
+        port = mg8_port()
+        out = {"located": {}, "pm": {}}
+        failed = mg8_profile(pool, port, out)
+        if failed:
+            return {"error": failed, **out}
+        traced = r8_traced()
+        hashes = {"pinned_sha256": r7_sha256(os.path.join(PACKAGE, "sdk.mjs")),
+                  "traced_sha256": traced.get("traced_sha256")}
+        out["hashes"] = hashes
+        with open(BAND8_ESTABLISHED, encoding="utf-8") as handle:
+            established = set(json.load(handle).get(HOST, []))
+        try:
+            pairs = band8_pairs(port, out["profile"])
+        except Band8Stop as stop:
+            return {"error": str(stop), **out}
+        folder = os.path.join(os.path.dirname(OUT), "band8")
+        os.makedirs(folder, exist_ok=True)
+        runs = Band8Runs(port)
+        out["pairs"], stopped = {}, []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2 * (os.cpu_count() or 1)) as band_pool:
+            for pair in pairs:
+                events = os.path.join(folder, f"{pair['id']}.events.jsonl")
+                lock = __import__("threading").Lock()
+
+                def write_event(event, events=events, lock=lock):
+                    with lock, open(events, "a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(event) + "\n")
+
+                summary = {"host": HOST, "pair": pair["id"], "axis": pair["axis"], "near": pair["near"][0],
+                           "far": pair["far"][0], "near_level": pair["near_level"], "far_level": pair["far_level"],
+                           "flags": list(DEFAULT_FLAGS), **hashes}
+                try:
+                    if pair["near_level"] >= pair["far_level"] and not pair.get("limit"):
+                        raise Band8Stop(f"{pair['id']}: the near level is not below the far level")
+                    answers = {"near": band8_answer(runs, pair["near"]), "far": band8_answer(runs, pair["far"])}
+                    if answers["near"] == answers["far"]:
+                        raise Band8Stop(f"{pair['id']}: the pair answers the same")
+                    sides = ["far"] if pair.get("limit") else ["near", "far"]
+                    for side in sides:
+                        own = pair[side][0] in established and not pair["id"].startswith("org_")
+                        summary[side] = band8_side(runs, band_pool, pair, side, own, answers, write_event, hashes)
+                except Band8Stop as stop:
+                    summary["stop"] = str(stop)
+                    stopped.append(pair["id"])
+                summary["folder_assertion"] = runs.tally()
+                write_event({"summary": summary})
+                out["pairs"][pair["id"]] = summary
+        out["folder_assertion"] = runs.tally()
+        out["stopped"] = stopped
+        assertion = out["folder_assertion"]
+        if assertion["refusals"] or assertion["running_after"] or assertion["distinct_folders"] != assertion["runs"]:
+            out["error"] = f"the folder check did not hold: {assertion}"
+        elif stopped:
+            out["error"] = f"pairs stopped: {stopped}"
+        return out
+    return go
+
+
 def round8_units():
     out = [("rec8:instrument", r8_instrument_unit())]
     out += [(f"rec8:fixture:{name}", rec8_fixture(name)) for name in R8_FIXTURES]
@@ -2129,6 +2429,8 @@ def round8_units():
     out += [(f"pm8:{label}:{which}", pm8_unit(label, which)) for label in R8_LABELS for which in R8_PASSES]
     # Last: it fills the handed-over profile keys from the pm8 classes this job found.
     out += [("mg8:goldens", mg8_unit())]
+    # After the pm8 units too: the default-flag margins of every pair the profile names.
+    out += [("band8:goldens", band8_unit())]
     return out
 
 

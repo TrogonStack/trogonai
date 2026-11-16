@@ -13,11 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         host:
-          # Unix: the handed-over managed settings passes, the first copy found from its trace with its events
-          # file, the second, cached copy, then the managed goldens of each host.
-          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|mg8:)" }
-          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 1, only: "^(pm8:|mg8:)" }
-          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|mg8:)" }
+          # Unix: the handed-over managed settings passes, then the default-flag margins of every boundary pair
+          # the managed goldens hold, each host's pairs stepped level by level until two in a row stay clean.
+          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|band8:)" }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 1, only: "^(pm8:|band8:)" }
+          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|band8:)" }
         shard: [1]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360
@@ -81,7 +81,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: r8c-${{ matrix.host.label }}-${{ matrix.shard }}
+          name: band8-${{ matrix.host.label }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 7
