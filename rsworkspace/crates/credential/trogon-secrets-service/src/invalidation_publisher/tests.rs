@@ -639,6 +639,39 @@ async fn a_settlement_the_credential_stream_refuses_is_logged_and_reading_goes_o
 }
 
 #[tokio::test]
+async fn a_retry_the_credential_stream_refuses_is_logged_and_reading_goes_on() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let run = Run::new();
+    let unknown = stored(4, raw_message(&identity(), Some("acme.v1.Unknown"), Vec::new()));
+    let revocation = stored(5, message(&identity(), &revoked(&identity())));
+    let notice = notice_for(&revocation, &holding_owner());
+
+    let outcome = run
+        .publish(
+            [Ok(run.unsettleable(unknown)), Ok(run.delivery(revocation))],
+            [],
+            holding_owner(),
+        )
+        .await;
+
+    ran_out(outcome);
+    assert_eq!(run.steps(), [published(&notice), Step::Stored, Step::Acked(5)]);
+    let unsettled: Vec<_> = logged_at(&events, 4)
+        .into_iter()
+        .filter(|event| event.field("settlement").is_some())
+        .collect();
+    assert_eq!(unsettled.len(), 1, "{unsettled:?}");
+    assert!(
+        unsettled[0]
+            .field("settlement")
+            .is_some_and(|kind| kind.starts_with("Nak")),
+        "{unsettled:?}"
+    );
+    assert_eq!(unsettled[0].field("error"), Some("fake-settle-refused"));
+}
+
+#[tokio::test]
 async fn a_delivery_that_fails_is_logged_and_reading_goes_on() {
     let events = CapturedEvents::new();
     let _capture = events.install(LevelFilter::WARN);

@@ -130,8 +130,9 @@ where
         let message = match delivery.stored() {
             Ok(message) => message,
             Err(error) => {
+                let error = error_chain(&error);
                 tracing::error!(
-                    error = %error_chain(&error),
+                    error = %error,
                     "credential event delivery does not say where it was stored; retrying it"
                 );
                 retry(delivery, None).await;
@@ -143,26 +144,30 @@ where
             Ok(InvalidationOutcome::Publish(notice)) => self.publish(delivery, sequence, &notice).await,
             Ok(InvalidationOutcome::NothingToPublish) => acknowledge(delivery, sequence).await,
             Ok(InvalidationOutcome::OwnerHeldByNoTenant { credential }) => {
+                let credential_id = credential.credential_id();
+                let owner_id = credential.owner_id();
                 tracing::warn!(
                     stream_sequence = sequence,
-                    credential_id = %credential.credential_id(),
-                    owner_id = %credential.owner_id(),
+                    credential_id = %credential_id,
+                    owner_id = %owner_id,
                     "credential event ends a release whose owner no tenant holds; no notice published"
                 );
                 acknowledge(delivery, sequence).await;
             }
             Err(error) if retried(&error) => {
+                let error = error_chain(&error);
                 tracing::warn!(
                     stream_sequence = sequence,
-                    error = %error_chain(&error),
+                    error = %error,
                     "credential event is not readable by this build yet; retrying it"
                 );
                 retry(delivery, Some(sequence)).await;
             }
             Err(error) => {
+                let error = error_chain(&error);
                 tracing::error!(
                     stream_sequence = sequence,
-                    error = %error_chain(&error),
+                    error = %error,
                     "credential event is not readable; terminated without a notice"
                 );
                 settle_with(delivery, Some(sequence), AckKind::Term).await;
@@ -184,10 +189,12 @@ where
         match stored {
             Ok(()) => acknowledge(delivery, sequence).await,
             Err(error) => {
+                let subject = notice.subject();
+                let error = error_chain(&error);
                 tracing::warn!(
                     stream_sequence = sequence,
-                    subject = notice.subject(),
-                    error = %error_chain(&error),
+                    subject,
+                    error = %error,
                     "invalidation notice was not stored; retrying its credential event"
                 );
                 retry(delivery, Some(sequence)).await;
