@@ -20,8 +20,8 @@ use crate::fixtures::{
     runtime_service, secret, tenant,
 };
 use crate::{
-    FakeOutcome, FakeSecretsService, InvalidReleaseResponse, RELEASE_HOLD_BOUND, ReleaseClientConfig, ReleaseError,
-    ReleaseTimeout, TenantAccount, UnsealError,
+    FakeOutcome, FakeSecretsService, InvalidReleaseResponseError, RELEASE_HOLD_BOUND, ReleaseClientConfig,
+    ReleaseError, ReleaseTimeout, TenantAccount, UnsealError,
 };
 
 fn subject(tenant: &TenantAccount) -> String {
@@ -131,7 +131,7 @@ async fn refuses_a_reply_that_does_not_decode() {
 
     assert!(matches!(
         refused,
-        ReleaseError::InvalidResponse(InvalidReleaseResponse::Reply(ReplyError::Decode(_)))
+        ReleaseError::InvalidResponse(InvalidReleaseResponseError::Reply(ReplyError::Decode(_)))
     ));
 }
 
@@ -145,7 +145,7 @@ async fn refuses_a_reply_with_no_result() {
 
     assert!(matches!(
         refused,
-        ReleaseError::InvalidResponse(InvalidReleaseResponse::MissingResult)
+        ReleaseError::InvalidResponse(InvalidReleaseResponseError::MissingResult)
     ));
 }
 
@@ -166,7 +166,7 @@ async fn refuses_a_failure_the_contract_does_not_allow() {
 
     assert!(matches!(
         refused,
-        ReleaseError::InvalidResponse(InvalidReleaseResponse::ThrottledWithoutRetryAfter)
+        ReleaseError::InvalidResponse(InvalidReleaseResponseError::ThrottledWithoutRetryAfter)
     ));
 }
 

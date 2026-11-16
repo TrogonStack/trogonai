@@ -11,7 +11,7 @@ use trogonai_proto::secrets::exchange::v1alpha1::resolve_for_release_response::R
 
 use super::constants::{METHOD_NAME, SERVICE_NAME, SUBJECT_DOMAIN};
 use super::{
-    InvalidReleaseResponse, ReleaseClientConfig, ReleaseError, ReleaseRequest, ReleaseSubjectError, ReleasedValue,
+    InvalidReleaseResponseError, ReleaseClientConfig, ReleaseError, ReleaseRequest, ReleaseSubjectError, ReleasedValue,
     TenantAccount,
 };
 
@@ -59,7 +59,7 @@ where
         )
         .await
         .map_err(ReleaseError::from_request)?;
-        match response.result.ok_or(InvalidReleaseResponse::MissingResult)? {
+        match response.result.ok_or(InvalidReleaseResponseError::MissingResult)? {
             Outcome::Access(access) => ReleasedValue::open(
                 *access,
                 &requester,

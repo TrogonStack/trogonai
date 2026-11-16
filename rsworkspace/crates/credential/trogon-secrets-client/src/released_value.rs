@@ -5,7 +5,7 @@ use trogon_std::SecretString;
 use trogonai_proto::secrets::exchange::v1alpha1::SealedAccess;
 
 use super::constants::RELEASE_HOLD_BOUND;
-use super::{InvalidReleaseResponse, ReleaseError, ServiceXkey, UnsealError};
+use super::{InvalidReleaseResponseError, ReleaseError, ServiceXkey, UnsealError};
 
 /// A credential value the secrets service released to this caller, opened.
 ///
@@ -29,16 +29,16 @@ impl ReleasedValue {
         now: SystemTime,
     ) -> Result<Self, ReleaseError> {
         if access.xkey_sealed_value.is_empty() {
-            return Err(InvalidReleaseResponse::EmptySealedValue.into());
+            return Err(InvalidReleaseResponseError::EmptySealedValue.into());
         }
         let valid_until = access
             .valid_until
             .into_option()
-            .ok_or(InvalidReleaseResponse::MissingValidUntil)?;
+            .ok_or(InvalidReleaseResponseError::MissingValidUntil)?;
         if valid_until.seconds <= 0 {
-            return Err(InvalidReleaseResponse::ValidUntilNotPositive.into());
+            return Err(InvalidReleaseResponseError::ValidUntilNotPositive.into());
         }
-        let valid_until = SystemTime::try_from(valid_until).map_err(InvalidReleaseResponse::ValidUntil)?;
+        let valid_until = SystemTime::try_from(valid_until).map_err(InvalidReleaseResponseError::ValidUntil)?;
         if valid_until <= now {
             return Err(ReleaseError::Expired);
         }

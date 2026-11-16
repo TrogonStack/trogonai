@@ -7,7 +7,7 @@ use nkeys::XKey;
 
 use super::ReleasedValue;
 use crate::fixtures::{BUNDLE_GENERATION, VALUE, now, pinned, sealed_access};
-use crate::{InvalidReleaseResponse, RELEASE_HOLD_BOUND, ReleaseError, UnsealError};
+use crate::{InvalidReleaseResponseError, RELEASE_HOLD_BOUND, ReleaseError, UnsealError};
 
 fn in_a_minute() -> SystemTime {
     now() + Duration::from_secs(60)
@@ -31,7 +31,7 @@ fn refuses_an_empty_sealed_value() {
 
     assert!(matches!(
         refused,
-        ReleaseError::InvalidResponse(InvalidReleaseResponse::EmptySealedValue)
+        ReleaseError::InvalidResponse(InvalidReleaseResponseError::EmptySealedValue)
     ));
 }
 
@@ -46,7 +46,7 @@ fn refuses_an_access_without_valid_until() {
 
     assert!(matches!(
         refused,
-        ReleaseError::InvalidResponse(InvalidReleaseResponse::MissingValidUntil)
+        ReleaseError::InvalidResponse(InvalidReleaseResponseError::MissingValidUntil)
     ));
 }
 
@@ -65,7 +65,7 @@ fn refuses_a_valid_until_at_or_before_the_epoch() {
 
     assert!(matches!(
         refused,
-        ReleaseError::InvalidResponse(InvalidReleaseResponse::ValidUntilNotPositive)
+        ReleaseError::InvalidResponse(InvalidReleaseResponseError::ValidUntilNotPositive)
     ));
 }
 
@@ -84,7 +84,7 @@ fn refuses_a_valid_until_with_out_of_range_nanos() {
 
     assert!(matches!(
         refused,
-        ReleaseError::InvalidResponse(InvalidReleaseResponse::ValidUntil(TimestampError::InvalidNanos))
+        ReleaseError::InvalidResponse(InvalidReleaseResponseError::ValidUntil(TimestampError::InvalidNanos))
     ));
 }
 

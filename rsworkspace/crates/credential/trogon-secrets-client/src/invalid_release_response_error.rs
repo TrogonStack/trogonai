@@ -4,7 +4,7 @@ use grpc_nats_micro::ReplyError;
 /// Why a reply from the secrets service is not a release response the
 /// contract allows. Each one is refused: no part of such a reply is trusted.
 #[derive(Debug, thiserror::Error)]
-pub enum InvalidReleaseResponse {
+pub enum InvalidReleaseResponseError {
     #[error("release reply did not decode")]
     Reply(#[source] ReplyError),
     #[error("release response carries neither an access nor a failure")]
