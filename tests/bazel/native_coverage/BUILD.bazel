@@ -1,0 +1,20 @@
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load(":coverage_test.bzl", "excluded_coverage_test", "included_coverage_test")
+
+cargo_build_script(
+    name = "native_fixture",
+    srcs = ["build.rs"],
+    tags = ["manual"],
+)
+
+excluded_coverage_test(
+    name = "excluded_test",
+    expected_coverage = False,
+    target_under_test = ":native_fixture",
+)
+
+included_coverage_test(
+    name = "included_test",
+    expected_coverage = True,
+    target_under_test = ":native_fixture",
+)

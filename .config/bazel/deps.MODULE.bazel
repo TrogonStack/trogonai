@@ -1,5 +1,12 @@
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_rust", version = "0.75.0")
+single_version_override(
+    module_name = "rules_rust",
+    patch_strip = 1,
+    patches = ["//.config/bazel:patches/rules_rust-native-coverage-filter.patch"],
+)
+
 bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "gazelle", version = "0.54.0")
@@ -70,6 +77,16 @@ kubernetes_json_schema(
 )
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+
+# The runner expands ${pwd}; rules_rust appends these to the C toolchain flags.
+crate.annotation(
+    build_script_env = {
+        "CFLAGS": "-ffile-prefix-map=$${pwd}=.",
+        "CXXFLAGS": "-ffile-prefix-map=$${pwd}=.",
+    },
+    crate = "*",
+    repositories = ["crates"],
+)
 
 # Resolve Rust dependencies from the Cargo workspace lockfile. crate_universe
 # discovers workspace members from the root manifest.
@@ -199,8 +216,8 @@ go_sdk.wrap(root_file = "@mise_go//:ROOT")
 
 # Runs the go vet analyzers on every compile of the repository's own Go code.
 go_sdk.nogo(
-    nogo = "//goworkspace:nogo",
     includes = ["//goworkspace:__subpackages__"],
+    nogo = "//goworkspace:nogo",
 )
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
