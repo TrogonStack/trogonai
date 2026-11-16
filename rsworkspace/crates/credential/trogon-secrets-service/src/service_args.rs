@@ -1,8 +1,11 @@
 use clap::Parser;
 use trogon_service_config::RuntimeConfigArgs;
 
-/// The command line of the secrets service: the configuration file, and the
-/// NATS connection flags every service here takes.
+use super::ServiceCommand;
+
+/// The command line of the secrets service: the configuration file, the NATS
+/// connection flags every service here takes, and the command to run instead of
+/// serving releases, when one is given.
 #[derive(Clone, Debug, Default, Parser)]
 #[command(
     name = "trogon-secrets-service",
@@ -16,9 +19,17 @@ use trogon_service_config::RuntimeConfigArgs;
         NATS_TLS_DISABLED and OPENBAO_TLS_DISABLED, read from the environment alone, disable TLS.\n\n\
         At startup the service reads the tenant owners file and the release policies file once, \
         reads its sealing key, connects to NATS, and logs in to OpenBao before it joins the \
-        release queue group. It does not start when a setting or a file is missing or invalid."
+        release queue group. It does not start when a setting or a file is missing or invalid.\n\n\
+        `config dump --resolved` prints every setting with its effective value and its source, \
+        without reading a secret or connecting to anything."
 )]
 pub struct ServiceArgs {
     #[command(flatten)]
     pub runtime: RuntimeConfigArgs,
+
+    #[command(subcommand)]
+    pub command: Option<ServiceCommand>,
 }
+
+#[cfg(test)]
+mod tests;

@@ -38,6 +38,11 @@
 //! one canonical name, a [`ConfigSetting`], and every refusal names it without
 //! quoting a secret: the file holds references to secrets, never the secrets.
 //!
+//! [`ConfigDump`] is what `trogon-secrets-service config dump --resolved`
+//! prints: every setting with its effective value and its source, from the
+//! same resolution and validation startup runs, a secret shown only by its
+//! reference. It reads no secret and connects to nothing.
+//!
 //! [`ReleaseSources`] reads what the configuration points at once, at startup:
 //! the tenant owners, the release policies, the sealing key, and the AppRole.
 //! [`SecretsService`] wires them to NATS, the credential stream, OpenBao, and
@@ -58,6 +63,7 @@
 mod admission_limit;
 mod admission_limit_error;
 mod audit_section_wire;
+mod config_command;
 mod config_dump;
 mod config_setting;
 mod constants;
@@ -118,6 +124,7 @@ mod sealer;
 mod secrets_service;
 mod secrets_service_error;
 mod service_args;
+mod service_command;
 mod service_config;
 mod service_config_error;
 mod service_config_wire;
@@ -136,6 +143,7 @@ mod xkey_sealer;
 
 pub use admission_limit::AdmissionLimit;
 pub use admission_limit_error::AdmissionLimitError;
+pub use config_command::ConfigCommand;
 pub use config_dump::ConfigDump;
 pub use config_setting::ConfigSetting;
 pub use constants::{
@@ -184,6 +192,7 @@ pub use sealer::Sealer;
 pub use secrets_service::SecretsService;
 pub use secrets_service_error::SecretsServiceError;
 pub use service_args::ServiceArgs;
+pub use service_command::ServiceCommand;
 pub use service_config::ServiceConfig;
 pub use service_config_error::ServiceConfigError;
 pub use setting_source::SettingSource;
