@@ -34,6 +34,8 @@
 //!   shorter than two minutes, which the publisher's redelivery must fit in);
 //! - refuse a notice for its size (a maximum message size under the 1 KiB the
 //!   largest notice fits in with its headers);
+//! - refuse every notice as a counter stream (`allow_msg_counter`), which
+//!   takes only publishes that add to a counter;
 //! - store notices under another subject (`subject_transform`), so a holder
 //!   filtering on the subject a notice was published to would never read it;
 //! - leave out the subject, so a notice would be published to nothing.
@@ -124,6 +126,9 @@ impl InvalidationStream {
         }
         if actual.allow_message_ttl {
             return Err(InvalidationStreamMismatchError::MessageTtl);
+        }
+        if actual.allow_message_counter {
+            return Err(InvalidationStreamMismatchError::MessageCounter);
         }
         if actual.max_messages_per_subject > 0 {
             return Err(InvalidationStreamMismatchError::MaxMessagesPerSubject);
