@@ -2242,6 +2242,7 @@ class Band8Runs:
 
     def __init__(self, port):
         self.port, self.lock, self.folders, self.refusals, self.runs = port, __import__("threading").Lock(), set(), 0, 0
+        self.assertions = 0
 
     def once(self, case, flags):
         folder = tempfile.mkdtemp()
@@ -2253,9 +2254,16 @@ class Band8Runs:
                                         self.port["case_startup"](case))
             return mg8_collapse(answered) if isinstance(answered, dict) else None
         except RuntimeError as error:
+            # The folder, flag and PAD checks every probe entry makes: a failed one stops the pair, never counts as a
+            # missing answer.
             if "share the working folder" in str(error):
                 with self.lock:
                     self.refusals += 1
+                raise Band8Stop(f"{case[0]}: {error}") from error
+            if str(error).startswith(("a probe", "a padded probe")):
+                with self.lock:
+                    self.assertions += 1
+                raise Band8Stop(f"{case[0]}: {error}") from error
             return None
         except (Exception, SystemExit):
             return None
@@ -2264,7 +2272,7 @@ class Band8Runs:
 
     def tally(self):
         return {"runs": self.runs, "distinct_folders": len(self.folders), "refusals": self.refusals,
-                "running_after": len(self.port["RUNNING"])}
+                "failed_probe_checks": self.assertions, "running_after": len(self.port["RUNNING"])}
 
 
 def band8_answer(runs, case):
@@ -2414,7 +2422,8 @@ def band8_unit():
         out["folder_assertion"] = runs.tally()
         out["stopped"] = stopped
         assertion = out["folder_assertion"]
-        if assertion["refusals"] or assertion["running_after"] or assertion["distinct_folders"] != assertion["runs"]:
+        if (assertion["refusals"] or assertion["failed_probe_checks"] or assertion["running_after"]
+                or assertion["distinct_folders"] != assertion["runs"]):
             out["error"] = f"the folder check did not hold: {assertion}"
         elif stopped:
             out["error"] = f"pairs stopped: {stopped}"
