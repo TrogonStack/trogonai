@@ -33,17 +33,17 @@ impl SecretsService {
     }
 
     /// Connects to NATS, finds the credential stream, checks the invalidation
-    /// stream, logs in to OpenBao, and has the invalidation publisher
-    /// listening on the credential stream before it opens its audit chain and
-    /// joins the release queue group, so a service that cannot reach any of
-    /// them never takes a release, and the revocation of every value it
-    /// releases reaches the publisher's durable, which reads only the events
-    /// appended after it was created. The invalidation stream is checked
-    /// against [`InvalidationStream`] with the configured replicas and never
-    /// created: a value released by a service that cannot announce its
-    /// revocation would outlive the revocation. A login OpenBao refuses is
-    /// retried, with a wait that doubles after each refusal up to a cap, until
-    /// OpenBao accepts it (ADR#0023 Decision 3).
+    /// stream, then logs in to OpenBao while the invalidation publisher starts
+    /// listening on the credential stream, both before it opens its audit
+    /// chain and joins the release queue group, so a service that cannot
+    /// reach any of them never takes a release, and the revocation of every
+    /// value it releases reaches the publisher's durable, which reads only
+    /// the events appended after it was created. The invalidation stream is
+    /// checked against [`InvalidationStream`] with the configured replicas
+    /// and never created: a value released by a service that cannot announce
+    /// its revocation would outlive the revocation. A login OpenBao refuses
+    /// is retried, with a wait that doubles after each refusal up to a cap,
+    /// until OpenBao accepts it (ADR#0023 Decision 3).
     ///
     /// It then serves releases and publishes invalidation notices until
     /// `shutdown`, or until either stops on its own, which stops the other
@@ -93,20 +93,21 @@ impl SecretsService {
                 config.child_tokens.clone(),
             )
         };
-        let Some(store) = LoginRetry::new(OPENBAO_LOGIN_RETRY_INITIAL, OPENBAO_LOGIN_RETRY_MAX)
-            .log_in(&shutdown, login)
-            .await
-            .map_err(SecretsServiceError::OpenBaoLogin)?
-        else {
-            return Ok(());
-        };
-
-        let Some(publisher) =
-            InvalidationPublisher::new(stream.clone(), jetstream.clone(), sources.tenant_owners.clone())
-                .listen(&shutdown)
-                .await
-                .map_err(SecretsServiceError::Publish)?
-        else {
+        let (store, publisher) = tokio::try_join!(
+            async {
+                LoginRetry::new(OPENBAO_LOGIN_RETRY_INITIAL, OPENBAO_LOGIN_RETRY_MAX)
+                    .log_in(&shutdown, login)
+                    .await
+                    .map_err(SecretsServiceError::OpenBaoLogin)
+            },
+            async {
+                InvalidationPublisher::new(stream.clone(), jetstream.clone(), sources.tenant_owners.clone())
+                    .listen(&shutdown)
+                    .await
+                    .map_err(SecretsServiceError::Publish)
+            },
+        )?;
+        let (Some(store), Some(publisher)) = (store, publisher) else {
             return Ok(());
         };
         let stamper = Stamper::new(SystemClock, UuidV7Generator);
