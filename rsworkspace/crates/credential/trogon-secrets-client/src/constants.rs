@@ -28,6 +28,12 @@ pub const RELEASE_CACHE_JITTER: Duration = Duration::from_secs(30);
 /// release that finds the cache full is served without being held.
 pub const MAX_CACHED_RELEASES: usize = 4_096;
 
+/// How many of the latest invalidations, and losses and recoveries of the
+/// reader's place, a client remembers to judge a release that was on its way
+/// when they happened. A release asked for before more of them than this is
+/// treated as invalidated.
+pub(crate) const RECENT_INVALIDATIONS: usize = 1_024;
+
 /// How far back the invalidation reader starts reading: the longest any copy
 /// of a release may be held, its hold bound plus the most jitter (ADR#0049).
 pub const INVALIDATION_LOOKBACK: Duration = Duration::from_secs(330);

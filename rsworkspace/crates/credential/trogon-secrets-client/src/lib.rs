@@ -32,7 +32,10 @@
 //! cannot stretch its hold. Its own
 //! reader of [`INVALIDATION_STREAM`] drops every held copy of a credential
 //! named on `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`,
-//! and every held copy at all for a notice it cannot read. It refuses to
+//! and every held copy at all for a notice it cannot read. A release on its
+//! way when its credential is invalidated, or when the reader loses or
+//! regains its place, is neither held nor returned; the client asks once more
+//! and fails with [`ReleaseError::Invalidated`] if that one is overtaken too. It refuses to
 //! start without that stream. While its reader has lost its place it holds
 //! nothing, and it reads again every [`INVALIDATION_RETRY_DELAY`] from
 //! [`INVALIDATION_LOOKBACK`] back. Concurrent misses for one key each ask the

@@ -4,6 +4,7 @@ use trogon_credential_domain::{CredentialId, CredentialKey};
 use trogon_std::time::MockClock;
 
 use super::ReleaseCache;
+use crate::constants::RECENT_INVALIDATIONS;
 use crate::fixtures::{CREDENTIAL_ID, VALUE, now, released_until, request, tenant};
 use crate::{
     RELEASE_CACHE_JITTER, RELEASE_HOLD_BOUND, ReleaseCacheKey, ReleaseCacheMode, ReleaseInvalidation, ReleaseRequest,
@@ -55,16 +56,61 @@ fn holds_nothing_while_uncached() {
 }
 
 #[test]
-fn does_not_hold_a_release_asked_for_before_an_invalidation() {
+fn does_not_hold_a_release_asked_for_before_an_invalidation_that_covers_it() {
     let tenant = tenant();
     let key = key_of(&tenant, CREDENTIAL_ID);
     let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
     let ticket = cache.ticket();
 
     cache.invalidate(&notice_for(&tenant, OTHER_CREDENTIAL_ID));
-    cache.put(ticket, key.clone(), released_until(in_a_minute()), now());
+    cache.invalidate(&notice_for(&tenant, CREDENTIAL_ID));
 
+    assert!(!cache.is_current(ticket, &key));
+    cache.put(ticket, key.clone(), released_until(in_a_minute()), now());
     assert!(cache.get(&key, now()).is_none());
+}
+
+#[test]
+fn does_not_hold_a_release_asked_for_before_a_notice_it_could_not_read() {
+    let key = key_of(&tenant(), CREDENTIAL_ID);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
+    let ticket = cache.ticket();
+
+    cache.invalidate(&ReleaseInvalidation::from_subject("fake-subject"));
+
+    assert!(!cache.is_current(ticket, &key));
+}
+
+#[test]
+fn does_not_hold_a_release_asked_for_before_more_invalidations_than_it_remembers() {
+    let tenant = tenant();
+    let key = key_of(&tenant, CREDENTIAL_ID);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
+    let ticket = cache.ticket();
+
+    for _ in 0..=RECENT_INVALIDATIONS {
+        cache.invalidate(&notice_for(&tenant, OTHER_CREDENTIAL_ID));
+    }
+
+    assert!(!cache.is_current(ticket, &key));
+    cache.put(ticket, key.clone(), released_until(in_a_minute()), now());
+    assert!(cache.get(&key, now()).is_none());
+}
+
+#[test]
+fn holds_a_release_asked_for_before_as_many_unrelated_invalidations_as_it_remembers() {
+    let tenant = tenant();
+    let key = key_of(&tenant, CREDENTIAL_ID);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
+    let ticket = cache.ticket();
+
+    for _ in 0..RECENT_INVALIDATIONS {
+        cache.invalidate(&notice_for(&tenant, OTHER_CREDENTIAL_ID));
+    }
+
+    assert!(cache.is_current(ticket, &key));
+    cache.put(ticket, key.clone(), released_until(in_a_minute()), now());
+    assert!(cache.get(&key, now()).is_some());
 }
 
 #[test]
@@ -75,9 +121,32 @@ fn does_not_hold_a_release_asked_for_before_the_reader_lost_its_place() {
 
     cache.suspend();
     cache.resume();
-    cache.put(ticket, key.clone(), released_until(in_a_minute()), now());
 
+    assert!(!cache.is_current(ticket, &key));
+    cache.put(ticket, key.clone(), released_until(in_a_minute()), now());
     assert!(cache.get(&key, now()).is_none());
+}
+
+#[test]
+fn counts_a_release_asked_for_while_uncached_as_stale_once_it_resumes() {
+    let key = key_of(&tenant(), CREDENTIAL_ID);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
+    cache.suspend();
+    let ticket = cache.ticket();
+
+    cache.resume();
+
+    assert!(!cache.is_current(ticket, &key));
+}
+
+#[test]
+fn counts_a_release_asked_for_since_the_last_change_as_current() {
+    let tenant = tenant();
+    let key = key_of(&tenant, CREDENTIAL_ID);
+    let mut cache = ReleaseCache::with_capacity(8, MockClock::new());
+    cache.invalidate(&notice_for(&tenant, CREDENTIAL_ID));
+
+    assert!(cache.is_current(cache.ticket(), &key));
 }
 
 #[test]

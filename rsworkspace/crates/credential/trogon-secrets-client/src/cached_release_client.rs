@@ -22,7 +22,8 @@ use super::{
 /// It reads `SECRETS_INVALIDATION` through an ordered consumer of its own and
 /// drops every copy of a credential a notice names, for every host and
 /// location and whatever the reason; a notice whose subject it cannot read
-/// drops every copy. While that reader has lost its place nothing is held
+/// drops every copy. A release still on its way when such a notice arrives is
+/// neither held nor returned, and is asked for once more. While that reader has lost its place nothing is held
 /// and every release is asked for again. Clones share the cache and the
 /// reader, which stops when the last clone is dropped.
 #[derive(Clone)]
@@ -59,19 +60,43 @@ where
 
     /// The copy held for `release`, or what the secrets service releases for
     /// it now.
+    ///
+    /// A release that was on its way when an invalidation covered its
+    /// credential, or when the reader lost or regained its place, may carry
+    /// the revoked value, so it is dropped and asked for once more. When that
+    /// one is overtaken too, the call fails with
+    /// [`ReleaseError::Invalidated`] and returns no value.
     pub async fn release(&self, release: &ReleaseRequest) -> Result<ReleasedValue, ReleaseError> {
         let key = ReleaseCacheKey::of(release);
+        if let Some(released) = self.held_or_fetched(release, &key).await? {
+            return Ok(released);
+        }
+        self.held_or_fetched(release, &key)
+            .await?
+            .ok_or(ReleaseError::Invalidated)
+    }
+
+    /// The copy held under `key`, or a release fetched now, or nothing when
+    /// that release was overtaken on its way.
+    async fn held_or_fetched(
+        &self,
+        release: &ReleaseRequest,
+        key: &ReleaseCacheKey,
+    ) -> Result<Option<ReleasedValue>, ReleaseError> {
         let ticket = {
             let mut cache = self.cache();
-            if let Some(held) = cache.get(&key, self.client.clock().system_time()) {
-                return Ok(held);
+            if let Some(held) = cache.get(key, self.client.clock().system_time()) {
+                return Ok(Some(held));
             }
             cache.ticket()
         };
         let released = self.client.release(release).await?;
-        self.cache()
-            .put(ticket, key, released.clone(), self.client.clock().system_time());
-        Ok(released)
+        let mut cache = self.cache();
+        if !cache.is_current(ticket, key) {
+            return Ok(None);
+        }
+        cache.put(ticket, key.clone(), released.clone(), self.client.clock().system_time());
+        Ok(Some(released))
     }
 
     /// Whether releases are held right now, or all asked for again because

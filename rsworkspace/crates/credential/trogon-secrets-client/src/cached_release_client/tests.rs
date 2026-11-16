@@ -1,16 +1,21 @@
 use std::time::{Duration, SystemTime};
 
+use tokio::task::JoinHandle;
+
 use trogon_credential_domain::{CredentialId, CredentialKey};
+use trogon_std::SecretString;
 
 use super::CachedReleaseClient;
 use crate::fixtures::{BUNDLE_GENERATION, CREDENTIAL_ID, VALUE, now, request, runtime_service, secret, tenant};
 use crate::{
     FakeOutcome, FakeSecretsService, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM, InvalidationStartError,
     InvalidationStep, ReleaseCacheMode, ReleaseClient, ReleaseClientConfig, ReleaseError, ReleaseRequest,
-    ScriptedInvalidations, SteppedClock, TenantAccount,
+    ReleasedValue, ScriptedInvalidations, SteppedClock, TenantAccount,
 };
 
 const OTHER_CREDENTIAL_ID: &str = "1c7e3a4f-8d2b-4a6c-9e01-2f3b4c5d6e7f";
+const REVOKED: &str = "fake-revoked-secret";
+const REPLY_DELAY: Duration = Duration::from_secs(1);
 
 type Client = CachedReleaseClient<FakeSecretsService, SteppedClock>;
 
@@ -22,6 +27,30 @@ fn releasing(fake: &FakeSecretsService, times: usize) {
     for _ in 0..times {
         fake.script(FakeOutcome::release(secret(), in_a_minute(), BUNDLE_GENERATION));
     }
+}
+
+/// Releases `value` only after [`REPLY_DELAY`], so a test can deliver a
+/// notice while the release is on its way.
+fn releasing_late(fake: &FakeSecretsService, value: &str) {
+    fake.script(
+        FakeOutcome::release(SecretString::new(value).unwrap(), in_a_minute(), BUNDLE_GENERATION).after(REPLY_DELAY),
+    );
+}
+
+/// Starts `asked` in the background and lets it reach the service.
+async fn releasing_in_background(
+    client: &Client,
+    asked: &ReleaseRequest,
+) -> JoinHandle<Result<ReleasedValue, ReleaseError>> {
+    let (client, asked) = (client.clone(), asked.clone());
+    let released = tokio::spawn(async move { client.release(&asked).await });
+    settle().await;
+    released
+}
+
+/// Lets a late reply in flight arrive.
+async fn reply() {
+    tokio::time::sleep(REPLY_DELAY).await;
 }
 
 fn notice_subject(tenant: &TenantAccount, credential_id: &str) -> String {
@@ -359,4 +388,82 @@ async fn asks_again_once_its_hold_passes_even_with_the_wall_clock_moved_back() {
     client.release(&asked).await.unwrap();
 
     assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn fails_closed_when_both_releases_are_invalidated_on_their_way() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, REVOKED);
+    releasing_late(&fake, REVOKED);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+    let subject = notice_subject(asked.tenant(), CREDENTIAL_ID);
+
+    let released = releasing_in_background(&client, &asked).await;
+    invalidations.notify(&subject);
+    reply().await;
+    invalidations.notify(&subject);
+    reply().await;
+    let refused = released.await.unwrap().unwrap_err();
+
+    assert!(matches!(refused, ReleaseError::Invalidated));
+    assert_eq!(refused.to_string(), "release was invalidated while it was on its way");
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn asks_again_when_the_credential_is_invalidated_while_its_release_is_on_its_way() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, REVOKED);
+    releasing(&fake, 1);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+
+    let released = releasing_in_background(&client, &asked).await;
+    invalidations.notify(&notice_subject(asked.tenant(), CREDENTIAL_ID));
+    reply().await;
+    let released = released.await.unwrap().unwrap();
+    let held = client.release(&asked).await.unwrap();
+
+    assert_eq!(released.value().as_str(), VALUE);
+    assert_eq!(held.value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn asks_again_when_its_reader_loses_its_place_while_a_release_is_on_its_way() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, REVOKED);
+    releasing(&fake, 1);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+
+    let released = releasing_in_background(&client, &asked).await;
+    invalidations.fail();
+    reply().await;
+
+    assert_eq!(released.await.unwrap().unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_a_release_on_its_way_when_a_notice_names_another_credential() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, VALUE);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+
+    let released = releasing_in_background(&client, &asked).await;
+    invalidations.notify(&notice_subject(asked.tenant(), OTHER_CREDENTIAL_ID));
+    reply().await;
+    let released = released.await.unwrap().unwrap();
+    let held = client.release(&asked).await.unwrap();
+
+    assert_eq!(released.value().as_str(), VALUE);
+    assert_eq!(held.value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 1);
 }

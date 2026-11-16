@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::SystemTime;
 
 use trogon_std::time::GetElapsed;
 
-use super::constants::RELEASE_HOLD_BOUND;
+use super::constants::{RECENT_INVALIDATIONS, RELEASE_HOLD_BOUND};
 use super::{CachedRelease, ReleaseCacheKey, ReleaseCacheMode, ReleaseInvalidation, ReleasedValue};
 
 /// The releases one client holds, bounded in count and in time.
@@ -15,15 +15,19 @@ use super::{CachedRelease, ReleaseCacheKey, ReleaseCacheMode, ReleaseInvalidatio
 /// after, so a wall clock stepped back cannot keep a copy serving past its
 /// hold.
 ///
-/// A release asked for before an invalidation, or before the reader lost its
-/// place, may be the value that invalidation dropped, so it is served but not
-/// held: every change bumps the epoch, and a release whose ticket names an
-/// older epoch is not kept.
+/// A release asked for before an invalidation that covers its key, or before
+/// the reader lost or regained its place, may be the value that change
+/// revoked, so it is neither held nor served. Every change bumps the epoch
+/// and is remembered, up to [`RECENT_INVALIDATIONS`] of them; a ticket names
+/// the epoch its release was asked for in, and it stays current only while
+/// every change since covers other keys. A ticket older than every change
+/// remembered is not current, since what it missed is no longer known.
 pub(crate) struct ReleaseCache<C: GetElapsed> {
     entries: BTreeMap<ReleaseCacheKey, CachedRelease<C::Instant>>,
     capacity: usize,
     clock: C,
     epoch: u64,
+    recent: VecDeque<Option<ReleaseInvalidation>>,
     mode: ReleaseCacheMode,
 }
 
@@ -34,6 +38,7 @@ impl<C: GetElapsed> ReleaseCache<C> {
             capacity,
             clock,
             epoch: 0,
+            recent: VecDeque::new(),
             mode: ReleaseCacheMode::Caching,
         }
     }
@@ -54,11 +59,25 @@ impl<C: GetElapsed> ReleaseCache<C> {
         self.epoch
     }
 
-    /// Holds `value` under `key` as it arrived at `now`, unless anything
-    /// changed since `ticket` was taken, its hold is over, or the cache is
-    /// full of copies that still serve.
+    /// Whether a release for `key` asked for at `ticket` may still be served:
+    /// nothing since covers `key`, the reader neither lost nor regained its
+    /// place, and every change since is still remembered.
+    pub(crate) fn is_current(&self, ticket: u64, key: &ReleaseCacheKey) -> bool {
+        let since = usize::try_from(self.epoch - ticket).unwrap_or(usize::MAX);
+        since <= self.recent.len()
+            && self
+                .recent
+                .iter()
+                .rev()
+                .take(since)
+                .all(|change| change.as_ref().is_some_and(|notice| !notice.covers(key)))
+    }
+
+    /// Holds `value` under `key` as it arrived at `now`, unless it is no
+    /// longer current for `ticket`, its hold is over, or the cache is full of
+    /// copies that still serve.
     pub(crate) fn put(&mut self, ticket: u64, key: ReleaseCacheKey, value: ReleasedValue, now: SystemTime) {
-        if self.mode == ReleaseCacheMode::Uncached || ticket != self.epoch {
+        if self.mode == ReleaseCacheMode::Uncached || !self.is_current(ticket, &key) {
             return;
         }
         let Ok(ttl) = value.hold_until().duration_since(now) else {
@@ -82,21 +101,31 @@ impl<C: GetElapsed> ReleaseCache<C> {
 
     /// Drops every copy `notice` covers.
     pub(crate) fn invalidate(&mut self, notice: &ReleaseInvalidation) {
-        self.epoch += 1;
         self.entries.retain(|key, _| !notice.covers(key));
+        self.change(Some(notice.clone()));
     }
 
     /// Drops every copy and holds none until [`ReleaseCache::resume`].
     pub(crate) fn suspend(&mut self) {
-        self.epoch += 1;
+        self.change(None);
         self.mode = ReleaseCacheMode::Uncached;
         self.entries.clear();
     }
 
     /// Holds releases again.
     pub(crate) fn resume(&mut self) {
-        self.epoch += 1;
+        self.change(None);
         self.mode = ReleaseCacheMode::Caching;
+    }
+
+    /// Bumps the epoch and remembers what changed: the notice, or `None` when
+    /// the reader lost or regained its place, which covers every key.
+    fn change(&mut self, notice: Option<ReleaseInvalidation>) {
+        self.epoch += 1;
+        self.recent.push_back(notice);
+        if self.recent.len() > RECENT_INVALIDATIONS {
+            self.recent.pop_front();
+        }
     }
 
     pub(crate) const fn mode(&self) -> ReleaseCacheMode {
