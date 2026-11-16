@@ -153,6 +153,7 @@ version = "0.1.0"
 dependencies = [
  "a2a-identity-types",
  "a2a-lf",
+ "a2a-nats",
  "a2a-pack",
  "async-nats",
  "async-trait",
