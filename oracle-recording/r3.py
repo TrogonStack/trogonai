@@ -1177,6 +1177,110 @@ def round5_windows_units():
     return out
 
 
+# Round 6, E'': the copy of the held reads in K3's form (key `x` under a `__proto__` wrap), whose class round 5 resolved
+# to 16 bytes on Linux. The text stays under the 8192 unit parse cache, so the nested read of hklm runs only the copy.
+HELD_COPY_ABOVE = (3, 1)
+REG6 = [
+    ("reg6:H5:held_hkcu:copy", "held_hkcu", "x", "copy", "a", HELD_COPY_ABOVE, "__proto__"),
+    ("reg6:H6:held_hklm:copy", "held_hklm", "x", "copy", "a", HELD_COPY_ABOVE, "__proto__"),
+]
+
+
+def round6_held_units():
+    return [(name, reg5_unit(place, key, which, major, above, wrap))
+            for name, place, key, which, major, above, wrap in REG6]
+
+
+# Round 6, XP: machineLoginPins reads the managed file again on a fresh store (XP, sdk.mjs 165:61413), which runs only
+# when the remote tier is present (165:66832). `src` reads the file without the remote tier, `xp` with it; the file
+# pins a login organization, so a read that runs out only at the XP frame drops the pin and keeps the file loaded.
+XP6_FORMS = {"walk": ("model", None, 1, "o"), "clone": ("model", None, 1, "a"), "copy": ("x", "__proto__", 2, "a")}
+XP6_PASSES = {"darwin arm64": ("walk", "clone"), "linux aarch64": ("walk", "copy"), "linux x86_64": ("walk", "copy")}
+XP6_WINDOWS_PASSES = ("walk", "clone")
+XP6_REMOTE = {"model": "remote"}
+
+
+def xp6_text(key, wrap, shape):
+    inner = deep(*shape)
+    if wrap is not None:
+        inner = '{"' + wrap + '":' + inner + "}"
+    return '{"forceLoginOrgUUID":"f","' + key + '":' + inner + "}"
+
+
+def xp6_answer(text, remote, flags, startup):
+    """The collapsed answer of a resolve whose managed file holds `text`, the rejection it surfaces, or None when the
+    run failed."""
+    name = unique("xp")
+    spec_path = MANAGED["prepare"](name, [["managed", text]])
+    try:
+        with open(spec_path, encoding="utf-8") as handle:
+            spec = json.load(handle)
+        if remote:
+            for case in spec["cases"]:
+                case["options"]["serverManagedSettings"] = XP6_REMOTE
+        with open(spec_path, "w", encoding="utf-8") as handle:
+            json.dump(spec, handle)
+        answered = run_spec(spec_path, flags or REF, startup)
+        if isinstance(answered, dict):
+            return dumps({"error": answered["rejected"]}) if "rejected" in answered else None
+        got, failure = project(answered, spec["root"])
+        return None if failure is not None else got
+    finally:
+        shutil.rmtree(os.path.join(MANAGED["FOLDER"], name), ignore_errors=True)
+        if os.path.exists(spec_path):
+            os.remove(spec_path)
+
+
+def xp6_fits(which, remote):
+    key, wrap, _, _ = XP6_FORMS[which]
+    references = {}
+
+    def fits(shape, flags, startup):
+        form = form_of(shape)
+        with REFERENCE_LOCK:
+            reference = references.get(form)
+        if reference is None:
+            reference = xp6_answer(xp6_text(key, wrap, form), remote, REF, STARTUP)
+            if reference is None or reference.startswith('{"error"'):
+                raise RuntimeError(f"the shallow form {form} has no answer: {reference}")
+            with REFERENCE_LOCK:
+                references[form] = reference
+        got = xp6_answer(xp6_text(key, wrap, shape), remote, flags, startup)
+        return None if got is None else got == reference
+    return fits
+
+
+def xp6_unit(which, remote):
+    key, wrap, above, major = XP6_FORMS[which]
+
+    def go(pool, quiet):
+        found = Search(pool, xp6_fits(which, remote), MODEL[HOST][which], above, major, REG5_LEAVES[which]).run()
+        found["above"] = above
+        if found.get("far"):
+            # Which read ran out past the class: the XP frame drops the pin and keeps the file loaded.
+            found["far_answer"] = xp6_answer(xp6_text(key, wrap, tuple(found["far"][0])), remote, REF, STARTUP)
+        return found
+    return go
+
+
+def xp6_windows_at(which, remote):
+    key, wrap, _, major = XP6_FORMS[which]
+
+    def at(level):
+        shape = (level, 0, "null_array") if major == "o" else (0, level, "null_array")
+        got = xp6_answer(xp6_text(key, wrap, shape), remote, REF, STARTUP)
+        return "fail" if got is None else got
+    return at
+
+
+def round6_xp_units():
+    if WINDOWS:
+        return [(f"xp6:{side}:{which}", transition_unit(xp6_windows_at(which, side == "xp"), passes=ROUND4_PASSES))
+                for which in XP6_WINDOWS_PASSES for side in ("src", "xp")]
+    return [(f"xp6:{side}:{which}", xp6_unit(which, side == "xp"))
+            for which in XP6_PASSES.get(HOST, ()) for side in ("src", "xp")]
+
+
 def units():
     out = [(f"proto:{o}", proto_unit(o)) for o in "ESOM"]
     if not WINDOWS:
@@ -1198,8 +1302,9 @@ def units():
         out += top_units() + registry_units()
         out += chain_units() + leaf_units() + windows_reg_units()
         out += round5_windows_units()
+        out += round6_xp_units()
     else:
-        out += unix_round4_units() + round5_unix_units()
+        out += unix_round4_units() + round5_unix_units() + round6_held_units() + round6_xp_units()
         profile = MANAGED["PROFILES"].get(HOST, {})
         out += [(f"key:{key}", key_unit(key, guess)) for key, guess in GUESSES.get(HOST, {}).items() if key not in profile]
         out += [(f"key:{key}", key_unit(key, guess, profile)) for key, guess in PASS_KEYS.get(HOST, {}).items()]

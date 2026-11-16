@@ -13,10 +13,14 @@ jobs:
       fail-fast: false
       matrix:
         host:
-          # Unix: the held clone with the text padded past the parse cache, to check its split against the walk's.
-          - { runner: macos-latest, label: darwin-arm64-pad, shards: 1, only: "^reg5:H[34]p:" }
-          - { runner: ubuntu-24.04-arm, label: linux-arm64-pad, shards: 1, only: "^reg5:H[34]p:" }
-          - { runner: ubuntu-latest, label: linux-x64-pad, shards: 1, only: "^reg5:H[34]p:" }
+          # Linux: the held copy in the form whose class resolves to 16 bytes, hkcu against hklm, for the nested frame.
+          - { runner: ubuntu-24.04-arm, label: linux-arm64-e2, shards: 1, only: "^reg6:H[56]:" }
+          - { runner: ubuntu-latest, label: linux-x64-e2, shards: 1, only: "^reg6:H[56]:" }
+          # Every host: the managed file read without and with the machine login re-read, for the XP frame.
+          - { runner: macos-latest, label: darwin-arm64-xp, shards: 1, only: "^xp6:" }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64-xp, shards: 1, only: "^xp6:" }
+          - { runner: ubuntu-latest, label: linux-x64-xp, shards: 1, only: "^xp6:" }
+          - { runner: windows-latest, label: windows-x64-xp, shards: 1, only: "^xp6:" }
         shard: [1]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360
@@ -80,7 +84,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: r5-${{ matrix.host.label }}-${{ matrix.shard }}
+          name: r6-${{ matrix.host.label }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 7
