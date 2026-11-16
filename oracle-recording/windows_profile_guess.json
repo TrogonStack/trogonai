@@ -1,0 +1,47 @@
+{
+  "main_merge": 1272,
+  "main_merge_arrays": 1197,
+  "main_read": [
+    50,
+    6000
+  ],
+  "main_read_arrays": 1833,
+  "drop_merge": 1272,
+  "drop_merge_arrays": 1197,
+  "drop_read": [
+    50,
+    6000
+  ],
+  "drop_read_arrays": 1833,
+  "admin_arrays": 1197,
+  "admin_inner": 1270,
+  "sources_copy": 1833,
+  "machine_merge": 1272,
+  "machine_copy": 1833,
+  "origin_drop": 1274,
+  "origin_read": [
+    50,
+    6000
+  ],
+  "machine_drop": 1274,
+  "machine_read": [
+    50,
+    6000
+  ],
+  "machine_after_held_array": 1271,
+  "machine_after_held_arrays": 1271,
+  "partial_drop": 1270,
+  "org_copy": [
+    1300,
+    2600
+  ],
+  "effective_copy": 1833,
+  "effective_ask": [
+    50,
+    6000
+  ],
+  "effective_ask_machine": [
+    50,
+    6000
+  ]
+}

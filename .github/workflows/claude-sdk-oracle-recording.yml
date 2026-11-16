@@ -1,0 +1,94 @@
+name: Claude SDK Oracle Recording
+
+on:
+  push:
+    branches: [yordis/chore-claude-sdk-oracle-recording]
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          # Unix: the registry reads resumed from a file request, each to its class, dealt over shards; on linux arm64
+          # also the pre-registered xp:tool top-up.
+          - { runner: macos-latest, label: darwin-arm64, shards: 3, only: "^reg5:" }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 2, only: "^reg5:" }
+          - { runner: ubuntu-latest, label: linux-x64, shards: 2, only: "^reg5:" }
+          # Windows: the chain clone edge at 1837 and 1838, and the empty object leaf walk into an object path.
+          - { runner: windows-latest, label: windows-x64, shards: 3, only: "^(chain5|eoleaf5):" }
+        shard: [1, 2, 3]
+        exclude:
+          - host: { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 2, only: "^reg5:" }
+            shard: 3
+          - host: { runner: ubuntu-latest, label: linux-x64, shards: 2, only: "^reg5:" }
+            shard: 3
+    runs-on: ${{ matrix.host.runner }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      LIB: rsworkspace/crates/platform/trogon-claude-agent-sdk/.config/mise/lib/claude-sdk-freshness
+      SHARD: ${{ matrix.shard }}
+      SHARDS: ${{ matrix.host.shards }}
+      R3_ONLY: ${{ matrix.host.only }}
+      R3_BAND_RUNS: "50"
+      R3_ROUND4_PASSES: "60"
+      R5_TOPUP_RUNS: "50"
+      R5_CHAIN_PASSES: "100"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.13.1
+
+      - name: Locate tools
+        run: |
+          {
+            if command -v python3 >/dev/null; then echo "PY=python3"; else echo "PY=python"; fi
+            echo "NODE_BIN=$(node -p 'process.execPath')"
+            echo "OUT=$RUNNER_TEMP/out"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/out"
+
+      - name: Describe the host
+        run: |
+          {
+            node -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8})'
+            "$PY" --version
+            uname -a || true
+          } | tee "$OUT/host.txt"
+
+      - name: Fetch the pinned package
+        run: |
+          "$PY" -I "$LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
+
+      - name: Build the Windows stand-ins
+        if: runner.os == 'Windows'
+        run: |
+          rustc --edition 2021 -O -o "$RUNNER_TEMP/stand_in.exe" oracle-recording/stand_in.rs
+          rustc --edition 2021 -O -o "$RUNNER_TEMP/registry_stand_in.exe" "$LIB/registry_stand_in.rs"
+          {
+            echo "STUB=$RUNNER_TEMP/stand_in.exe"
+            echo "REGISTRY_STAND_IN=$RUNNER_TEMP/registry_stand_in.exe"
+          } >> "$GITHUB_ENV"
+
+      - name: Find the registry classes, chain and leaf edges
+        run: |
+          "$PY" -I oracle-recording/r3.py "$LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/r3.json" "$SHARD" "$SHARDS" 2> >(tee "$OUT/r3.log" >&2)
+
+      - name: Keep the oracle output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: r5-${{ matrix.host.label }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 7
