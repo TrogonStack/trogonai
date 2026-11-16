@@ -22,10 +22,11 @@ use trogon_nats::mocks::MockError;
 use trogon_std::log_capture::{CapturedEvent, CapturedEvents, LevelFilter};
 use trogonai_proto::gateway::credentials::{CredentialEventCase, v1};
 
-use super::{InvalidationPublisher, retried};
+use super::InvalidationPublisher;
 use crate::constants::{INVALIDATION_PUBLISHER_ACK_WAIT, INVALIDATION_PUBLISHER_DURABLE, INVALIDATION_RETRY_DELAY};
 use crate::fixtures::credential_events::{activated, message, raw_message, revoked, rotated};
 use crate::fixtures::{OWNER, identity, tenant};
+use crate::listening_invalidation_publisher::retried;
 use crate::{
     CredentialEventDelivery, DeliveryInfoError, InvalidationNotice, InvalidationOutcome, InvalidationPublisherError,
     InvalidationSourceError, StaticTenantOwners, TenantAccount,
