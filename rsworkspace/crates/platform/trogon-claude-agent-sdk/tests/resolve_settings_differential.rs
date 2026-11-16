@@ -17,7 +17,7 @@ use std::{
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    PolicyRereads, ResolveSettingsOptions, ResolverState,
+    PolicyRereads, ResolveSettingsError, ResolveSettingsOptions, ResolverState,
     adapters::{EnvironmentVariable, ExecuteFile, ExecuteFileRequest, NativeHost, OperatingSystem},
     filter_escalating_default_mode, js_stringify, resolve_settings_with_state,
 };
@@ -211,13 +211,23 @@ fn rust_results(name: &str, spec: &Value, root: &Path) -> Vec<String> {
             writable: writable(spec, &root_text),
             durations: durations(step),
         };
-        let resolved = resolve_settings_with_state(&host, &options, &state).expect("resolve");
-        let filtered = filter_escalating_default_mode(&resolved);
         let label = if spec["steps"].is_array() {
             format!("{name}/{index}")
         } else {
             name.to_owned()
         };
+        let resolved = match resolve_settings_with_state(&host, &options, &state) {
+            Err(error @ ResolveSettingsError::MaximumCallStack) => {
+                // Upstream rejects with the `RangeError` V8 throws, which the oracle prints by name and message.
+                printed.push(js_stringify(&json!({
+                    "name": label,
+                    "error": {"name": "RangeError", "message": error.to_string()},
+                })));
+                continue;
+            }
+            outcome => outcome.expect("resolve"),
+        };
+        let filtered = filter_escalating_default_mode(&resolved);
         printed.push(js_stringify(&json!({
             "name": label,
             "result": serde_json::to_value(&resolved).expect("encode"),
@@ -244,6 +254,7 @@ fn oracle_results(package: &str, cases: &[(String, PathBuf, Value, PathBuf)]) ->
             "env": environment(&spec, &root_text),
             "process": spec["process"],
             "writable": writable(&spec, &root_text),
+            "rejections": true,
             "cases": steps(&spec).iter().enumerate().map(|(index, step)| {
                 let label = if spec["steps"].is_array() { format!("{name}/{index}") } else { name.clone() };
                 json!({
