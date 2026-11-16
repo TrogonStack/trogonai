@@ -120,18 +120,18 @@ fn the_subject_writes_each_dot_of_the_owner_as_a_tilde() {
 
     assert_eq!(
         notice.subject(),
-        "ADVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZW22.secrets.invalidation.v1.project~1.\
+        "secrets.invalidation.v1.ADVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZW22.project~1.\
          0f8fad5b-d9cb-469f-a165-70867728950e"
     );
 }
 
 #[test]
-fn the_subject_names_the_holding_tenant_then_the_owner_then_the_credential() {
+fn the_subject_names_the_holding_tenant_after_the_prefix_then_the_owner_then_the_credential() {
     let notice = notice("project-1", InvalidationReason::Revoked);
 
     assert_eq!(
         notice.subject(),
-        "ADVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZW22.secrets.invalidation.v1.project-1.\
+        "secrets.invalidation.v1.ADVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZW22.project-1.\
          0f8fad5b-d9cb-469f-a165-70867728950e"
     );
 }

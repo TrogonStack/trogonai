@@ -63,7 +63,7 @@ impl InvalidationNotice {
         };
         Ok(Self {
             subject: format!(
-                "{tenant}.{INVALIDATION_SUBJECT_INFIX}.{}.{}",
+                "{INVALIDATION_SUBJECT_INFIX}.{tenant}.{}.{}",
                 token.as_str(),
                 credential.credential_id()
             ),
@@ -73,7 +73,7 @@ impl InvalidationNotice {
     }
 
     /// The subject to publish on:
-    /// `{tenant}.secrets.invalidation.v1.{owner_token}.{credential_id}`.
+    /// `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`.
     pub fn subject(&self) -> &str {
         &self.subject
     }

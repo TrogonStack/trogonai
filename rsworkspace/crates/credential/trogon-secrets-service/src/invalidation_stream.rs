@@ -3,10 +3,10 @@
 //! keeps it.
 //!
 //! [`INVALIDATION_STREAM`] takes every tenant's notices on
-//! [`INVALIDATION_SUBJECTS`]. The first token of a notice subject is the
+//! [`INVALIDATION_SUBJECTS`]. The fourth token of a notice subject is the
 //! account of the tenant holding the credential's owner, so an account imports
-//! only its own (ADR#0081 Decision 3). A notice carries metadata, never a value
-//! (ADR#0023 Decision 3).
+//! only its own (ADR#0081 Decision 3 amendment). A notice carries metadata,
+//! never a value (ADR#0023 Decision 3).
 //!
 //! # What an existing stream must keep
 //!

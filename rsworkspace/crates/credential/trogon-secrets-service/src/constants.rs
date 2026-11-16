@@ -83,11 +83,14 @@ pub const INVALIDATION_REPLAY_WINDOW: Duration = RELEASE_TTL_BOUND.saturating_ad
 pub const INVALIDATION_STREAM: &str = "SECRETS_INVALIDATION";
 
 /// The subjects of [`INVALIDATION_STREAM`]: every tenant's notices, the tenant
-/// account first so each account imports only its own (ADR#0081 Decision 3).
-pub const INVALIDATION_SUBJECTS: &str = "*.secrets.invalidation.v1.>";
+/// account in the fourth token so each account imports only its own. The
+/// literal prefix comes first because the server refuses a stream subject
+/// that starts with a wildcard unless it drops publish acks (ADR#0081
+/// Decision 3 amendment).
+pub const INVALIDATION_SUBJECTS: &str = "secrets.invalidation.v1.*.>";
 
-/// What follows the tenant account in a notice subject, before the owner
-/// token and the credential id.
+/// What precedes the tenant account in a notice subject, which the owner
+/// token and the credential id follow.
 pub(crate) const INVALIDATION_SUBJECT_INFIX: &str = "secrets.invalidation.v1";
 
 /// How long the invalidation stream keeps a notice: the hour ADR#0083
