@@ -202,7 +202,7 @@ fn nats(wire: NatsSectionWire, args: &ServiceArgs, env: &impl ReadEnv) -> Result
 
 /// The value of `setting`'s environment variable, when it is set and not
 /// empty.
-fn env_value(env: &impl ReadEnv, setting: ConfigSetting) -> Result<Option<String>, ServiceConfigError> {
+pub(crate) fn env_value(env: &impl ReadEnv, setting: ConfigSetting) -> Result<Option<String>, ServiceConfigError> {
     match env.var(setting.env()) {
         Ok(value) if !value.is_empty() => Ok(Some(value)),
         Ok(_) | Err(VarError::NotPresent) => Ok(None),

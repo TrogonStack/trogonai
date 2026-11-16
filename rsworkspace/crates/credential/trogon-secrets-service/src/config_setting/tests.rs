@@ -69,3 +69,42 @@ fn a_setting_only_the_environment_may_hold_reads_as_its_variable() {
         assert_eq!(format!("{setting}"), named);
     }
 }
+
+#[test]
+fn every_setting_is_listed_once_in_the_order_it_is_declared() {
+    // A setting added to the enum fails to compile here until it is given its
+    // place, and then fails below until it is listed.
+    let declared = |setting| match setting {
+        ConfigSetting::NatsUrl => 0,
+        ConfigSetting::NatsCreds => 1,
+        ConfigSetting::NatsNkey => 2,
+        ConfigSetting::NatsUser => 3,
+        ConfigSetting::NatsPassword => 4,
+        ConfigSetting::NatsToken => 5,
+        ConfigSetting::NatsJwt => 6,
+        ConfigSetting::NatsSeed => 7,
+        ConfigSetting::NatsTlsCert => 8,
+        ConfigSetting::NatsTlsKey => 9,
+        ConfigSetting::NatsTlsCa => 10,
+        ConfigSetting::NatsTlsDisabled => 11,
+        ConfigSetting::OpenBaoAddress => 12,
+        ConfigSetting::OpenBaoTlsDisabled => 13,
+        ConfigSetting::OpenBaoMount => 14,
+        ConfigSetting::OpenBaoRoleId => 15,
+        ConfigSetting::OpenBaoSecretIdFile => 16,
+        ConfigSetting::OpenBaoChildTokenRole => 17,
+        ConfigSetting::OpenBaoChildTokenPolicy => 18,
+        ConfigSetting::TenantOwnersFile => 19,
+        ConfigSetting::ReleasePoliciesFile => 20,
+        ConfigSetting::XkeySeed => 21,
+        ConfigSetting::CredentialStream => 22,
+        ConfigSetting::AdmissionLimit => 23,
+        ConfigSetting::AuditTenant => 24,
+        ConfigSetting::AuditProject => 25,
+        ConfigSetting::AuditInstance => 26,
+    };
+
+    for (position, setting) in ConfigSetting::ALL.into_iter().enumerate() {
+        assert_eq!(declared(setting), position, "{setting}");
+    }
+}

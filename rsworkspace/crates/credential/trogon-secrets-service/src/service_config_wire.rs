@@ -12,7 +12,7 @@ use super::{ServiceConfigError, TomlSyntax};
 /// The configuration file as written. Every section may be left out, and a
 /// key no section defines is refused rather than ignored, so a misspelt
 /// setting cannot fall back to its default unnoticed (ADR#0007).
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct ServiceConfigWire {
     pub(crate) nats: NatsSectionWire,

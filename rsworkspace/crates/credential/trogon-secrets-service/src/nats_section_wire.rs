@@ -5,7 +5,7 @@ use serde::Deserialize;
 /// The authentication secrets are read as any TOML value, so a secret written
 /// as a number or a table is refused by this crate, which never quotes it,
 /// rather than by a type error that would.
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct NatsSectionWire {
     pub(crate) url: Option<String>,
