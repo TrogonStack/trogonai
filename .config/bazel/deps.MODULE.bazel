@@ -1,6 +1,11 @@
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_rust", version = "0.75.0")
+
+# Build scripts that the coverage instrumentation filter excludes still compile
+# their C code with coverage, which embeds timestamps and changes every
+# downstream Rust cache key. Not reported upstream yet; drop the patch once
+# rules_rust skips coverage for uninstrumented build scripts.
 single_version_override(
     module_name = "rules_rust",
     patch_strip = 1,
@@ -78,7 +83,12 @@ kubernetes_json_schema(
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 
-# The runner expands ${pwd}; rules_rust appends these to the C toolchain flags.
+# C code compiled by build scripts embeds the sandbox path, which differs per
+# run, so downstream Rust cache keys never matched. The runner expands ${pwd};
+# rules_rust appends these to the C toolchain flags. Drop this once rules_rust
+# ships the same remapping:
+# https://github.com/bazelbuild/rules_rust/issues/4407
+# https://github.com/bazelbuild/rules_rust/pull/4408
 crate.annotation(
     build_script_env = {
         "CFLAGS": "-ffile-prefix-map=$${pwd}=.",
