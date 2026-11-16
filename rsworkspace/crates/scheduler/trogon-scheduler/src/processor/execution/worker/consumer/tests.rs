@@ -20,6 +20,7 @@ impl NatsServer {
         let cmd = NatsServerCmd::default().with_jetstream();
         let container = Nats::default()
             .with_cmd(&cmd)
+            .with_tag("2.14.2-alpine")
             .start()
             .await
             .expect("start NATS testcontainer for JetStream unit tests");

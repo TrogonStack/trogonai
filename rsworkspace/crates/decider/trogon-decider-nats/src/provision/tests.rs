@@ -82,11 +82,8 @@ async fn ensure_stream_rejects_retention_mismatch() {
 async fn ensure_stream_rejects_allow_atomic_publish_mismatch() {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;
-    // NATS 2.10 (the testcontainer server version) does not persist
-    // `allow_atomic_publish`, so it always round-trips as `false` regardless
-    // of what is requested at creation. Creating with the (honored) default
-    // of `false` and then requiring `true` still exercises the mismatch
-    // path without depending on the server actually storing `true`.
+    // Creating with `false` and then requiring `true` exercises the
+    // mismatch path without depending on the server storing `true`.
     let mut config = stream_config("ATOMIC_STREAM", "atomic.stream.>");
     config.allow_atomic_publish = false;
     ensure_stream(&js, config.clone()).await.expect("create stream");

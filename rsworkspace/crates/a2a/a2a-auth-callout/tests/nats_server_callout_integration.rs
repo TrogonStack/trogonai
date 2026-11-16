@@ -65,7 +65,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const NATS_IMAGE: &str = "nats";
-const NATS_TAG: &str = "2.14.1";
+const NATS_TAG: &str = "2.14.2-alpine";
 const NATS_CLIENT_PORT: u16 = 4222;
 const NATS_CONFIG_ROOT: &str = "/etc/nats";
 const AUTH_CALLOUT_SUBJECT: &str = "$SYS.REQ.USER.AUTH";

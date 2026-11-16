@@ -2,7 +2,6 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 
 pub async fn start() -> (ContainerAsync<Nats>, async_nats::Client) {
-    // Scheduler command writes require atomic publish, absent from the shared fixture's NATS 2.10.
     let container = Nats::default()
         .with_cmd(&NatsServerCmd::default().with_jetstream())
         .with_tag("2.14.2-alpine")
