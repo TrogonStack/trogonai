@@ -1,0 +1,13 @@
+{
+  "platform": "linux",
+  "env": {},
+  "padded": {
+    "home/.claude/settings.json": 2097152
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [
+      "user"
+    ]
+  }
+}

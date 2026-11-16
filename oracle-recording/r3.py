@@ -1546,6 +1546,514 @@ def round7_units():
     return out
 
 
+# ---- round 8: the parent and remote managed settings (pm), the item 4 recordings and the parse cache order ----
+# pm (sdk.mjs 165:30296) clones (j7e Tr), walks (cm) and schema-reads the document a host passes in on a miss and
+# copies it (oX) on every call. The traced copy adds log-only hooks: each pm call (hit or miss, the label and the
+# parse object's first-seen id), the clone, walk, schema and copy stages, the parse (hm), and each Ya read (sdk.mjs
+# 165 `let r=t.length>CYe?...`): uncached past 8192 units, or a hit or miss of the 50 entry LRU with the resident keys
+# most recent first, as text ids in order of first appearance.
+R8_TRACE_FUNCTIONS = (
+    'function __tw(o){try{const f=process.env.TRACE_LOG;if(f){process.getBuiltinModule("fs").appendFileSync(f,'
+    'JSON.stringify(o)+"\\n")}}catch(q){}}'
+    'function __tr(t,k,v,b){try{__tw({label:String(t),stage:k,info:b?null:__ti(v)})}catch(q){}return v}'
+    'function __ti(v){const s=v&&typeof v==="object"&&"loadState" in v?v.settings:v;if(!s||typeof s!=="object")'
+    'return{settings:null};const out={keys:Object.keys(s)};if(Object.prototype.hasOwnProperty.call(s,"x")){const x=s.x;'
+    'const d=x&&typeof x==="object"?Object.getOwnPropertyDescriptor(x,"__proto__"):undefined;let j=null;'
+    'try{j=JSON.stringify(x)}catch(q){}out.x={json:j,protoOwn:!!d,protoData:!!d&&"value" in d,protoEnumerable:'
+    '!!d&&d.enumerable,plainPrototype:x!==null&&typeof x==="object"&&Object.getPrototypeOf(x)===Object.prototype}}'
+    'return out}'
+    'function __pe(t,e,h){try{const w=globalThis.__pmIds||(globalThis.__pmIds=new WeakMap);let i=w.get(e);'
+    'if(i===undefined){i=globalThis.__pmNext||0;globalThis.__pmNext=i+1;w.set(e,i)}'
+    '__tw({pm:h?"hit":"miss",label:String(t),object:i})}catch(q){}}'
+    'function __yi(t){const m=globalThis.__yaIds||(globalThis.__yaIds=new Map);let i=m.get(t);'
+    'if(i===undefined){i=m.size;m.set(t,i)}return i}'
+    'function __ye(k,t){try{const l=globalThis.__yaLru;const id=__yi(t);'
+    '__tw({ya:k,id,length:t.length,resident:l?[...l.keys()].map(__yi):null})}catch(q){}}'
+)
+R8_PATCHES = [
+    ("function pm(e,t){let n=sX.get(e),r=n?.get(t);if(r)return oX(r);",
+     R8_TRACE_FUNCTIONS + 'function pm(e,t){let n=sX.get(e),r=n?.get(t);__pe(t,e,!!r);if(r)return __tr(t,"copy-hit",oX(r));'),
+    ("return oX(o)}", 'return __tr(t,"copy",oX(o))}'),
+    ("function j7e(e,t){let n=Tr(e),", 'function j7e(e,t){let n=__tr(t,"clone",Tr(e)),'),
+    ("r=cm(n,t,{skipMcpServerEntryFilter:!0,policySource:!0}),",
+     'r=__tr(t,"walk",cm(n,t,{skipMcpServerEntryFilter:!0,policySource:!0}),!0),'),
+    ("cP(CX(t,o),t,n).safeParse(n);", 'cP(CX(t,o),t,n).safeParse(n);__tr(t,"schema",s.success?s.data:null);'),
+    ("function hm(e,t,{userWritable:n=!1}={}){let r=Ya(e,!1);",
+     'function hm(e,t,{userWritable:n=!1}={}){let r=__tr(t,"parse",Ya(e,!1));'),
+    ("let r=new Gy({max:n}),o=", "let r=new Gy({max:n});if(e===u4)globalThis.__yaLru=r;let o="),
+    ("let r=t.length>CYe?u4(t,n):c4.parse(t,n);",
+     'let r;if(t.length>CYe){r=u4(t,n);__ye("uncached",t)}else{const h=c4.cache.has(t);r=c4.parse(t,n);'
+     '__ye(h?"hit":"miss",t)}'),
+]
+R8_STATE, R8_LOCK = {}, __import__("threading").Lock()
+R8_LABELS = {"parent": ("managedSettings", "parent managed settings"),
+             "remote": ("serverManagedSettings", "remote managed settings")}
+R8_SHALLOW = '{"x":{"__proto__":[[null]]},"model":"m"}'
+# name: (key, wrap, pass, major, above)
+R8_PASSES = {"walk": ("model", None, "walk", "o", 1), "clone": ("model", None, "clone", "a", 1),
+             "copy": ("x", "__proto__", "copy", "a", 2)}
+# The stage the far shape must stop at: both the object-major (walk) and the array-major (clone) forms overflow
+# inside the j7e structuredClone, which runs before the walk; the copy overflows after the schema read.
+R8_ATTRIBUTION = {"walk": (None, "clone"), "clone": (None, "clone"), "copy": ("schema", "copy")}
+
+
+def r8_traced():
+    with R8_LOCK:
+        if "traced" not in R8_STATE:
+            target = os.path.join(os.path.dirname(OUT), "package-traced8")
+            shutil.rmtree(target, ignore_errors=True)
+            shutil.copytree(PACKAGE, target)
+            bundle = os.path.join(target, "sdk.mjs")
+            with open(bundle, encoding="utf-8") as handle:
+                text = handle.read()
+            counts = {anchor: text.count(anchor) for anchor, _ in R8_PATCHES}
+            if any(count != 1 for count in counts.values()):
+                R8_STATE["traced"] = {"error": "an anchor does not occur exactly once", "counts": counts}
+            else:
+                for anchor, replacement in R8_PATCHES:
+                    text = text.replace(anchor, replacement)
+                with open(bundle, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(text)
+                R8_STATE["traced"] = {"package": target, "pinned_sha256": r7_sha256(os.path.join(PACKAGE, "sdk.mjs")),
+                                      "traced_sha256": r7_sha256(bundle)}
+        return R8_STATE["traced"]
+
+
+def r8_text(which, shape):
+    key, wrap = R8_PASSES[which][:2]
+    return '{"' + key + '":' + reg5_text(shape, wrap) + "}"
+
+
+def r8_spec(label, document, root):
+    """A spec whose one case passes `document` (spliced as text: Python's json would recurse through it) as the
+    parent or remote managed settings."""
+    for folder in ("home/.claude", "work"):
+        os.makedirs(os.path.join(root, folder), exist_ok=True)
+    write(os.path.join(root, "home/.claude/settings.json"), '{"u":[null]}')
+    spec = {"root": root, "platform": "linux", "env": {"HOME": os.path.join(root, "home")}, "deep": True,
+            "cases": [{"name": "case", "options": {"cwd": os.path.join(root, "work"), R8_LABELS[label][0]: "@DOC@"}}]}
+    text = json.dumps(spec)
+    if text.count('"@DOC@"') != 1:
+        raise RuntimeError("the spec holds the document placeholder more than once")
+    return text.replace('"@DOC@"', document)
+
+
+def r8_run(package, label, document, flags, startup, trace=None):
+    """The collapsed answer of one run, the rejection it surfaces, or None when the run failed; with `trace`, the
+    traced records too."""
+    root = os.path.join(D["SCRATCH"], unique("m"))
+    spec_path = root + ".json"
+    try:
+        with open(spec_path, "w", encoding="utf-8") as handle:
+            handle.write(r8_spec(label, document, root))
+        command = [NODE, *flags, MANAGED["ORACLE"], package, spec_path]
+        env = {"PAD": "x" * MANAGED["pad"](command, startup), **D["EXTRA_ENV"]}
+        if trace is not None:
+            env["TRACE_LOG"] = trace
+            if os.path.exists(trace):
+                os.remove(trace)
+        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=600)
+        stdout, stderr = process.stdout.decode("utf-8", "replace"), process.stderr.decode("utf-8", "replace")
+        if process.returncode != 0:
+            found = re.search(r"^(\w*Error): (.*)$", stderr.replace("\r\n", "\n"), re.M)
+            answer = dumps({"error": found.group(1) + ": " + found.group(2)[:200]}) if found else None
+        else:
+            answer, failure = project(json.loads(stdout), root)
+            answer = None if failure is not None else answer
+        raw = (process.returncode, stdout.replace(root, "R"), stderr.replace(root, "R")[-600:])
+        return answer, raw
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        if os.path.exists(spec_path):
+            os.remove(spec_path)
+
+
+def r8_records(trace):
+    if not os.path.exists(trace):
+        return []
+    with open(trace, encoding="utf-8") as handle:
+        records = [json.loads(line) for line in handle if line.strip()]
+    os.remove(trace)
+    return records
+
+
+def r8_control(label):
+    """Whether the shallow document reaches the clone, walk, schema read and copy of `label` with `x` an own data
+    `__proto__` on a plain object, and the pinned and traced packages print the same."""
+    traced = r8_traced()
+    if "error" in traced:
+        return False, traced
+    trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
+    _, pinned = r8_run(PACKAGE, label, R8_SHALLOW, REF, STARTUP)
+    _, instrumented = r8_run(traced["package"], label, R8_SHALLOW, REF, STARTUP, trace)
+    records = r8_records(trace)
+    name = R8_LABELS[label][1]
+    mine = [record for record in records if record.get("label") == name]
+
+    def shows(record):
+        x = (record.get("info") or {}).get("x")
+        return bool(x) and x["json"] == '{"__proto__":[[null]]}' and x["protoOwn"] and x["protoData"] \
+            and x["plainPrototype"]
+
+    stages = {stage: [shows(r) for r in mine if r.get("stage") == stage] for stage in ("clone", "schema", "copy", "copy-hit")}
+    calls = [r["pm"] for r in records if r.get("label") == name and "pm" in r]
+    walked = [r for r in mine if r.get("stage") == "walk"]
+    detail = {"identical": pinned[0] == 0 and pinned == instrumented, "pinned_exit": pinned[0],
+              "instrumented_exit": instrumented[0], "stderr": instrumented[2] if instrumented[0] else "",
+              "stages": stages, "walk": len(walked), "calls": calls, "records": records[:60],
+              "answer": pinned[1][:4000], **{k: v for k, v in traced.items() if k != "package"}}
+    passed = (detail["identical"] and all(stages[s] and all(stages[s]) for s in ("clone", "schema", "copy"))
+              and all(stages["copy-hit"]) and len(walked) == 1 and calls[:1] == ["miss"])
+    return passed, detail
+
+
+def r8_fits(label, which):
+    references = {}
+
+    def fits(shape, flags, startup):
+        form = form_of(shape)
+        with REFERENCE_LOCK:
+            reference = references.get(form)
+        if reference is None:
+            reference = r8_run(PACKAGE, label, r8_text(which, form), REF, STARTUP)[0]
+            if reference is None or reference.startswith('{"error"'):
+                raise RuntimeError(f"the shallow form {form} has no answer: {reference}")
+            with REFERENCE_LOCK:
+                references[form] = reference
+        got = r8_run(PACKAGE, label, r8_text(which, shape), flags, startup)[0]
+        return None if got is None else got == reference
+    return fits
+
+
+def r8_attribution(label, which, shape):
+    """The stages the traced package reached for `label` at a shape past the edge, and whether they match the pass."""
+    traced = r8_traced()
+    trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
+    answer, raw = r8_run(traced["package"], label, r8_text(which, shape), REF, STARTUP, trace)
+    records = r8_records(trace)
+    name = R8_LABELS[label][1]
+    stages = [r.get("stage") or ("pm:" + r["pm"]) for r in records if r.get("label") == name]
+    present, missing = R8_ATTRIBUTION[which]
+    matches = (present is None or present in stages) and missing not in stages
+    return {"answer": answer, "stages": stages, "matches": matches, "exit": raw[0]}
+
+
+def pm8_unit(label, which):
+    def go(pool, quiet):
+        visible, detail = r8_control(label)
+        if not visible:
+            return {"error": "the control does not show the document reaching every stage", "control": detail}
+        _, _, model_pass, major, above = R8_PASSES[which]
+        found = Search(pool, r8_fits(label, which), MODEL[HOST][model_pass], above, major,
+                       REG5_LEAVES[model_pass]).run()
+        found["above"] = above
+        found["control"] = detail
+        if "class" in found:
+            found["room_at_class"] = found["class"] - prefix(MODEL[HOST][model_pass], above)
+        if found.get("far"):
+            far = tuple(found["far"][0])
+            found["far_answer"] = r8_run(PACKAGE, label, r8_text(which, far), REF, STARTUP)[0]
+            found["attribution"] = r8_attribution(label, which, far)
+            if not (found["far_answer"] or "").startswith('{"error":"RangeError'):
+                found["error"] = "the far answer is not the uncaught RangeError"
+            elif not found["attribution"]["matches"]:
+                found["error"] = "the far shape stops at a different stage"
+        return found
+    return go
+
+
+def r8_record(name, package, trace=None):
+    """r7_record with the `padded` step of the Rust harness: each listed file grows to exactly that many bytes with
+    trailing ASCII spaces."""
+    with open(os.path.join(R7_FIXTURES, name, "case.json"), encoding="utf-8") as handle:
+        spec = json.load(handle)
+    scratch = tempfile.mkdtemp(prefix="f")
+    root = os.path.join(scratch, name)
+    try:
+        r7_copy_tree(os.path.join(R7_FIXTURES, name, "tree"), root)
+        os.makedirs(os.path.join(root, "work"), exist_ok=True)
+        os.makedirs(os.path.join(root, "home"), exist_ok=True)
+        for relative, size in sorted((spec.get("padded") or {}).items()):
+            location = os.path.join(root, relative)
+            have = os.path.getsize(location)
+            if have >= size:
+                return {"error": f"{relative} already holds {have} bytes, not fewer than {size}"}
+            with open(location, "ab") as handle:
+                handle.write(b" " * (size - have))
+        env = {variable: None for variable in R7_SCRUBBED}
+        env["HOME"] = root + "/home"
+        for variable, value in (spec.get("env") or {}).items():
+            env[variable] = value.replace("$ROOT", root) if isinstance(value, str) else None
+        stepped = isinstance(spec.get("steps"), list)
+        steps = spec["steps"] if stepped else [{}]
+        document = {
+            "root": root, "platform": spec.get("platform"), "env": dict(sorted(env.items())),
+            "process": spec.get("process"),
+            "writable": dict(sorted((path.replace("$ROOT", root), answer)
+                                    for path, answer in (spec.get("writable") or {}).items())),
+            "rejections": True,
+            "cases": [{"name": f"{name}/{index}" if stepped else name, "at": step.get("at"), "files": step.get("files"),
+                       "durations": step.get("durations") or {}, "options": r7_substitute(spec["options"], root)}
+                      for index, step in enumerate(steps)],
+        }
+        spec_path = os.path.join(scratch, name + ".json")
+        with open(spec_path, "w", encoding="utf-8") as handle:
+            json.dump(document, handle)
+        env = dict(os.environ)
+        env.pop("TRACE_LOG", None)
+        if trace is not None:
+            env["TRACE_LOG"] = trace
+        code, stdout, stderr = r7_oracle(package, spec_path, env)
+        if code != 0:
+            return {"error": "the oracle failed", "stderr": stderr.replace(root, "$ROOT")}
+        expected = stdout.replace(root, "$ROOT").rstrip()
+        return {"expected": expected, "sha256": __import__("hashlib").sha256(expected.encode()).hexdigest()}
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+R8_FIXTURES = ("fm_user_file_at_limit", "fm_user_file_over_limit", "fm_managed_file_at_limit",
+               "fm_managed_file_over_limit", "fm_wsl_windows_side_at_limit", "fm_wsl_windows_side_over_limit",
+               "fm_wsl_user_registry_probe_at_limit", "fm_wsl_user_registry_probe_over_limit", "parent_own_proto",
+               "remote_own_proto")
+R8_EVICTION = "org_held_registry_parse_cache_order"
+
+
+def rec8_fixture(name, events=False):
+    """The fixture's expected.json from the pinned package, the same text from the traced copy, and with `events`
+    the traced pm and Ya events, which the Rust parse cache log must equal."""
+    def go(pool, quiet):
+        traced = r8_traced()
+        if "error" in traced:
+            return {"error": "the traced copy failed", "traced": traced}
+        pinned = r8_record(name, PACKAGE)
+        trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
+        os.makedirs(D["SCRATCH"], exist_ok=True)
+        instrumented = r8_record(name, traced["package"], trace)
+        records = r8_records(trace)
+        out = {**pinned, "identical": pinned == instrumented}
+        if "error" in pinned or "error" in instrumented:
+            out["error"] = "a recording failed"
+            out["instrumented"] = instrumented
+        elif not out["identical"]:
+            out["error"] = "the traced copy printed a different answer"
+            out["instrumented"] = instrumented
+        if events:
+            kept = [r for r in records if "ya" in r or "pm" in r]
+            text = "".join(json.dumps(r, separators=(",", ":"), sort_keys=True) + "\n" for r in kept)
+            out["events"] = text
+            out["events_sha256"] = __import__("hashlib").sha256(text.encode()).hexdigest()
+            out["evictions"] = sum(1 for a, b in zip(kept, kept[1:])
+                                   if "ya" in a and "ya" in b and a["resident"] and b["resident"]
+                                   and set(a["resident"]) - set(b["resident"]))
+            if out["evictions"] == 0 and "error" not in out:
+                out["error"] = "the parse cache never evicted"
+        return out
+    return go
+
+
+def r8_instrument_unit():
+    def go(pool, quiet):
+        traced = r8_traced()
+        return {k: v for k, v in traced.items() if k != "package"}
+    return go
+
+
+# ---- mg8: the managed goldens ----
+MG8_PORT = os.path.join(HERE, "ts_managed_settings_goldens_r8.py")
+MG8_PREVIOUS = {"darwin arm64": "ts_managed_settings.json", "linux aarch64": "ts_managed_settings_linux_arm64.json",
+                "linux x86_64": "ts_managed_settings_linux_x64.json"}
+MG8_HOSTS = {"darwin arm64": "darwin arm64, GitHub Actions macos-latest runner, native",
+             "linux aarch64": "linux aarch64, GitHub Actions ubuntu-24.04-arm runner, native",
+             "linux x86_64": "linux x86_64, GitHub Actions ubuntu-latest runner, native"}
+# The keys this job locates: each one's range must hold the edge on every host, and the first answer change in it
+# is the edge (the answers only lose members as the level grows).
+MG8_LOCATE = {"xp_login": [600, 4000], "org_cache_split": [600, 4000], "org_cache_kept": [600, 4000],
+              "org_cache_hit": [600, 4000]}
+MG8_WINDOW = 30
+MG8_OBSERVE_RUNS = 25
+MG8_OLD_FIELDS = ("files", "effective", "exact", "machine_policy", "error")
+MG8_ANSWERS = ("effective", "exact", "machine_policy", "managed_source", "error")
+
+
+def mg8_port():
+    """The round 8 recorder as a namespace: everything above its run, with no cases chosen yet."""
+    with open(MG8_PORT, encoding="utf-8") as handle:
+        source = handle.read()
+    source = source[: source.index("version = subprocess.run(")]
+    cut, end = source.index('TARGET = f"'), source.index("\n\n\ndef text(")
+    source = source[:cut] + "CASES = []" + source[end:]
+    saved = sys.argv
+    sys.argv = [MG8_PORT, NODE, PACKAGE, os.path.join(D["SCRATCH"], "mg8.json")]
+    port = {"__name__": "mg8_port", "__file__": MG8_PORT}
+    try:
+        exec(compile(source, MG8_PORT, "exec"), port)
+    finally:
+        sys.argv = saved
+    port["ORACLE"] = MANAGED["ORACLE"]
+    return port
+
+
+def mg8_collapse(answer):
+    text = json.dumps(answer)
+    text = re.sub(r'(?:\{\\"x\\":){2,}', '{\\"x\\":*', text)
+    text = re.sub(r"(?:\}){3,}", "}*", text)
+    text = re.sub(r"\[{3,}", "[*", text)
+    return re.sub(r"\]{3,}", "]*", text)
+
+
+def mg8_case_at(port, key, level):
+    """The near case the group of `key` makes at `level`."""
+    group = next(make for keys, make in port["GROUPS"] if keys == key)
+    return group(level)[0]
+
+
+def mg8_locate(pool, port, key):
+    low, high = MG8_LOCATE[key]
+
+    def at(level, flags=REF):
+        case_name, files = mg8_case_at(port, key, level)[:2]
+        name = case_name.rsplit("_", 1)[0] + "_" + unique("g")
+        try:
+            return mg8_collapse(port["run"](port["prepare"](name, files), flags))
+        except SystemExit:
+            return "fail"
+        finally:
+            shutil.rmtree(os.path.join(port["FOLDER"], name), ignore_errors=True)
+
+    reference_answer, top = at(low), at(high)
+    if "fail" in (reference_answer, top) or top == reference_answer:
+        return {"error": f"no change between {low} and {high}", "at_low": reference_answer[:2000], "at_high": top[:2000]}
+    while high - low > 1:
+        middle = (low + high) // 2
+        if at(middle) == reference_answer:
+            low = middle
+        else:
+            high = middle
+    levels = list(range(low - MG8_WINDOW, low + MG8_WINDOW + 1))
+    answered = dict(zip(levels, pool.map(at, levels)))
+    changes = [level for level in levels[:-1] if answered[level] != answered[level + 1]]
+    checks = {str(level): [at(level, CROSS) == answered[level], at(level + 1, CROSS) == answered[level + 1]]
+              for level in changes}
+    found = {"level": low, "changes": changes, "checks": checks,
+             "answers": {str(level): answered[level][:3000] for level in sorted({*changes, *(c + 1 for c in changes)})}}
+    if "fail" in answered.values():
+        found["error"] = "a level of the window failed"
+    elif not changes or changes[0] != low:
+        found["error"] = "the first change in the window is not the located level"
+    elif not all(all(pair) for pair in checks.values()):
+        found["error"] = "the cross-check flags answer otherwise at a change"
+    return found
+
+
+def mg8_old_gate(entries):
+    """Every committed golden of this host, present among `entries` with the same files and answers."""
+    with open(os.path.join(HERE, "mg8_previous", MG8_PREVIOUS[HOST]), encoding="utf-8") as handle:
+        previous = json.load(handle)
+    missing, matched = [], {}
+    for old in previous["cases"]:
+        want = {field: old.get(field) for field in MG8_OLD_FIELDS}
+        own = old.get("startup_bytes")
+        names = [entry["name"] for entry in entries
+                 if {field: entry.get(field) for field in MG8_OLD_FIELDS} == want and entry.get("startup_bytes") == own]
+        if names:
+            matched[old["name"]] = names
+        else:
+            missing.append(old["name"])
+    return {"old_entries": len(previous["cases"]), "missing": missing, "matched": matched,
+            "old_observed": previous.get("observed", [])}
+
+
+def mg8_unit():
+    def go(pool, quiet):
+        units = R8_STATE.get("units", {})
+        port = mg8_port()
+        profile = dict(port["PROFILES"].get(HOST, {}))
+        out = {"located": {}, "pm": {}}
+        for label in R8_LABELS:
+            for which in R8_PASSES:
+                found = units.get(f"pm8:{label}:{which}")
+                if not found or "error" in found or "class" not in found:
+                    return {"error": f"pm8:{label}:{which} has no class to fill", **out}
+                profile[f"pm_{label}_{which}"] = profile_pair(found)
+                out["pm"][f"pm_{label}_{which}"] = profile[f"pm_{label}_{which}"]
+        for key in MG8_LOCATE:
+            found = mg8_locate(pool, port, key)
+            out["located"][key] = found
+            if "error" in found:
+                return {"error": f"{key}: {found['error']}", **out}
+            profile[key] = found["level"]
+        profile["org_cache_limit"] = profile["org_cache_split"]
+        absent = [key for keys, _ in port["GROUPS"] for key in keys.split() if key not in profile]
+        if absent:
+            return {"error": f"the profile lacks {absent}", **out}
+        out["profile"] = profile
+        cases = [case for keys, make in port["GROUPS"] for case in make(*(profile[key] for key in keys.split()))]
+        cases += port["FIXED"] + port["org_cases"]()
+        port["CASES"] = cases
+        version = subprocess.run([NODE, "--version"], capture_output=True, check=True, env={}).stdout.decode().strip()
+        port["LABEL"] = f"{version} {HOST}"
+
+        def record(case):
+            try:
+                return port["reference"](*case)
+            except SystemExit:
+                return {"name": case[0], "failed": True}
+
+        entries = list(pool.map(record, cases))
+        failed = [entry["name"] for entry in entries if entry.get("failed")]
+        if failed:
+            return {"error": "the reference and cross-check flags answer otherwise", "failed": failed, **out}
+        unexpected = [entry["name"] for entry in entries
+                      if entry.get("error") is not None and entry["error"].get("name") != "RangeError"]
+        if unexpected:
+            return {"error": "a case rejects with something other than a RangeError", "unexpected": unexpected, **out}
+        by_name = {entry["name"]: {key: entry[key] for key in MG8_ANSWERS} for entry in entries}
+        pairs = []
+        for keys, make in port["GROUPS"]:
+            made = [case[0] for case in make(*(profile[key] for key in keys.split()))]
+            # partial_drop records one case, which no pair holds.
+            pairs += [made[index:index + 2] for index in range(0, len(made) - 1, 2)]
+        same = [pair for pair in pairs if by_name[pair[0]] == by_name[pair[1]]]
+        split = profile["org_cache_split"]
+        limit_consistent = by_name[f"org_cache_limit_{split + 1}_{port['CACHE_LIMIT'] + 1}"] == by_name[f"org_cache_split_{split + 1}"]
+        out["old"] = mg8_old_gate(entries)
+        # The recorder observes in a run of its own, so the cases it prepares again need a folder without them.
+        shutil.rmtree(port["FOLDER"], ignore_errors=True)
+        port["FOLDER"] = tempfile.mkdtemp()
+        seen, missed = port["observe"](entries, MG8_OBSERVE_RUNS, MG8_HOSTS[HOST])
+        shutil.rmtree(port["FOLDER"], ignore_errors=True)
+        out["observed"] = seen
+        old_names = {name for names in out["old"]["matched"].values() for name in names}
+        new_bands = [band["name"] for band in seen["bands"] if band["name"] not in old_names]
+        out["body"] = port["body"](entries, [seen])
+        out["body_sha256"] = __import__("hashlib").sha256(out["body"].encode()).hexdigest()
+        out["cases"] = len(entries)
+        if same:
+            out["error"] = f"a pair answers the same: {same}"
+        elif not limit_consistent:
+            out["error"] = "the 8193-unit limit case answers otherwise than the split case at the same level"
+        elif out["old"]["missing"]:
+            out["error"] = f"committed goldens are missing: {out['old']['missing']}"
+        elif missed:
+            out["error"] = f"no default-flag run gave the recorded answer of {missed}"
+        elif new_bands:
+            out["error"] = f"new entries answer more than one way: {new_bands}"
+        return out
+    return go
+
+
+def round8_units():
+    out = [("rec8:instrument", r8_instrument_unit())]
+    out += [(f"rec8:fixture:{name}", rec8_fixture(name)) for name in R8_FIXTURES]
+    out += [(f"rec8:events:{R8_EVICTION}", rec8_fixture(R8_EVICTION, True))]
+    out += [(f"pm8:{label}:{which}", pm8_unit(label, which)) for label in R8_LABELS for which in R8_PASSES]
+    # Last: it fills the handed-over profile keys from the pm8 classes this job found.
+    out += [("mg8:goldens", mg8_unit())]
+    return out
+
+
+
 def units():
     out = [(f"proto:{o}", proto_unit(o)) for o in "ESOM"]
     if not WINDOWS:
@@ -1569,7 +2077,7 @@ def units():
         out += round5_windows_units()
         out += round6_xp_units()
     else:
-        out += unix_round4_units() + round5_unix_units() + round6_held_units() + round6_xp_units() + round7_units()
+        out += unix_round4_units() + round5_unix_units() + round6_held_units() + round6_xp_units() + round7_units() + round8_units()
         profile = MANAGED["PROFILES"].get(HOST, {})
         out += [(f"key:{key}", key_unit(key, guess)) for key, guess in GUESSES.get(HOST, {}).items() if key not in profile]
         out += [(f"key:{key}", key_unit(key, guess, profile)) for key, guess in PASS_KEYS.get(HOST, {}).items()]
@@ -1581,6 +2089,7 @@ def units():
 def main():
     version = subprocess.run([NODE, "--version"], capture_output=True, check=True).stdout.decode().strip()
     result = {"host": HOST, "node": version, "shard": SHARD, "shards": SHARDS, "machine": machine(), "units": {}}
+    R8_STATE["units"] = result["units"]
     started = time.time()
     only = __import__("re").compile(os.environ["R3_ONLY"]) if os.environ.get("R3_ONLY") else None
     matching = [unit for unit in units() if not only or only.search(unit[0])]

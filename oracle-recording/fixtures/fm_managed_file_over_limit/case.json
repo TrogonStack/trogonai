@@ -1,0 +1,11 @@
+{
+  "platform": "linux",
+  "env": {},
+  "padded": {
+    "etc/claude-code/managed-settings.json": 2097153
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": []
+  }
+}

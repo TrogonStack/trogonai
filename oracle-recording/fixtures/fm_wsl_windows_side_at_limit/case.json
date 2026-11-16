@@ -1,0 +1,13 @@
+{
+  "platform": "linux",
+  "env": {
+    "WSL_DISTRO_NAME": "Ubuntu"
+  },
+  "padded": {
+    "mnt/c/Program Files/ClaudeCode/managed-settings.json": 2097152
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": []
+  }
+}

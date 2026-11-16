@@ -1,0 +1,3 @@
+
+    Settings    REG_SZ    {"permissions":{"deny":["Read(./secrets/**)"]},"x":{"__proto__":{"a":[1]},"b":2},"y":{"__proto__":3}}
+

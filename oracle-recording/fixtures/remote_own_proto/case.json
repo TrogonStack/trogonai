@@ -1,0 +1,18 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "serverManagedSettings": {
+      "x": {
+        "__proto__": [
+          [
+            null
+          ]
+        ]
+      },
+      "model": "m"
+    }
+  }
+}

@@ -1,0 +1,3 @@
+
+    Settings    REG_SZ    {"allowedMcpServers":[{"serverName":"h","x":null}],"x":{"__proto__":[[null]]},"y":[{"a":null}]}
+
