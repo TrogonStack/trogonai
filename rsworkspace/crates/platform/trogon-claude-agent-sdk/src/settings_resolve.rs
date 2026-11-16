@@ -32,7 +32,10 @@ use crate::{
     settings_strings::{
         SurrogateStandIns, approximate_strings, array_mark, escape_stand_ins, reserve_text, reserve_value,
     },
-    upstream::settings_resolution::{ResolveSettingsOptions, ResolvedSettings},
+    upstream::{
+        settings::Settings,
+        settings_resolution::{ResolveSettingsOptions, ResolvedSettings},
+    },
 };
 
 fn source_label(source: &str) -> &'static str {
