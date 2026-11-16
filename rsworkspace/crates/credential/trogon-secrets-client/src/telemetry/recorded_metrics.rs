@@ -60,3 +60,6 @@ impl RecordedMetrics {
         counts
     }
 }
+
+#[cfg(test)]
+mod tests;
