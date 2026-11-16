@@ -41,38 +41,19 @@ jobs:
     outputs:
       runners: ${{ steps.runner.outputs.runners }}
     steps:
-      # The three Baton steps may fail without failing CI: the action then
-      # gets no token and keeps every job on a hosted runner, as it does for an
-      # API error, and the step summary says so.
-      - name: Google Cloud auth
-        id: gcp
-        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        continue-on-error: true
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          project_id: ${{ vars.BATON_PROJECT_ID }}
-          workload_identity_provider: ${{ vars.BATON_WORKLOAD_IDENTITY_PROVIDER }}
-
-      - name: Baton key
-        id: baton_key
-        if: ${{ steps.gcp.outcome == 'success' }}
-        continue-on-error: true
-        uses: google-github-actions/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262 # v3.0.0
-        with:
-          secrets: |-
-            private_key:${{ vars.BATON_PRIVATE_KEY_SECRET }}
-
-      # The installation holds no repository, so the token is the
-      # organization's: its only permission is reading self-hosted runners.
+      # Gives an empty token when anything fails, and skips everything when
+      # the job declared no environment, since the provider then reads empty.
+      # Either way the next step keeps every job on a hosted runner.
       - name: Baton token
         id: baton
-        if: ${{ steps.baton_key.outcome == 'success' }}
-        continue-on-error: true
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: TrogonStack/github-actions/actions/github-app-token/gcp@1d8ff339e81c50c253a962709250af6db8753e2e # TrogonStack/github-actions#36, unreleased
         with:
-          client-id: ${{ vars.BATON_APP_CLIENT_ID }}
-          private-key: ${{ steps.baton_key.outputs.private_key }}
-          owner: ${{ github.repository_owner }}
+          workload-identity-provider: ${{ vars.BATON_WORKLOAD_IDENTITY_PROVIDER }}
+          project-id: ${{ vars.BATON_PROJECT_ID }}
+          private-key-secret: ${{ vars.BATON_PRIVATE_KEY_SECRET }}
+          app-client-id: ${{ vars.BATON_APP_CLIENT_ID }}
+          # The installation holds no repository, so the token is the
+          # organization's: its only permission is reading self-hosted runners.
           permission-organization-self-hosted-runners: read
 
       # Falls back on its own for a missing token and API errors, so a failure
