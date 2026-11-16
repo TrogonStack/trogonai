@@ -3,7 +3,6 @@ load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load(":compiler_failures.bzl", "fixture_feature_setting")
 load(":coverage.bzl", "rust_coverage_tools")
 
 rust_binary(
@@ -42,18 +41,6 @@ py_test(
         ":coverage_tools",
         "@rules_rust//rust/coverage:collect_rust_coverage",
     ],
-)
-
-fixture_feature_setting(
-    name = "compile_fail_features",
-    build_setting_default = False,
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "compile_fail",
-    flag_values = {":compile_fail_features": "true"},
-    visibility = ["//visibility:public"],
 )
 
 exports_files([

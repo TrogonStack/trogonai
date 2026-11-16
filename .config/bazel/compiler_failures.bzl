@@ -2,23 +2,6 @@
 
 load("@rules_rust//rust:defs.bzl", "rust_common")
 
-def _fixture_features_impl(_settings, _attr):
-    return {str(Label("//.config/bazel:compile_fail_features")): True}
-
-_fixture_features = transition(
-    implementation = _fixture_features_impl,
-    inputs = [],
-    outputs = [str(Label("//.config/bazel:compile_fail_features"))],
-)
-
-def _feature_setting_impl(_ctx):
-    return []
-
-fixture_feature_setting = rule(
-    implementation = _feature_setting_impl,
-    build_setting = config.bool(),
-)
-
 def _compiler_failure_impl(ctx):
     toolchain = ctx.toolchains[rust_common.toolchain_type]
     result = ctx.actions.declare_file(ctx.label.name + ".json")
@@ -77,7 +60,7 @@ compiler_failure = rule(
         "src": attr.label(allow_single_file = [".rs"], mandatory = True),
         "crate_name": attr.string(mandatory = True),
         "edition": attr.string(mandatory = True),
-        "deps": attr.label_list(cfg = _fixture_features, providers = [rust_common.crate_info, rust_common.dep_info]),
+        "deps": attr.label_list(providers = [rust_common.crate_info, rust_common.dep_info]),
         "proc_macro_deps": attr.label_list(cfg = "exec", providers = [rust_common.crate_info, rust_common.dep_info]),
         "aliases": attr.label_keyed_string_dict(),
         "compile_data": attr.label_list(allow_files = True),
