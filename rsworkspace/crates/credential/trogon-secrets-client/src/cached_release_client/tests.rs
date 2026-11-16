@@ -1146,3 +1146,163 @@ async fn asks_for_distinct_keys_without_one_waiting_on_the_other() {
     assert_eq!(late.await.unwrap().unwrap().value().as_str(), VALUE);
     assert_eq!(fake.received().len(), 2);
 }
+
+/// Starts a client in the background, as one whose start has not returned.
+fn starting(
+    fake: &FakeSecretsService,
+    invalidations: &ScriptedInvalidations,
+) -> JoinHandle<Result<Client, InvalidationStartError>> {
+    let (fake, invalidations) = (fake.clone(), invalidations.clone());
+    tokio::spawn(async move { started(&fake, &invalidations).await })
+}
+
+#[tokio::test(start_paused = true)]
+async fn does_not_start_until_its_backlog_is_drained() {
+    let invalidations = ScriptedInvalidations::default();
+    invalidations.replay(2);
+    let starting = starting(&FakeSecretsService::new(), &invalidations);
+    let subject = notice_subject(&tenant(), OTHER_CREDENTIAL_ID);
+    settle().await;
+    assert!(!starting.is_finished());
+
+    invalidations.notify(&subject);
+    settle().await;
+    assert!(!starting.is_finished());
+    invalidations.notify(&subject);
+    settle().await;
+
+    assert!(starting.is_finished());
+    assert_eq!(starting.await.unwrap().unwrap().mode(), ReleaseCacheMode::Caching);
+}
+
+#[tokio::test(start_paused = true)]
+async fn starts_at_once_when_the_stream_holds_no_backlog() {
+    let starting = starting(&FakeSecretsService::new(), &ScriptedInvalidations::default());
+    settle().await;
+
+    assert!(starting.is_finished());
+    assert_eq!(starting.await.unwrap().unwrap().mode(), ReleaseCacheMode::Caching);
+}
+
+#[tokio::test(start_paused = true)]
+async fn releases_on_the_first_call_once_started_however_many_notices_replayed() {
+    let fake = FakeSecretsService::new();
+    releasing(&fake, 1);
+    let invalidations = ScriptedInvalidations::default();
+    let replayed = 2_000;
+    invalidations.replay(replayed);
+    let starting = starting(&fake, &invalidations);
+    settle().await;
+    let subject = notice_subject(&tenant(), CREDENTIAL_ID);
+    for _ in 0..replayed {
+        invalidations.notify(&subject);
+    }
+    let client = starting.await.unwrap().unwrap();
+
+    let released = client.release(&request(&tenant())).await.unwrap();
+
+    assert_eq!(released.value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn starts_uncached_when_it_loses_its_place_while_catching_up() {
+    let invalidations = ScriptedInvalidations::default();
+    invalidations.replay(2);
+    let starting = starting(&FakeSecretsService::new(), &invalidations);
+    settle().await;
+
+    invalidations.notify(&notice_subject(&tenant(), OTHER_CREDENTIAL_ID));
+    invalidations.fail();
+    settle().await;
+
+    assert!(starting.is_finished());
+    assert_eq!(starting.await.unwrap().unwrap().mode(), ReleaseCacheMode::Uncached);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stays_uncached_until_its_new_consumer_has_drained_its_backlog() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    let subject = notice_subject(&tenant(), OTHER_CREDENTIAL_ID);
+    invalidations.replay(2);
+    invalidations.fail();
+
+    retry().await;
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    invalidations.notify(&subject);
+    settle().await;
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    invalidations.notify(&subject);
+    settle().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stays_uncached_when_it_loses_its_place_again_before_catching_up() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    invalidations.replay(2);
+    invalidations.fail();
+    retry().await;
+
+    invalidations.notify(&notice_subject(&tenant(), OTHER_CREDENTIAL_ID));
+    invalidations.fail();
+    settle().await;
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+    retry().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert_eq!(invalidations.configs().len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn starts_once_a_quiet_look_finds_nothing_owed_though_its_backlog_was_larger() {
+    let invalidations = ScriptedInvalidations::default();
+    invalidations.replay(3);
+    let starting = starting(&FakeSecretsService::new(), &invalidations);
+    settle().await;
+    invalidations.notify(&notice_subject(&tenant(), OTHER_CREDENTIAL_ID));
+    settle().await;
+    assert!(!starting.is_finished());
+
+    next_position_check().await;
+    settle().await;
+    next_position_check().await;
+    settle().await;
+
+    assert!(starting.is_finished());
+    assert_eq!(starting.await.unwrap().unwrap().mode(), ReleaseCacheMode::Caching);
+}
+
+#[tokio::test(start_paused = true)]
+async fn holds_releases_again_once_a_quiet_look_finds_nothing_owed_though_its_backlog_was_larger() {
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&FakeSecretsService::new(), &invalidations).await.unwrap();
+    invalidations.replay(3);
+    invalidations.fail();
+    retry().await;
+    assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+
+    next_position_check().await;
+    settle().await;
+    next_position_check().await;
+    settle().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_waiting_while_a_quiet_look_finds_a_notice_still_owed() {
+    let invalidations = ScriptedInvalidations::default();
+    invalidations.replay(2);
+    let starting = starting(&FakeSecretsService::new(), &invalidations);
+    settle().await;
+    invalidations.hold_back(&notice_subject(&tenant(), OTHER_CREDENTIAL_ID));
+
+    next_position_check().await;
+    settle().await;
+
+    assert!(!starting.is_finished());
+}

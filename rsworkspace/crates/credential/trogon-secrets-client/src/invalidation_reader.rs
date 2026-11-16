@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy, pull};
 use futures::{Stream, StreamExt};
 use time::OffsetDateTime;
+use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 use trogon_std::time::{EpochClock, GetElapsed};
@@ -20,6 +21,7 @@ use super::{
 
 type Consumer<J> = <<J as InvalidationStreamSource>::Stream as InvalidationStream>::Consumer;
 type Notices<J> = <Consumer<J> as InvalidationConsumer>::Notices;
+type Reading<J> = (Consumer<J>, Notices<J>, u64);
 
 /// One client's own reader of release invalidations, read the way an ordered
 /// consumer reads: an ephemeral consumer of its own, never durable and never
@@ -27,12 +29,18 @@ type Notices<J> = <Consumer<J> as InvalidationConsumer>::Notices;
 /// 6), with no acks, checked to arrive one after another.
 ///
 /// It starts [`INVALIDATION_LOOKBACK`] back, so a notice sent while it was
-/// not reading is still heard. It loses its place on any error, any gap in
+/// not reading is still heard. Those notices are already in the stream when
+/// its consumer is created, and each one it replays drops what it covers,
+/// so the reader is not caught up, and holds nothing, until it has received
+/// every one the stream held at that moment, or a quiet
+/// [`INVALIDATION_POSITION_CHECK`] finds the server owes it nothing more. Starting waits for that, so a
+/// release asked for after it is not overtaken by the replay, and so does
+/// every return to reading. It loses its place on any error, any gap in
 /// what it was delivered, the end of its consumer, or a notice the server
 /// says it delivered that has not arrived by the next
 /// [`INVALIDATION_POSITION_CHECK`]; then it drops every
 /// held copy and holds none, retrying every [`INVALIDATION_RETRY_DELAY`]
-/// until it reads again. It stops when dropped.
+/// until it reads again and has caught up. It stops when dropped.
 ///
 /// Each loss of place is counted under why it happened and warned of once,
 /// however long the reader takes to read again; reading again is logged
@@ -54,6 +62,9 @@ type Notices<J> = <Consumer<J> as InvalidationConsumer>::Notices;
 pub(crate) struct InvalidationReader(AbortHandle);
 
 impl InvalidationReader {
+    /// Returns once the first consumer has caught up with the notices the
+    /// stream held when it was created, or once the reader has lost its place
+    /// before that, when nothing is held and it keeps retrying.
     pub(crate) async fn start<J, C>(
         jetstream: J,
         clock: C,
@@ -66,7 +77,9 @@ impl InvalidationReader {
         C::Instant: Send,
     {
         let reading = subscribe(&jetstream, &clock).await?;
-        let task = tokio::spawn(read(jetstream, clock, cache, metrics, reading));
+        let (caught_up, ready) = oneshot::channel();
+        let task = tokio::spawn(read(jetstream, clock, cache, metrics, reading, caught_up));
+        let _ = ready.await;
         Ok(Self(task.abort_handle()))
     }
 }
@@ -77,7 +90,7 @@ impl Drop for InvalidationReader {
     }
 }
 
-async fn subscribe<J, C>(jetstream: &J, clock: &C) -> Result<(Consumer<J>, Notices<J>), InvalidationStartError>
+async fn subscribe<J, C>(jetstream: &J, clock: &C) -> Result<Reading<J>, InvalidationStartError>
 where
     J: InvalidationStreamSource,
     C: EpochClock,
@@ -85,8 +98,9 @@ where
     let stream = jetstream.get_stream(INVALIDATION_STREAM).await?;
     InvalidationStreamError::check(&stream.config())?;
     let consumer = stream.create_consumer(consumer_config(clock.system_time())).await?;
+    let backlog = consumer.backlog();
     let notices = consumer.messages().await?;
-    Ok((consumer, notices))
+    Ok((consumer, notices, backlog))
 }
 
 async fn read<J, C>(
@@ -94,16 +108,29 @@ async fn read<J, C>(
     clock: C,
     cache: Arc<Mutex<ReleaseCache<C>>>,
     metrics: ReleaseCacheMetrics,
-    mut reading: (Consumer<J>, Notices<J>),
+    mut reading: Reading<J>,
+    started: oneshot::Sender<()>,
 ) where
     J: InvalidationStreamSource,
     C: EpochClock + GetElapsed,
     C::Instant: Send,
 {
+    let mut started = Some(started);
+    let mut attempts: u64 = 0;
     loop {
-        let (consumer, notices) = &mut reading;
-        let loss = drain(&cache, consumer, notices).await;
+        let (consumer, notices, backlog) = &mut reading;
+        let loss = drain(&cache, consumer, notices, *backlog, || match started.take() {
+            Some(started) => {
+                let _ = started.send(());
+            }
+            None => {
+                cache.lock().unwrap_or_else(PoisonError::into_inner).resume();
+                tracing::info!(attempts, "invalidation reader reads again; releases are held again");
+            }
+        })
+        .await;
         cache.lock().unwrap_or_else(PoisonError::into_inner).suspend();
+        started = None;
         metrics.record_position_loss(&loss);
         let reason = loss.reason().as_str();
         tracing::warn!(
@@ -111,7 +138,7 @@ async fn read<J, C>(
             detail = %loss,
             "invalidation reader lost its place; releases are not held until it reads again"
         );
-        let mut attempts: u64 = 0;
+        attempts = 0;
         reading = loop {
             tokio::time::sleep(INVALIDATION_RETRY_DELAY).await;
             attempts += 1;
@@ -119,27 +146,40 @@ async fn read<J, C>(
                 break reading;
             }
         };
-        cache.lock().unwrap_or_else(PoisonError::into_inner).resume();
-        tracing::info!(attempts, "invalidation reader reads again; releases are held again");
     }
 }
 
 /// Drops what each notice covers, until the consumer fails, skips one, ends,
 /// or delivered one that never arrived, and says which.
 ///
+/// Calls `caught_up` once, when `backlog` notices have been received, or at
+/// once when there are none, or when a look after a quiet interval finds the
+/// server owes it nothing, since the backlog was then counted too high and
+/// the replay is over. A drain that ends before then never calls it.
+///
 /// Every [`INVALIDATION_POSITION_CHECK`] with no notice since the last look,
 /// it asks the server how far `consumer` has delivered. A notice delivered
 /// past the last one received may still be on its way, so it is owed until
 /// the next look; still missing then, the reader has lost its place. Without
 /// this, a lost last notice would show only when a later one arrived.
-async fn drain<K, S, N, C>(cache: &Mutex<ReleaseCache<C>>, consumer: &K, notices: &mut S) -> InvalidationLoss
+async fn drain<K, S, N, C>(
+    cache: &Mutex<ReleaseCache<C>>,
+    consumer: &K,
+    notices: &mut S,
+    backlog: u64,
+    caught_up: impl FnOnce(),
+) -> InvalidationLoss
 where
     K: InvalidationConsumer,
     S: Stream<Item = Result<N, pull::MessagesError>> + Unpin,
     N: InvalidationNotice,
     C: GetElapsed,
 {
+    let mut caught_up = Some(caught_up);
     let mut received = 0;
+    if backlog == 0 {
+        call_once(&mut caught_up);
+    }
     let mut arrived = false;
     let mut owed = None;
     let mut next_look = Instant::now() + INVALIDATION_POSITION_CHECK;
@@ -156,6 +196,9 @@ where
                 cache.lock().unwrap_or_else(PoisonError::into_inner).invalidate(&notice);
                 received += 1;
                 arrived = true;
+                if received >= backlog {
+                    call_once(&mut caught_up);
+                }
             }
             Ok(Some(Err(failed))) => return InvalidationLoss::Failed(failed),
             Ok(None) => return InvalidationLoss::Ended,
@@ -169,10 +212,19 @@ where
                         Err(unknown) => return InvalidationLoss::PositionUnknown(unknown),
                     };
                     owed = (delivered > received).then_some(delivered);
+                    if owed.is_none() {
+                        call_once(&mut caught_up);
+                    }
                 }
                 next_look = Instant::now() + INVALIDATION_POSITION_CHECK;
             }
         }
+    }
+}
+
+fn call_once(call: &mut Option<impl FnOnce()>) {
+    if let Some(call) = call.take() {
+        call();
     }
 }
 
