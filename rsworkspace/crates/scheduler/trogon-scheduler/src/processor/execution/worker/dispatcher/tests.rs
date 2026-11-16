@@ -1077,6 +1077,85 @@ async fn record_queued_behind_a_busy_lane_runs_once_the_lane_finishes() {
     ));
 }
 
+#[tokio::test(start_paused = true)]
+async fn report_held_back_by_a_full_report_channel_is_sent_once_the_receiver_frees_capacity() {
+    let (processor, _kv, _execution) = build();
+    // One report slot: the second report finds it taken by the first.
+    let (handle, join, mut reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
+        processor,
+        clock(),
+        DispatcherConfig {
+            channel_capacity: 1,
+            ..DispatcherConfig::default()
+        },
+    );
+
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
+    let key = key_for_stream(id);
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let gates: [Arc<SettlementGate>; 3] = Default::default();
+
+    let create = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
+    handle
+        .submit(stream_event(&create, id, 1), gated_message(log.clone(), &gates[0]))
+        .await
+        .unwrap();
+    gates[0].wait_until_held().await;
+
+    handle
+        .submit(stream_event(&paused(id), id, 2), gated_message(log.clone(), &gates[1]))
+        .await
+        .unwrap();
+    gates[0].release();
+    // The lane runs one record at a time, so the second record reaching
+    // settlement means the first report already took the only slot.
+    gates[1].wait_until_held().await;
+
+    handle
+        .submit(stream_event(&resumed(id), id, 3), gated_message(log.clone(), &gates[2]))
+        .await
+        .unwrap();
+    gates[1].release();
+    // Likewise, the second report was produced while the slot was still taken.
+    gates[2].wait_until_held().await;
+
+    let first = reports.recv().await.unwrap();
+    assert_eq!(first.stream_position.as_u64(), 1);
+
+    // The third record stays held and nothing else is submitted, so only the
+    // freed report slot can wake the dispatcher to send the held-back report.
+    let second = unless_stalled(
+        reports.recv(),
+        "held-back report must be sent once the receiver frees capacity",
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.stream_position.as_u64(), 2);
+    assert_eq!(handle.active_lanes(), 1, "the third record is still held");
+
+    gates[2].release();
+    drop(handle);
+    let third = unless_stalled(reports.recv(), "dispatcher stalled before reporting the last record")
+        .await
+        .unwrap();
+    join.await.unwrap();
+
+    assert_eq!(third.stream_position.as_u64(), 3);
+    assert!([&first, &second, &third].iter().all(|report| report.lane == key));
+    assert_eq!(
+        [first, second, third].map(|report| report.result.unwrap()),
+        [
+            ProcessedOutcome::Published,
+            ProcessedOutcome::Purged,
+            ProcessedOutcome::Published,
+        ]
+    );
+    assert!(matches!(
+        log.lock().unwrap().as_slice(),
+        [Settlement::Ack, Settlement::Ack, Settlement::Ack]
+    ));
+}
+
 #[tokio::test]
 async fn dropped_report_receiver_stops_drain_early() {
     let (processor, _kv, _execution) = build();
