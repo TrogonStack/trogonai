@@ -38,6 +38,8 @@ pub enum InvalidationStreamMismatchError {
     MaxMessageSize,
     #[error("stream '{INVALIDATION_STREAM}' must keep a duplicate window of two minutes or longer")]
     DuplicateWindow,
+    #[error("stream '{INVALIDATION_STREAM}' must not transform the subjects notices are stored on")]
+    SubjectTransform,
     #[error("stream '{INVALIDATION_STREAM}' must keep at least the replicas the deployment asked for")]
     Replicas,
     #[error(
