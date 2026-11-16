@@ -334,7 +334,6 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
         impl __trogon_decider_bindings::GuestSession for Session #bundle_bounds {
             fn new(snapshot: Option<Vec<u8>>) -> Self {
                 let state = ::trogon_decider_guest_sdk::load_or_initial::<
-                    #canonical_ty,
                     <#canonical_ty as ::trogon_decider::Decider>::State,
                 >(snapshot, #state_schema_version);
                 Self {
@@ -379,7 +378,7 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
             }
 
             fn snapshot(&self) -> Option<Vec<u8>> {
-                Some(::trogon_decider_guest_sdk::encode_current::<
+                Some(::trogon_decider_guest_sdk::encode_current_state::<
                     <#canonical_ty as ::trogon_decider::Decider>::State,
                 >(&self.state.borrow(), #state_schema_version))
             }

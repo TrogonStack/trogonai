@@ -40,9 +40,9 @@ pub enum SnapshotDecodeError {
     UnsupportedWireType,
 }
 
-/// Load guest state from an optional snapshot frame or fall back to [`C::initial_state`](trogon_decider::Decider::initial_state).
+/// Load guest state from an optional snapshot frame or its [`Default`] value.
 ///
-/// When `snapshot` is `None` the decider starts from its initial state. When a snapshot
+/// When `snapshot` is `None` the state starts from its default value. When a snapshot
 /// frame is supplied it must decode and match `schema_version`: a corrupt frame or schema
 /// mismatch traps rather than silently degrading to empty state, because the WIT session
 /// constructor has no error channel and a host applying only a post-snapshot event suffix
@@ -51,18 +51,27 @@ pub enum SnapshotDecodeError {
     clippy::panic,
     reason = "guest session constructor cannot return an error; trap so the host observes a failed snapshot load instead of silently running on empty state"
 )]
-pub fn load_or_initial<C, S>(snapshot: Option<Vec<u8>>, schema_version: &str) -> C::State
+pub fn load_or_initial<S>(snapshot: Option<Vec<u8>>, schema_version: &str) -> S
 where
-    C: trogon_decider::Decider<State = S>,
-    S: buffa::Message,
+    S: Default + trogon_decider::StateSnapshot,
+    S::Payload: buffa::Message,
 {
     match snapshot {
-        Some(bytes) => match decode_snapshot::<S>(&bytes, schema_version) {
-            Ok(state) => state,
+        Some(bytes) => match decode_snapshot::<S::Payload>(&bytes, schema_version) {
+            Ok(payload) => S::from(payload),
             Err(error) => panic!("failed to load decider snapshot: {error}"),
         },
-        None => C::initial_state(),
+        None => S::default(),
     }
+}
+
+/// Encode a decider state through its snapshot payload without changing the persisted format.
+pub fn encode_current_state<S>(state: &S, schema_version: &str) -> Vec<u8>
+where
+    S: trogon_decider::StateSnapshot,
+    S::Payload: buffa::Message,
+{
+    encode_snapshot(state.as_ref(), schema_version)
 }
 
 /// Encode the current guest state into a versioned snapshot frame.

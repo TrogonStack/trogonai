@@ -1,4 +1,4 @@
-use super::{Act, ActBuilder, Decider, Events};
+use super::{Act, ActBuilder, Decider, Events, Evolve, EvolveError};
 
 /// Outcome of [`Decider::decide`].
 ///
@@ -29,7 +29,7 @@ pub enum DecisionError<DecideError, EvolveError> {
 #[doc(hidden)]
 pub type DecisionResult<C> = Result<
     (<C as Decider>::State, Events<<C as Decider>::Event>),
-    DecisionError<<C as Decider>::DecideError, <C as Decider>::EvolveError>,
+    DecisionError<<C as Decider>::DecideError, EvolveError<C>>,
 >;
 
 #[doc(hidden)]
@@ -69,7 +69,7 @@ where
     /// # Example
     ///
     /// ```
-    /// # use trogon_decider::{Decider, Decision, WritePrecondition};
+    /// # use trogon_decider::{Decider, Decision, Evolve, WritePrecondition};
     /// # struct PlaceAndDiscount { order_id: String }
     /// # #[derive(Debug, PartialEq, Eq)]
     /// # enum OrderEvent {
@@ -86,18 +86,20 @@ where
     /// # #[derive(thiserror::Error, Debug, PartialEq, Eq)]
     /// # #[error("invalid order event")]
     /// # struct PlaceAndDiscountEvolveError;
+    /// # impl Default for OrderState { fn default() -> Self { Self::New } }
+    /// # impl Evolve<OrderEvent> for OrderState {
+    /// #     type Error = PlaceAndDiscountEvolveError;
+    /// #     fn evolve(self, event: &OrderEvent) -> Result<Self, Self::Error> {
+    /// #         match event { OrderEvent::Placed { .. } | OrderEvent::Discounted { .. } => Ok(Self::Placed) }
+    /// #     }
+    /// # }
     /// # impl Decider for PlaceAndDiscount {
     /// #     type StreamId = str;
     /// #     type State = OrderState;
     /// #     type Event = OrderEvent;
     /// #     type DecideError = PlaceAndDiscountError;
-    /// #     type EvolveError = PlaceAndDiscountEvolveError;
     /// #     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
     /// #     fn stream_id(&self) -> &str { &self.order_id }
-    /// #     fn initial_state() -> OrderState { OrderState::New }
-    /// #     fn evolve(_: OrderState, event: &OrderEvent) -> Result<OrderState, PlaceAndDiscountEvolveError> {
-    /// #         match event { OrderEvent::Placed { .. } | OrderEvent::Discounted { .. } => Ok(OrderState::Placed) }
-    /// #     }
     /// #     fn decide(_: &OrderState, cmd: &Self) -> Result<Decision<Self>, PlaceAndDiscountError> {
     /// #         Ok(Decision::event(OrderEvent::Placed { order_id: cmd.order_id.clone() }))
     /// #     }
@@ -129,7 +131,7 @@ where
         match self {
             Self::Events(events) => {
                 for event in events.iter() {
-                    state = C::evolve(state, event).map_err(DecisionError::Evolve)?;
+                    state = state.evolve(event).map_err(DecisionError::Evolve)?;
                 }
 
                 Ok((state, events))

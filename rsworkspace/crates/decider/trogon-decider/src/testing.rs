@@ -11,7 +11,7 @@
 //! # Command emits events
 //!
 //! ```
-//! use trogon_decider::{Decider, Decision, WritePrecondition};
+//! use trogon_decider::{Decider, Decision, Evolve, WritePrecondition};
 //! use trogon_decider::testing::TestCase;
 //!
 //! #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,27 +36,27 @@
 //!     account_id: &'static str,
 //! }
 //!
+//! impl Default for AccountState {
+//!     fn default() -> Self { Self::Missing }
+//! }
+//!
+//! impl Evolve<AccountEvent> for AccountState {
+//!     type Error = AccountError;
+//!     fn evolve(self, event: &AccountEvent) -> Result<Self, Self::Error> {
+//!         match event { AccountEvent::Opened => Ok(Self::Open) }
+//!     }
+//! }
+//!
 //! impl Decider for OpenAccount {
 //!     type StreamId = str;
 //!     type State = AccountState;
 //!     type Event = AccountEvent;
 //!     type DecideError = AccountError;
-//!     type EvolveError = AccountError;
 //!
 //!     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 //!
 //!     fn stream_id(&self) -> &Self::StreamId {
 //!         self.account_id
-//!     }
-//!
-//!     fn initial_state() -> Self::State {
-//!         AccountState::Missing
-//!     }
-//!
-//!     fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-//!         match event {
-//!             AccountEvent::Opened => Ok(AccountState::Open),
-//!         }
 //!     }
 //!
 //!     fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -76,7 +76,7 @@
 //! # Command rejects
 //!
 //! ```
-//! # use trogon_decider::{Decider, Decision, WritePrecondition};
+//! # use trogon_decider::{Decider, Decision, Evolve, WritePrecondition};
 //! # use trogon_decider::testing::TestCase;
 //! #
 //! # #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,21 +101,21 @@
 //! #     account_id: &'static str,
 //! # }
 //! #
+//! # impl Default for AccountState { fn default() -> Self { Self::Missing } }
+//! # impl Evolve<AccountEvent> for AccountState {
+//! #     type Error = AccountError;
+//! #     fn evolve(self, event: &AccountEvent) -> Result<Self, Self::Error> {
+//! #         match event { AccountEvent::Opened => Ok(Self::Open) }
+//! #     }
+//! # }
 //! # impl Decider for OpenAccount {
 //! #     type StreamId = str;
 //! #     type State = AccountState;
 //! #     type Event = AccountEvent;
 //! #     type DecideError = AccountError;
-//! #     type EvolveError = AccountError;
 //! #     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 //! #
 //! #     fn stream_id(&self) -> &Self::StreamId { self.account_id }
-//! #     fn initial_state() -> Self::State { AccountState::Missing }
-//! #     fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-//! #         match event {
-//! #             AccountEvent::Opened => Ok(AccountState::Open),
-//! #         }
-//! #     }
 //! #     fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
 //! #         match state {
 //! #             AccountState::Missing => Ok(Decision::event(AccountEvent::Opened)),
@@ -132,7 +132,7 @@
 
 use std::{fmt::Debug, marker::PhantomData};
 
-use crate::{Decider, DecisionError, Events, evaluate_decision};
+use crate::{Decider, DecisionError, Events, Evolve, EvolveError, evaluate_decision};
 
 /// Prior events used to rebuild decider state in tests.
 ///
@@ -294,7 +294,7 @@ where
     /// # Example
     ///
     /// ```
-    /// # use trogon_decider::{Decider, Decision, WritePrecondition};
+    /// # use trogon_decider::{Decider, Decision, Evolve, WritePrecondition};
     /// # use trogon_decider::testing::TestCase;
     /// #
     /// # #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,21 +319,21 @@ where
     /// #     account_id: &'static str,
     /// # }
     /// #
+    /// # impl Default for AccountState { fn default() -> Self { Self::Missing } }
+    /// # impl Evolve<AccountEvent> for AccountState {
+    /// #     type Error = AccountError;
+    /// #     fn evolve(self, event: &AccountEvent) -> Result<Self, Self::Error> {
+    /// #         match event { AccountEvent::Opened => Ok(Self::Open) }
+    /// #     }
+    /// # }
     /// # impl Decider for OpenAccount {
     /// #     type StreamId = str;
     /// #     type State = AccountState;
     /// #     type Event = AccountEvent;
     /// #     type DecideError = AccountError;
-    /// #     type EvolveError = AccountError;
     /// #     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
     /// #
     /// #     fn stream_id(&self) -> &Self::StreamId { self.account_id }
-    /// #     fn initial_state() -> Self::State { AccountState::Missing }
-    /// #     fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-    /// #         match event {
-    /// #             AccountEvent::Opened => Ok(AccountState::Open),
-    /// #         }
-    /// #     }
     /// #     fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
     /// #         match state {
     /// #             AccountState::Missing => Ok(Decision::event(AccountEvent::Opened)),
@@ -380,7 +380,7 @@ pub enum DecisionEvaluationFailure<DecideError, EvolveError> {
 #[doc(hidden)]
 pub type DecisionEvaluation<C> = Result<
     (Events<<C as Decider>::Event>, <C as Decider>::State),
-    DecisionEvaluationFailure<<C as Decider>::DecideError, <C as Decider>::EvolveError>,
+    DecisionEvaluationFailure<<C as Decider>::DecideError, EvolveError<C>>,
 >;
 
 impl<Event, Error> ThenError<Event, Error> {
@@ -481,7 +481,7 @@ where
         }
     }
 
-    /// Starts from prior events replayed through [`Decider::evolve`].
+    /// Starts from prior events replayed through [`Evolve::evolve`].
     pub fn given<I, E>(mut self, events: I) -> TestCase<C, Given<C::Event>>
     where
         I: IntoIterator<Item = E>,
@@ -504,11 +504,14 @@ where
     /// sequence value. Prefer [`given`](Self::given) or
     /// [`given_no_history`](Self::given_no_history) for any behavior reachable
     /// through real events.
-    pub fn given_state(mut self, state: C::State) -> TestCase<C, GivenState<C::State>> {
+    pub fn given_state<State>(mut self, state: State) -> TestCase<C, GivenState<C::State>>
+    where
+        State: Into<C::State>,
+    {
         self.completed = true;
         TestCase {
             marker: PhantomData,
-            stage: Some(GivenState { state }),
+            stage: Some(GivenState { state: state.into() }),
             completed: false,
         }
     }
@@ -553,7 +556,7 @@ impl<C> TestCase<C, NoHistory>
 where
     C: Decider,
     C::Event: Clone + Debug,
-    C::EvolveError: Debug,
+    EvolveError<C>: Debug,
 {
     /// Provides the command under test.
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
@@ -562,7 +565,7 @@ where
             marker: PhantomData,
             stage: Some(When {
                 history: History::new(),
-                state: C::initial_state(),
+                state: C::State::default(),
                 expected_state: None,
                 command,
             }),
@@ -575,22 +578,22 @@ impl<C> TestCase<C, Given<C::Event>>
 where
     C: Decider,
     C::Event: Clone + Debug,
-    C::EvolveError: Debug,
+    EvolveError<C>: Debug,
 {
     /// Replays given events and provides the command under test.
     ///
-    /// Panics when the given history cannot be replayed through [`Decider::evolve`].
+    /// Panics when the given history cannot be replayed through [`Evolve::evolve`].
     #[allow(
         clippy::disallowed_methods,
         reason = "TestCase is the sanctioned harness; it replays history through evolve so tests don't call it directly"
     )]
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
         self.completed = true;
-        let mut state = C::initial_state();
+        let mut state = C::State::default();
         let history = std::mem::take(&mut self.stage_mut().history);
 
         for (index, event) in history.iter().enumerate() {
-            state = match C::evolve(state, event) {
+            state = match state.evolve(event) {
                 Ok(next) => next,
                 Err(error) => panic!(
                     "Given history could not be replayed at event {}:\nevent = {:?}\nerror = {:?}",
@@ -619,7 +622,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    C::EvolveError: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
 {
     /// Asserts the state rebuilt from the given history before the command is decided.
@@ -716,7 +719,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    C::EvolveError: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
     E: Into<C::Event>,
 {
@@ -737,7 +740,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    C::EvolveError: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
 {
     type Output = ThenEvents<C::Event, C::State>;
@@ -756,7 +759,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    C::EvolveError: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
     E: Into<C::Event>,
 {
@@ -786,7 +789,7 @@ where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
-    C::EvolveError: Debug,
+    EvolveError<C>: Debug,
     C::StreamId: std::fmt::Display,
 {
     match actual {

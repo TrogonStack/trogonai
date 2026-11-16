@@ -120,10 +120,6 @@ fn decider_identity_delegates_to_schedule_state() {
         Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
     );
     assert_eq!(command.stream_id(), &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"));
-    assert_eq!(
-        ScheduleNextOccurrence::initial_state(),
-        super::super::state::initial_state()
-    );
 }
 
 #[test]

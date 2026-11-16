@@ -54,11 +54,14 @@ A stream module contains:
 
 - `commands/`: the write side. One file per command decider, named after the
   command; each file holds the command struct and its `Decider` implementation.
-  The decider's `Event` and `State` associated types are the generated proto
-  types used directly (see "Proto types are the event and state" below), not
-  hand-written domain enums. The write-side submodules nest inside `commands/`:
-  - `commands/state`: `initial_state`, `evolve`, and the decide-time and
-    evolve-time validators, operating on the proto state type.
+  The decider's `Event` is the generated proto type. Its `State` uses the
+  generated state directly or the transparent wrapper described below. Neither
+  introduces a parallel domain schema. The write-side submodules nest inside
+  `commands/`:
+  - `commands/state`: the state's no-history `Default`, its `Evolve<Event>`
+    implementation, and the decide-time and evolve-time validators, operating
+    on the proto state payload. Shared replay helpers used by the read side
+    also belong here.
   - `commands/snapshot`: the snapshot policy only, for example the snapshot
     frequency. It does not contain the snapshot codec.
   - `commands/domain`: the aggregate's value objects used as command inputs,
@@ -110,26 +113,48 @@ the crate conventions applies to value-object and library crates that own no
 aggregate. The read model depending on the aggregate's `commands/domain` is
 expected, not a layering violation.
 
-### Proto types are the event and state; their codec lives in the proto crate
+### Protobuf owns the event and state schemas; their codec lives in the proto crate
 
-The decider's `Event` and `State` are the generated proto messages, used
-directly (`type Event = v1::CredentialEvent; type State = state_v1::CredentialStateSnapshot`).
-Do not wrap them in parallel hand-written domain enums with manual proto-to-domain
-conversion; that duplicates the schema ([ADR#0009](./0009-protocol-buffers-wire-contracts.md)) and drags the codec into the
-consuming crate.
+Generated proto messages define the event and state data shapes
+([ADR#0009](./0009-protocol-buffers-wire-contracts.md)). The decider's `Event`
+uses the generated message directly. Its `State` may also use the generated
+message directly when its `Default` represents no history and Rust's trait
+ownership rules permit the replay implementation.
 
-The event and snapshot codec, the `EventEncode`, `EventDecode`, `EventType`,
-`SnapshotType`, and `SnapshotPayload*` implementations, lives in `trogonai-proto`,
-implemented on the proto types. This is forced by the orphan rule: both the trait
-(`trogon-decider-runtime`) and the type (generated proto) are foreign to the
-consuming crate, so the impl must live in the crate that owns the proto type.
+A consuming crate may instead define a local, single-field
+`#[repr(transparent)]` state wrapper in `commands/state`, such as
+`CredentialState(state_v1::CredentialStateSnapshot)`, to own the domain's
+`Default` and `Evolve<Event>` implementations, which automatically satisfy
+`DeciderState<Event>`. `Default` means the state before
+any events. A generated protobuf default can be an empty message with
+`state: None` or an unspecified enum value, while the aggregate starts in an
+explicit `Missing` state. Its derived `Default` cannot be replaced by another
+implementation. The orphan rule also prevents the consuming crate from
+implementing a foreign `Evolve` trait for a foreign generated state and event;
+the wrapper supplies a local state type while replay stays with the commands.
+
+The wrapper contains only the generated message, without additional state
+fields or a parallel hand-written enum. Its `From` implementations only wrap
+and unwrap the message, and `AsRef` borrows it, without allocation, cloning, or
+serialization. `StateSnapshot::Payload` names that generated message, and
+`SnapshotRead` and `SnapshotWrite` keep using the generated payload type. The
+wrapper does not change the snapshot type name or persisted bytes. Manual
+proto-to-domain schema conversion remains prohibited.
+
+The event and snapshot codecs, the `EventEncode`, `EventDecode`, `EventType`,
+`SnapshotType`, and `SnapshotPayload*` implementations, live in `trogonai-proto`
+on the generated types. This is forced by the orphan rule: both the trait
+(`trogon-decider` or `trogon-decider-runtime`) and the type (generated proto)
+are foreign to the consuming crate, so the impl must live in the crate that
+owns the proto type.
 
 Register a per-domain cargo feature in `trogonai-proto` for each event-sourced
 domain (`schedules`, `gateway`), pulling in `trogon-decider-runtime` and any codec
 dependencies, and gating that domain's hand-written support module (codec, payload
 error types, oneof re-exports). The consuming crate enables that feature and uses
-the proto types as its decider types. `trogon-scheduler` with the `schedules`
-feature is the reference; its `commands/snapshot.rs` is only the policy const
+the generated event and state payload, with any state wrapper limited to the
+behavior described above. `trogon-scheduler` with the `schedules` feature is the
+reference; its `commands/snapshot.rs` is only the policy const
 because the codec lives in `trogonai-proto`.
 
 ### Domain stays free of infrastructure
@@ -139,10 +164,10 @@ transport and persistence SDKs. What converts at the boundary per
 [ADR#0009](./0009-protocol-buffers-wire-contracts.md) is the transport and
 persistence envelope: adapters turn message frames, KV entries, and wire bytes
 into the proto event and state messages and the aggregate's value objects, and
-back. The decider's event and state values stay the generated proto types
-through that conversion; the boundary never reintroduces the parallel domain
-enums rejected above. Infrastructure adapters (NATS/JetStream stores, stream and
-subject configuration, KV stores) are thin and live inside the module
+back. The event and persisted state payload stay the generated proto types;
+wrapping state for domain initialization and replay does not remap its fields
+or move its codec into the domain. Infrastructure adapters (NATS/JetStream
+stores, stream and subject configuration, KV stores) are thin and live inside the module
 that owns them, not scattered at the crate root: the event store and command
 handler next to the commands they serve, a processor's checkpoint store nested
 under that processor.
@@ -150,11 +175,13 @@ under that processor.
 ## Design Rules
 
 - One command decider per file.
-- The decider `Event`/`State` are proto types used directly; do not add parallel
-  domain enums or hand-written proto conversion for them ([ADR#0009](./0009-protocol-buffers-wire-contracts.md)).
-- The event and snapshot codec and the `trogon-decider-runtime` trait impls live
-  in `trogonai-proto` on the proto types, behind a registered per-domain feature
-  that pulls in `trogon-decider-runtime`. The consuming crate's
+- The decider's `Event` and persisted state payload are generated proto types.
+  `State` may use the transparent wrapper described above to own `Default` and
+  `Evolve<Event>`. Do not add parallel domain enums or hand-written schema
+  conversion ([ADR#0009](./0009-protocol-buffers-wire-contracts.md)).
+- The event and snapshot codec implementations live in `trogonai-proto` on the
+  proto types, behind a registered per-domain feature that pulls in
+  `trogon-decider-runtime`. The consuming crate's
   `commands/snapshot` module holds only the snapshot policy.
 - Keep the fold (`evolve`) separate from the snapshot policy.
 - Name a stream for the workflow it represents, expressed as a noun (a workflow
@@ -184,8 +211,10 @@ under that processor.
   `credential/` with `lifecycle` dropped, and its event and snapshot codec moves
   out of `credential/commands/` into `trogonai-proto` behind the `gateway`
   feature (which gains `trogon-decider-runtime`), so the deciders use the proto
-  `CredentialEvent`/`CredentialStateSnapshot` types directly and the hand-written
-  domain-enum conversion is removed. Done before the contract ships.
+  `CredentialEvent` and `CredentialStateSnapshot` payloads and the hand-written
+  domain-enum conversion is removed. Domain-owned state initialization and
+  replay can use the transparent wrapper defined above. Done before the
+  contract ships.
 
 ## References
 

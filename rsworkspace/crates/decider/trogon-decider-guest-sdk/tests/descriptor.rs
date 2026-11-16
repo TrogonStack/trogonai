@@ -4,15 +4,15 @@ use std::convert::Infallible;
 
 use buffa::Message as _;
 use trogon_decider::{
-    Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, SnapshotCadence,
-    WritePrecondition,
+    Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, SnapshotCadence,
+    StateSnapshot, WritePrecondition,
 };
 use trogon_decider_guest_sdk::export_decider;
 use trogonai_proto::scheduler::schedules::{
     CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, REMOVE_SCHEDULE_TYPE_URL, RESUME_SCHEDULE_TYPE_URL, v1,
 };
 
-use __trogon_decider_bindings::{Guest, SnapshotPolicy, WritePrecondition as GuestWritePrecondition};
+use __trogon_decider_bindings::{Guest, GuestSession, SnapshotPolicy, WritePrecondition as GuestWritePrecondition};
 
 trait Declaration {
     const WRITE_PRECONDITION: WritePrecondition;
@@ -61,6 +61,41 @@ impl<P> From<P> for DeclaredCommand<P> {
 
 struct PausedEvent(v1::SchedulePaused);
 
+#[derive(Clone, Debug, PartialEq)]
+struct DeclaredState(v1::SchedulePaused);
+
+impl Default for DeclaredState {
+    fn default() -> Self {
+        Self(v1::SchedulePaused {
+            schedule_id: "initial".to_string(),
+        })
+    }
+}
+
+impl Evolve<PausedEvent> for DeclaredState {
+    type Error = Infallible;
+
+    fn evolve(self, event: &PausedEvent) -> Result<Self, Self::Error> {
+        Ok(Self(event.0.clone()))
+    }
+}
+
+impl StateSnapshot for DeclaredState {
+    type Payload = v1::SchedulePaused;
+}
+
+impl From<v1::SchedulePaused> for DeclaredState {
+    fn from(payload: v1::SchedulePaused) -> Self {
+        Self(payload)
+    }
+}
+
+impl AsRef<v1::SchedulePaused> for DeclaredState {
+    fn as_ref(&self) -> &v1::SchedulePaused {
+        &self.0
+    }
+}
+
 impl EventEncode for PausedEvent {
     type Error = Infallible;
 
@@ -90,23 +125,14 @@ impl EventDecode for PausedEvent {
 
 impl<P: Declaration> Decider for DeclaredCommand<P> {
     type StreamId = str;
-    type State = v1::SchedulePaused;
+    type State = DeclaredState;
     type Event = PausedEvent;
     type DecideError = Infallible;
-    type EvolveError = Infallible;
     const WRITE_PRECONDITION: WritePrecondition = P::WRITE_PRECONDITION;
     const SNAPSHOT_CADENCE: SnapshotCadence = P::SNAPSHOT_CADENCE;
 
     fn stream_id(&self) -> &str {
         self.0.schedule_id()
-    }
-
-    fn initial_state() -> Self::State {
-        v1::SchedulePaused::default()
-    }
-
-    fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Ok(event.0.clone())
     }
 
     fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -146,6 +172,30 @@ export_decider!(
         state_schema_version = "fixture-state/v1",
     },
 );
+
+#[test]
+fn exported_session_restores_and_encodes_state_payload() {
+    let initial = Session::new(None);
+    let snapshot = trogon_decider_guest_sdk::encode_current_state(&DeclaredState::default(), "fixture-state/v1");
+    assert_eq!(initial.snapshot(), Some(snapshot.clone()));
+    let restored = Session::new(Some(snapshot.clone()));
+    assert_eq!(restored.snapshot(), Some(snapshot));
+
+    let empty_payload_frame = b"\x0a\x10fixture-state/v1\x12\x00".to_vec();
+    let empty_state_snapshot =
+        trogon_decider_guest_sdk::encode_current(&v1::SchedulePaused::default(), "fixture-state/v1");
+    assert_ne!(initial.snapshot(), Some(empty_state_snapshot.clone()));
+    assert_eq!(
+        Session::new(Some(empty_payload_frame)).snapshot(),
+        Some(empty_state_snapshot)
+    );
+
+    let state = DeclaredState(v1::SchedulePaused {
+        schedule_id: "restored".to_string(),
+    });
+    let snapshot = trogon_decider_guest_sdk::encode_current_state(&state, "fixture-state/v1");
+    assert_eq!(Session::new(Some(snapshot.clone())).snapshot(), Some(snapshot));
+}
 
 #[test]
 fn exported_descriptor_preserves_each_commands_concurrency_and_snapshot_policy() {

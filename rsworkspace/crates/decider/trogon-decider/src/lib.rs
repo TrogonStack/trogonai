@@ -14,8 +14,8 @@
 //! A *decider* turns a command into events against a prior state. This crate provides:
 //!
 //! - The [`Decider`] trait, which ties together a command, its [`State`](Decider::State),
-//!   [`Event`](Decider::Event), and the rules for replaying events ([`evolve`](Decider::evolve))
-//!   and producing new ones ([`decide`](Decider::decide)).
+//!   [`Event`](Decider::Event), and the rules for producing new events.
+//! - The [`Evolve`] trait, which lets each decider's state replay prior events.
 //! - [`Decision`], the outcome of `decide`: either a batch of events directly, or a
 //!   multi-step plan ([`Decision::act`]) whose later steps observe the state that would
 //!   result from earlier steps.
@@ -26,7 +26,7 @@
 //! # Example
 //!
 //! ```
-//! use trogon_decider::{Decider, Decision, WritePrecondition};
+//! use trogon_decider::{Decider, Decision, Evolve, WritePrecondition};
 //!
 //! struct PlaceOrder {
 //!     order_id: String,
@@ -54,26 +54,31 @@
 //! #[error("invalid order event")]
 //! struct PlaceOrderEvolveError;
 //!
+//! impl Default for OrderState {
+//!     fn default() -> Self { Self::New }
+//! }
+//!
+//! impl Evolve<OrderEvent> for OrderState {
+//!     type Error = PlaceOrderEvolveError;
+//!
+//!     fn evolve(self, event: &OrderEvent) -> Result<Self, Self::Error> {
+//!         match event {
+//!             OrderEvent::Placed { customer_id, .. } => Ok(Self::Placed {
+//!                 customer_id: customer_id.clone(),
+//!             }),
+//!         }
+//!     }
+//! }
+//!
 //! impl Decider for PlaceOrder {
 //!     type StreamId = str;
 //!     type State = OrderState;
 //!     type Event = OrderEvent;
 //!     type DecideError = PlaceOrderError;
-//!     type EvolveError = PlaceOrderEvolveError;
 //!
 //!     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 //!
 //!     fn stream_id(&self) -> &Self::StreamId { &self.order_id }
-//!
-//!     fn initial_state() -> Self::State { OrderState::New }
-//!
-//!     fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, PlaceOrderEvolveError> {
-//!         match event {
-//!             OrderEvent::Placed { customer_id, .. } => Ok(OrderState::Placed {
-//!                 customer_id: customer_id.clone(),
-//!             }),
-//!         }
-//!     }
 //!
 //!     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, PlaceOrderError> {
 //!         match state {
@@ -90,16 +95,18 @@
 //!     order_id: "order-42".into(),
 //!     customer_id: "alice".into(),
 //! };
-//! let state = PlaceOrder::initial_state();
+//! let state = OrderState::default();
 //! let decision = PlaceOrder::decide(&state, &command);
 //! assert!(decision.is_ok());
 //! ```
 
 mod act;
+mod decider_state;
 mod decision;
 pub mod event;
 mod events;
 mod snapshot_cadence;
+mod state_snapshot;
 #[cfg(feature = "test-support")]
 pub mod testing;
 mod write_precondition;
@@ -107,41 +114,46 @@ mod write_precondition;
 pub use act::{Act, ActBuilder};
 #[doc(hidden)]
 pub use act::{ActChain, ActRun, First, Steps, Then};
+pub use decider_state::DeciderState;
 pub use decision::Decision;
 #[doc(hidden)]
 pub use decision::{DecisionError, DecisionResult, evaluate_decision};
 pub use event::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
 pub use events::Events;
 pub use snapshot_cadence::SnapshotCadence;
+pub use state_snapshot::StateSnapshot;
 #[cfg(feature = "test-support")]
 pub use testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
 pub use write_precondition::WritePrecondition;
 
+/// Replays an event into the state selected by a decider.
+pub trait Evolve<Event>: Sized {
+    /// Error returned when an event cannot be applied to state.
+    type Error: std::error::Error;
+
+    /// Applies one event to the current state, yielding the new state.
+    fn evolve(self, event: &Event) -> Result<Self, Self::Error>;
+}
+
+/// Replay error selected by a decider's state type.
+pub type EvolveError<C> = <<C as Decider>::State as Evolve<<C as Decider>::Event>>::Error;
+
 /// Decision-making for a typed command.
 ///
-/// An implementation replays prior events through [`evolve`](Self::evolve) to rebuild
-/// [`State`](Self::State), then evaluates the command against that state in
-/// [`decide`](Self::decide) to produce a [`Decision`].
-///
-/// The trait is `Sized` so `&Self` and `&Self::State` can be passed around without
-/// erasure. Errors are split into two channels: [`DecideError`](Self::DecideError) for
-/// rule-level rejections in `decide`, and [`EvolveError`](Self::EvolveError) for invalid
-/// event payloads encountered in `evolve`.
+/// [`DeciderState`] combines the state's no-history value through [`Default`] and event replay
+/// through [`Evolve`]. The command only decides which new events to produce.
 pub trait Decider: Sized {
     /// Stream identifier type. Usually `str` so commands return a borrowed slice.
     type StreamId: ?Sized;
 
     /// State rebuilt from prior events.
-    type State;
+    type State: DeciderState<Self::Event>;
 
     /// Domain event appended to the stream.
     type Event;
 
     /// Error returned when a command cannot be turned into events.
     type DecideError: std::error::Error;
-
-    /// Error returned when an event cannot be applied to state.
-    type EvolveError: std::error::Error;
 
     /// Concurrency guard applied when persisting the resulting events.
     ///
@@ -159,12 +171,6 @@ pub trait Decider: Sized {
 
     /// Returns the stream identifier this command targets.
     fn stream_id(&self) -> &Self::StreamId;
-
-    /// Returns the state used before any events have been replayed.
-    fn initial_state() -> Self::State;
-
-    /// Applies one event to the current state, yielding the new state.
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError>;
 
     /// Decides which events the command produces against the current state.
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError>;

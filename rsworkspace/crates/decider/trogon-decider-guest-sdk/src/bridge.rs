@@ -1,7 +1,8 @@
 use std::error::Error as _;
 
 use trogon_decider::{
-    Decider, DecisionError, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, evaluate_decision,
+    Decider, DecisionError, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, EvolveError,
+    evaluate_decision,
 };
 
 /// Abstraction over whatever concrete WIT-generated command-envelope type a guest's generated
@@ -75,7 +76,7 @@ pub enum BridgeError {
     /// A stored event envelope's payload failed to decode during replay.
     #[error("failed to decode event: {0}")]
     EventDecode(#[source] Box<dyn std::error::Error>),
-    /// `Decider::evolve` failed while folding a decoded event into state.
+    /// State evolution failed while folding a decoded event into state.
     #[error("failed to evolve state: {0}")]
     Evolve(#[source] Box<dyn std::error::Error>),
     /// A business-rule rejection raised by `decide`.
@@ -180,7 +181,7 @@ where
     Cmd::try_from(proto).map_err(|source| into_view(BridgeError::CommandConvert(Box::new(source))))
 }
 
-/// Decodes one stored event envelope and folds it into decider state via `C::evolve`. Envelopes
+/// Decodes one stored event envelope and folds it into state via [`Evolve`]. Envelopes
 /// whose event type isn't recognized by this decider's event set are skipped (not errored),
 /// mirroring the native runtime's replay behavior so WASM and native replay fold the same stream
 /// to the same state.
@@ -190,7 +191,8 @@ where
 )]
 pub fn evolve_one<C, E, A>(state: C::State, envelope: A) -> Result<C::State, E>
 where
-    C: Decider<EvolveError: 'static>,
+    C: Decider,
+    EvolveError<C>: 'static,
     C::Event: EventDecode,
     A: AnyEnvelopeView,
     E: From<DomainErrorParts>,
@@ -206,15 +208,18 @@ where
         EventDecodeOutcome::Skipped => return Ok(state),
     };
 
-    C::evolve(state, &event).map_err(|source| into_view(BridgeError::Evolve(Box::new(source))))
+    state
+        .evolve(&event)
+        .map_err(|source| into_view(BridgeError::Evolve(Box::new(source))))
 }
 
 /// Project a [`DecisionError`] into a [`BridgeError`], mirroring the native runtime's
 /// handling of the same failure type (see `trogon-decider-runtime`'s `append_decision` and
 /// `trogon_decider::testing`'s `decide_events`).
-fn map_decision_failure<C>(failure: DecisionError<C::DecideError, C::EvolveError>) -> BridgeError
+fn map_decision_failure<C>(failure: DecisionError<C::DecideError, EvolveError<C>>) -> BridgeError
 where
-    C: Decider<DecideError: std::error::Error + 'static, EvolveError: std::error::Error + 'static>,
+    C: Decider<DecideError: 'static>,
+    EvolveError<C>: 'static,
 {
     match failure {
         DecisionError::Decide(source) => BridgeError::Rejected {
@@ -235,7 +240,8 @@ where
 )]
 pub fn decide_command<C, D, A>(command: &C, state: &C::State) -> Result<Vec<A>, D>
 where
-    C: Decider<DecideError: std::error::Error + 'static, EvolveError: std::error::Error + 'static, State: Clone>,
+    C: Decider<DecideError: 'static, State: Clone>,
+    EvolveError<C>: 'static,
     C::Event: EventEncode + EventType,
     A: From<AnyEnvelopeParts>,
     D: DecideErrorView,

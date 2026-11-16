@@ -173,7 +173,11 @@ fn decider_trait_methods_delegate_to_schedule_state() {
 
     assert_eq!(command.stream_id(), &command.id);
     assert_eq!(
-        RemoveSchedule::initial_state().state.unwrap().as_known(),
+        super::super::state::ScheduleState::default()
+            .state
+            .as_ref()
+            .unwrap()
+            .as_known(),
         Some(state_v1::StateValue::STATE_VALUE_MISSING)
     );
 }

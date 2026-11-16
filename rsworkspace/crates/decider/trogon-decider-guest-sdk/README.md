@@ -6,7 +6,7 @@ contract, so it can be compiled to a WASM component and executed by
 same `trogon:decider` world).
 
 This guide covers the `Decider` trait, the `export_decider!` macro, the WIT contract it targets,
-building a component, and the two ways to test one. For the end-to-end picture, including how
+building a component, and testing it. For the end-to-end picture, including how
 this crate's WIT contract and engine budgets fit into the rest of the platform, see
 [Decider Platform](../../../../docs/architecture/decider.md).
 
@@ -17,19 +17,24 @@ A decider is a plain Rust type implementing `trogon_decider::Decider`:
 ```rust
 pub trait Decider: Sized {
     type StreamId: ?Sized;
-    type State;
+
+    type State: DeciderState<Self::Event>;
     type Event;
     type DecideError: std::error::Error;
-    type EvolveError: std::error::Error;
 
-    const WRITE_PRECONDITION: Option<WritePrecondition> = None;
+    const WRITE_PRECONDITION: WritePrecondition;
+    const SNAPSHOT_CADENCE: SnapshotCadence = SnapshotCadence::Never;
 
     fn stream_id(&self) -> &Self::StreamId;
-    fn initial_state() -> Self::State;
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError>;
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError>;
 }
 ```
+
+`DeciderState<Event>` is implemented automatically for state types that provide the no-history
+value through `Default` and event replay through `Evolve<Event>`.
+For snapshots it also implements `StateSnapshot` to name its protobuf `Payload` type.
+The standard `From<Payload>` and `AsRef<Payload>` implementations restore the state and borrow
+the payload for encoding. Native stores keep using the protobuf payload type.
 
 `decide` returns a `Decision<Self>`, which is either a flat batch of events
 (`Decision::Events`) or an `Act` plan: a chain of steps, each re-evaluating `decide` against the

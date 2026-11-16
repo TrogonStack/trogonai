@@ -1,7 +1,4 @@
-use trogon_decider::{
-    Decider, Decision, WritePrecondition,
-    testing::TestCase,
-};
+use trogon_decider::{Decider, Decision, WritePrecondition, testing::TestCase};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TestState {
@@ -37,24 +34,10 @@ impl Decider for TestCommand {
     type State = TestState;
     type Event = TestEvent;
     type DecideError = TestDecisionError;
-    type EvolveError = TestHistoryError;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "alpha"
-    }
-
-    fn initial_state() -> Self::State {
-        TestState::Missing
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        match (state, event) {
-            (TestState::Missing, TestEvent::Registered) => Ok(TestState::Registered),
-            (TestState::Registered, TestEvent::Disabled) => Ok(TestState::Disabled),
-            (TestState::Disabled, TestEvent::Removed) => Ok(TestState::Missing),
-            _ => Err(TestHistoryError::Invalid),
-        }
     }
 
     fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -71,4 +54,23 @@ fn main() {
         .given([TestEvent::Disabled])
         .when(TestCommand)
         .then([TestEvent::Removed]);
+}
+
+impl Default for TestState {
+    fn default() -> Self {
+        TestState::Missing
+    }
+}
+
+impl trogon_decider::Evolve<TestEvent> for TestState {
+    type Error = TestHistoryError;
+
+    fn evolve(self, event: &TestEvent) -> Result<Self, Self::Error> {
+        match (self, event) {
+            (TestState::Missing, TestEvent::Registered) => Ok(TestState::Registered),
+            (TestState::Registered, TestEvent::Disabled) => Ok(TestState::Disabled),
+            (TestState::Disabled, TestEvent::Removed) => Ok(TestState::Missing),
+            _ => Err(TestHistoryError::Invalid),
+        }
+    }
 }

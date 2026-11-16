@@ -1,5 +1,62 @@
 use buffa::{EnumValue, MessageField};
+use std::ops::Deref;
+use trogon_decider::{Evolve, StateSnapshot};
 use trogonai_proto::scheduler::schedules::{ScheduleEventCase, ScheduleStatusKind, state_v1, v1};
+
+#[repr(transparent)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScheduleState(state_v1::State);
+
+impl Default for ScheduleState {
+    fn default() -> Self {
+        Self(state_v1::State {
+            state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_MISSING)),
+            last_occurrence_at: MessageField::default(),
+            last_occurrence_sequence: None,
+            schedule: MessageField::default(),
+            pending_occurrence_at: MessageField::default(),
+            completed: None,
+        })
+    }
+}
+
+impl Evolve<v1::ScheduleEvent> for ScheduleState {
+    type Error = EvolveError;
+
+    fn evolve(self, event: &v1::ScheduleEvent) -> Result<Self, Self::Error> {
+        evolve(self.0, event).map(Self)
+    }
+}
+
+impl Deref for ScheduleState {
+    type Target = state_v1::State;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<state_v1::State> for ScheduleState {
+    fn from(value: state_v1::State) -> Self {
+        Self(value)
+    }
+}
+
+impl From<ScheduleState> for state_v1::State {
+    fn from(value: ScheduleState) -> Self {
+        value.0
+    }
+}
+
+impl AsRef<state_v1::State> for ScheduleState {
+    fn as_ref(&self) -> &state_v1::State {
+        &self.0
+    }
+}
+
+impl StateSnapshot for ScheduleState {
+    type Payload = state_v1::State;
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EvolveError {
@@ -17,17 +74,6 @@ pub enum EvolveError {
     MissingOccurrenceSequence,
     #[error("protobuf state '{value}' is unknown")]
     UnknownStateValue { value: i32 },
-}
-
-pub fn initial_state() -> state_v1::State {
-    state_v1::State {
-        state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_MISSING)),
-        last_occurrence_at: MessageField::default(),
-        last_occurrence_sequence: None,
-        schedule: MessageField::default(),
-        pending_occurrence_at: MessageField::default(),
-        completed: None,
-    }
 }
 
 pub fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Result<state_v1::State, EvolveError> {

@@ -8,7 +8,8 @@
 //! this crate's `[package.metadata.decider-test] exempt` key, and not consumed by any other crate.
 
 use trogon_decider::{
-    Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, WritePrecondition,
+    Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, StateSnapshot,
+    WritePrecondition,
 };
 use trogon_decider_guest_sdk::export_decider;
 
@@ -63,6 +64,16 @@ pub struct PlanState {
     pub steps_applied: u32,
 }
 
+impl StateSnapshot for PlanState {
+    type Payload = Self;
+}
+
+impl AsRef<Self> for PlanState {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 buffa::impl_default_instance!(PlanState);
 
 impl buffa::Message for PlanState {
@@ -113,6 +124,16 @@ pub enum PlanDecideError {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid plan event")]
 pub struct PlanEvolveError;
+
+impl Evolve<PlanEvent> for PlanState {
+    type Error = PlanEvolveError;
+
+    fn evolve(self, _event: &PlanEvent) -> Result<Self, Self::Error> {
+        Ok(Self {
+            steps_applied: self.steps_applied + 1,
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid step-two payload: expected 4 bytes, got {actual}")]
@@ -166,21 +187,10 @@ impl Decider for RunTwoStepPlan {
     type State = PlanState;
     type Event = PlanEvent;
     type DecideError = PlanDecideError;
-    type EvolveError = PlanEvolveError;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &str {
         &self.stream_id
-    }
-
-    fn initial_state() -> PlanState {
-        PlanState::default()
-    }
-
-    fn evolve(state: PlanState, _event: &PlanEvent) -> Result<PlanState, PlanEvolveError> {
-        Ok(PlanState {
-            steps_applied: state.steps_applied + 1,
-        })
     }
 
     fn decide(state: &PlanState, _command: &Self) -> Result<Decision<Self>, PlanDecideError> {

@@ -12,7 +12,7 @@ use trogon_decider_sim::{
 use trogon_decider_test::Suite;
 use trogon_scheduler_domain::{CreateSchedule, PauseSchedule, RemoveSchedule, ResumeSchedule};
 use trogonai_proto::scheduler::schedules::{
-    CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, REMOVE_SCHEDULE_TYPE_URL, RESUME_SCHEDULE_TYPE_URL, state_v1, v1,
+    CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, REMOVE_SCHEDULE_TYPE_URL, RESUME_SCHEDULE_TYPE_URL, v1,
 };
 
 const BACKUP_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181be9";
@@ -27,15 +27,11 @@ fn invalid_command(other: &str) -> NativeDomainError {
 
 /// Mirrors `wasm-components/trogon-schedules-decider`'s `export_decider!` bundle: the same four
 /// commands, dispatched by type URL, with `CreateSchedule` as the canonical command whose shared
-/// `State`/`Event`/`EvolveError` folds every event regardless of which command produced it.
+/// `State`/`Event` folds every event regardless of which command produced it.
 struct SchedulesBundle;
 
 impl NativeDeciderBundle for SchedulesBundle {
-    type State = state_v1::State;
-
-    fn initial_state() -> Self::State {
-        trogon_scheduler_domain::initial_state()
-    }
+    type State = trogon_scheduler_domain::ScheduleState;
 
     fn stream_id(command: &WireEnvelope) -> Result<String, NativeDomainError> {
         match command.type_url.as_str() {
