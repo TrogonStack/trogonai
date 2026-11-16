@@ -96,6 +96,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 args = sys.argv[1:]
 if len(args) < 3 or any(arg.startswith("-") for arg in args[:3]) or (args[3:4] == ["--observe"] and len(args) != 6):
@@ -525,9 +526,11 @@ def write(location, text):
         handle.write(text)
 
 
-def prepare(name, files):
-    """Writes the files and the oracle spec of the case `name`, and returns the path of the spec."""
-    root = os.path.join(FOLDER, name)
+def prepare(name, files, folder=None):
+    """Writes the files and the oracle spec of the case `name` under `folder` (`FOLDER` by default), and returns the
+    path of the spec."""
+    folder = folder or FOLDER
+    root = os.path.join(folder, name)
     os.makedirs(os.path.join(root, "home/.claude"))
     os.makedirs(os.path.join(root, "work/.claude"))
     options = {"cwd": os.path.join(root, "work")}
@@ -562,7 +565,7 @@ def prepare(name, files):
         spec["process"] = ORG_PROCESS
         steps = KEPT_STEPS if name.startswith("org_cache_kept") else ORG_STEPS
         spec["cases"] = [{"name": f"{name}/{index}", "options": options, **step} for index, step in enumerate(steps)]
-    spec_path = os.path.join(FOLDER, f"{name}.spec.json")
+    spec_path = os.path.join(folder, f"{name}.spec.json")
     spec_text = json.dumps(spec)
     for placeholder, text in handed.items():
         if spec_text.count(placeholder) != len(spec["cases"]):
@@ -573,6 +576,11 @@ def prepare(name, files):
     return spec_path
 
 
+# The working folders of the runs going on now.
+RUNNING = set()
+RUNNING_LOCK = threading.Lock()
+
+
 def run(spec_path, node_flags, startup=STARTUP_BYTES):
     """What `resolveSettings` answers for the case `spec_path` names, on Node started with `node_flags` and a command
     line and environment of `startup` bytes."""
@@ -580,15 +588,26 @@ def run(spec_path, node_flags, startup=STARTUP_BYTES):
     # The steps of an organization case write their files as the resolves go, so each run starts without them.
     with open(spec_path, encoding="utf-8") as handle:
         spec = json.load(handle)
-    for case in spec["cases"]:
-        for step_file in case.get("files", {}):
-            if os.path.exists(os.path.join(spec["root"], step_file)):
-                os.remove(os.path.join(spec["root"], step_file))
-    # Node can exit on an uncaught error before a pipe drains the long source line it prints, so stderr goes to a file.
-    with tempfile.TemporaryFile() as errors:
-        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=errors, env={"PAD": "x" * pad(command, startup)})
-        errors.seek(0)
-        stderr = errors.read().decode("utf-8")
+    # Runs that shared a folder would read and delete each other's step files.
+    with RUNNING_LOCK:
+        if spec["root"] in RUNNING:
+            raise RuntimeError(f"two runs at once would share the working folder {spec['root']}")
+        RUNNING.add(spec["root"])
+    try:
+        for case in spec["cases"]:
+            for step_file in case.get("files", {}):
+                if os.path.exists(os.path.join(spec["root"], step_file)):
+                    os.remove(os.path.join(spec["root"], step_file))
+        # Node can exit on an uncaught error before a pipe drains the long source line it prints, so stderr goes to a
+        # file.
+        with tempfile.TemporaryFile() as errors:
+            process = subprocess.run(command, stdout=subprocess.PIPE, stderr=errors,
+                                     env={"PAD": "x" * pad(command, startup)})
+            errors.seek(0)
+            stderr = errors.read().decode("utf-8")
+    finally:
+        with RUNNING_LOCK:
+            RUNNING.discard(spec["root"])
     if process.returncode == 0:
         return answer(json.loads(process.stdout.decode("utf-8")))
     found = re.search(r"^(\w*Error): (.*)$", stderr, re.M)
@@ -611,10 +630,19 @@ def reference(name, files, startup=STARTUP_BYTES):
 
 
 def observe(entries, runs, host):
-    """The `observed` entry of `host`: every case `runs` times with the default flags, two runs per core at once."""
-    specs = [(prepare(case[0], case[1]), case_startup(case)) for case in CASES]
+    """The `observed` entry of `host`: every case `runs` times with the default flags, two runs per core at once,
+    each run in a folder of its own. The folder name has the length of `FOLDER`'s, so every path a run sees has the
+    length it has in the reference run."""
+
+    def once(case):
+        folder = tempfile.mkdtemp()
+        try:
+            return run(prepare(case[0], case[1], folder), [], case_startup(case))
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=2 * (os.cpu_count() or 1)) as pool:
-        pending = [[pool.submit(run, spec_path, [], startup) for _ in range(runs)] for spec_path, startup in specs]
+        pending = [[pool.submit(once, case) for _ in range(runs)] for case in CASES]
         answers = [[future.result() for future in futures] for futures in pending]
     bands, missed = [], []
     for entry, answered in zip(entries, answers):
