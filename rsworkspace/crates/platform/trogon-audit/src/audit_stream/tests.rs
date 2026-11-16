@@ -83,6 +83,7 @@ fn config_holds_every_guarantee_the_adr_names() {
         assert_eq!(config.discard, DiscardPolicy::New);
         assert!(config.deny_delete);
         assert!(config.deny_purge);
+        assert!(!config.allow_message_counter);
         assert_eq!(config.duplicate_window, Duration::from_secs(120));
         assert!(config.max_age.is_zero());
         assert_eq!(config.num_replicas, replicas.get());
@@ -99,7 +100,7 @@ fn the_configuration_it_creates_is_one_it_accepts() {
 #[test]
 fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
     type Weaken = fn(&mut Config);
-    let cases: [(Weaken, AuditStreamMismatchError); 12] = [
+    let cases: [(Weaken, AuditStreamMismatchError); 13] = [
         (
             |c| c.storage = StorageType::Memory,
             AuditStreamMismatchError::Storage { stream: "AUDIT" },
@@ -132,6 +133,10 @@ fn refuses_each_way_a_stream_could_weaken_the_guarantees() {
         (
             |c| c.allow_rollup = true,
             AuditStreamMismatchError::Rollup { stream: "AUDIT" },
+        ),
+        (
+            |c| c.allow_message_counter = true,
+            AuditStreamMismatchError::MessageCounter { stream: "AUDIT" },
         ),
         (
             |c| c.max_messages_per_subject = 1,

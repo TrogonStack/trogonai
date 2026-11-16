@@ -22,6 +22,8 @@ pub enum AuditStreamMismatchError {
     MessageTtl { stream: &'static str },
     #[error("stream '{stream}' must not let a publish roll up and remove stored records")]
     Rollup { stream: &'static str },
+    #[error("stream '{stream}' must not be a counter stream, since a counter stream refuses every audit record")]
+    MessageCounter { stream: &'static str },
     #[error("stream '{stream}' must not limit the records kept per subject")]
     MaxMessagesPerSubject { stream: &'static str },
     #[error("stream '{stream}' must keep a duplicate window of two minutes or longer")]

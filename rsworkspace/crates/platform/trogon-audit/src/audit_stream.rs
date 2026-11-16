@@ -24,6 +24,8 @@
 //! - let an operator or a compromised client remove them (`deny_delete` and
 //!   `deny_purge` off, or `allow_rollup` on, which lets any publisher replace
 //!   every stored record on a subject with one header);
+//! - refuse every record (`allow_msg_counter`, which makes the stream accept
+//!   only publishes that add to a counter and reject each ordinary publish);
 //! - lose them with a node (fewer replicas than the deployment asked for);
 //! - store a retried record twice (a duplicate window shorter than the sink's
 //!   retries span, [`STREAM_DUPLICATE_WINDOW`]);
@@ -136,6 +138,9 @@ impl AuditStream {
         }
         if actual.allow_rollup {
             return Err(AuditStreamMismatchError::Rollup { stream });
+        }
+        if actual.allow_message_counter {
+            return Err(AuditStreamMismatchError::MessageCounter { stream });
         }
         if actual.max_messages_per_subject > 0 {
             return Err(AuditStreamMismatchError::MaxMessagesPerSubject { stream });
