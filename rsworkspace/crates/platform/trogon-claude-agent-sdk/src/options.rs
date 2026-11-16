@@ -394,7 +394,9 @@ pub struct ClaudeAgentOptions {
     /// `AbortError("Claude Code process aborted by user")`; a token already cancelled makes `connect` fail with that
     /// error. `None` uses a fresh token, which `abort()` cancels. Closing the client does not cancel it.
     pub abort_controller: Option<crate::CancellationToken>,
-    /// TypeScript `spawnClaudeCodeProcess`: start the CLI with this instead of the SDK's own spawn.
+    /// TypeScript `spawnClaudeCodeProcess`: start the CLI with this instead of the SDK's own spawn. The SDK's own
+    /// spawn passes the child only its stdio under the Python dialect, and on Apple platforms under the TypeScript
+    /// one, as the upstream SDKs do; with this function, which descriptors the child keeps is the caller's choice.
     pub spawn_claude_code_process: Option<crate::SpawnClaudeCodeProcess>,
     /// TypeScript `onProcessSpawned`: told the process id when the SDK starts the CLI itself.
     pub on_process_spawned: Option<crate::OnProcessSpawned>,
