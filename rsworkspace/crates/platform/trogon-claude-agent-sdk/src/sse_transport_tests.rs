@@ -95,6 +95,8 @@ struct Server {
     origin: String,
     seen: Arc<Mutex<Seen>>,
     first_post: Arc<Notify>,
+    /// How many GETs the server has read, published as each one is recorded.
+    gets_seen: watch::Receiver<usize>,
 }
 
 impl Server {
@@ -117,6 +119,8 @@ async fn serve(gets: Value, posts: Value) -> Result<Server, Box<dyn StdError>> {
     let shared = Arc::clone(&seen);
     let first_post = Arc::new(Notify::new());
     let posted = Arc::clone(&first_post);
+    let (got, gets_seen) = watch::channel(0);
+    let got = Arc::new(got);
     tokio::spawn(async move {
         while let Ok((socket, _)) = listener.accept().await {
             tokio::spawn(connection(
@@ -125,6 +129,7 @@ async fn serve(gets: Value, posts: Value) -> Result<Server, Box<dyn StdError>> {
                 posts.clone(),
                 Arc::clone(&shared),
                 Arc::clone(&posted),
+                Arc::clone(&got),
             ));
         }
     });
@@ -132,6 +137,7 @@ async fn serve(gets: Value, posts: Value) -> Result<Server, Box<dyn StdError>> {
         origin,
         seen,
         first_post,
+        gets_seen,
     })
 }
 
@@ -178,7 +184,14 @@ async fn read_request(socket: &mut TcpStream, buffer: &mut Vec<u8>) -> Option<Re
     Some(Request { method, headers, body })
 }
 
-async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<Mutex<Seen>>, first_post: Arc<Notify>) {
+async fn connection(
+    mut socket: TcpStream,
+    gets: Value,
+    posts: Value,
+    seen: Arc<Mutex<Seen>>,
+    first_post: Arc<Notify>,
+    got: Arc<watch::Sender<usize>>,
+) {
     let mut buffer = Vec::new();
     while let Some(request) = read_request(&mut socket, &mut buffer).await {
         let is_post = request.method == "POST";
@@ -203,6 +216,9 @@ async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<
         };
         if is_post && index == 0 {
             first_post.notify_one();
+        }
+        if !is_post {
+            got.send_replace(index + 1);
         }
         let script = if is_post {
             posts.get(index).cloned().unwrap_or_else(|| json!({"status": 200}))
@@ -347,7 +363,17 @@ async fn write_many(
     resolved
 }
 
-async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
+/// A recorded case's server and connected transport, before any of its actions run.
+struct Started {
+    golden: Value,
+    server: Server,
+    transport: SseTransport,
+    handle: SseHandle,
+    abort: CancellationToken,
+    events: Arc<Mutex<Vec<Value>>>,
+}
+
+async fn start(name: &str) -> Result<Started, Box<dyn StdError>> {
     let golden = golden(name)?;
     let spec = &golden["spec"];
     let server = serve(spec["gets"].clone(), spec["posts"].clone()).await?;
@@ -396,17 +422,62 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
         .with_time_divisor(divisor);
     let handle = transport.handle();
     transport.connect().await?;
+    Ok(Started {
+        golden,
+        server,
+        transport,
+        handle,
+        abort,
+        events,
+    })
+}
+
+/// The `snapshot` action.
+fn snapshot(started: &Started) -> Value {
+    let drops: Map<String, Value> = started
+        .handle
+        .drop_counts()
+        .into_iter()
+        .map(|(category, count)| (category.to_owned(), json!(count)))
+        .collect();
+    json!({
+        "ready": started.transport.is_ready(),
+        "drops": drops,
+        "last": started.handle.last_sequence_num(),
+        "events": std::mem::take(&mut *locked(&started.events)),
+    })
+}
+
+/// What the server saw, with the results, in the golden's terms.
+fn finish(started: &Started, results: Vec<Value>) -> Result<Replay, Box<dyn StdError>> {
+    let (gets, mut posts) = {
+        let seen = locked(&started.server.seen);
+        (Value::Array(seen.gets.clone()), Value::Array(seen.posts.clone()))
+    };
+    without_uuids(&mut posts);
+    let origin = started.server.origin.as_str();
+    Ok(Replay {
+        results: hosted(&Value::Array(results), origin)?,
+        gets: hosted(&gets, origin)?,
+        posts: hosted(&posts, origin)?,
+        golden: started.golden.clone(),
+    })
+}
+
+async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
+    let mut started = start(name).await?;
+    let spec = started.golden["spec"].clone();
     let mut results = Vec::new();
     let mut pending_writes = tokio::task::JoinSet::new();
     for action in spec["actions"].as_array().into_iter().flatten() {
         let name = action[0].as_str().unwrap_or_default();
         let argument = &action[1];
         let result = match name {
-            "read" => match timeout(Duration::from_secs(2), transport.read_message()).await {
+            "read" => match timeout(Duration::from_secs(2), started.transport.read_message()).await {
                 Err(_) => json!({"timeout": true}),
                 Ok(Ok(Some(message))) => {
-                    let ccr = ccr_json(handle.ccr_event(&message));
-                    handle.mark_delivered(&message);
+                    let ccr = ccr_json(started.handle.ccr_event(&message));
+                    started.handle.mark_delivered(&message);
                     json!({"message": message, "ccr": ccr})
                 }
                 Ok(Ok(None)) => json!({"done": true}),
@@ -414,7 +485,7 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
             },
             "write" => {
                 let line = argument.as_str().unwrap_or_default();
-                match timeout(Duration::from_secs(2), transport.write(line)).await {
+                match timeout(Duration::from_secs(2), started.transport.write(line)).await {
                     Err(_) => json!({"error": "write timeout"}),
                     Ok(Ok(())) => json!({"ok": true}),
                     Ok(Err(error)) => json!({"error": error.to_string()}),
@@ -422,8 +493,8 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
             }
             "writeMany" => {
                 let resolved = write_many(
-                    &transport,
-                    &server,
+                    &started.transport,
+                    &started.server,
                     argument.as_u64().unwrap_or_default(),
                     &mut pending_writes,
                 )
@@ -432,65 +503,44 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
             }
             "waitGets" => {
                 let wanted = usize::try_from(argument.as_u64().unwrap_or_default())?;
-                json!({"reached": until(|| server.gets() >= wanted).await})
+                json!({"reached": until(|| started.server.gets() >= wanted).await})
             }
             "waitPosts" => {
                 let wanted = usize::try_from(argument.as_u64().unwrap_or_default())?;
-                json!({"reached": until(|| server.posts() >= wanted).await})
+                json!({"reached": until(|| started.server.posts() >= wanted).await})
             }
-            "waitReady" => json!({"reached": until(|| transport.is_ready()).await}),
+            "waitReady" => json!({"reached": until(|| started.transport.is_ready()).await}),
             "settle" => {
                 sleep(Duration::from_millis(argument.as_u64().unwrap_or_default())).await;
                 json!({"settled": true})
             }
-            "suspend" => json!({"suspended": handle.suspend()}),
-            "resume" => json!({"resumed": handle.resume()}),
+            "suspend" => json!({"suspended": started.handle.suspend()}),
+            "resume" => json!({"resumed": started.handle.resume()}),
             "expect" => {
-                handle.expect_control_response(argument.as_str().unwrap_or_default());
+                started
+                    .handle
+                    .expect_control_response(argument.as_str().unwrap_or_default());
                 json!({"expected": true})
             }
             "abort" => {
-                abort.cancel();
+                started.abort.cancel();
                 sleep(Duration::from_millis(20)).await;
                 json!({"aborted": true})
             }
             "close" => {
-                transport.close().await?;
+                started.transport.close().await?;
                 while let Some(result) = pending_writes.join_next().await {
                     result??;
                 }
                 sleep(Duration::from_millis(10)).await;
                 json!({"closed": true})
             }
-            "snapshot" => {
-                let drops: Map<String, Value> = handle
-                    .drop_counts()
-                    .into_iter()
-                    .map(|(category, count)| (category.to_owned(), json!(count)))
-                    .collect();
-                json!({
-                    "ready": transport.is_ready(),
-                    "drops": drops,
-                    "last": handle.last_sequence_num(),
-                    "events": std::mem::take(&mut *locked(&events)),
-                })
-            }
+            "snapshot" => snapshot(&started),
             other => return Err(format!("unknown action {other}").into()),
         };
         results.push(json!([name, result]));
     }
-    let (gets, mut posts) = {
-        let seen = locked(&server.seen);
-        (Value::Array(seen.gets.clone()), Value::Array(seen.posts.clone()))
-    };
-    without_uuids(&mut posts);
-    let origin = server.origin.as_str();
-    Ok(Replay {
-        results: hosted(&Value::Array(results), origin)?,
-        gets: hosted(&gets, origin)?,
-        posts: hosted(&posts, origin)?,
-        golden,
-    })
+    finish(&started, results)
 }
 
 fn without_logs(results: &mut Value) {
@@ -502,7 +552,10 @@ fn without_logs(results: &mut Value) {
 }
 
 async fn replays(name: &str) -> TestResult {
-    let replay = replay(name).await?;
+    matches_golden(&replay(name).await?, name)
+}
+
+fn matches_golden(replay: &Replay, name: &str) -> TestResult {
     let mut expected = replay.golden["results"].clone();
     without_logs(&mut expected);
     assert_eq!(replay.results, expected, "{name}: results");
@@ -644,9 +697,63 @@ async fn a_silent_stream_is_reconnected() -> TestResult {
     replays("liveness_timeout_reconnects").await
 }
 
-#[tokio::test]
+/// `connect_timeout_reconnects` on a paused clock. The test moves time past the connect timeout and the reconnect
+/// wait itself, each only once the stream task is waiting on it, so neither wait races the machine's speed.
+#[tokio::test(start_paused = true)]
 async fn a_stream_that_never_answers_is_reconnected() -> TestResult {
-    replays("connect_timeout_reconnects").await
+    const BOUND: Duration = Duration::from_secs(3_600);
+    let name = "connect_timeout_reconnects";
+    // While a blocking task runs, a paused clock does not auto-advance, so it stays put while the test waits on the
+    // loopback sockets. The wall-clock bound only turns a lost signal into a failure instead of a hang: the clock
+    // auto-advances again and the virtual bounds below fire.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let clock_hold = tokio::task::spawn_blocking(move || held.recv_timeout(Duration::from_secs(10)));
+    let mut started = start(name).await?;
+    let shared = Arc::clone(&started.transport.shared);
+    let mut ready = shared.first_ready.subscribe();
+
+    let first_get = timeout(BOUND, started.server.gets_seen.wait_for(|gets| *gets >= 1)).await;
+    let first_seen = first_get.is_ok_and(|seen| seen.is_ok());
+    // The first request hangs, so only the connect timeout ends it.
+    tokio::time::advance(shared.scaled(CONNECT_TIMEOUT)).await;
+    // The stream task arms the reconnect wait in the same poll that sees the connect timeout fire, so once the attempt
+    // is counted the wait is pending at the paused instant.
+    let mut yields = 0;
+    while shared.state().reconnect_attempts == 0 {
+        yields += 1;
+        if yields > 1_000 {
+            return Err("the connect timeout never ended the first request".into());
+        }
+        tokio::task::yield_now().await;
+    }
+    tokio::time::advance(shared.scaled(reconnect_delay(1))).await;
+    let second_get = timeout(BOUND, started.server.gets_seen.wait_for(|gets| *gets >= 2)).await;
+    let wait_gets = json!({"reached": first_seen && second_get.is_ok_and(|seen| seen.is_ok())});
+    let settled = timeout(BOUND, ready.wait_for(Option::is_some)).await;
+    let opened = settled.is_ok_and(|value| value.is_ok_and(|value| value.as_ref().is_some_and(Result::is_ok)));
+    let wait_ready = json!({"reached": opened && started.transport.is_ready()});
+    let results = vec![
+        json!(["waitGets", wait_gets]),
+        json!(["waitReady", wait_ready]),
+        json!(["snapshot", snapshot(&started)]),
+    ];
+    let replay = finish(&started, results)?;
+    release
+        .send(())
+        .map_err(|_| "the paused clock was released before the case finished")?;
+    clock_hold.await??;
+    let actions: Vec<&str> = replay.golden["spec"]["actions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|action| action[0].as_str())
+        .collect();
+    assert_eq!(
+        actions,
+        ["waitGets", "waitReady", "snapshot"],
+        "{name}: the steps above"
+    );
+    matches_golden(&replay, name)
 }
 
 #[tokio::test]
