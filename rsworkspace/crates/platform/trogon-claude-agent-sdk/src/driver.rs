@@ -2588,6 +2588,11 @@ where
         if self.frame_cut || !self.input_open() {
             return Err(Error::NotReadyForWriting);
         }
+        // Past the close grace TypeScript has stopped the process and Python has marked the transport not ready, so
+        // neither starts another frame. A frame already under way is not checked here and still finishes first.
+        if self.close_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(Error::ShutdownRequested);
+        }
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
         let grace = match self.argv_style {
             crate::ArgvStyle::TypeScript => constants::TYPESCRIPT_CLOSE_GRACE,

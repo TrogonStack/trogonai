@@ -436,6 +436,38 @@ async fn a_pipe_that_stops_draining_ends_the_queued_prompts_at_the_close_grace()
     Ok(())
 }
 
+/// The first queued prompt finishes exactly at each SDK's close grace, so the frame already under way still wins
+/// over the deadline and arrives whole. The prompt behind it would start after the grace, when TypeScript has stopped
+/// the process and Python has marked the transport not ready, so none of it reaches stdin and nothing is cut.
+#[tokio::test(start_paused = true)]
+async fn no_new_frame_starts_after_the_close_grace() -> Result<(), Box<dyn std::error::Error>> {
+    for (style, grace) in [
+        (crate::ArgvStyle::TypeScript, constants::TYPESCRIPT_CLOSE_GRACE),
+        (crate::ArgvStyle::Python, constants::PYTHON_CLOSE_WAIT),
+    ] {
+        let (mut fixture, mut steps) = split_pipe(grace)?;
+        fixture.driver.argv_style = style;
+        let (on_time, on_time_written) = prompt_command("finished at the grace");
+        let (late, late_written) = prompt_command("started after the grace");
+        for command in [on_time, late] {
+            fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+        }
+        let (terminal, terminated) = oneshot::channel();
+        let started = Instant::now();
+        fixture.driver.run(Ok(()), terminal).await;
+        assert_eq!(started.elapsed(), grace, "{style:?}");
+        assert!(matches!(terminated.await?, Ok(())), "{style:?}");
+        assert!(matches!(on_time_written.await, Ok(Ok(()))), "{style:?}");
+        assert!(!matches!(late_written.await, Ok(Ok(()))), "{style:?}");
+        let stdin = stdin_bytes(&mut fixture.harness.written);
+        let frame: serde_json::Value = serde_json::from_str(stdin.strip_suffix('\n').ok_or("no newline")?)?;
+        assert_eq!(frame["message"]["content"], "finished at the grace", "{style:?}");
+        assert!(!stdin.contains("started after the grace"), "{style:?}: {stdin}");
+        assert_eq!(recorded_steps(&mut steps), ["end_input", "close"], "{style:?}");
+    }
+    Ok(())
+}
+
 /// The steps the scripted transport recorded so far, in order.
 fn recorded_steps(steps: &mut mpsc::UnboundedReceiver<&'static str>) -> Vec<&'static str> {
     let mut order = Vec::new();
