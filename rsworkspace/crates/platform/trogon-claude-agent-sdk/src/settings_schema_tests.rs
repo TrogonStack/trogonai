@@ -178,6 +178,16 @@ fn a_coerced_string_runs_its_checks_on_the_javascript_string() {
     assert_eq!(coerced.validate(None), Err(()));
 }
 
+/// The pinned schema checks a plugin source's `sha` (`n39` in the description) for exactly 40 characters.
+#[test]
+fn a_string_of_a_fixed_length_accepts_only_that_length() {
+    let sha = Node::Str(vec![Check::LengthEquals(40)]);
+    let exact = json!("a".repeat(40));
+    assert_eq!(sha.validate(Some(&exact)), Ok(Some(exact.clone())));
+    assert_eq!(sha.validate(Some(&json!("a".repeat(39)))), Err(()));
+    assert_eq!(sha.validate(Some(&json!("a".repeat(41)))), Err(()));
+}
+
 /// The pinned description with the given fields added (or replaced) and the given restrictive readings appended,
 /// so a policy read runs over a schema built to exercise one shape.
 fn schema_with(fields: Value, restrictive: Value) -> SettingsSchema {
@@ -197,7 +207,11 @@ fn schema_with(fields: Value, restrictive: Value) -> SettingsSchema {
 }
 
 fn read_policy(schema: &SettingsSchema, document: Value) -> Value {
-    Value::Object(schema.parse_policy_document(document.as_object().expect("object")))
+    Value::Object(
+        schema
+            .parse_policy(document.as_object().expect("object"), None)
+            .settings,
+    )
 }
 
 fn optional(inner: Value) -> Value {
@@ -324,6 +338,25 @@ fn a_locked_block_inside_a_locked_block_is_read_member_by_member() {
 }
 
 #[test]
+fn a_locked_block_inside_a_locked_block_made_only_of_restrictive_values_stands_in_for_policy() {
+    let schema = nested_blocks();
+    let only_substitutes = |document: Value| {
+        schema
+            .parse_policy(document.as_object().expect("object"), None)
+            .only_substitutes
+    };
+    assert!(only_substitutes(
+        json!({"probe": {"lock": "no", "inner": {"deep": "no"}}})
+    ));
+    assert!(!only_substitutes(
+        json!({"probe": {"lock": "no", "inner": {"deep": false}}})
+    ));
+    assert!(!only_substitutes(
+        json!({"probe": {"lock": false, "inner": {"deep": "no"}}})
+    ));
+}
+
+#[test]
 fn a_strict_block_with_an_unknown_key_reads_as_its_restrictive_skeleton() {
     let schema = nested_blocks();
     assert_eq!(
@@ -383,4 +416,129 @@ fn a_list_whose_failing_entries_cannot_be_located_is_dropped() {
     assert_eq!(read_policy(&probe_block(text_middle), document.clone()), dropped);
     let union = json!({"type": "union", "options": [strings()]});
     assert_eq!(read_policy(&probe_block(union), document), dropped);
+}
+
+#[test]
+fn a_policy_helper_entry_that_cannot_be_read_is_dropped_alone() {
+    let schema = schema().expect("schema loads");
+    let long = format!("/{}", "a".repeat(1024));
+    let payload = json!({"model": "m"});
+    let document = json!({"policyHelpers": {
+        "macos": {"path": long, "defaultSettings": {"policyHelpers": {}}},
+        "linux": {"path": long, "defaultSettings": payload, "outputBehavior": "merge"},
+        "windows": {"path": long, "defaultSettings": payload, "outputBehavior": "bogus"},
+        "wsl": {"path": long, "defaultSettings": payload},
+        "default": payload,
+        "other": 1,
+    }});
+    assert_eq!(
+        read_policy(schema, document),
+        json!({"policyHelpers": {
+            "linux": {"defaultSettings": payload, "outputBehavior": "merge"},
+            "wsl": {"defaultSettings": payload},
+            "default": payload,
+        }})
+    );
+    assert_eq!(
+        read_policy(
+            schema,
+            json!({"policyHelpers": {"linux": {"path": long}, "macos": 5, "wsl": {"path": null}}})
+        ),
+        json!({"policyHelpers": {}})
+    );
+}
+
+#[test]
+fn a_policy_helper_map_that_is_not_an_object_reads_as_an_empty_map() {
+    let schema = schema().expect("schema loads");
+    assert_eq!(
+        read_policy(schema, json!({"policyHelpers": "x"})),
+        json!({"policyHelpers": {}})
+    );
+    assert_eq!(read_policy(schema, json!({"policyHelpers": null})), json!({}));
+}
+
+#[test]
+fn a_managed_mcp_server_that_cannot_be_read_is_dropped_alone() {
+    let schema = schema().expect("schema loads");
+    let server = json!({"type": "http", "url": "https://e.com", "oauth": {"authServerMetadataUrl": "https://e.com/m"}});
+    let long = format!("https://e.com/{}", "a".repeat(4083));
+    let document = json!({"managedMcpServers": {
+        "kept": server,
+        "long": {"type": "http", "url": "https://e.com", "oauth": {"authServerMetadataUrl": long}},
+        "local": {"type": "stdio", "command": "x"},
+        "bad name": server,
+        "constructor": server,
+    }});
+    assert_eq!(
+        read_policy(schema, document),
+        json!({"managedMcpServers": {"kept": server}})
+    );
+    assert_eq!(
+        read_policy(schema, json!({"managedMcpServers": {"local": {"command": "x"}}})),
+        json!({"managedMcpServers": {}})
+    );
+}
+
+#[test]
+fn a_managed_mcp_server_map_that_is_not_an_object_is_left_unset() {
+    let schema = schema().expect("schema loads");
+    for value in [json!(null), json!(5), json!([{"type": "http", "url": "https://e.com"}])] {
+        assert_eq!(read_policy(schema, json!({"managedMcpServers": value})), json!({}));
+    }
+    let unkeyed = schema_with(json!({"managedMcpServers": {"type": "unknown"}}), json!([]));
+    assert_eq!(read_policy(&unkeyed, json!({"managedMcpServers": {}})), json!({}));
+}
+
+fn floored(document: Value) -> bool {
+    schema()
+        .expect("schema loads")
+        .parse_policy(document.as_object().expect("object"), None)
+        .floored
+}
+
+#[test]
+fn a_default_mode_put_in_place_of_one_that_cannot_be_read_marks_the_parse_floored() {
+    assert!(floored(json!({"permissions": {"defaultMode": 5}})));
+    assert!(floored(
+        json!({"permissions": {"deny": "Bash", "defaultMode": "bypassPermissions"}})
+    ));
+    assert!(!floored(
+        json!({"permissions": {"deny": "Bash", "defaultMode": "plan"}})
+    ));
+    assert!(!floored(json!({"permissions": {"defaultMode": "plan"}})));
+    assert!(!floored(
+        json!({"permissions": {"disableBypassPermissionsMode": "bogus"}})
+    ));
+}
+
+#[test]
+fn a_folder_holds_the_default_mode_floor_the_way_upstream_merges_documents() {
+    let schema = schema().expect("schema loads");
+    let map = |value: Value| value.as_object().expect("object").clone();
+    let plan = map(json!({"permissions": {"defaultMode": "plan"}}));
+    let stand_in = || map(json!({"permissions": {"defaultMode": "default"}, "model": "a"}));
+
+    let mut without_mode = map(json!({"model": "a"}));
+    assert!(schema.hold_default_mode_floor(&plan, &mut without_mode, true, true));
+    assert!(!schema.hold_default_mode_floor(&plan, &mut without_mode, true, false));
+    assert_eq!(without_mode, map(json!({"model": "a"})));
+
+    let mut after_inert = stand_in();
+    assert!(!schema.hold_default_mode_floor(&plan, &mut after_inert, true, false));
+    assert_eq!(after_inert, map(json!({"permissions": {}, "model": "a"})));
+
+    let mut held = stand_in();
+    assert!(schema.hold_default_mode_floor(&plan, &mut held, true, true));
+    assert_eq!(held, stand_in());
+
+    let accept = map(json!({"permissions": {"defaultMode": "acceptEdits"}}));
+    let mut after_grant = stand_in();
+    assert!(schema.hold_default_mode_floor(&accept, &mut after_grant, true, false));
+    assert_eq!(after_grant, stand_in());
+    assert!(schema.hold_default_mode_floor(&Map::new(), &mut stand_in(), true, false));
+
+    let mut written = stand_in();
+    assert!(!schema.hold_default_mode_floor(&plan, &mut written, false, true));
+    assert_eq!(written, stand_in());
 }

@@ -1,0 +1,35 @@
+name: CI Requeue
+
+# Runs a cancelled CI Bazel run again for watch-self-hosted-queue in
+# ci-bazel.yml. That job cancels its own run, so the rerun has to come from a
+# run that outlives it.
+on:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: ID of the cancelled CI Bazel run to run again.
+        required: true
+        type: string
+      run-attempt:
+        description: The attempt the watcher cancelled.
+        required: true
+        type: string
+
+concurrency:
+  group: ci-requeue-${{ inputs.run-id }}
+
+permissions:
+  actions: write
+
+jobs:
+  rerun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Run again
+        uses: TrogonStack/github-actions/actions/runs-on-fallback-requeue@d5c77134bdde3c7036b58be27aa0e2f0c7d496e0 # runs-on-fallback-requeue@v0.0.1
+        with:
+          run-id: ${{ inputs.run-id }}
+          run-attempt: ${{ inputs.run-attempt }}
+          workflow-path: .github/workflows/ci-bazel.yml
+          finish-timeout-seconds: '600'

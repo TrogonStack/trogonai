@@ -382,3 +382,17 @@ async fn a_pending_verdict_is_answered_when_the_host_settles() {
         })]
     );
 }
+
+fn simple_switch(value: &str) -> impl Fn(&str) -> Option<String> + '_ {
+    move |name| (name == "CLAUDE_CODE_SIMPLE").then(|| value.to_owned())
+}
+
+#[test]
+fn background_task_switches_trim_like_javascript() {
+    for value in ["\u{feff}1\u{feff}", "\u{feff}true"] {
+        assert!(background_tasks_disabled(simple_switch(value), &[]), "{value:?}");
+    }
+    for value in ["\u{85}1\u{85}", "\u{85}true"] {
+        assert!(!background_tasks_disabled(simple_switch(value), &[]), "{value:?}");
+    }
+}

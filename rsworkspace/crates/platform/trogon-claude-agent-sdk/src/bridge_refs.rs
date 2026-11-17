@@ -14,8 +14,8 @@ use std::pin::Pin;
 
 use crate::bridge_gitcmd::GitProbeContext;
 use crate::bridge_gitdir::{as_str, common_dir, find_git_dir};
-use crate::bridge_js::js_trim;
 use crate::bridge_paths::PathGuard;
+use crate::session_prompt::js_trim;
 
 mod constants;
 

@@ -474,6 +474,57 @@ fn a_zero_admission_limit_is_refused_from_any_source() {
 }
 
 #[test]
+fn an_invalidation_stream_replica_count_that_is_not_a_number_is_refused() {
+    let env = complete_env();
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "many");
+
+    let refused = refused(&env);
+
+    assert!(
+        matches!(
+            refused,
+            ServiceConfigError::NotANumber {
+                setting: ConfigSetting::InvalidationStreamReplicas,
+                ..
+            }
+        ),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn a_zero_invalidation_stream_replica_count_is_refused_from_any_source() {
+    let zero = |refused: ServiceConfigError| {
+        assert!(
+            matches!(
+                refused,
+                ServiceConfigError::Zero {
+                    setting: ConfigSetting::InvalidationStreamReplicas
+                }
+            ),
+            "{refused:?}"
+        );
+    };
+    let env = complete_env();
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "0");
+    zero(refused(&env));
+
+    zero(refused_with_file(
+        "[release]\ninvalidation_stream_replicas = 0\n",
+        &complete_env(),
+    ));
+
+    zero(
+        ServiceConfig::resolve(
+            &args(&["--invalidation-stream-replicas", "0"]),
+            &complete_env(),
+            &MemFs::new(),
+        )
+        .unwrap_err(),
+    );
+}
+
+#[test]
 #[cfg_attr(
     dylint_lib = "trogon_dylint_lints",
     expect(
@@ -514,6 +565,16 @@ fn a_refusal_names_the_setting_by_its_key_and_its_variable() {
         ),
         (ConfigSetting::AdmissionLimit, "many", "TROGON_SECRETS_ADMISSION_LIMIT"),
         (ConfigSetting::AdmissionLimit, "0", "TROGON_SECRETS_ADMISSION_LIMIT"),
+        (
+            ConfigSetting::InvalidationStreamReplicas,
+            "many",
+            "TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS",
+        ),
+        (
+            ConfigSetting::InvalidationStreamReplicas,
+            "0",
+            "TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS",
+        ),
         (ConfigSetting::AuditTenant, "a b", "TROGON_SECRETS_AUDIT_TENANT"),
         (ConfigSetting::AuditProject, "a.b", "TROGON_SECRETS_AUDIT_PROJECT"),
         (ConfigSetting::AuditInstance, "a b", "TROGON_SECRETS_AUDIT_INSTANCE"),
@@ -598,6 +659,7 @@ fn the_environment_alone_configures_the_service_with_its_defaults() {
     );
     assert_eq!(config.credential_stream.as_str(), "CREDENTIAL_EVENTS");
     assert_eq!(config.admission_limit, AdmissionLimit::default());
+    assert_eq!(config.invalidation_stream_replicas.get(), 3);
     assert_eq!(config.audit.writer().as_str(), "secrets-service:secrets-0");
     assert_eq!(config.audit.component().as_str(), "secrets_service");
     assert_eq!(config.audit.tenant().as_str(), "acme");
@@ -648,6 +710,30 @@ fn the_environment_overrides_the_file_and_a_flag_overrides_the_environment() {
     assert_eq!(from_env.credential_stream.as_str(), "CREDENTIALS_ENV");
     assert_eq!(from_env.admission_limit, AdmissionLimit::new(8).unwrap());
     assert_eq!(from_flag.nats.servers, ["nats-flag.internal:4222"]);
+}
+
+#[test]
+fn the_invalidation_stream_replica_count_is_read_from_the_file_then_the_environment_then_its_flag() {
+    let contents = COMPLETE_FILE.replace("[release]\n", "[release]\ninvalidation_stream_replicas = 5\n");
+    let env = InMemoryEnv::new();
+    let replicas = |flags: &[&str], env: &InMemoryEnv| {
+        let mut flags = flags.to_vec();
+        flags.extend(["--config", CONFIG_PATH]);
+        ServiceConfig::resolve(&args(&flags), env, &file(&contents))
+            .unwrap()
+            .invalidation_stream_replicas
+            .get()
+    };
+
+    assert_eq!(replicas(&[], &env), 5);
+
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "2");
+    assert_eq!(replicas(&[], &env), 2);
+
+    assert_eq!(replicas(&["--invalidation-stream-replicas", "1"], &env), 1);
+
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "many");
+    assert_eq!(replicas(&["--invalidation-stream-replicas", "1"], &env), 1);
 }
 
 #[test]

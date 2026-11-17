@@ -41,6 +41,10 @@ fn each_message_names_the_rule_and_the_stream() {
             "stream 'AUDIT' must not let a publish roll up and remove stored records",
         ),
         (
+            AuditStreamMismatchError::MessageCounter { stream },
+            "stream 'AUDIT' must not be a counter stream, since a counter stream refuses every audit record",
+        ),
+        (
             AuditStreamMismatchError::MaxMessagesPerSubject { stream },
             "stream 'AUDIT' must not limit the records kept per subject",
         ),

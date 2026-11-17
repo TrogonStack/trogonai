@@ -387,3 +387,17 @@ fn an_explicit_client_app_is_set_in_every_mode_over_the_configured_env() {
         Some("configured/1")
     );
 }
+
+#[test]
+fn the_debug_variable_trims_like_javascript_in_every_typescript_mode() {
+    for mode in [EnvironmentMode::Replace, EnvironmentMode::Inherit] {
+        for value in ["\u{feff}1\u{feff}", "\u{feff}true", " Yes "] {
+            let plan = plan(&options(mode, &[]), &inherited(&[("DEBUG_CLAUDE_AGENT_SDK", value)]));
+            assert_eq!(set(&plan, "DEBUG").as_deref(), Some("1"), "{mode:?} {value:?}");
+        }
+        for value in ["\u{85}1\u{85}", "\u{85}true"] {
+            let plan = plan(&options(mode, &[]), &inherited(&[("DEBUG_CLAUDE_AGENT_SDK", value)]));
+            assert_eq!(set(&plan, "DEBUG"), None, "{mode:?} {value:?}");
+        }
+    }
+}
