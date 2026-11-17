@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, LocalMcpServer, LocalMcpServerOptions, McpServerDialect, McpServerName, McpToolInputSchema,
-    McpToolName, McpToolOutput, McpToolRequest, Message, Prompt, SdkMcpServers, SdkTool, SdkToolOptions, ToolRule,
-    query,
+    McpToolName, McpToolOutput, Message, Prompt, SdkMcpServers, SdkTool, SdkToolOptions, ToolRule, TypedMcpToolHandler,
+    TypedMcpToolRequest, query,
 };
 
 #[cfg_attr(
@@ -23,11 +23,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         name: McpToolName::from("echo"),
         description: "Return the supplied text".into(),
         input_schema: schema,
-        handler: Arc::new(|request: McpToolRequest| async move {
-            Ok(McpToolOutput::text(
-                request.arguments["text"].as_str().unwrap_or_default(),
-            ))
-        }),
+        handler: Arc::new(TypedMcpToolHandler::new(
+            |request: TypedMcpToolRequest<schema::EchoArguments>| async move {
+                Ok(McpToolOutput::text(request.arguments.text))
+            },
+        )),
         annotations: None,
         search_hint: None,
         always_load: false,

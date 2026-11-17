@@ -686,3 +686,91 @@ fn the_holders_read_write_compare_print_and_give_back_the_json_they_hold() {
     assert_eq!(value.clone().into_value(), Value::from(2));
     assert_eq!(Value::from(value), Value::from(2));
 }
+
+#[test]
+fn compact_writes_what_serde_json_writes() -> TestResult {
+    let values = [
+        json!(null),
+        json!(true),
+        json!(-12),
+        json!(1.5),
+        json!("a \"quoted\"\n line \u{1}"),
+        json!([]),
+        json!({}),
+        json!([[], {}, [1, [2, {"b": [3]}]], {"": null}]),
+        json!({"z": 1, "a": {"y": [true, false], "x": {}}, "m": [{"k": "v"}, []]}),
+    ];
+    for value in &values {
+        assert_eq!(compact(value)?, serde_json::to_string(value)?);
+        assert_eq!(
+            DeepJsonValue::from(value.clone()).to_json()?,
+            serde_json::to_string(value)?
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn equal_matches_value_equality_and_ignores_key_order() {
+    let left = json!({"a": [1, {"b": 2, "c": [3]}], "d": null});
+    let reordered = json!({"d": null, "a": [1, {"c": [3], "b": 2}]});
+    assert!(equal(&left, &reordered));
+    assert!(!equal(&left, &json!({"a": [1, {"b": 2, "c": [4]}], "d": null})));
+    assert!(!equal(&left, &json!({"a": [1, {"b": 2, "c": [3]}], "e": null})));
+    assert!(!equal(&left, &json!({"a": [1, {"b": 2, "c": [3]}]})));
+    assert!(!equal(&json!([1, 2]), &json!([1])));
+    assert!(!equal(&json!([]), &json!({})));
+    assert!(!equal(&json!(1), &json!(1.0)));
+    assert!(equal(&json!(1.0), &json!(1.0)));
+    let deep = DeepJsonValue::from(left.clone());
+    let deep_reordered = DeepJsonValue::from(reordered);
+    assert!(deep == deep_reordered);
+    assert!(deep == left);
+}
+
+#[test]
+fn nests_within_counts_the_enclosing_containers() {
+    assert!(nests_within(&json!(1), 0));
+    assert!(!nests_within(&json!([]), 0));
+    assert!(nests_within(&json!([]), 1));
+    assert!(nests_within(&nested(SHALLOW, false, json!(1)), SHALLOW));
+    assert!(!nests_within(
+        &nested(SHALLOW.saturating_add(1), false, json!(1)),
+        SHALLOW
+    ));
+    assert!(!nests_within(&json!([1, {"a": [[]]}]), 3));
+    assert!(nests_within(&json!([1, {"a": [[]]}]), 4));
+}
+
+#[test]
+fn a_deep_json_value_prints_as_serde_json_value_prints() {
+    let values = [
+        json!(null),
+        json!(-1.5),
+        json!("a \"quoted\"\n line"),
+        json!([]),
+        json!({}),
+        json!([[], {}, [1, [2, {"b": [3]}]], {"": null}]),
+        json!({"z": 1, "a": {"y": [true, false], "x": {}}, "m": [{"k": "v"}, []]}),
+        nested(SHALLOW.saturating_add(1), true, json!([1, "b"])),
+    ];
+    for value in values {
+        let held = DeepJsonValue::from(value.clone());
+        assert_eq!(format!("{held:?}"), format!("{value:?}"));
+        assert_eq!(format!("{held:#?}"), format!("{value:#?}"));
+    }
+}
+
+#[test]
+fn undeclared_members_write_as_serde_json_value_while_shallow_and_as_their_text_beyond() -> TestResult {
+    let shallow = nested(SHALLOW, false, json!({"b": [1, "c"]}));
+    let deep = nested(SHALLOW.saturating_add(1), true, json!({"b": [1, "c"]}));
+    for value in [&shallow, &deep] {
+        assert_eq!(
+            serde_json::to_string(&ShallowWrite(value))?,
+            serde_json::to_string(value)?
+        );
+        assert_eq!(serde_json::to_value(ShallowWrite(value))?, *value);
+    }
+    Ok(())
+}

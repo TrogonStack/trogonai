@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Run the Bazel lint aspects over every target using the GitHub Actions caches"
+#MISE description="Run the Bazel lint aspects over every target using the runner's Bazel cache"
 set -euo pipefail
 
 mkdir -p "${RUNNER_TEMP:?}/bazel-profiles"
@@ -10,6 +10,4 @@ exec bazel build \
   --config=lint \
   --keep_going \
   --profile="$RUNNER_TEMP/bazel-profiles/lint.profile.gz" \
-  --disk_cache="${RUNNER_TEMP:?}/bazel-disk-cache" \
-  --repository_cache="${RUNNER_TEMP:?}/bazel-repository-cache" \
   //...
