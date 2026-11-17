@@ -1,21 +1,50 @@
-use trogon_decider::{Decider, Decision, WritePrecondition};
+use std::convert::Infallible;
+use trogon_decider::{
+    Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, Evolve, WritePrecondition,
+};
 use trogon_decider_guest_sdk::export_decider;
-use trogon_scheduler_domain::CreateSchedule;
-use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, SCHEDULES_STATE_SCHEMA_VERSION, state_v1, v1};
+use trogon_scheduler_domain::{CreateSchedule, ScheduleState};
+use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, SCHEDULES_STATE_SCHEMA_VERSION, v1};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct WrongEvent;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Evolve<WrongEvent> for ScheduleState {
+    type Error = Infallible;
+
+    fn evolve(self, _event: &WrongEvent) -> Result<Self, Self::Error> {
+        Ok(self)
+    }
+}
+
+impl EventEncode for WrongEvent {
+    type Error = Infallible;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        Ok(Vec::new())
+    }
+}
+
+impl EventType for WrongEvent {
+    type Error = Infallible;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error> {
+        Ok("fixture.wrong-event")
+    }
+}
+
+impl EventDecode for WrongEvent {
+    type Error = Infallible;
+
+    fn decode(_event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error> {
+        Ok(EventDecodeOutcome::Skipped)
+    }
+}
+
 struct WrongEventCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("rejected")]
 struct WrongEventDecideError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("evolve failed")]
-struct WrongEventEvolveError;
 
 impl TryFrom<v1::CreateSchedule> for WrongEventCommand {
     type Error = WrongEventDecideError;
@@ -27,22 +56,13 @@ impl TryFrom<v1::CreateSchedule> for WrongEventCommand {
 
 impl Decider for WrongEventCommand {
     type StreamId = str;
-    type State = state_v1::State;
+    type State = ScheduleState;
     type Event = WrongEvent;
     type DecideError = WrongEventDecideError;
-    type EvolveError = WrongEventEvolveError;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "wrong"
-    }
-
-    fn initial_state() -> Self::State {
-        state_v1::State::default()
-    }
-
-    fn evolve(_state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Err(WrongEventEvolveError)
     }
 
     fn decide(_state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {

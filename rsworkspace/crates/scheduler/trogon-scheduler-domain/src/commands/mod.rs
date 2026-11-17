@@ -12,4 +12,4 @@ pub use create_schedule::{CreateSchedule, CreateScheduleDecideError};
 pub use pause_schedule::{PauseSchedule, PauseScheduleError};
 pub use remove_schedule::{RemoveSchedule, RemoveScheduleError};
 pub use resume_schedule::{ResumeSchedule, ResumeScheduleError};
-pub use state::{EvolveError, evolve, initial_state};
+pub use state::{EvolveError, ScheduleState, evolve};
