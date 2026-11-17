@@ -16,9 +16,10 @@ use trogon_claude_agent_sdk::adapters::{
     SupplementaryGroupIds, WallClock,
 };
 
-/// Machine-wide locations the resolver reads, which the host moves under a sandbox root.
+/// Machine-wide locations the resolver reads, which the host moves under a sandbox root. All of `/etc` moves, since
+/// a write check walks every folder down from the root and `/etc` is a link on some hosts and a folder on others.
 const VIRTUAL: [&str; 6] = [
-    "/etc/claude-code",
+    "/etc",
     "/Library/Application Support/ClaudeCode",
     "/Library/Managed Preferences",
     "/mnt/c",

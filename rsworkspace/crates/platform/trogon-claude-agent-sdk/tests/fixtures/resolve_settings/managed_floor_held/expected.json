@@ -1,0 +1,1 @@
+[{"name":"managed_floor_held","result":{"effective":{"permissions":{"defaultMode":"dontAsk"}},"provenance":{"permissions":{"source":"managed","policyOrigin":"file"}},"sources":[{"source":"managed","settings":{"permissions":{"defaultMode":"dontAsk"}},"policyOrigin":"file"}],"machinePolicy":{"didNotLoad":false}},"filtered":{"permissions":{"defaultMode":"dontAsk"}}}]
