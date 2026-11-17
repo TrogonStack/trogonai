@@ -13,11 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         host:
-          # Unix: the handed-over managed settings passes, then the default-flag margins of every boundary pair
-          # the managed goldens hold, each host's pairs stepped level by level until two in a row stay clean.
-          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|band8:)" }
-          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 1, only: "^(pm8:|band8:)" }
-          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|band8:)" }
+          # darwin: the handed-over managed settings passes, then the default-flag margins of the remote cached copy
+          # pair alone, stepped by class at its own startup.
+          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|band8:)", pairs: pm_remote_cachedcopy }
         shard: [1]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360
@@ -29,6 +27,7 @@ jobs:
       SHARD: ${{ matrix.shard }}
       SHARDS: ${{ matrix.host.shards }}
       R3_ONLY: ${{ matrix.host.only }}
+      R3_BAND8_PAIRS: ${{ matrix.host.pairs }}
       R3_BAND_RUNS: "50"
       R3_ROUND4_PASSES: "60"
       R5_TOPUP_RUNS: "50"

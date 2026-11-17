@@ -2143,6 +2143,12 @@ BAND8_RUNS_ALONE = BAND8_CLEAN_IN_A_ROW * BAND8_RUNS
 BAND8_ESTABLISHED = os.path.join(HERE, "band8_established.json")
 # How far past a class the next class a pass reaches can be: no model step is wider than this.
 BAND8_CLASS_REACH = 64
+# Pairs a host steps by class with the startup fixed as registered, where one startup byte per level never left
+# the default-flag flips within the cap (PLAN Update 72, note A). A level is the next class the pass reaches on the
+# host, so its size in bytes is a host property the bound line records.
+BAND8_CLASS_AXIS = {"darwin arm64": {"pm_remote_cachedcopy": 4410}}
+# The pairs one job measures, by id; unset measures every pair.
+BAND8_ONLY = set(filter(None, os.environ.get("R3_BAND8_PAIRS", "").split(",")))
 
 
 class Band8Stop(Exception):
@@ -2179,7 +2185,24 @@ def band8_pairs(port, profile):
                 at = lambda entry, make=make: make([entry, entry])[0]
                 if at(first)[0] != near[0] or at(second)[0] != far[0]:
                     raise Band8Stop(f"{keys}: the stepped cases do not rebuild the pair {[near[0], far[0]]}")
-                if first[:3] == second[:3]:
+                if first[:3] == second[:3] and keys in BAND8_CLASS_AXIS.get(HOST, ()):
+                    # The near case stays; the far case is the first shape of the next class the pass reaches,
+                    # at the same startup.
+                    if first[3] != BAND8_CLASS_AXIS[HOST][keys]:
+                        raise Band8Stop(f"{keys}: the near startup is {first[3]}, not the registered "
+                                        f"{BAND8_CLASS_AXIS[HOST][keys]}")
+                    table, above, major, leaves = band8_shape_pass(keys)
+                    stepped = {"id": keys, "axis": "class", "pass": [table, above, major, leaves]}
+                    near_level = cost(table, above, tuple(first[:3]))
+                    far_level = band8_next(stepped, near_level, "far")
+                    shape_at = lambda c, p=(table, above, major, leaves): shapes_at(p[0], p[1], c, p[2], p[3])[0]
+                    pairs.append({**stepped, "near": near, "far": at([*shape_at(far_level), first[3]]),
+                                  "near_level": near_level, "far_level": far_level,
+                                  "near_at": lambda c, at=at, first=first, shape_at=shape_at:
+                                      at([*shape_at(c), first[3]]),
+                                  "far_at": lambda c, at=at, first=first, shape_at=shape_at:
+                                      at([*shape_at(c), first[3]])})
+                elif first[:3] == second[:3]:
                     pairs.append({"id": keys, "axis": "startup", "near": near, "far": far,
                                   "near_level": first[3], "far_level": second[3],
                                   "near_at": lambda n, at=at, first=first: at([*first[:3], n]),
@@ -2298,8 +2321,9 @@ def band8_cases(pair, side, level, answers):
 def band8_region(runs, pair, side, answers, write_event):
     """The levels from L0 outward through L8 whose reference answer is the side's own, from one REF run each, and
     the bound line the events keep for them."""
-    level, region, crossing = pair[f"{side}_level"], [], None
+    level, region, crossing, visited = pair[f"{side}_level"], [], None, []
     for _ in range(BAND8_STEPS + 1):
+        visited.append(level)
         for case, own, _other, which in band8_cases(pair, side, level, answers):
             answered = runs.once(case, probe_flags(REF))
             if answered is None:
@@ -2314,8 +2338,11 @@ def band8_region(runs, pair, side, answers, write_event):
     width = min(len(region), BAND8_STEPS)
     bound = (f"bounded by reference crossing at level {crossing['level']}" if crossing
              else f"no reference crossing through L{BAND8_STEPS}")
+    # The size of each step this side took, in the axis's own unit: bytes on the class axis, where it is the host's
+    # class granularity for this pass.
+    steps = [abs(after - before) for before, after in zip(visited, visited[1:])]
     write_event({"bound": {"host": HOST, "pair": pair["id"], "side": side, "axis": pair["axis"], "width": width,
-                           "region": region, "bound": bound, "crossing": crossing}})
+                           "region": region, "bound": bound, "crossing": crossing, "steps": steps}})
     return region, width
 
 
@@ -2384,7 +2411,9 @@ def band8_unit():
         with open(BAND8_ESTABLISHED, encoding="utf-8") as handle:
             established = set(json.load(handle).get(HOST, []))
         try:
-            pairs = band8_pairs(port, out["profile"])
+            pairs = [pair for pair in band8_pairs(port, out["profile"]) if not BAND8_ONLY or pair["id"] in BAND8_ONLY]
+            if BAND8_ONLY and {pair["id"] for pair in pairs} != BAND8_ONLY:
+                raise Band8Stop(f"no pair for {sorted(BAND8_ONLY - {pair['id'] for pair in pairs})}")
         except Band8Stop as stop:
             return {"error": str(stop), **out}
         folder = os.path.join(os.path.dirname(OUT), "band8")
