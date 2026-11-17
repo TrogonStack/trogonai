@@ -1,7 +1,29 @@
+load("@rules_python//python:py_test.bzl", "py_test")
+
 # The contract validator and every fixture suite it discovers, for
 # //proto:contracts_test.
 filegroup(
     name = "contracts",
     srcs = ["validate.py"] + glob(["*/fixtures/*.json"]),
     visibility = ["//proto:__pkg__"],
+)
+
+py_test(
+    name = "validator_test",
+    srcs = ["test_validate.py"],
+    data = [
+        "connector_mcp/fixtures/discovery-pins.json",
+        "validate.py",
+        "//:buf.lock",
+        "//:buf.yaml",
+        "//.config/bazel:buf",
+        "//.config/mise:config.toml",
+        "//proto:buf_cache",
+        "//proto:sources",
+    ],
+    env = {
+        "VALIDATOR_TEST_BUF": "$(rootpath //.config/bazel:buf)",
+        "VALIDATOR_TEST_BUF_CACHE": "$(rootpath //proto:buf_cache)",
+    },
+    main = "test_validate.py",
 )

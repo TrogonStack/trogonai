@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-#MISE description="Run every Bazel test with coverage using the GitHub Actions caches"
+#MISE description="Run every Bazel test with coverage using the runner's Bazel cache"
 set -euo pipefail
+
+# shellcheck source=../../../../lib/bazel-ci.sh
+source "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/.config/mise/lib/bazel-ci.sh"
 
 mkdir -p "${RUNNER_TEMP:?}/bazel-profiles"
 
 # Coverage runs every test as `bazel test` would, so the tests run once and
 # also produce the report the coverage gate reads.
 # --keep_going so one broken target does not hide the results of all others.
-exec bazel coverage \
+bazel_ci coverage \
   --config=ci \
   --config=coverage \
   --keep_going \
   --profile="$RUNNER_TEMP/bazel-profiles/coverage.profile.gz" \
-  --disk_cache="${RUNNER_TEMP:?}/bazel-disk-cache" \
-  --repository_cache="${RUNNER_TEMP:?}/bazel-repository-cache" \
   //...
