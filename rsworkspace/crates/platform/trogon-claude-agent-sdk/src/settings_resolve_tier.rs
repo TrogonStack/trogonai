@@ -1,10 +1,32 @@
 use serde_json::Value;
 
 use crate::{
-    constants::MANAGED_ONLY_KEYS, settings_dialect::SettingsDialect, settings_numbers::normalize_numbers,
-    settings_policy_content::has_authored_value, settings_read::read_policy_object,
+    constants::MANAGED_ONLY_KEYS,
+    settings_dialect::SettingsDialect,
+    settings_numbers::normalize_numbers,
+    settings_parse::parse_json,
+    settings_parse_deep::{nests_past_serde_json, parse_json_deep},
+    settings_policy_content::has_authored_value,
+    settings_read::read_policy_object,
     settings_resolve_values::SettingsMap,
+    settings_strings::stand_in_escapes,
 };
+
+/// `Ya(text, false)` upstream, as `hm` and the WSL flag read a registry or `plutil` answer: nothing for empty text,
+/// otherwise `JSON.parse` after a leading byte order mark. `JSON.parse` has no depth limit, and no text nests more
+/// arrays and objects than it holds bytes, so a document nested past `serde_json` still reads here and the stage
+/// that walks it decides whether the stack holds.
+pub(crate) fn parse_policy_answer(text: &str) -> Option<Value> {
+    if text.is_empty() {
+        return None;
+    }
+    let text = stand_in_escapes(text.strip_prefix('\u{feff}').unwrap_or(text));
+    if nests_past_serde_json(&text) {
+        parse_json_deep(&text, text.len())
+    } else {
+        parse_json(&text).ok()
+    }
+}
 
 /// Whether a policy source was read (`loadState` upstream).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -87,10 +109,7 @@ impl TierRead {
 
     /// `hm` upstream: parse a policy document handed over as text, read the way `file` is read.
     pub(crate) fn from_hm(text: &str, user_writable: bool, file: &str) -> Self {
-        let parsed = (!text.is_empty())
-            .then(|| crate::settings_parse::parse_json(text).ok())
-            .flatten();
-        let Some(Value::Object(mut document)) = parsed else {
+        let Some(Value::Object(mut document)) = parse_policy_answer(text) else {
             let mut tier = Self::did_not_load(false);
             tier.user_writable = user_writable;
             return tier;

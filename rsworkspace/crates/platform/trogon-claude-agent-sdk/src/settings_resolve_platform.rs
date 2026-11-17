@@ -20,7 +20,7 @@ use crate::{
         REGISTRY_USER_KEY, REGISTRY_VALUE_NAME, WINDOWS_MANAGED_DIRECTORY, WSL_MANAGED_DIRECTORY, WSL_REGISTRY_TOOL,
     },
     settings_resolve_platform_kind::PlatformKind,
-    settings_resolve_tier::{LoadState, TierRead},
+    settings_resolve_tier::{LoadState, TierRead, parse_policy_answer},
     settings_resolve_values::SettingsMap,
     settings_resolve_writable::registry_tool_writable,
 };
@@ -629,10 +629,7 @@ fn evaluate_reads<H: SettingsHost>(host: &H, kind: PlatformKind, read: &MdmRead)
         let tier = TierRead::from_hm(&text, false, REGISTRY_MACHINE_FILE);
         machine_facts.blocking = tier.load_state == LoadState::DidNotLoad;
         machine = Some(tier);
-        if let Some(Value::Object(document)) = crate::settings_parse::parse_json(&text)
-            .ok()
-            .filter(|_| !text.is_empty())
-        {
+        if let Some(Value::Object(document)) = parse_policy_answer(&text) {
             flag = wsl_flag(&document);
         }
     } else if read.hklm_oversize {
