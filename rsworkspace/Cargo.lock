@@ -7789,6 +7789,7 @@ dependencies = [
  "grpc-nats-micro",
  "nkeys",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tokio-util",
  "trogon-credential-aggregate",

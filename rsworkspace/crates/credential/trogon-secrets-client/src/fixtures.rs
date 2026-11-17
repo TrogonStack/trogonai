@@ -3,6 +3,7 @@
 use std::num::NonZeroU16;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use async_nats::jetstream::stream::{self, DiscardPolicy, RetentionPolicy, StorageType};
 use buffa::MessageField;
 use buffa_types::google::protobuf::Timestamp;
 use nkeys::{KeyPair, XKey};
@@ -14,7 +15,7 @@ use trogon_std::SecretString;
 use trogon_std::time::FixedEpochClock;
 use trogonai_proto::secrets::exchange::v1alpha1::SealedAccess;
 
-use crate::{ReleaseDestination, ReleaseRequest, RuntimeService, ServiceXkey, TenantAccount};
+use crate::{ReleaseDestination, ReleaseRequest, ReleasedValue, RuntimeService, ServiceXkey, TenantAccount};
 
 pub(crate) const OWNER: &str = "project.alpha";
 pub(crate) const CREDENTIAL_ID: &str = "0b6f2f3e-7c1a-4f7e-9d55-3b8a1c2d4e5f";
@@ -85,4 +86,36 @@ pub(crate) fn sealed_access(service: &XKey, requester: &XKey, plain: &[u8], vali
 /// The pinned form of `service`.
 pub(crate) fn pinned(service: &XKey) -> ServiceXkey {
     ServiceXkey::from_public_key(&service.public_key()).unwrap()
+}
+
+/// A value released at [`now`] that the service says is valid until
+/// `valid_until`.
+pub(crate) fn released_until(valid_until: SystemTime) -> ReleasedValue {
+    let service = XKey::new();
+    let requester = XKey::new();
+    ReleasedValue::open(
+        sealed_access(&service, &requester, VALUE.as_bytes(), valid_until),
+        &requester,
+        &pinned(&service),
+        now(),
+    )
+    .unwrap()
+}
+
+/// The invalidation stream as the secrets service creates it.
+pub(crate) fn invalidation_stream_config() -> stream::Config {
+    stream::Config {
+        name: crate::INVALIDATION_STREAM.to_owned(),
+        subjects: vec!["secrets.invalidation.v1.*.>".to_owned()],
+        storage: StorageType::File,
+        retention: RetentionPolicy::Limits,
+        discard: DiscardPolicy::Old,
+        max_age: Duration::from_secs(3_600),
+        duplicate_window: Duration::from_secs(120),
+        max_message_size: 1_024,
+        deny_delete: true,
+        deny_purge: true,
+        allow_direct: true,
+        ..Default::default()
+    }
 }

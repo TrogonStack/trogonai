@@ -43,6 +43,11 @@ pub enum ReleaseError {
     InvalidResponse(#[from] InvalidReleaseResponseError),
     #[error("released value was already expired when it arrived")]
     Expired,
+    /// The credential was invalidated, or the client lost track of its
+    /// invalidations, while each release asked for it was on its way, so the
+    /// value it carried may be the one revoked.
+    #[error("release was invalidated while it was on its way")]
+    Invalidated,
     #[error("released value did not open")]
     Unseal(#[from] UnsealError),
     #[error(transparent)]
