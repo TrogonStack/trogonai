@@ -1354,6 +1354,10 @@ pub(crate) const REMOTE_TOOL_SUBTYPES: [&str; 4] = [
     "remote_tools_reannounce",
 ];
 
+/// The most nested arrays and objects `TypedMcpToolHandler` reads tool arguments through, the recursion limit
+/// `serde_json` reads JSON text with.
+pub(crate) const TYPED_TOOL_ARGUMENTS_MAX_DEPTH: usize = 128;
+
 /// The longest tool name the TypeScript `McpServer` registers without printing a warning.
 pub(crate) const MCP_TS_TOOL_NAME_MAX_LENGTH: usize = 128;
 

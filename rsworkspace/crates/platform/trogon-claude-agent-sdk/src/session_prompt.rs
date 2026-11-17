@@ -41,6 +41,14 @@ pub(crate) fn js_trim(text: &str) -> &str {
     text.trim_matches(js_space)
 }
 
+/// `Te` in `sdk.mjs` 0.3.323 (`ue` in `bridge.mjs`): `String(value).toLowerCase().trim()` is `1`, `true`, `yes` or
+/// `on`. No white space has a case mapping, so trimming first reads the same text. `to_lowercase` and JavaScript
+/// `toLowerCase` share the Unicode default mapping, and the only characters outside ASCII that lower into ASCII
+/// (U+0130 and U+212A) never spell one of the four words.
+pub(crate) fn js_truthy(value: &str) -> bool {
+    matches!(js_trim(value).to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
 /// Upstream `Rxe` and `$U`: `Prompt from the <label> plugin: <text>` for a stored plugin prompt, else `None`.
 fn plugin_prompt(content: &str, plugin: Option<&Value>) -> Option<String> {
     let text = plugin?

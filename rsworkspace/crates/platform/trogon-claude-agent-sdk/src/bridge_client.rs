@@ -9,12 +9,13 @@ use serde_json::{Map, Value};
 
 use crate::adapters::{CurrentDirectory, EnvironmentVariable, GetAddrInfoResolver, HttpExecute, SystemEnvironment};
 use crate::bridge_git::{DefaultGitProbe, GitContextProbe, git_entries};
-use crate::bridge_js::{js_number, js_trim, plain_detail, safe_integer};
+use crate::bridge_js::{js_number, plain_detail, safe_integer};
 use crate::bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
     DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,
     RemoteMcpConfig,
 };
+use crate::session_prompt::js_trim;
 use crate::settings_json::js_stringify;
 use crate::settings_numbers::js_value;
 use crate::settings_parse::parse_json;
