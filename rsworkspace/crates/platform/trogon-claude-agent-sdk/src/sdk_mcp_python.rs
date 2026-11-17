@@ -5,8 +5,8 @@ use super::{
     LocalMcpSession, McpServerError, RequestId, ServerState, python_object, tool_error, typescript::initialize_issues,
 };
 use crate::{
-    CallbackError, CancellationToken, JsonObject, McpToolRequest, PythonJsonObject, PythonString, ToolResultStatus,
-    constants, deep_json,
+    CallbackError, CancellationToken, JsonObject, McpToolArgumentsError, McpToolRequest, PythonJsonObject,
+    PythonString, ToolResultStatus, constants, deep_json,
     jsonrpc_message::{self, JsonRpcKind},
     python_json::{is_truthy, python_repr},
     python_json_load::drop_python_deep,
@@ -432,7 +432,7 @@ async fn call_tool(
     drop_python_deep(schema);
     let rejected = match outcome {
         Outcome::Valid => None,
-        Outcome::Invalid(message) => Some(Ok((tool_error(format!("Input validation error: {message}")), None))),
+        Outcome::Invalid(message) => Some(Ok((tool_error(invalid_arguments(&message)), None))),
         Outcome::Raised(text) => {
             let lossy = text.to_str_lossy().into_owned();
             Some(Ok((tool_error(lossy), Some(text))))
@@ -461,8 +461,19 @@ async fn call_tool(
             Err(message) => Ok(Ok((tool_error(message), None))),
         },
         Err(CallbackError::Cancelled) => Err(CallbackError::Cancelled.into()),
-        Err(CallbackError::Failed(error)) => Ok(Ok((tool_error(error.to_string()), None))),
+        Err(CallbackError::Failed(error)) => {
+            let message = match error.downcast_ref::<McpToolArgumentsError>() {
+                Some(invalid) => invalid_arguments(invalid.message()),
+                None => error.to_string(),
+            };
+            Ok(Ok((tool_error(message), None)))
+        }
     }
+}
+
+/// The text of the result `run_tool` answers a `jsonschema.ValidationError` with.
+fn invalid_arguments(message: &str) -> String {
+    format!("Input validation error: {message}")
 }
 
 /// `_convert_tool_content`; a block missing a field it needs fails like the Python `KeyError`.

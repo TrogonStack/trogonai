@@ -96,6 +96,7 @@ mod mcp_server_dialect;
 mod mcp_server_name;
 mod mcp_server_options;
 mod mcp_server_tool_policy;
+mod mcp_tool_arguments_error;
 mod mcp_tool_input_schema;
 mod mcp_tool_name;
 mod mcp_tool_name_warning;
@@ -219,6 +220,7 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_dialect;
+mod settings_exact;
 mod settings_input;
 mod settings_json;
 mod settings_load_error;
@@ -295,6 +297,7 @@ mod tool_view;
 mod transcript_mirror;
 mod transport;
 mod transport_cause;
+mod typed_mcp_tool_handler;
 mod ui_host;
 mod urlopen_retriever;
 mod urlopen_retriever_options;
@@ -432,6 +435,7 @@ pub use mcp_server_dialect::McpServerDialect;
 pub use mcp_server_name::McpServerName;
 pub use mcp_server_options::{McpRemoteServerOptions, McpSdkServerOptions, McpServerOptions, McpStdioServerOptions};
 pub use mcp_server_tool_policy::{McpServerToolPolicy, McpToolOrgMaxPermission, McpToolPermissionPolicy};
+pub use mcp_tool_arguments_error::McpToolArgumentsError;
 pub use mcp_tool_input_schema::{McpToolInputSchema, McpToolInputSchemaError};
 pub use mcp_tool_name::McpToolName;
 pub use mcp_url::{McpUrl, McpUrlError};
@@ -537,14 +541,17 @@ pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_ent
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use settings_dialect::SettingsDialect;
+pub use settings_exact::js_stringify_exact;
 pub use settings_input::SettingsInput;
 pub use settings_json::js_stringify;
 pub use settings_load_error::{SettingsLoadCauseError, SettingsLoadError};
 pub use settings_resolve::{
     filter_escalating_default_mode, resolve_python_settings, resolve_python_settings_with,
-    resolve_python_settings_with_state, resolve_settings, resolve_settings_in_dialect,
-    resolve_settings_in_dialect_with, resolve_settings_in_dialect_with_state, resolve_settings_json_with,
-    resolve_settings_json_with_state, resolve_settings_with, resolve_settings_with_state,
+    resolve_python_settings_with_state, resolve_settings, resolve_settings_exact, resolve_settings_exact_in_dialect,
+    resolve_settings_exact_in_dialect_with, resolve_settings_exact_in_dialect_with_state, resolve_settings_exact_with,
+    resolve_settings_exact_with_state, resolve_settings_in_dialect, resolve_settings_in_dialect_with,
+    resolve_settings_in_dialect_with_state, resolve_settings_json_with, resolve_settings_json_with_state,
+    resolve_settings_with, resolve_settings_with_state,
 };
 pub use settings_resolve_error::ResolveSettingsError;
 pub use settings_resolve_reread::PolicyRereads;
@@ -578,6 +585,7 @@ pub use tool_rule::ToolRule;
 pub use tool_use_id::ToolUseId;
 pub use transcript_mirror::{MirrorEnqueueError, MirrorFailureError, MirrorFlush, TranscriptMirror};
 pub use transport::Transport;
+pub use typed_mcp_tool_handler::{TypedMcpToolHandler, TypedMcpToolRequest};
 pub use ui_host::{UiFuture, UiHandler, UiHost, UiRequest};
 pub use upstream::hooks::{EXIT_REASONS, ExitReason, HOOK_EVENTS, HookInput, HookJSONOutput};
 pub use upstream::settings::Settings;

@@ -2,8 +2,9 @@
 
 These SDK maintenance modules read compiler declarations for compatibility work.
 They do not establish runtime parity. `behaviors.json` maps runtime behavior
-against both upstream SDKs. Only its test runs in CI: `claude-sdk:test` depends
-on `claude-sdk:behavior-map`, which runs `tests/test_behavior_map.py`.
+against both upstream SDKs. Only its tests run in CI: `claude-sdk:test` depends
+on `claude-sdk:behavior-map`, which runs `tests/test_behavior_map.py`, and on
+`claude-sdk:gate-z`, which runs `tests/test_gate_z.py`.
 
 Run the Python foundation tests from this directory:
 
@@ -98,6 +99,26 @@ given sources. The mapping test checks both against the crate's top-level
 integration tests and every file under `src/`.
 `validate(..., require_contracts=True)` rejects any row without one. The
 mapping alone does not establish runtime parity.
+
+## Gate Z
+
+`gate_z.py` is the parity bar. It fails while any of these hold:
+
+- A feature in `../claude-sdk-freshness/mapping.json` is not `supported`.
+- A behavior row decides anything other than `upstream`, `follow-typescript` or
+  `follow-python`, or follows Python where TypeScript has a counterpart. Python
+  is followed only for a form TypeScript lacks, which review keeps opt-in.
+- A behavior row is a `rust-adaptation` outside the TLS rows m19 to m25 and
+  `m26-python-tls-trust-directory-lookup`, or one of those rows gives a reason
+  that does not end with the owner's rustls decision under ADR 0015. The one
+  other accepted adaptation is `m18-python-system-proxy-undefined-reads`,
+  whose upstream behavior is a crash or an uninitialized read. Rust does not
+  copy a defect, and that row's reason must end with `DEFECT_REASON`.
+- A behavior row has no contracts.
+- `openssl`, `openssl-sys`, `openssl-src` or `native-tls` is reachable from the
+  SDK in the workspace `Cargo.lock`.
+
+Each check returns every gap it finds, so one failing run lists them all.
 
 The reviewed-bytes test reads `upstream/typescript/<tarball>` and
 `upstream/python/<path>` in this directory and is skipped when they are
