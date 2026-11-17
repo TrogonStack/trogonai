@@ -57,6 +57,8 @@ fn the_configuration_flags_apply_to_the_dump_wherever_they_are_given() {
         "/etc/trogon/secrets-service.toml",
         "--nats-url",
         "nats://nats.internal:4222",
+        "--invalidation-stream-replicas",
+        "5",
         "config",
         "dump",
         "--resolved",
@@ -70,6 +72,8 @@ fn the_configuration_flags_apply_to_the_dump_wherever_they_are_given() {
         "/etc/trogon/secrets-service.toml",
         "--nats-url",
         "nats://nats.internal:4222",
+        "--invalidation-stream-replicas",
+        "5",
     ]);
 
     for args in [before, after] {
@@ -79,5 +83,6 @@ fn the_configuration_flags_apply_to_the_dump_wherever_they_are_given() {
             Some(std::path::Path::new("/etc/trogon/secrets-service.toml"))
         );
         assert_eq!(args.runtime.nats.nats_url.as_deref(), Some("nats://nats.internal:4222"));
+        assert_eq!(args.invalidation_stream_replicas, Some(5));
     }
 }

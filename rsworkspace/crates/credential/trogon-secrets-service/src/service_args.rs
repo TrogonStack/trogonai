@@ -31,7 +31,7 @@ pub struct ServiceArgs {
     /// The replicas the SECRETS_INVALIDATION stream must keep
     /// (release.invalidation_stream_replicas, TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS;
     /// default 3).
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub invalidation_stream_replicas: Option<usize>,
 
     #[command(subcommand)]
