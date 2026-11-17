@@ -2192,6 +2192,13 @@ def mg8_profile(pool, port, out):
             profile[f"pm_{label}_{which}"] = profile_pair(found)
             out["pm"][f"pm_{label}_{which}"] = profile[f"pm_{label}_{which}"]
     for key in MG8_LOCATE:
+        if key.startswith("org_") and GATE["NATIVE"] and not GATE["WSL"]:
+            # An organization case needs a WSL kernel to answer /proc/version (Gc, sdk.mjs 136 col 4257) and the gate
+            # refuses the stand-in, so off WSL the key is not located. The low end of its window only names the
+            # pairs (a pair's id does not depend on its level), and no unit runs an organization pair off WSL.
+            profile[key] = MG8_LOCATE[key][0]
+            out["located"][key] = {"level": profile[key], "located": False, "reason": "organization key off WSL"}
+            continue
         found = mg8_locate(pool, port, key)
         out["located"][key] = found
         if "error" in found:
