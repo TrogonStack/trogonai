@@ -1,0 +1,17 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "managedSettings": {
+      "model": 5,
+      "permissions": {
+        "deny": [
+          "Bash"
+        ],
+        "disableBypassPermissionsMode": "bogus"
+      }
+    }
+  }
+}

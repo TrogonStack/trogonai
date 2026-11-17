@@ -10,6 +10,10 @@ on:
         description: ID of the cancelled CI Bazel run to run again.
         required: true
         type: string
+      run-attempt:
+        description: The attempt the watcher cancelled.
+        required: true
+        type: string
 
 concurrency:
   group: ci-requeue-${{ inputs.run-id }}
@@ -22,19 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise
-        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
-        with:
-          install: false
-          cache: false
-
       - name: Run again
-        run: mise run --skip-tools github:workflows:ci-requeue:rerun
-        env:
-          RUN_ID: ${{ inputs.run-id }}
-          GH_TOKEN: ${{ github.token }}
+        uses: TrogonStack/github-actions/actions/runs-on-fallback-requeue@d5c77134bdde3c7036b58be27aa0e2f0c7d496e0 # runs-on-fallback-requeue@v0.0.1
+        with:
+          run-id: ${{ inputs.run-id }}
+          run-attempt: ${{ inputs.run-attempt }}
+          workflow-path: .github/workflows/ci-bazel.yml
+          finish-timeout-seconds: '600'

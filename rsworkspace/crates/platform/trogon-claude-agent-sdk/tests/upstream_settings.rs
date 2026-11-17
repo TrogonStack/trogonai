@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::upstream::settings::{SettingsAttribution, SettingsPermissionsDefaultMode};
-use trogon_claude_agent_sdk::{Settings, SettingsInput};
+use trogon_claude_agent_sdk::{DeepJsonValue, Settings, SettingsInput};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -99,7 +99,10 @@ fn unknown_top_level_keys_survive_in_place_and_in_order() -> TestResult {
         typed.extra.keys().map(String::as_str).collect::<Vec<_>>(),
         ["futureSetting", "zzLast", "alsoNew"]
     );
-    assert_eq!(typed.extra.get("alsoNew"), Some(&Value::Null));
+    assert_eq!(
+        typed.extra.get("alsoNew").map(DeepJsonValue::as_value),
+        Some(&Value::Null)
+    );
     assert_eq!(typed.to_json()?, text);
     Ok(())
 }

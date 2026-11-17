@@ -11,6 +11,8 @@
 //   * unions of other shapes pick the member that round-trips exactly with the fewest undeclared
 //     keys (earliest declared on ties), otherwise keep the raw JSON value in their own
 //     `Unknown` variant;
+//   * a member a target lists under `untyped_members` holds any JSON object, for an option upstream takes as
+//     a raw caller object and reads key by key later instead of through its declared type;
 //   * nothing is validated.
 //
 // Usage: generate_types.mjs --typescript-package DIR --config types.json --out-root DIR [--check]
@@ -247,6 +249,8 @@ class Emitter {
     this.foreign = new Map();
     this.tagged = new Map();
     this.taggedEmitted = new Set();
+    this.untyped = new Map();
+    this.untypedEmitted = new Set();
   }
 
   claim(name) {
@@ -383,6 +387,7 @@ class Emitter {
       case 'number': return 'serde_json::Number';
       case 'bool': return 'bool';
       case 'unknown': return 'serde_json::Value';
+      case 'raw': return 'crate::DeepJsonObject';
       case 'null': return 'Option<serde_json::Value>';
       case 'ref': this.request(ir.name); return this.externs.get(ir.name) ?? ir.name;
       case 'array': return `Vec<${this.type(ir.el, `${name}Item`)}>`;
@@ -411,6 +416,11 @@ class Emitter {
         nullable = true;
         inner = inner.inner;
       }
+      if (this.untyped.get(name)?.includes(prop.name)) {
+        if (!prop.optional || nullable) fail(`untyped_members names ${name}.${prop.name}, which is not an optional, non-nullable property`);
+        this.untypedEmitted.add(`${name}.${prop.name}`);
+        inner = { k: 'raw' };
+      }
       const rust = this.type(inner, `${name}${pascal(prop.name)}`);
       let type;
       if (prop.optional && nullable) {
@@ -420,6 +430,7 @@ class Emitter {
         type = `Option<${rust}>`;
         attrs.push('default', 'skip_serializing_if = "Option::is_none"');
         if (inner.k === 'unknown') attrs.push('deserialize_with = "super::support::optional_value"');
+        if (inner.k === 'raw') attrs.push('serialize_with = "super::support::optional_shallow_object"');
       } else if (nullable) {
         type = `Option<${rust}>`;
         attrs.push('default');
@@ -438,16 +449,18 @@ class Emitter {
     for (const reserved of ['extra', 'key_order']) {
       if (used.has(reserved)) fail(`Field name ${reserved} collides in ${name}`);
     }
-    const extraType = ir.index && ir.index.k !== 'unknown'
+    const typedExtra = ir.index && ir.index.k !== 'unknown';
+    const extraType = typedExtra
       ? `indexmap::IndexMap<String, ${this.type(ir.index, `${name}Extra`)}>`
-      : 'serde_json::Map<String, serde_json::Value>';
+      : 'indexmap::IndexMap<String, crate::DeepJsonValue>';
+    const extraSerde = typedExtra ? 'flatten' : 'flatten, serialize_with = "super::support::shallow_members"';
     const extraDoc = '    /// Keys the pinned upstream declarations do not list, in the order they were decoded.\n';
     const orderDoc = '    /// The key order this value was decoded with; encoding reproduces it.\n';
     const wire = this.claimWire(name);
     const plain = fields.map(field => `${field.doc}${field.decl}`);
     plain.push(`${extraDoc}    pub extra: ${extraType},`, `${orderDoc}    pub key_order: super::support::KeyOrder,`);
     const mirror = fields.map(field => `${field.serde}${field.decl}`);
-    mirror.push(`    #[serde(flatten)]\n    pub extra: ${extraType},`, '    #[serde(skip)]\n    pub key_order: super::support::KeyOrder,');
+    mirror.push(`    #[serde(${extraSerde})]\n    pub extra: ${extraType},`, '    #[serde(skip)]\n    pub key_order: super::support::KeyOrder,');
     const known = ir.props.map(prop => rustString(prop.name)).join(', ');
     // String-literal properties: a value outside the listed ones would still decode (as the
     // enum's `Unknown`), so a union that picks a member by shape counts it as a mismatch.
@@ -461,7 +474,7 @@ class Emitter {
     out.push(`${doc}#[derive(Clone, Debug, PartialEq, Eq)]\npub struct ${name} {\n${plain.join('\n')}\n}\n`);
     out.push(`#[derive(Serialize, Deserialize)]\n#[serde(remote = "${name}")]\nstruct ${wire} {\n${mirror.join('\n')}\n}\n`);
     out.push(`impl ${name} {`, '    /// The keys the pinned upstream declarations list for this object.', `    pub const KNOWN_KEYS: &'static [&'static str] = &[${known}];`, '', '    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.', '    pub fn match_score(value: &serde_json::Value) -> usize {', `        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[${literals.join(', ')}])`, '    }', '}', '');
-    out.push(`impl Serialize for ${name} {`, '    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {', `        super::support::ordered(${wire}::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)`, '    }', '}', '');
+    out.push(`impl Serialize for ${name} {`, '    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {', `        super::support::ordered(${wire}::serialize(self, serde_json::value::Serializer), |text| ${wire}::serialize(self, text), &self.key_order, serializer)`, '    }', '}', '');
     out.push(`impl<'de> Deserialize<'de> for ${name} {`, '    fn deserialize<D: serde::Deserializer<\'de>>(deserializer: D) -> Result<Self, D::Error> {', '        let value = serde_json::Value::deserialize(deserializer)?;', `        let mut decoded = ${wire}::deserialize(value.clone()).map_err(serde::de::Error::custom)?;`, '        decoded.key_order = super::support::KeyOrder::of(&value);', '        Ok(decoded)', '    }', '}', '');
     this.chunks.push(out.join('\n'));
   }
@@ -673,6 +686,11 @@ export function generate({ packageDir, target, label }) {
     if (!Array.isArray(keys) || keys.length === 0) fail(`tagged ${name} needs at least one key`);
     emitter.tagged.set(name, keys);
   }
+  for (const [name, members] of Object.entries(target.untyped_members ?? {})) {
+    if (!declarations.has(name)) fail(`untyped_members names ${name}, which is not declared`);
+    if (!Array.isArray(members) || members.length === 0) fail(`untyped_members ${name} needs at least one member`);
+    emitter.untyped.set(name, members);
+  }
   for (const [name, rustPath] of Object.entries(target.extern ?? {})) {
     if (!declarations.has(name)) fail(`extern names ${name}, which is not declared`);
     emitter.externs.set(name, rustPath);
@@ -690,6 +708,11 @@ export function generate({ packageDir, target, label }) {
   }
   for (const name of emitter.tagged.keys()) {
     if (!emitter.taggedEmitted.has(name)) fail(`tagged names ${name}, which is not a union emitted for ${target.output}`);
+  }
+  for (const [name, members] of emitter.untyped) {
+    for (const member of members) {
+      if (!emitter.untypedEmitted.has(`${name}.${member}`)) fail(`untyped_members names ${name}.${member}, which is not a property emitted for ${target.output}`);
+    }
   }
   const header = [
     `// @generated by .config/mise/lib/claude-sdk-freshness/generate_types.mjs from ${label} ${target.source}.`,
