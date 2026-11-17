@@ -10,7 +10,9 @@ on:
 
 concurrency:
   group: ci-bazel-${{ github.ref }}
-  cancel-in-progress: true
+  # Runs on main finish so their uploads fill the sunny-go remote cache; a
+  # newer push queues behind the running one instead of cancelling it.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -50,15 +52,15 @@ jobs:
       # Self-hosted sunny-go runners have a bazel-remote cache on their private
       # network, so they skip the GitHub Actions Bazel caches below. Pushes to
       # main are the only runs that receive the write password.
-      - name: Configure Bazel remote cache
-        id: remote-cache
-        run: mise run --skip-tools github:workflows:ci-bazel:remote-cache
+      - name: Configure Bazel cache
+        id: cache-config
+        run: mise run --skip-tools github:workflows:ci-bazel:cache-config
         env:
           SUNNY_GO_CACHE_PASSWORD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.SUNNY_GO_CACHE_PASSWORD || '' }}
 
       - name: Restore Bazel cache
         id: bazel-cache
-        if: ${{ steps.remote-cache.outputs.enabled != 'true' }}
+        if: ${{ steps.cache-config.outputs.remote != 'true' }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -104,11 +106,11 @@ jobs:
       # Lint even when tests or the build fail, so their findings are not
       # hidden behind an unrelated failure.
       - name: Lint Bazel targets
-        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || (steps.remote-cache.outputs.enabled == 'true' && steps.remote-cache.outcome == 'success')) }}
+        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || steps.cache-config.outputs.remote == 'true') }}
         run: mise run --skip-tools github:workflows:ci-bazel:lint
 
       - name: Upload Bazel profiles
-        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || (steps.remote-cache.outputs.enabled == 'true' && steps.remote-cache.outcome == 'success')) }}
+        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || steps.cache-config.outputs.remote == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bazel-profiles-${{ github.run_attempt }}
@@ -132,11 +134,11 @@ jobs:
             ${{ runner.temp }}/bazel-repository-cache
           key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
 
-      # Runner homes outlive the job; the file holds the write credential on
+      # Self-hosted workspaces outlive the job, and the file holds the write credential on
       # pushes to main. It is deleted even when the job fails or is cancelled.
-      - name: Remove Bazel remote cache config
+      - name: Remove Bazel cache config
         if: ${{ always() }}
-        run: mise run --skip-tools github:workflows:ci-bazel:remote-cache-cleanup
+        run: mise run --skip-tools github:workflows:ci-bazel:cache-config-cleanup
 
   # Nothing reserves the self-hosted runner choose-runner saw idle, so verify
   # can wait behind another run, or for up to 24 hours if every self-hosted
@@ -150,27 +152,15 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise
-        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
-        with:
-          install: false
-          cache: false
-
       - name: Watch verify's queue
-        run: mise run --skip-tools github:workflows:ci-bazel:watch-self-hosted-queue
-        env:
-          WATCHED_JOB: verify
+        uses: TrogonStack/github-actions/actions/runs-on-fallback-watch-queue@5a31768301365e9980bb9e5f020155b694a8148c # runs-on-fallback-watch-queue@v0.0.1
+        with:
+          job-name: verify
           # A verify takes about 16 minutes, so a job that lost its runner to
           # another run usually gets one back sooner than this.
-          QUEUE_LIMIT_SECONDS: '1200'
-          MAX_RUN_ATTEMPTS: '3'
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
+          queue-limit-seconds: '1200'
+          max-run-attempts: '3'
+          requeue-workflow: ci-requeue.yml
 
   # The gate writes to the storage branch and comments on the pull request, so
   # it runs apart from verify, which keeps a read-only token.

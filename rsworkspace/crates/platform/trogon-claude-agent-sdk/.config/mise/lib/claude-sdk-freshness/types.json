@@ -297,6 +297,9 @@
       "extern": {
         "Settings": "super::settings::Settings"
       },
+      "untyped_members": {
+        "ResolveSettingsOptions": ["managedSettings", "serverManagedSettings"]
+      },
       "roots": [
         "ResolvedSettings",
         "ProvenanceEntry",

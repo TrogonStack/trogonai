@@ -6,9 +6,9 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::bridge_js::js_trim;
 use crate::bridge_paths::PathGuard;
 use crate::bridge_platform::EntryKind;
+use crate::session_prompt::js_trim;
 
 mod constants;
 

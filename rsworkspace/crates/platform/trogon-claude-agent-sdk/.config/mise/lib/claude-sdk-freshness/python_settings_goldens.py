@@ -15,22 +15,37 @@ function, `client_connect` awaits `ClaudeSDKClient.connect` under `asyncio.run`,
 under `asyncio.run`. Each depth is searched with a fresh event loop, then checked once more after a first call, so
 the caches the first call fills cannot move it. `surrogates` pairs settings text holding lone surrogate escapes
 with the `--settings` value, as `json.loads` keeps a lone surrogate in the `str` and `json.dumps` escapes it.
+
+`files` holds settings files `_build_settings_value` reads with `Path.read_text(encoding="utf-8-sig")`: the bytes
+of each, as hex before and after a run of `a` bytes of the given length, and either the `--settings` value or the
+`CLIConnectionError` message. They cover invalid UTF-8, which raises `UnicodeDecodeError` with positions counted
+after a leading byte order mark, a byte order mark and the prefixes of one, which decode to nothing, and carriage
+returns, which universal newlines turn into line feeds before `json.loads` counts lines. `missing_paths` pairs the
+bytes of a relative `cwd` that holds no settings file with the message, whose path `repr` shows each byte that is
+not UTF-8 as the lone surrogate `os.fsdecode` gives it.
+
+`raised` holds settings files the `utf-8-sig` codec cannot decode, as hex, with what each caller raises for one:
+the caller as in `depth`, the class name of the exception, whether it is a `ClaudeSDKError`, its message, and the
+class name, `encoding`, `object` as hex, `start`, `end` and `reason` of its `__cause__`. Every caller names a CLI that
+does not exist, so an exception raised while the command is built comes before any attempt to start it.
 """
 
 import asyncio
 import hashlib
 import json
+import os
 import platform
 import sys
+import tempfile
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, query
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ClaudeSDKError, query
 from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 
 args = sys.argv[1:]
 if not args or args[0].startswith("-"):
     sys.stderr.write("usage: python_settings_goldens.py OUT_FILE [--check]\n")
     sys.exit(2)
-out, flags = args[0], args[1:]
+out, flags = os.path.abspath(args[0]), args[1:]
 
 SANDBOX = {"enabled": True}
 
@@ -126,6 +141,137 @@ surrogates = [
     for text in surrogate_texts
 ]
 
+FOLDER = tempfile.mkdtemp()
+
+FILES = [
+    ("", 0, ""),
+    ("ef", 0, ""),
+    ("efbb", 0, ""),
+    ("efbbbf", 0, ""),
+    ("efbbbfefbbbf7b7d", 0, ""),
+    ("efbbbf7b2278223a22efbbbf227d", 0, ""),
+    ("20efbbbf7b7d", 0, ""),
+    ("ef80", 0, ""),
+    ("efbb80", 0, ""),
+    ("efbbbfef", 0, ""),
+    ("7b2278223a22eda080227d", 0, ""),
+    ("7b2278223a22edbfbf227d", 0, ""),
+    ("7b2278223a2280227d", 0, ""),
+    ("7b2278223a22c0af227d", 0, ""),
+    ("7b2278223a22ff227d", 0, ""),
+    ("7b2278223a22f5227d", 0, ""),
+    ("7b2278223a22f490227d", 0, ""),
+    ("7b2278223a22e080227d", 0, ""),
+    ("7b2278223a22c3227d", 0, ""),
+    ("7b2278223a22e282227d", 0, ""),
+    ("7b2278223a22f09f98227d", 0, ""),
+    ("7b2278223a22e282", 0, ""),
+    ("7b2278223a317dff", 0, ""),
+    ("efbbbf7b2278223a2280227d", 0, ""),
+    ("7b2278223a22efbfbe227d", 0, ""),
+    ("7b2278223a22", 10000, "80227d"),
+    ("7b0d0a2278223a312c7d", 0, ""),
+    ("7b0d2278223a312c7d", 0, ""),
+    ("0d0a0d0a7b2278223a5d", 0, ""),
+    ("7b2278223a22610d62227d", 0, ""),
+    ("7b2278223a22610a62227d", 0, ""),
+]
+
+
+def file_entry(index, head, pad, tail):
+    path = os.path.join(FOLDER, f"settings-{index}.json")
+    with open(path, "wb") as handle:
+        handle.write(bytes.fromhex(head) + b"a" * pad + bytes.fromhex(tail))
+    try:
+        found = ["value", SubprocessCLITransport(prompt="hi", options=options(path))._build_settings_value()]
+    except Exception as error:
+        found = ["error", str(error)]
+    return [head, pad, tail, found]
+
+
+files = [file_entry(index, *entry) for index, entry in enumerate(FILES)]
+
+RAISED_FILES = [
+    "7b2278223a22ff227d",
+    "efbbbf7b2278223a2280227d",
+    "7b2278223a22e282",
+    "7b2278223a22eda080227d",
+    "7b2278223a22f09f98227d",
+]
+
+
+async def connect_file(path):
+    await ClaudeSDKClient(options(path)).connect()
+
+
+async def query_file(path):
+    async for _ in query(prompt="hi", options=options(path)):
+        pass
+
+
+RAISING_CALLERS = [
+    ("module", lambda path: SubprocessCLITransport(prompt="hi", options=options(path))._build_settings_value()),
+    ("client_connect", lambda path: asyncio.run(connect_file(path))),
+    ("query", lambda path: asyncio.run(query_file(path))),
+]
+
+
+def raised_by(caller, path):
+    try:
+        caller(path)
+    except Exception as error:
+        cause = error.__cause__
+        return [
+            type(error).__name__,
+            isinstance(error, ClaudeSDKError),
+            str(error),
+            type(cause).__name__,
+            cause.encoding,
+            cause.object.hex(),
+            cause.start,
+            cause.end,
+            cause.reason,
+        ]
+    raise SystemExit(f"{path}: an undecodable settings file was read")
+
+
+def raised_entry(index, head):
+    path = os.path.join(FOLDER, f"raised-{index}.json")
+    with open(path, "wb") as handle:
+        handle.write(bytes.fromhex(head))
+    return [head, [[name, *raised_by(caller, path)] for name, caller in RAISING_CALLERS]]
+
+
+raised = [raised_entry(index, head) for index, head in enumerate(RAISED_FILES)]
+
+MISSING_CWDS = [
+    "73ff78",
+    "69742773ff",
+    "712227fe",
+    "636166c3a9",
+    "ee8080",
+    "7409627f5c",
+    "c3",
+    "610a620d85c285e280a8",
+    "eda080",
+    "e282",
+]
+
+
+def missing_entry(cwd):
+    found = ClaudeAgentOptions(
+        cli_path="/nonexistent/claude", sandbox=SANDBOX, settings="none.json", cwd=os.fsdecode(bytes.fromhex(cwd))
+    )
+    try:
+        SubprocessCLITransport(prompt="hi", options=found)._build_settings_value()
+    except Exception as error:
+        return [cwd, str(error)]
+    raise SystemExit(f"{cwd}: a missing settings file was read")
+
+
+os.chdir(FOLDER)
+missing_paths = [missing_entry(cwd) for cwd in MISSING_CWDS]
+
 
 def lines(items):
     return ",\n".join(f"    {json.dumps(item)}" for item in items)
@@ -135,7 +281,10 @@ body = (
     "{\n"
     f'  "python": {json.dumps(platform.python_version())},\n'
     f'  "depth": [\n{lines(depth)}\n  ],\n'
-    f'  "surrogates": [\n{lines(surrogates)}\n  ]\n'
+    f'  "surrogates": [\n{lines(surrogates)}\n  ],\n'
+    f'  "files": [\n{lines(files)}\n  ],\n'
+    f'  "raised": [\n{lines(raised)}\n  ],\n'
+    f'  "missing_paths": [\n{lines(missing_paths)}\n  ]\n'
     "}\n"
 )
 

@@ -252,7 +252,7 @@ def _crate(package, workspace_package, workspace_root, by_dir, unified, wasm):
         elif dep["optional"] and key not in resolved.activated:
             # crate_universe's resolution leaves this optional dependency out
             # of all_crate_deps, so it is listed explicitly.
-            label = "@crates//:" + dep["name"]
+            label = "@crates//:" + key
             proc_macro = False
         else:
             continue
