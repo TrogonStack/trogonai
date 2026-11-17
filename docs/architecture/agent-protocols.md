@@ -20,21 +20,12 @@ messages. Stdio is useful when a client launches a local bridge; HTTP and
 WebSocket provide remote connection shapes. NATS is the internal backbone that
 routes messages between the bridge and a service.
 
-```mermaid
-flowchart LR
-    Agent[Another agent] -->|A2A| A2A[A2A adapter or gateway]
-    Editor[Editor or client] -->|ACP| ACP[ACP bridge]
-    Host[AI application] -->|MCP| MCP[MCP bridge]
-    A2A <--> Bus[NATS backbone]
-    ACP <--> Bus
-    MCP <--> Bus
-    Bus <--> Agents[Agent implementations]
-    Bus <--> Tools[MCP server implementations]
-```
+<ProtocolMap />
 
-The diagram groups the routing paths. It does not make the protocol endpoints
-interchangeable: an MCP tool call still needs an MCP server, and an ACP prompt
-still needs an ACP agent implementation.
+The map shows each protocol's logical participants. Transport adapters carry
+their separate conversations over NATS. An MCP tool call needs an MCP server,
+and an ACP prompt needs an ACP agent implementation. The agent application owns
+any decision to delegate work or call a tool.
 
 [ADR#0003](../adr/0003-ai-protocol-transport-taxonomy.md) defines this vocabulary.
 [ADR#0004](../adr/0004-protocol-and-transport-layering.md) keeps transport and

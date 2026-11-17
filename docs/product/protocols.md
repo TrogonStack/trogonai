@@ -77,6 +77,11 @@ supply the agent or tool service behind it.
 
 ## The right protocol for the job
 
+Follow an agent's conversations with its client, another agent and its tools.
+Select a protocol to see what travels in each direction.
+
+<ProtocolMap />
+
 <ProtocolOverview :items="$frontmatter.protocols" />
 
 ## A2A: agent-to-agent work

@@ -17,6 +17,7 @@ import KeyEnvelope from "./KeyEnvelope.vue";
 import KeyLifecycle from "./KeyLifecycle.vue";
 import ProductHeader from "./ProductHeader.vue";
 import ProductOverview from "./ProductOverview.vue";
+import ProtocolMap from "./ProtocolMap.vue";
 import ProtocolOverview from "./ProtocolOverview.vue";
 import SecretFlow from "./SecretFlow.vue";
 import SessionEventDriven from "./SessionEventDriven.vue";
@@ -46,6 +47,7 @@ export default {
     app.component("KeyLifecycle", KeyLifecycle);
     app.component("ProductHeader", ProductHeader);
     app.component("ProductOverview", ProductOverview);
+    app.component("ProtocolMap", ProtocolMap);
     app.component("ProtocolOverview", ProtocolOverview);
     app.component("SecretFlow", SecretFlow);
     app.component("SessionEventDriven", SessionEventDriven);
