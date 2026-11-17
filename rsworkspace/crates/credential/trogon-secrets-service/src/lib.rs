@@ -38,6 +38,11 @@
 //! one canonical name, a [`ConfigSetting`], and every refusal names it without
 //! quoting a secret: the file holds references to secrets, never the secrets.
 //!
+//! [`ConfigDump`] is what `trogon-secrets-service config dump --resolved`
+//! prints: every setting with its effective value and its source, from the
+//! same resolution and validation startup runs, a secret shown only by its
+//! reference. It reads no secret and connects to nothing.
+//!
 //! [`ReleaseSources`] reads what the configuration points at once, at startup:
 //! the tenant owners, the release policies, the sealing key, and the AppRole,
 //! whose secret id file is read again at every login so it can be rotated.
@@ -93,6 +98,8 @@
 mod admission_limit;
 mod admission_limit_error;
 mod audit_section_wire;
+mod config_command;
+mod config_dump;
 mod config_setting;
 mod constants;
 mod credential_event_delivery;
@@ -153,6 +160,7 @@ mod release_server_error;
 mod release_sources;
 mod release_sources_error;
 mod requester_xkey;
+mod resolved_setting;
 #[cfg(test)]
 mod scripted_release;
 mod seal_error;
@@ -162,9 +170,12 @@ mod sealer;
 mod secrets_service;
 mod secrets_service_error;
 mod service_args;
+mod service_command;
 mod service_config;
 mod service_config_error;
 mod service_config_wire;
+mod setting_source;
+mod setting_value;
 mod static_release_policies;
 mod static_tenant_owners;
 mod tenant_account;
@@ -178,6 +189,8 @@ mod xkey_sealer;
 
 pub use admission_limit::AdmissionLimit;
 pub use admission_limit_error::AdmissionLimitError;
+pub use config_command::ConfigCommand;
+pub use config_dump::ConfigDump;
 pub use config_setting::ConfigSetting;
 pub use constants::{
     INVALIDATION_PUBLISHER_DURABLE, INVALIDATION_REPLAY_WINDOW, INVALIDATION_STREAM, INVALIDATION_SUBJECTS,
@@ -230,6 +243,7 @@ pub use release_server_error::ReleaseServerError;
 pub use release_sources::ReleaseSources;
 pub use release_sources_error::ReleaseSourcesError;
 pub use requester_xkey::{RequesterXkey, RequesterXkeyError};
+pub use resolved_setting::ResolvedSetting;
 pub use seal_error::SealError;
 pub use sealed_release::SealedRelease;
 pub use sealed_value::{SealedValue, SealedValueError};
@@ -237,8 +251,11 @@ pub use sealer::Sealer;
 pub use secrets_service::SecretsService;
 pub use secrets_service_error::SecretsServiceError;
 pub use service_args::ServiceArgs;
+pub use service_command::ServiceCommand;
 pub use service_config::ServiceConfig;
 pub use service_config_error::ServiceConfigError;
+pub use setting_source::SettingSource;
+pub use setting_value::SettingValue;
 pub use static_release_policies::StaticReleasePolicies;
 pub use static_tenant_owners::StaticTenantOwners;
 pub use tenant_account::{TenantAccount, TenantAccountError};

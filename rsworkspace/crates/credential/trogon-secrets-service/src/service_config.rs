@@ -1,6 +1,6 @@
 use std::env::VarError;
 use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use trogon_audit::{AuditName, WriterId, WriterIdentity};
 use trogon_credential_aggregate::CREDENTIAL_STREAM;
@@ -13,7 +13,7 @@ use trogon_std::{ReadFile, SecretString};
 use super::constants::{AUDIT_COMPONENT, AUDIT_WRITER_PREFIX, DEFAULT_INVALIDATION_STREAM_REPLICAS};
 use super::nats_section_wire::NatsSectionWire;
 use super::service_config_wire::ServiceConfigWire;
-use super::{AdmissionLimit, ConfigSetting, OpenBaoAddress, ServiceArgs, ServiceConfigError, TomlSyntax};
+use super::{AdmissionLimit, ConfigSetting, OpenBaoAddress, ServiceArgs, ServiceConfigError};
 
 /// The configuration the secrets service runs with, after every source is
 /// merged and every setting is validated (ADR#0007).
@@ -60,10 +60,16 @@ impl ServiceConfig {
     /// setting is unset, when a value is invalid, or when a secret is given
     /// inline rather than by reference. No error quotes a secret.
     pub fn resolve(args: &ServiceArgs, env: &impl ReadEnv, fs: &impl ReadFile) -> Result<Self, ServiceConfigError> {
-        let wire = match &args.runtime.config {
-            Some(path) => read_file(path, fs)?,
-            None => ServiceConfigWire::default(),
-        };
+        Self::from_wire(ServiceConfigWire::read(args.runtime.config.as_deref(), fs)?, args, env)
+    }
+
+    /// Merges `wire`, the configuration file as written, with the environment
+    /// and the flags, and validates the result, as [`Self::resolve`] does.
+    pub(crate) fn from_wire(
+        wire: ServiceConfigWire,
+        args: &ServiceArgs,
+        env: &impl ReadEnv,
+    ) -> Result<Self, ServiceConfigError> {
         let openbao = wire.openbao;
         let release = wire.release;
         let audit = wire.audit;
@@ -143,19 +149,6 @@ impl ServiceConfig {
             audit: WriterIdentity::new(writer, component, tenant, project),
         })
     }
-}
-
-fn read_file(path: &Path, fs: &impl ReadFile) -> Result<ServiceConfigWire, ServiceConfigError> {
-    let document = fs
-        .read_to_string(path)
-        .map_err(|source| ServiceConfigError::ConfigUnreadable {
-            path: path.to_owned(),
-            source,
-        })?;
-    toml::from_str(&document).map_err(|error| ServiceConfigError::ConfigUnparsable {
-        path: path.to_owned(),
-        syntax: TomlSyntax::of(&error, &document),
-    })
 }
 
 /// The NATS connection: each setting from the file, then the environment,
@@ -240,7 +233,7 @@ fn invalidation_stream_replicas(
 
 /// The value of `setting`'s environment variable, when it is set and not
 /// empty.
-fn env_value(env: &impl ReadEnv, setting: ConfigSetting) -> Result<Option<String>, ServiceConfigError> {
+pub(crate) fn env_value(env: &impl ReadEnv, setting: ConfigSetting) -> Result<Option<String>, ServiceConfigError> {
     match env.var(setting.env()) {
         Ok(value) if !value.is_empty() => Ok(Some(value)),
         Ok(_) | Err(VarError::NotPresent) => Ok(None),

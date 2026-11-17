@@ -10,26 +10,8 @@ use trogon_std::env::{InMemoryEnv, ReadEnv};
 use trogon_std::fs::MemFs;
 
 use super::*;
+use crate::fixtures::service_settings::{CONFIG_PATH, REQUIRED, complete_env};
 use crate::{AdmissionLimit, AdmissionLimitError, ConfigSetting, OpenBaoAddressError, ServiceArgs};
-
-const CONFIG_PATH: &str = "/etc/trogon/secrets-service.toml";
-
-/// Every setting the service cannot start without, with a value it accepts.
-const REQUIRED: [(ConfigSetting, &str); 13] = [
-    (ConfigSetting::NatsUrl, "nats.internal:4222"),
-    (ConfigSetting::OpenBaoAddress, "https://openbao.internal:8200"),
-    (ConfigSetting::OpenBaoMount, "secret"),
-    (ConfigSetting::OpenBaoRoleId, "fake-role-id"),
-    (ConfigSetting::OpenBaoSecretIdFile, "/run/secrets/fake-secret-id"),
-    (ConfigSetting::OpenBaoChildTokenRole, "secrets-release"),
-    (ConfigSetting::OpenBaoChildTokenPolicy, "secrets-release-read"),
-    (ConfigSetting::TenantOwnersFile, "/etc/trogon/tenant-owners.toml"),
-    (ConfigSetting::ReleasePoliciesFile, "/etc/trogon/release-policies.toml"),
-    (ConfigSetting::XkeySeed, "file:///run/secrets/fake-xkey-seed"),
-    (ConfigSetting::AuditTenant, "acme"),
-    (ConfigSetting::AuditProject, "platform"),
-    (ConfigSetting::AuditInstance, "secrets-0"),
-];
 
 /// A configuration file that sets every setting the environment sets in
 /// [`complete_env`].
@@ -78,14 +60,6 @@ fn args(flags: &[&str]) -> ServiceArgs {
 
 fn with_config_file() -> ServiceArgs {
     args(&["--config", CONFIG_PATH])
-}
-
-fn complete_env() -> InMemoryEnv {
-    let env = InMemoryEnv::new();
-    for (setting, value) in REQUIRED {
-        env.set(setting.env(), value);
-    }
-    env
 }
 
 fn file(contents: &str) -> MemFs {

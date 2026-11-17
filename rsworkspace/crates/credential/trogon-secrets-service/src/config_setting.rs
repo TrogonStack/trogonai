@@ -38,6 +38,38 @@ pub enum ConfigSetting {
 }
 
 impl ConfigSetting {
+    /// Every setting, in the order they are declared.
+    pub const ALL: [Self; 28] = [
+        Self::NatsUrl,
+        Self::NatsCreds,
+        Self::NatsNkey,
+        Self::NatsUser,
+        Self::NatsPassword,
+        Self::NatsToken,
+        Self::NatsJwt,
+        Self::NatsSeed,
+        Self::NatsTlsCert,
+        Self::NatsTlsKey,
+        Self::NatsTlsCa,
+        Self::NatsTlsDisabled,
+        Self::OpenBaoAddress,
+        Self::OpenBaoTlsDisabled,
+        Self::OpenBaoMount,
+        Self::OpenBaoRoleId,
+        Self::OpenBaoSecretIdFile,
+        Self::OpenBaoChildTokenRole,
+        Self::OpenBaoChildTokenPolicy,
+        Self::TenantOwnersFile,
+        Self::ReleasePoliciesFile,
+        Self::XkeySeed,
+        Self::CredentialStream,
+        Self::AdmissionLimit,
+        Self::InvalidationStreamReplicas,
+        Self::AuditTenant,
+        Self::AuditProject,
+        Self::AuditInstance,
+    ];
+
     /// The key of the setting in the configuration file, when the file may
     /// hold it.
     pub fn key(self) -> Option<&'static str> {

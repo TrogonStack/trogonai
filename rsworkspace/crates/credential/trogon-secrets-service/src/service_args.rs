@@ -1,8 +1,11 @@
 use clap::Parser;
 use trogon_service_config::RuntimeConfigArgs;
 
-/// The command line of the secrets service: the configuration file, and the
-/// NATS connection flags every service here takes.
+use super::ServiceCommand;
+
+/// The command line of the secrets service: the configuration file, the NATS
+/// connection flags every service here takes, and the command to run instead of
+/// serving releases, when one is given.
 #[derive(Clone, Debug, Default, Parser)]
 #[command(
     name = "trogon-secrets-service",
@@ -18,7 +21,9 @@ use trogon_service_config::RuntimeConfigArgs;
         reads its sealing key, connects to NATS, checks that the SECRETS_INVALIDATION stream \
         exists with the configured replicas, and logs in to OpenBao before it joins the release \
         queue group and starts publishing invalidation notices. It never creates that stream. It \
-        does not start when a setting, a file, or the stream is missing or invalid."
+        does not start when a setting, a file, or the stream is missing or invalid.\n\n\
+        `config dump --resolved` prints every setting with its effective value and its source, \
+        without reading a secret or connecting to anything."
 )]
 pub struct ServiceArgs {
     #[command(flatten)]
@@ -26,6 +31,12 @@ pub struct ServiceArgs {
     /// The replicas the SECRETS_INVALIDATION stream must keep
     /// (release.invalidation_stream_replicas, TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS;
     /// default 3).
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub invalidation_stream_replicas: Option<usize>,
+
+    #[command(subcommand)]
+    pub command: Option<ServiceCommand>,
 }
+
+#[cfg(test)]
+mod tests;
