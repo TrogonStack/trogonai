@@ -5,6 +5,7 @@
 use std::error::Error;
 use std::io::Write;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::Parser;
 use tokio_util::sync::CancellationToken;
@@ -48,7 +49,7 @@ async fn main() -> ExitCode {
 #[cfg_attr(coverage_nightly, coverage(off))]
 async fn serve(args: ServiceArgs) -> Result<(), Box<dyn Error>> {
     let config = ServiceConfig::resolve(&args, &SystemEnv, &SystemFs)?;
-    let sources = ReleaseSources::load(&config, &SystemEnv, &SystemFs)?;
+    let sources = ReleaseSources::load(&config, &SystemEnv, &Arc::new(SystemFs))?;
 
     let shutdown = CancellationToken::new();
     let on_signal = shutdown.clone();

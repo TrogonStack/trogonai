@@ -50,6 +50,14 @@ pub trait Transport: Send + 'static {
     /// Python `is_ready`: whether the transport can still be written to.
     fn is_ready(&self) -> bool;
 
+    /// Whether a [`Transport::write`] dropped before it finishes leaves the peer with all of the document or none of
+    /// it. The driver lets a close win over such a write at once; any other write that has started is finished
+    /// first, up to the close grace, so the peer never reads half a line. The default is false, as for a pipe that
+    /// takes a document in pieces.
+    fn writes_whole_documents(&self) -> bool {
+        false
+    }
+
     /// Whether the driver may hand [`Transport::write`] another document. The default is
     /// [`Transport::is_ready`]. A transport whose `write` waits for its own connection, as the TypeScript SSE
     /// transport awaits its first readiness, accepts writes before it is ready, and only stops once it closes.
@@ -65,8 +73,9 @@ pub trait Transport: Send + 'static {
     fn expect_control_response(&mut self, _request_id: &str) {}
 
     /// TypeScript `SpawnedProcess.kill` and `abortController.abort()`: stop the peer now, without waiting for it
-    /// to finish. Called before [`Transport::close`] when the run ends on an error or an abort. The default does
-    /// nothing, which is right for a transport whose `close` already tears the connection down.
+    /// to finish. Called before [`Transport::close`] when the run ends on an error or an abort, and before
+    /// [`Transport::end_input`] when a write was dropped partway through a frame. The default does nothing, which is
+    /// right for a transport whose `close` already tears the connection down.
     fn kill(&mut self) -> impl Future<Output = Result<(), Error>> + Send {
         async { Ok(()) }
     }

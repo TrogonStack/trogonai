@@ -45,6 +45,7 @@ release.policies_file (TROGON_SECRETS_RELEASE_POLICIES_FILE) = /etc/trogon/relea
 release.xkey_seed (TROGON_SECRETS_XKEY_SEED) = file:///run/secrets/fake-xkey-seed (from environment)
 release.credential_stream (TROGON_SECRETS_CREDENTIAL_STREAM) = CREDENTIAL_EVENTS (from default)
 release.admission_limit (TROGON_SECRETS_ADMISSION_LIMIT) = 64 (from default)
+release.invalidation_stream_replicas (TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS) = 3 (from default)
 audit.tenant (TROGON_SECRETS_AUDIT_TENANT) = acme (from environment)
 audit.project (TROGON_SECRETS_AUDIT_PROJECT) = platform (from environment)
 audit.instance (TROGON_SECRETS_AUDIT_INSTANCE) = secrets-0 (from environment)
@@ -79,6 +80,7 @@ policies_file = "/etc/trogon/release-policies.toml"
 xkey_seed = "file:///run/secrets/fake-xkey-seed"
 credential_stream = "FAKE_CREDENTIALS"
 admission_limit = 16
+invalidation_stream_replicas = 5
 
 [audit]
 tenant = "acme"
@@ -112,6 +114,7 @@ release.policies_file (TROGON_SECRETS_RELEASE_POLICIES_FILE) = /etc/trogon/relea
 release.xkey_seed (TROGON_SECRETS_XKEY_SEED) = file:///run/secrets/fake-xkey-seed (from file)
 release.credential_stream (TROGON_SECRETS_CREDENTIAL_STREAM) = FAKE_CREDENTIALS (from file)
 release.admission_limit (TROGON_SECRETS_ADMISSION_LIMIT) = 16 (from file)
+release.invalidation_stream_replicas (TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS) = 5 (from file)
 audit.tenant (TROGON_SECRETS_AUDIT_TENANT) = acme (from file)
 audit.project (TROGON_SECRETS_AUDIT_PROJECT) = platform (from file)
 audit.instance (TROGON_SECRETS_AUDIT_INSTANCE) = secrets-0 (from file)
@@ -119,7 +122,7 @@ audit.instance (TROGON_SECRETS_AUDIT_INSTANCE) = secrets-0 (from file)
 
 /// A value for the environment variable of every setting the file may set,
 /// each different from [`FULL_FILE`], and how the dump shows it.
-fn environment_overrides() -> [(ConfigSetting, &'static str, SettingValue); 25] {
+fn environment_overrides() -> [(ConfigSetting, &'static str, SettingValue); 26] {
     [
         (
             ConfigSetting::NatsUrl,
@@ -215,6 +218,7 @@ fn environment_overrides() -> [(ConfigSetting, &'static str, SettingValue); 25] 
             shown("FAKE_ENV_CREDENTIALS"),
         ),
         (ConfigSetting::AdmissionLimit, "8", shown("8")),
+        (ConfigSetting::InvalidationStreamReplicas, "2", shown("2")),
         (ConfigSetting::AuditTenant, "globex", shown("globex")),
         (ConfigSetting::AuditProject, "runtime", shown("runtime")),
         (ConfigSetting::AuditInstance, "secrets-1", shown("secrets-1")),
@@ -222,7 +226,7 @@ fn environment_overrides() -> [(ConfigSetting, &'static str, SettingValue); 25] 
 }
 
 /// A flag for every setting that has one, and how the dump shows it.
-fn flag_overrides() -> [(ConfigSetting, &'static str, &'static str, SettingValue); 11] {
+fn flag_overrides() -> [(ConfigSetting, &'static str, &'static str, SettingValue); 12] {
     [
         (
             ConfigSetting::NatsUrl,
@@ -284,6 +288,12 @@ fn flag_overrides() -> [(ConfigSetting, &'static str, &'static str, SettingValue
             "--nats-tls-ca",
             "/etc/trogon/flag-ca.pem",
             shown("/etc/trogon/flag-ca.pem"),
+        ),
+        (
+            ConfigSetting::InvalidationStreamReplicas,
+            "--invalidation-stream-replicas",
+            "1",
+            shown("1"),
         ),
     ]
 }
@@ -747,4 +757,70 @@ fn a_tls_switch_shows_whether_the_environment_disabled_tls() {
             },
         );
     }
+}
+
+#[test]
+fn the_invalidation_stream_replicas_show_the_value_and_the_source_startup_uses() {
+    let replicas = |flags: &[&str], env: &InMemoryEnv, contents: Option<&str>| {
+        let args = args(flags);
+        let dump = dumped(&args, env, &files(contents));
+        let config = ServiceConfig::resolve(&args, env, &files(contents)).unwrap();
+        let resolved = resolved_setting(&dump, ConfigSetting::InvalidationStreamReplicas).clone();
+        assert_eq!(resolved.value, shown(&config.invalidation_stream_replicas.to_string()));
+        resolved
+    };
+    let expected = |value: &str, source| ResolvedSetting {
+        setting: ConfigSetting::InvalidationStreamReplicas,
+        value: shown(value),
+        source,
+    };
+    let file = Some(FULL_FILE);
+    let from_file = ["--config", CONFIG_PATH];
+    let with_flag = ["--config", CONFIG_PATH, "--invalidation-stream-replicas", "1"];
+    let env = complete_env();
+
+    assert_eq!(replicas(&[], &env, None), expected("3", SettingSource::Default));
+    assert_eq!(replicas(&from_file, &env, file), expected("5", SettingSource::File));
+
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "2");
+    assert_eq!(
+        replicas(&from_file, &env, file),
+        expected("2", SettingSource::Environment)
+    );
+    assert_eq!(replicas(&with_flag, &env, file), expected("1", SettingSource::Flag));
+
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "many");
+    assert_eq!(replicas(&with_flag, &env, file), expected("1", SettingSource::Flag));
+}
+
+#[test]
+fn invalidation_stream_replicas_startup_refuses_are_refused_by_the_dump_too() {
+    let env = complete_env();
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "many");
+    let refused = refused_alike(&args(&[]), &env, &files(None));
+    assert!(
+        matches!(
+            refused,
+            ServiceConfigError::NotANumber {
+                setting: ConfigSetting::InvalidationStreamReplicas,
+                ..
+            }
+        ),
+        "{refused:?}"
+    );
+
+    let refused = refused_alike(
+        &args(&["--invalidation-stream-replicas", "0"]),
+        &complete_env(),
+        &files(None),
+    );
+    assert!(
+        matches!(
+            refused,
+            ServiceConfigError::Zero {
+                setting: ConfigSetting::InvalidationStreamReplicas
+            }
+        ),
+        "{refused:?}"
+    );
 }

@@ -382,7 +382,8 @@ be explicit decisions, not consequences of a broad federation label.
 **F01: Use-case and trust-profile inventory.** Bind the first native foreign-domain, inbound
 CI and outbound resource examples to exact owners, subjects, scopes, recipients and
 deployment capabilities. Identify which provider access is requested by the platform service
-versus an agent. Exit: reviewed trust diagrams and no ambiguous direction.
+versus an agent. Exit: reviewed trust diagrams and no ambiguous direction. The
+[federation inventory](./federation-inventory.md) is the proposal for that review.
 
 **F02: Native SPIFFE relationship/control-plane design.** Specify managed
 domain/bundle/endpoint mapping, bootstrap and rotation, foreign registration and
@@ -402,7 +403,9 @@ parser tests.
 plus OIDC helper using the chosen external origin and signing profile. Verify `iss`, exact
 `sub`, single `aud`, TTL, algorithm, `kid`, rotation/JWKS overlap and public TLS. Prove
 privileged API isolation and current authority before/after issuance. Exit: decide native
-reuse versus a separately governed assertion issuer, with a documented reason.
+reuse versus a separately governed assertion issuer, with a documented reason. The
+[JWT-SVID issuer spike](./jwt-svid-issuer-spike.md) records local evidence and the
+unexercised items that keep this step open.
 
 **F05: Trusted exchange/custody and use guard.** Compose current material/registration and
 operation-grant owners with proposed recipient bindings, finite broker-held credentials and

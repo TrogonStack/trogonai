@@ -12,9 +12,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use crate::bridge_flavor::{Flavor, dirname, share_refused};
-use crate::bridge_js::{is_js_space, js_trim};
 use crate::bridge_platform::{EntryKind, HostProbe, Platform, PlatformProbe};
 use crate::bridge_unicode::js_lowercase;
+use crate::session_prompt::{js_space, js_trim};
 use unicode_normalization::UnicodeNormalization;
 
 mod constants;
@@ -218,7 +218,7 @@ fn without_comment(line: &str) -> &str {
 fn lists_home(master: &str) -> bool {
     master.split('\n').any(|line| {
         let trimmed = js_trim(without_comment(line));
-        let fields: Vec<&str> = trimmed.split(is_js_space).filter(|field| !field.is_empty()).collect();
+        let fields: Vec<&str> = trimmed.split(js_space).filter(|field| !field.is_empty()).collect();
         fields.len() >= 2 && js_lowercase(fields[0]) == "/home"
     })
 }

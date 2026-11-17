@@ -2,7 +2,7 @@ use std::fmt;
 
 use trogon_nats::{NatsTls, redact_server_userinfo};
 use trogon_secret_store::OpenBaoTransport;
-use trogon_service_config::{NatsArgs, SecretReference};
+use trogon_service_config::SecretReference;
 use trogon_std::ReadFile;
 use trogon_std::env::ReadEnv;
 
@@ -42,7 +42,7 @@ impl ConfigDump {
         let settings = ConfigSetting::ALL
             .into_iter()
             .map(|setting| {
-                let found = match flag(setting, &args.runtime.nats) {
+                let found = match flag(setting, args) {
                     Some(value) => Some((value, SettingSource::Flag)),
                     None => match env_value(env, setting)? {
                         Some(value) => Some((value, SettingSource::Environment)),
@@ -98,6 +98,9 @@ fn shown(setting: ConfigSetting, raw: Option<String>, config: &ServiceConfig) ->
         ConfigSetting::XkeySeed => SettingValue::Reference(config.xkey_seed.clone()),
         ConfigSetting::CredentialStream => SettingValue::Shown(config.credential_stream.to_string()),
         ConfigSetting::AdmissionLimit => SettingValue::Shown(config.admission_limit.get().to_string()),
+        ConfigSetting::InvalidationStreamReplicas => {
+            SettingValue::Shown(config.invalidation_stream_replicas.get().to_string())
+        }
         // The environment may give a NATS secret inline, the way the NATS
         // tools read it, and such a secret is never shown.
         ConfigSetting::NatsNkey
@@ -130,7 +133,8 @@ fn path(value: String) -> SettingValue {
 
 /// The value the command line flag of `setting` sets, when the setting has a
 /// flag and it is set and not empty.
-fn flag(setting: ConfigSetting, flags: &NatsArgs) -> Option<String> {
+fn flag(setting: ConfigSetting, args: &ServiceArgs) -> Option<String> {
+    let flags = &args.runtime.nats;
     let plain = |value: &Option<String>| value.clone().filter(|value| !value.is_empty());
     let reference = |value: &Option<SecretReference>| value.as_ref().map(ToString::to_string);
     match setting {
@@ -145,6 +149,9 @@ fn flag(setting: ConfigSetting, flags: &NatsArgs) -> Option<String> {
         ConfigSetting::NatsTlsCert => plain(&flags.nats_tls_cert),
         ConfigSetting::NatsTlsKey => plain(&flags.nats_tls_key),
         ConfigSetting::NatsTlsCa => plain(&flags.nats_tls_ca),
+        ConfigSetting::InvalidationStreamReplicas => {
+            args.invalidation_stream_replicas.map(|replicas| replicas.to_string())
+        }
         _ => None,
     }
 }
@@ -178,6 +185,9 @@ fn file(setting: ConfigSetting, wire: &ServiceConfigWire) -> Option<String> {
         ConfigSetting::XkeySeed => text(&release.xkey_seed),
         ConfigSetting::CredentialStream => release.credential_stream.clone(),
         ConfigSetting::AdmissionLimit => release.admission_limit.map(|limit| limit.to_string()),
+        ConfigSetting::InvalidationStreamReplicas => {
+            release.invalidation_stream_replicas.map(|count| count.to_string())
+        }
         ConfigSetting::AuditTenant => audit.tenant.clone(),
         ConfigSetting::AuditProject => audit.project.clone(),
         ConfigSetting::AuditInstance => audit.instance.clone(),

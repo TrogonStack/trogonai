@@ -46,6 +46,10 @@ fn a_setting_reads_as_its_file_key_and_the_variable_that_overrides_it() {
             ConfigSetting::AdmissionLimit,
             "release.admission_limit (TROGON_SECRETS_ADMISSION_LIMIT)",
         ),
+        (
+            ConfigSetting::InvalidationStreamReplicas,
+            "release.invalidation_stream_replicas (TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS)",
+        ),
         (ConfigSetting::AuditTenant, "audit.tenant (TROGON_SECRETS_AUDIT_TENANT)"),
         (
             ConfigSetting::AuditProject,
@@ -99,9 +103,10 @@ fn every_setting_is_listed_once_in_the_order_it_is_declared() {
         ConfigSetting::XkeySeed => 21,
         ConfigSetting::CredentialStream => 22,
         ConfigSetting::AdmissionLimit => 23,
-        ConfigSetting::AuditTenant => 24,
-        ConfigSetting::AuditProject => 25,
-        ConfigSetting::AuditInstance => 26,
+        ConfigSetting::InvalidationStreamReplicas => 24,
+        ConfigSetting::AuditTenant => 25,
+        ConfigSetting::AuditProject => 26,
+        ConfigSetting::AuditInstance => 27,
     };
 
     for (position, setting) in ConfigSetting::ALL.into_iter().enumerate() {

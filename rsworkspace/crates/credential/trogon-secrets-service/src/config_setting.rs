@@ -31,6 +31,7 @@ pub enum ConfigSetting {
     XkeySeed,
     CredentialStream,
     AdmissionLimit,
+    InvalidationStreamReplicas,
     AuditTenant,
     AuditProject,
     AuditInstance,
@@ -38,7 +39,7 @@ pub enum ConfigSetting {
 
 impl ConfigSetting {
     /// Every setting, in the order they are declared.
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::NatsUrl,
         Self::NatsCreds,
         Self::NatsNkey,
@@ -63,6 +64,7 @@ impl ConfigSetting {
         Self::XkeySeed,
         Self::CredentialStream,
         Self::AdmissionLimit,
+        Self::InvalidationStreamReplicas,
         Self::AuditTenant,
         Self::AuditProject,
         Self::AuditInstance,
@@ -95,6 +97,7 @@ impl ConfigSetting {
             Self::XkeySeed => "release.xkey_seed",
             Self::CredentialStream => "release.credential_stream",
             Self::AdmissionLimit => "release.admission_limit",
+            Self::InvalidationStreamReplicas => "release.invalidation_stream_replicas",
             Self::AuditTenant => "audit.tenant",
             Self::AuditProject => "audit.project",
             Self::AuditInstance => "audit.instance",
@@ -128,6 +131,7 @@ impl ConfigSetting {
             Self::XkeySeed => "TROGON_SECRETS_XKEY_SEED",
             Self::CredentialStream => "TROGON_SECRETS_CREDENTIAL_STREAM",
             Self::AdmissionLimit => "TROGON_SECRETS_ADMISSION_LIMIT",
+            Self::InvalidationStreamReplicas => "TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS",
             Self::AuditTenant => "TROGON_SECRETS_AUDIT_TENANT",
             Self::AuditProject => "TROGON_SECRETS_AUDIT_PROJECT",
             Self::AuditInstance => "TROGON_SECRETS_AUDIT_INSTANCE",

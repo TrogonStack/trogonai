@@ -384,3 +384,20 @@ fn manifest_capture_defaults_to_on_unless_the_disable_variable_is_truthy() {
     };
     assert!(forced.captures_sdk_mcp_manifests(Some(std::ffi::OsStr::new("1"))));
 }
+
+#[test]
+fn the_manifest_disable_variable_trims_like_javascript() {
+    let options = trogon_claude_agent_sdk::ClaudeAgentOptions::default();
+    for value in ["\u{feff}1\u{feff}", "\u{feff}true"] {
+        assert!(
+            !options.captures_sdk_mcp_manifests(Some(std::ffi::OsStr::new(value))),
+            "{value:?}"
+        );
+    }
+    for value in ["\u{85}1\u{85}", "\u{85}true"] {
+        assert!(
+            options.captures_sdk_mcp_manifests(Some(std::ffi::OsStr::new(value))),
+            "{value:?}"
+        );
+    }
+}

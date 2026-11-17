@@ -85,6 +85,34 @@ fn js_trim_follows_javascript_whitespace() {
 }
 
 #[test]
+fn js_truthy_trims_and_lowercases_like_javascript_te() {
+    for value in [
+        "1",
+        "true",
+        "TRUE",
+        " Yes ",
+        "on",
+        "\u{feff}1\u{feff}",
+        "\u{feff}true",
+        "\u{3000}ON\u{2028}",
+    ] {
+        assert!(js_truthy(value), "{value:?}");
+    }
+    for value in [
+        "",
+        "0",
+        "false",
+        "2",
+        "\u{85}1\u{85}",
+        "\u{85}true",
+        "t\u{feff}rue",
+        "\u{200b}1",
+    ] {
+        assert!(!js_truthy(value), "{value:?}");
+    }
+}
+
+#[test]
 fn typescript_command_name_stops_at_every_js_line_terminator() {
     let text = "<command-name>/x\u{2028}y</command-name>";
     assert_eq!(command_name(text, true), None);

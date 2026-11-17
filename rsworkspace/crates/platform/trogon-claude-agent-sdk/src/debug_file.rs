@@ -11,18 +11,14 @@ use crate::{
     constants::SDK_DEBUG_ENV,
     environment_plan::Inherited,
     home_directory::{HomeDirectoryError, Platform, node_homedir, node_join},
+    session_prompt::js_truthy,
 };
 
 static DERIVED: OnceLock<Option<PathBuf>> = OnceLock::new();
 
-/// JavaScript `Te`: `1`, `true`, `yes` or `on`, ignoring case and surrounding whitespace.
+/// `tg("DEBUG_CLAUDE_AGENT_SDK")`, which is `Te` of the variable.
 fn truthy(value: Option<&std::ffi::OsString>) -> bool {
-    value.is_some_and(|value| {
-        matches!(
-            value.to_string_lossy().trim().to_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
+    value.is_some_and(|value| js_truthy(&value.to_string_lossy()))
 }
 
 /// The configuration directory, `Wt()`: `CLAUDE_CONFIG_DIR` when set (even empty), otherwise

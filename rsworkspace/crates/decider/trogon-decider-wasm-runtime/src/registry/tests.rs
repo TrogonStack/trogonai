@@ -15,19 +15,14 @@ use trogon_nats::test_support::JetStreamTestServer;
 
 use super::*;
 use crate::test_doubles::{InMemoryEventStore, InMemorySnapshotStore};
-use crate::test_fixture::schedules_bytes;
-use crate::{WasmCommandExecution, WasmDeciderEngine, WasmEngineConfig, WasmSnapshotId};
+use crate::test_fixture::schedules_module;
+use crate::{WasmCommandExecution, WasmSnapshotId};
 
 const SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181be9";
 const HOT_SWAP_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bee";
 const HOT_SWAP_EVENTS_STREAM: &str = "WASM_REGISTRY_HOT_SWAP_EVENTS";
 const HOT_SWAP_EVENTS_SUBJECT: &str = "wasm.registry.hot_swap.events.>";
 const HOT_SWAP_SNAPSHOT_BUCKET: &str = "WASM_REGISTRY_HOT_SWAP_SNAPSHOTS";
-
-fn schedules_module() -> WasmDeciderModule {
-    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
-    WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads")
-}
 
 fn create_type() -> CommandType {
     CommandType::new(trogonai_proto::scheduler::schedules::CREATE_SCHEDULE_TYPE_URL).expect("valid command type")
