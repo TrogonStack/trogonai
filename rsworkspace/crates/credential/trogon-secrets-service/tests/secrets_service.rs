@@ -401,7 +401,7 @@ async fn a_secret_id_file_removed_after_startup_keeps_the_service_out_of_the_que
     let events = CapturedEvents::new();
     let _capture = events.install(LevelFilter::WARN);
     let server = JetStreamTestServer::start().await;
-    create_credential_stream(&server).await;
+    create_streams(&server).await;
     let (openbao, _openbao) = openbao_accepting(ROTATED_SECRET_ID).await;
     let fs = files(&KeyPair::new_account().public_key());
     let service = service_reading(&environment(server.address(), &openbao), &fs);
@@ -440,7 +440,7 @@ async fn a_secret_id_file_removed_after_startup_keeps_the_service_out_of_the_que
 #[tokio::test]
 async fn a_service_logs_in_with_the_secret_id_its_file_holds_when_it_logs_in() {
     let server = JetStreamTestServer::start().await;
-    create_credential_stream(&server).await;
+    create_streams(&server).await;
     let (openbao, _openbao) = openbao_accepting(ROTATED_SECRET_ID).await;
     let fs = files(&KeyPair::new_account().public_key());
     let service = service_reading(&environment(server.address(), &openbao), &fs);
