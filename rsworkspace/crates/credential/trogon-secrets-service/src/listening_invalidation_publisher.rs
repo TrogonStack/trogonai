@@ -177,6 +177,12 @@ async fn publish(
 /// rather than terminated. Only an unknown event type can read differently on
 /// a later delivery, by reaching a newer build; every other failure is in the
 /// stored event itself.
+///
+/// A retried delivery is never terminated, and each one holds a slot of the
+/// durable's `max_ack_pending`, which the durable's configuration leaves at the
+/// server default and every replica shares. Once that many unreadable events
+/// are pending, later events, including revocations this build can read, wait
+/// until a build that reads them settles them.
 pub(crate) fn retried(error: &InvalidationSourceError) -> bool {
     match error {
         InvalidationSourceError::UnknownEventType { .. } => true,
