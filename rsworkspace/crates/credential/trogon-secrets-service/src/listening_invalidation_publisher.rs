@@ -10,7 +10,7 @@ use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer, JetStre
 use super::constants::{INVALIDATION_PUBLISHER_DURABLE, INVALIDATION_RETRY_DELAY};
 use super::{
     CredentialEventDelivery, InvalidationNotice, InvalidationOutcome, InvalidationPublisherError,
-    InvalidationSourceError, OwnerTenants, PublisherError, error_chain,
+    InvalidationSourceError, OwnerTenants, PublisherError, StoredCredentialEvent, error_chain,
 };
 
 /// An [`InvalidationPublisher`](super::InvalidationPublisher) whose durable
@@ -91,8 +91,11 @@ async fn settle(
     owners: &impl OwnerTenants,
     delivery: &impl CredentialEventDelivery,
 ) {
-    let message = match delivery.stored() {
-        Ok(message) => message,
+    let StoredCredentialEvent {
+        stream: source_stream,
+        message,
+    } = match delivery.stored() {
+        Ok(stored) => stored,
         Err(error) => {
             let error = error_chain(&error);
             tracing::error!(
@@ -104,7 +107,7 @@ async fn settle(
         }
     };
     let sequence = message.sequence;
-    match InvalidationOutcome::of(message, owners) {
+    match InvalidationOutcome::of(&source_stream, message, owners) {
         Ok(InvalidationOutcome::Publish(notice)) => publish(notices, delivery, sequence, &notice).await,
         Ok(InvalidationOutcome::NothingToPublish) => acknowledge(delivery, sequence).await,
         Ok(InvalidationOutcome::OwnerHeldByNoTenant { credential }) => {

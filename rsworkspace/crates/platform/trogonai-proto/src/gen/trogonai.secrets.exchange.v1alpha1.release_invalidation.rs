@@ -228,9 +228,12 @@ pub struct ReleaseInvalidated {
         ::buffa_types::google::protobuf::Timestamp,
         ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
     >,
-    /// The CREDENTIAL_EVENTS stream sequence of that event. The publisher also
-    /// sends it as the `Nats-Msg-Id` `CREDENTIAL_EVENTS:{source_sequence}`, so a
-    /// redelivered event publishes one notice.
+    /// The sequence of that event in the credential stream it was read from. The
+    /// publisher also sends it as the `Nats-Msg-Id`
+    /// `{source_stream}:{source_sequence}`, `CREDENTIAL_EVENTS:{source_sequence}`
+    /// on the default credential stream, so a redelivered event publishes one
+    /// notice and services on differently named credential streams never share
+    /// an ID.
     ///
     /// Field 4: `source_sequence`
     #[serde(

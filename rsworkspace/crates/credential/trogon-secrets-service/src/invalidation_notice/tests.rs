@@ -17,6 +17,7 @@ const CREDENTIAL_ID: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const APPENDED_SECONDS: u64 = 1_700_000_000;
 const APPENDED_NANOS: u32 = 250;
 const SEQUENCE: u64 = 42;
+const STREAM: &str = "CREDENTIAL_EVENTS";
 const REASONS: [InvalidationReason; 3] = [
     InvalidationReason::Rotated,
     InvalidationReason::Revoked,
@@ -43,7 +44,15 @@ fn position(sequence: u64) -> StreamPosition {
 }
 
 fn notice(owner: &str, reason: InvalidationReason) -> InvalidationNotice {
-    InvalidationNotice::new(&tenant(), &credential(owner), reason, appended(), position(SEQUENCE)).unwrap()
+    InvalidationNotice::new(
+        &tenant(),
+        &credential(owner),
+        reason,
+        STREAM,
+        appended(),
+        position(SEQUENCE),
+    )
+    .unwrap()
 }
 
 fn decoded(notice: &InvalidationNotice) -> ReleaseInvalidated {
@@ -71,6 +80,7 @@ fn refuses_an_event_appended_at_the_unix_epoch() {
         &tenant(),
         &credential("project-1"),
         InvalidationReason::Revoked,
+        STREAM,
         SystemTime::UNIX_EPOCH,
         position(SEQUENCE),
     )
@@ -88,6 +98,7 @@ fn refuses_an_event_appended_before_the_unix_epoch() {
         &tenant(),
         &credential("project-1"),
         InvalidationReason::Revoked,
+        STREAM,
         SystemTime::UNIX_EPOCH - Duration::from_secs(1),
         position(SEQUENCE),
     )
@@ -105,6 +116,7 @@ fn takes_an_event_appended_one_nanosecond_after_the_unix_epoch() {
         &tenant(),
         &credential("project-1"),
         InvalidationReason::Revoked,
+        STREAM,
         SystemTime::UNIX_EPOCH + Duration::from_nanos(1),
         position(SEQUENCE),
     )
@@ -151,10 +163,25 @@ fn the_subject_is_one_the_stream_takes_whatever_dots_the_owner_has() {
 }
 
 #[test]
-fn the_message_id_is_the_credential_stream_and_the_event_sequence() {
+fn the_message_id_is_the_source_stream_and_the_event_sequence() {
     let notice = notice("project-1", InvalidationReason::Revoked);
 
     assert_eq!(notice.message_id(), "CREDENTIAL_EVENTS:42");
+}
+
+#[test]
+fn the_message_id_names_the_stream_the_event_was_read_from() {
+    let notice = InvalidationNotice::new(
+        &tenant(),
+        &credential("project-1"),
+        InvalidationReason::Revoked,
+        "TENANT_CREDENTIALS",
+        appended(),
+        position(SEQUENCE),
+    )
+    .unwrap();
+
+    assert_eq!(notice.message_id(), "TENANT_CREDENTIALS:42");
 }
 
 #[test]
@@ -252,6 +279,7 @@ fn the_largest_notice_fits_the_stream_message_size_with_its_headers() {
         &tenant(),
         &credential(&owner),
         InvalidationReason::Destroyed,
+        STREAM,
         SystemTime::UNIX_EPOCH + Duration::new(u64::try_from(i64::MAX).unwrap(), 999_999_999),
         position(u64::MAX),
     )
