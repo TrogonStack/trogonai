@@ -1,5 +1,8 @@
 use crate::{
-    CallbackError, CancellationToken, JsonObject, McpServerDialect, McpServerName, McpToolInputSchema, SdkTools,
+    CallbackError, CancellationToken, JsonObject, McpServerDialect, McpServerName, McpToolInputSchema,
+    PythonJsonObject, PythonJsonValue, PythonString, RemoteSchemaRetriever, SdkTools, UrlopenRetriever,
+    python_hash::HashSecret,
+    python_re_cache::{self, ReCache},
 };
 use serde_json::Value;
 use std::{
@@ -31,6 +34,10 @@ pub enum McpServerError {
 
 pub type McpFuture<'a> = Pin<Box<dyn Future<Output = Result<Option<JsonObject>, McpServerError>> + Send + 'a>>;
 
+/// What [`SdkMcpSession::request_python`] answers.
+pub type PythonMcpFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<PythonJsonObject>, McpServerError>> + Send + 'a>>;
+
 pub trait SdkMcpServer: Send + Sync {
     fn open_session(&self) -> Arc<dyn SdkMcpSession>;
 }
@@ -45,6 +52,28 @@ pub trait SdkMcpSession: Send + Sync {
     fn take_outbound(&self) -> Option<tokio::sync::mpsc::UnboundedReceiver<JsonObject>> {
         None
     }
+
+    /// [`SdkMcpSession::request`] as the Python SDK holds the response, which the runtime writes with `json.dumps`
+    /// in the Python argv style. A string the Python server answers may hold a lone surrogate, which `request`
+    /// cannot carry. The default converts what `request` answers.
+    fn request_python(&self, message: JsonObject, signal: CancellationToken) -> PythonMcpFuture<'_> {
+        python_answer(self.request(message, signal))
+    }
+}
+
+/// `answer` with its response converted member by member, each without recursing.
+fn python_answer(answer: McpFuture<'_>) -> PythonMcpFuture<'_> {
+    Box::pin(async move { answer.await.map(|response| response.map(python_object)) })
+}
+
+/// `response` converted member by member, each without recursing, and dropped at any nesting.
+pub(crate) fn python_object(mut response: JsonObject) -> PythonJsonObject {
+    let converted = response
+        .iter()
+        .map(|(name, member)| (PythonString::from(name.as_str()), PythonJsonValue::from(member)))
+        .collect();
+    crate::deep_json::clear_object(&mut response);
+    converted
 }
 
 /// An in-process MCP server like the TypeScript `createSdkMcpServer` and the Python `create_sdk_mcp_server`.
@@ -93,6 +122,7 @@ pub struct LocalMcpServer {
     state: Arc<ServerState>,
 }
 
+#[derive(Clone)]
 pub(crate) struct ServerState {
     pub(crate) name: McpServerName,
     pub(crate) version: Option<String>,
@@ -102,6 +132,13 @@ pub(crate) struct ServerState {
     pub(crate) dialect: McpServerDialect,
     /// The Python dialect lists and checks each name against the schema its last definition builds.
     pub(crate) python_schemas: HashMap<String, McpToolInputSchema>,
+    /// What the Python dialect retrieves a remote `$ref` of a tool schema with.
+    pub(crate) remote_schema_retriever: Arc<dyn RemoteSchemaRetriever>,
+    /// The `re` caches of the Python process the dialect validates in, which every server of the process shares.
+    pub(crate) re_cache: Arc<Mutex<ReCache>>,
+    /// The hash secret of that process, from `PYTHONHASHSEED` as Python reads it, which orders the sets the
+    /// validation iterates.
+    pub(crate) hash_secret: HashSecret,
 }
 
 impl ServerState {
@@ -229,8 +266,41 @@ impl From<LocalMcpServerOptions> for LocalMcpServer {
                 always_load,
                 dialect,
                 python_schemas,
+                remote_schema_retriever: UrlopenRetriever::shared(),
+                re_cache: python_re_cache::process_cache(),
+                hash_secret: HashSecret::process(),
             }),
         }
+    }
+}
+
+impl LocalMcpServer {
+    /// Retrieves the remote `$ref`s of the Python dialect's tool schemas with `retriever` instead of the default
+    /// [`UrlopenRetriever`]. Sessions opened before keep the retriever they were opened with.
+    #[must_use]
+    pub fn with_remote_schema_retriever(self, retriever: Arc<dyn RemoteSchemaRetriever>) -> Self {
+        let mut state = Arc::unwrap_or_clone(self.state);
+        state.remote_schema_retriever = retriever;
+        Self { state: Arc::new(state) }
+    }
+
+    /// Validates in a Python process of its own, whose `re` caches start as the pinned SDK's process holds them
+    /// at its first tool call, so a test does not see what other tests compiled.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_own_re_cache(self) -> Self {
+        let mut state = Arc::unwrap_or_clone(self.state);
+        state.re_cache = Arc::new(Mutex::new(ReCache::seeded()));
+        Self { state: Arc::new(state) }
+    }
+
+    /// Validates in a Python process started with `PYTHONHASHSEED` set to `seed`.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_hash_seed(self, seed: u32) -> Self {
+        let mut state = Arc::unwrap_or_clone(self.state);
+        state.hash_secret = HashSecret::from_seed(seed);
+        Self { state: Arc::new(state) }
     }
 }
 
@@ -261,6 +331,13 @@ impl SdkMcpSession for LocalMcpSession {
             McpServerDialect::Python => Box::pin(python::request(self, message, signal)),
         }
     }
+
+    fn request_python(&self, message: JsonObject, signal: CancellationToken) -> PythonMcpFuture<'_> {
+        match self.state.dialect {
+            McpServerDialect::TypeScript => python_answer(self.request(message, signal)),
+            McpServerDialect::Python => Box::pin(python::request_python(self, message, signal)),
+        }
+    }
 }
 
 impl std::fmt::Debug for LocalMcpServer {
@@ -281,6 +358,10 @@ mod tests;
 #[cfg(test)]
 #[path = "sdk_mcp_dialect_tests.rs"]
 mod dialect_tests;
+
+#[cfg(test)]
+#[path = "sdk_mcp_remote_tests.rs"]
+mod remote_tests;
 
 impl std::fmt::Debug for dyn SdkMcpServer {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -1,27 +1,11 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "a2a-auth-callout",
-    binaries = {"a2a-auth-callout": {}},
     compile_data = ["README.md"],
-    crate_features = ["test-support"],
     integration_tests = {
-        "issuer_public_keys": {},
         # Starts a nats-server container through Docker.
         "nats_server_callout_integration": {"tags": ["requires-network"]},
-        "startup_configuration": {
-            "data": [":a2a-auth-callout_bin"],
-            "rustc_env": {"CARGO_BIN_EXE_a2a-auth-callout": "$(rootpath :a2a-auth-callout_bin)"},
-        },
     },
     # Some tests start a NATS server in a container through Docker.
     unit_test_tags = ["requires-network"],
-    deps = [
-        "//rsworkspace/crates/a2a/a2a-identity-types",
-        "//rsworkspace/crates/a2a/a2a-nats",
-        "//rsworkspace/crates/platform/trogon-identity-types",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-service-config",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
 )

@@ -1,28 +1,11 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-gateway",
     binaries = {
-        "trogon-gateway": {
-            # The fixture tests read tests/fixtures relative to the manifest directory at run time.
-            "rustc_env": {"CARGO_MANIFEST_DIR": package_name()},
-        },
+        # The fixture tests read tests/fixtures relative to the manifest directory at run time.
+        "trogon-gateway": {"rustc_env": {"CARGO_MANIFEST_DIR": "{package}"}},
     },
-    data = glob(["tests/fixtures/**"]),
-    dev_deps = ["//rsworkspace/crates/decider/trogon-decider"],
-    integration_tests = {"crypto_provider": {}},
-    library = False,
+    data = ["tests/fixtures/**"],
     # Some unit tests start NATS and OpenBao servers in containers through Docker.
     unit_test_tags = ["requires-network"],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider-nats",
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-        "//rsworkspace/crates/platform/trogon-config-value",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-service-config",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogon-telemetry",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
 )

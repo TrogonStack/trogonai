@@ -28,10 +28,11 @@ use trogon_claude_agent_sdk::{
     ContinueConversation, Customizations, DialogKind, ElicitationMode, ElicitationRequest, ElicitationResponse, Error,
     HookEvent, HookFailureMode, HookRegistration, HookRequest, JsRuntime, JsonObject, LocalMcpServer,
     LocalMcpServerOptions, McpFuture, McpRemoteServerOptions, McpServerDialect, McpServerName, McpServerOptions,
-    McpServers, Message, MessageId, PermissionDecision, Prompt, ProtocolError, QueueCapacity, ResultStatus,
-    SdkMcpServer, SdkMcpServers, SdkMcpSession, SessionEntry, SessionError, SessionFork, SessionKey,
-    SessionPersistence, SessionProjectKey, SessionStore, SessionStoreError, SessionStoreFuture, SessionStoreOptions,
-    SystemPrompt, Timeout, ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
+    McpServers, McpToolInputSchema, McpToolName, McpToolOutput, McpToolRequest, Message, MessageId, PermissionDecision,
+    Prompt, ProtocolError, QueueCapacity, RemoteSchemaError, RemoteSchemaRetriever, ResultStatus, SdkMcpServer,
+    SdkMcpServers, SdkMcpSession, SdkTool, SdkToolOptions, SdkTools, SessionEntry, SessionError, SessionFork,
+    SessionKey, SessionPersistence, SessionProjectKey, SessionStore, SessionStoreError, SessionStoreFuture,
+    SessionStoreOptions, SystemPrompt, Timeout, ToolPermissionRequest, ToolResultStatus, UserDialogRequest, UserInput,
     adapters::{NativeFileSystem, RuntimeAdapters, SpawnProcess, TokioProcessSpawner},
     query_turn_with_adapters, query_with_adapters,
     test_support::FixedEnvironment,
@@ -307,7 +308,8 @@ async fn s15_input_sent_during_a_turn_is_written_and_closed_input_stays_recovera
     configured.limits.input_after_finish = trogon_claude_agent_sdk::InputAfterFinish::Reject;
     let (mut client, mut cli) = connect(configured).await?;
     client.query(Prompt::from("first")).await?;
-    assert_eq!(cli.read().await?["message"]["content"], "first");
+    // The TypeScript style writes `query(str)` as `sdk.mjs` writes a string prompt, as one text block.
+    assert_eq!(cli.read().await?["message"]["content"][0]["text"], "first");
     client.send_prompt(Prompt::from("during the turn")).await?;
     assert_eq!(cli.read().await?["message"]["content"], "during the turn");
     cli.send(result()).await?;
@@ -1124,6 +1126,86 @@ async fn python_mcp_message_answers_a_failed_request_with_an_internal_error() ->
     Ok(())
 }
 
+/// The lines `Query._handle_control_request` writes for `mcp_message` requests, recorded against the pinned Python
+/// SDK by `json.dumps`: tools whose remote schemas make validation raise texts with lone surrogates and other
+/// characters `json.dumps` escapes, and a tool that answers such text.
+const WIRE_SURROGATES: &str = include_str!("fixtures/sdk_mcp/python_wire_surrogates.json");
+
+/// Serves the documents the recording served, and fails any other URI as the recording's `urlopen` failed it.
+struct RecordedDocuments(BTreeMap<String, Vec<u8>>);
+
+impl RemoteSchemaRetriever for RecordedDocuments {
+    fn open(&self, uri: &str) -> Result<Box<dyn io::Read + '_>, RemoteSchemaError> {
+        match self.0.get(uri) {
+            Some(body) => Ok(Box::new(body.as_slice())),
+            None => Err(RemoteSchemaError::new("URLError", "<urlopen error nothing recorded>")),
+        }
+    }
+}
+
+fn recorded_tool(tool: &Value, answer: &str) -> Result<SdkTool, Box<dyn std::error::Error>> {
+    let answer = answer.to_owned();
+    Ok(SdkTool::from(SdkToolOptions {
+        name: McpToolName::from(tool["name"].as_str().ok_or("a tool without a name")?),
+        description: "d".to_owned(),
+        input_schema: McpToolInputSchema::new(
+            tool["input_schema"]
+                .as_object()
+                .ok_or("a schema is not an object")?
+                .clone(),
+        ),
+        handler: Arc::new(move |_: McpToolRequest| {
+            let answer = answer.clone();
+            async move { Ok(McpToolOutput::text(answer)) }
+        }),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
+    }))
+}
+
+#[tokio::test]
+async fn python_mcp_responses_are_written_as_the_python_query_writes_them() -> TestResult {
+    let fixture: Value = serde_json::from_str(WIRE_SURROGATES)?;
+    let mut documents = BTreeMap::new();
+    for (uri, body) in fixture["documents"].as_object().ok_or("no documents")? {
+        let body = body.as_str().ok_or("a document is not text")?;
+        documents.insert(uri.clone(), body.as_bytes().to_vec());
+    }
+    let answer = fixture["answer"].as_str().ok_or("no answer")?;
+    let tools = fixture["tools"]
+        .as_array()
+        .ok_or("no tools")?
+        .iter()
+        .map(|tool| recorded_tool(tool, answer))
+        .collect::<Result<Vec<_>, _>>()?;
+    let server = LocalMcpServer::from(LocalMcpServerOptions {
+        tools: Some(SdkTools::new(tools)?),
+        dialect: McpServerDialect::Python,
+        ..LocalMcpServerOptions::new(McpServerName::from("demo"))
+    })
+    .with_remote_schema_retriever(Arc::new(RecordedDocuments(documents)));
+    let mut configured = options()?;
+    configured.argv_style = ArgvStyle::Python;
+    configured
+        .sdk_mcp_servers
+        .insert(McpServerName::from("demo"), Arc::new(server));
+    let (client, mut cli) = connect(configured).await?;
+    let calls = fixture["calls"].as_array().ok_or("no calls")?;
+    assert_eq!(calls.len(), 10);
+    for call in calls {
+        let request = json!({"subtype":"mcp_message","server_name":"demo","message":call["message"]});
+        cli.send(json!({"type":"control_request","request_id":call["request_id"],"request":request}))
+            .await?;
+        let line = timeout(Duration::from_secs(5), cli.lines.next_line())
+            .await??
+            .ok_or("expected a control response")?;
+        assert_eq!(line, call["line"].as_str().ok_or("a line is not text")?);
+    }
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn callback_timeout_cancels_signal_and_returns_deny() -> TestResult {
     let signal = Arc::new(std::sync::Mutex::new(None::<CancellationToken>));
@@ -1146,6 +1228,22 @@ async fn callback_timeout_cancels_signal_and_returns_deny() -> TestResult {
         .clone()
         .ok_or_else(|| io::Error::other("missing callback signal"))?;
     assert!(signal.is_cancelled());
+    cli.disconnect(client).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_callback_that_answers_within_the_callback_timeout_keeps_its_answer() -> TestResult {
+    let mut configured = options()?;
+    configured.limits.callback_timeout = Some(Timeout::new(Duration::from_secs(30)));
+    configured.permission_handler = Some(Arc::new(|_: ToolPermissionRequest| async {
+        PermissionDecision::allow()
+    }));
+    let (client, mut cli) = connect(configured).await?;
+    cli.send(json!({"type":"control_request","request_id":"permission","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}})).await?;
+    let response = cli.read().await?;
+    assert_eq!(response["response"]["subtype"], "success");
+    assert_eq!(response["response"]["response"]["behavior"], "allow");
     cli.disconnect(client).await?;
     Ok(())
 }

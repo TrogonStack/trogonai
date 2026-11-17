@@ -2,9 +2,9 @@
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    PythonJsonValue, ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect, adapters::OperatingSystem,
-    filter_escalating_default_mode, js_stringify, python_json_dumps, resolve_python_settings_with,
-    resolve_settings_in_dialect_with, resolve_settings_with,
+    PythonJsonValue, PythonString, ResolveSettingsOptions, ResolvedSettings, Settings, SettingsDialect,
+    adapters::OperatingSystem, filter_escalating_default_mode, js_stringify, python_json_dumps,
+    resolve_python_settings_with, resolve_settings_in_dialect_with, resolve_settings_with,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -232,6 +232,26 @@ fn plist_policy_is_read_with_plutil_on_macos() {
     assert_eq!(result["provenance"]["model"]["policyOrigin"], "plist");
     assert!(
         host.ran()
+            .contains(&format!("/usr/bin/plutil -convert json -o - -- {plist}"))
+    );
+}
+
+#[test]
+fn the_device_level_plist_is_read_when_the_per_user_one_is_absent() {
+    let mut host = FakeHost::linux();
+    host.system = OperatingSystem::Darwin;
+    let plist = "/Library/Managed Preferences/fixture-user/com.anthropic.claudecode.plist";
+    let device = "/Library/Managed Preferences/com.anthropic.claudecode.plist";
+    let host = host.file(device, "bplist").command(
+        &format!("/usr/bin/plutil -convert json -o - -- {device}"),
+        ok(r#"{"model":"device-model"}"#),
+    );
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(result["effective"], json!({"model": "device-model"}));
+    assert_eq!(result["provenance"]["model"]["policyOrigin"], "plist");
+    assert!(
+        !host
+            .ran()
             .contains(&format!("/usr/bin/plutil -convert json -o - -- {plist}"))
     );
 }
@@ -484,11 +504,11 @@ fn the_python_resolve_keeps_every_number_as_json_loads_reads_it() -> TestResult 
             r#"{"custom":{"big":[123456789012345678901234567890,-98765432109876543210987654321,1.0,NaN,Infinity,1e400],"w":2.0,"z":-0.0}}"#,
         );
     let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
-    let PythonJsonValue::Object(resolved) = resolved else {
+    let PythonJsonValue::Object(resolved) = &resolved else {
         return Err("the resolved settings are not an object".into());
     };
     assert_eq!(
-        python_json_dumps(resolved.get("effective").expect("effective")),
+        python_json_dumps(resolved.get(&PythonString::from("effective")).expect("effective")),
         r#"{"env": {"A": "1.2345678901234568e+29"}, "custom": {"big": [123456789012345678901234567890, 1.0, -98765432109876543210987654321, NaN, Infinity], "w": 2.0, "z": -0.0}}"#
     );
     let approximate = effective_in(
@@ -511,11 +531,11 @@ fn the_python_resolve_unions_arrays_by_the_number_javascript_reads() -> TestResu
             r#"{"custom":{"l":[1.0,-0.0,2,9223372036854775808.0]}}"#,
         );
     let resolved = resolve_python_settings_with(&host, &options(json!({}))).expect("resolve");
-    let PythonJsonValue::Object(resolved) = resolved else {
+    let PythonJsonValue::Object(resolved) = &resolved else {
         return Err("the resolved settings are not an object".into());
     };
     assert_eq!(
-        python_json_dumps(resolved.get("effective").expect("effective")),
+        python_json_dumps(resolved.get(&PythonString::from("effective")).expect("effective")),
         r#"{"custom": {"l": [1, 0, 2, 9.223372036854776e+18]}}"#
     );
     Ok(())

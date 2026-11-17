@@ -10,6 +10,7 @@ use crate::{
     OptionError, PartialMessages, ProtocolError, SessionPersistence, ThinkingConfig, ToolSet,
     adapters::{NativeHost, ReadFile},
     process_options::ArgvStyle,
+    python_c_stack::PythonCStack,
     python_json::python_repr,
     wire::runtime_payload::{EmbeddedMcpPayload, McpConfigPayload},
 };
@@ -77,9 +78,14 @@ fn resumes(options: &ClaudeAgentOptions) -> bool {
         .is_some_and(|session| !session.as_str().is_empty())
 }
 
-/// `derived_debug_file` is the TypeScript default debug file, which only a native spawn derives.
-pub(crate) fn build(options: &ClaudeAgentOptions, derived_debug_file: Option<&Path>) -> Result<Vec<OsString>, Error> {
-    build_with(options, derived_debug_file, &NativeHost)
+/// `derived_debug_file` is the TypeScript default debug file, which only a native spawn derives. `python_stack`
+/// is where the Python SDK builds the command, which sets how deeply its settings text may nest.
+pub(crate) fn build(
+    options: &ClaudeAgentOptions,
+    derived_debug_file: Option<&Path>,
+    python_stack: PythonCStack,
+) -> Result<Vec<OsString>, Error> {
+    build_with(options, derived_debug_file, &NativeHost, python_stack)
 }
 
 /// [`build`] with the file reader Python's settings merge uses for a settings file path.
@@ -87,6 +93,7 @@ pub(crate) fn build_with<R>(
     options: &ClaudeAgentOptions,
     derived_debug_file: Option<&Path>,
     files: &R,
+    python_stack: PythonCStack,
 ) -> Result<Vec<OsString>, Error>
 where
     R: ReadFile<Error = std::io::Error>,
@@ -97,7 +104,7 @@ where
     }
     match options.argv_style {
         ArgvStyle::TypeScript => typescript(options, derived_debug_file),
-        ArgvStyle::Python => python(options, files),
+        ArgvStyle::Python => python(options, files, python_stack),
     }
 }
 
@@ -513,7 +520,7 @@ fn python_thinking(a: &mut Vec<OsString>, options: &ClaudeAgentOptions) -> Resul
     Ok(())
 }
 
-fn python<R>(options: &ClaudeAgentOptions, files: &R) -> Result<Vec<OsString>, Error>
+fn python<R>(options: &ClaudeAgentOptions, files: &R, stack: PythonCStack) -> Result<Vec<OsString>, Error>
 where
     R: ReadFile<Error = std::io::Error>,
 {
@@ -600,7 +607,7 @@ where
     if let Some(session) = options.session_id.as_ref().filter(|id| !id.as_str().is_empty()) {
         equals(&mut a, "--session-id", session.as_str());
     }
-    if let Some(settings) = crate::settings_option::python_settings_value(options, files)? {
+    if let Some(settings) = crate::settings_option::python_settings_value(options, files, stack)? {
         a.push("--settings".into());
         a.push(settings.into());
     }

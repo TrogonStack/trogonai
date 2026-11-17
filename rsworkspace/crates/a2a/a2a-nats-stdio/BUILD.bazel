@@ -1,22 +1,8 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "a2a-nats-stdio",
-    binaries = {"a2a-nats-stdio": {}},
     integration_tests = {
         # Runs the binary against a NATS server started in a container.
-        "runtime_process": {
-            "data": [":a2a-nats-stdio_bin"],
-            "rustc_env": {"CARGO_BIN_EXE_a2a-nats-stdio": "$(rootpath :a2a-nats-stdio_bin)"},
-            "tags": ["requires-network"],
-        },
+        "runtime_process": {"tags": ["requires-network"]},
     },
-    deps = [
-        "//rsworkspace/crates/a2a/a2a-identity-types",
-        "//rsworkspace/crates/a2a/a2a-nats",
-        "//rsworkspace/crates/platform/jsonrpc-nats",
-        "//rsworkspace/crates/platform/trogon-identity-types",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
 )

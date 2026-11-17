@@ -1,3 +1,4 @@
+use std::ops::RangeInclusive;
 use std::time::Duration;
 
 /// Keychain service that holds the Claude Code OAuth credentials on macOS.
@@ -230,6 +231,24 @@ pub(crate) const POLICY_READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Keys that do not make a managed settings document count as policy content (`Qi` upstream).
 pub(crate) const POLICY_META_KEYS: [&str; 2] = ["managedSourcesBehavior", "wslInheritsWindowsSettings"];
 
+/// Blocks whose fail-closed reading never counts as a stand-in for policy content (`K3` upstream).
+pub(crate) const POLICY_UNSYNTHESIZED_BLOCKS: [&str; 2] = ["remoteTools", "remoteControl"];
+
+/// Locks a managed document never replaces with their restrictive value (`neverSubstitute` upstream).
+pub(crate) const POLICY_NEVER_SUBSTITUTED: [&str; 1] = ["sandbox.failIfUnavailable"];
+
+/// Locks left out of the restrictive skeleton of a block that is not an object (`skeletonExclude` upstream).
+pub(crate) const POLICY_SKELETON_EXCLUDED: [&str; 1] = ["sandbox.enabled"];
+
+/// Prefix of the variable names a managed AWS pair that cannot be read is given (`Zx` upstream).
+pub(crate) const POLICY_INVALID_PAIR_PREFIX: &str = "_INVALID_PAIR_";
+
+/// FNV-1a offset basis of the managed file hash in stand-in pair names.
+pub(crate) const POLICY_FILE_HASH_OFFSET: u32 = 2_166_136_261;
+
+/// FNV-1a prime of the managed file hash in stand-in pair names.
+pub(crate) const POLICY_FILE_HASH_PRIME: u32 = 16_777_619;
+
 /// Keys only honored from administrator-controlled sources (`mE` upstream).
 pub(crate) const MANAGED_ONLY_KEYS: [&str; 3] = ["managedMcpServers", "isolation", "attributionProjectPolicy"];
 
@@ -274,6 +293,24 @@ pub(crate) const REGISTRY_USER_KEY: &str = "HKCU\\SOFTWARE\\Policies\\ClaudeCode
 
 /// Registry value that holds the settings document.
 pub(crate) const REGISTRY_VALUE_NAME: &str = "Settings";
+
+/// What upstream calls the managed settings a host passes in when it reads them (`iX`).
+pub(crate) const PARENT_MANAGED_FILE: &str = "parent managed settings";
+
+/// What upstream calls the server-managed settings when it reads them.
+pub(crate) const REMOTE_MANAGED_FILE: &str = "remote managed settings";
+
+/// What upstream calls the signed-in user's managed preferences document when it reads it (`Cx`).
+pub(crate) const PER_USER_PLIST_FILE: &str = "per-user managed preferences";
+
+/// What upstream calls the device-level managed preferences document when it reads it.
+pub(crate) const DEVICE_PLIST_FILE: &str = "device-level managed preferences";
+
+/// What upstream calls the machine-wide registry document when it reads it.
+pub(crate) const REGISTRY_MACHINE_FILE: &str = "Registry: HKLM\\SOFTWARE\\Policies\\ClaudeCode\\Settings";
+
+/// What upstream calls the per-user registry document when it reads it.
+pub(crate) const REGISTRY_USER_FILE: &str = "Registry: HKCU\\SOFTWARE\\Policies\\ClaudeCode\\Settings";
 
 /// Text `reg query` prints when the key or value does not exist.
 pub(crate) const REGISTRY_NOT_FOUND_TEXT: &str = "unable to find the specified registry key or value";
@@ -333,6 +370,13 @@ pub(crate) const SETTINGS_SCHEMA_JSON: &str = include_str!("upstream/settings_sc
 /// Magnitude up to which every integer is exactly a JavaScript number (2^53).
 pub(crate) const JS_MAX_EXACT_INTEGER: u64 = 1 << 53;
 
+/// The longest array JavaScript holds (2^32 - 1).
+pub(crate) const JS_MAX_ARRAY_LENGTH: u64 = u32::MAX as u64;
+
+/// The most UTF-16 units a V8 string holds (`String::kMaxLength`, 2^29 - 24); building a longer one throws
+/// `RangeError: Invalid string length`.
+pub(crate) const V8_MAX_STRING_LENGTH: u64 = (1 << 29) - 24;
+
 /// The double a settings value holds for `Infinity` (2^63). `serde_json` has no number for Infinity, and number
 /// normalization turns every whole double below 2^64 that a document holds into an integer, so no document
 /// leaves a float with this value behind.
@@ -357,8 +401,36 @@ pub(crate) const SETTINGS_PYTHON_NUMBER_MARKER_BASE: f64 = 4_611_686_018_427_387
 /// The distance between two consecutive Python number markers; doubles from 2^62 to 2^63 are 1024 apart.
 pub(crate) const SETTINGS_PYTHON_NUMBER_MARKER_STEP: f64 = 2048.0;
 
+/// The first surrogate code point, U+D800.
+pub(crate) const SURROGATE_FIRST: u32 = 0xD800;
+
+/// Where each range of private-use code points a lone surrogate of a Python-dialect settings string first tries to
+/// stand as begins: U+D800 + n tries the start plus n of each in turn. Each range is as wide as the surrogates and
+/// lies in the Basic Multilingual Plane, so a stand-in is one UTF-16 unit, as the surrogate is.
+pub(crate) const SETTINGS_SURROGATE_STAND_IN_STARTS: [u32; 3] = [0xE000, 0xE800, 0xF000];
+
+/// The private-use code points a lone surrogate of a Python-dialect settings string may stand as, in the order they
+/// are tried after its place in each of [`SETTINGS_SURROGATE_STAND_IN_STARTS`]: the Basic Multilingual Plane's,
+/// one UTF-16 unit each, then those of planes 15 and 16, two units each.
+pub(crate) const SETTINGS_SURROGATE_STAND_IN_RANGES: [(u32, u32); 3] =
+    [(0xE000, 0xF8FF), (0xF_0000, 0xF_FFFD), (0x10_0000, 0x10_FFFD)];
+
 /// The most decimal digits Python's `int()` converts from a string (`sys.get_int_max_str_digits()`).
 pub(crate) const PYTHON_INT_MAX_STR_DIGITS: usize = 4300;
+
+/// CPython 3.12's `Py_C_RECURSION_LIMIT`: how many C recursion checks may be open at once. The C scanner of
+/// `json.loads` opens one for each array and object it enters, and `sys.setrecursionlimit` does not move the limit.
+pub(crate) const PYTHON_C_RECURSION_LIMIT: usize = 10_000;
+
+/// The stack of the thread the settings engine runs the Python dialect on. The Python dialect reads a settings file
+/// nested as deep as `json.loads` reads it, almost [`PYTHON_C_RECURSION_LIMIT`] levels, and the engine walks the
+/// document recursively, a few frames per level at each step. Untouched stack pages are never committed, so the
+/// reservation costs address space, not memory.
+pub(crate) const SETTINGS_ENGINE_STACK_BYTES: usize = 256 * 1024 * 1024;
+
+/// The most arrays and objects `serde_json` reads nested in one document before it stops with "recursion limit
+/// exceeded".
+pub(crate) const SERDE_JSON_NESTING: usize = 127;
 
 /// Largest integer a JavaScript number holds exactly (`Number.MAX_SAFE_INTEGER`).
 pub(crate) const SETTINGS_SCHEMA_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
@@ -554,6 +626,9 @@ pub(crate) const SETTINGS_PROVIDER_NAMES: [&str; 8] = [
     "mantle",
     "gateway",
 ];
+
+/// Upstream `x3e`: the prefix of the provider names an `allowedProviders` entry may carry beyond `Gf`.
+pub(crate) const SETTINGS_PROVIDER_FAMILY: &str = "anthropic";
 
 /// Upstream `E3e`: server fields a managed settings server must not carry.
 pub(crate) const SETTINGS_MANAGED_SERVER_FORBIDDEN: [&str; 4] = ["command", "args", "env", "headersHelper"];
@@ -1386,3 +1461,1177 @@ pub(crate) const PYTHON_DEFAULT_SESSION: &str = "default";
 
 /// The keyword a schema `pattern` takes in the TypeScript call check.
 pub(crate) const ECMA_PATTERN: &str = "x-trogon-pattern";
+
+/// The key TypeScript spreads after a `canUseTool` result to carry the request's `tool_use_id`.
+pub(crate) const PERMISSION_TOOL_USE_ID_FIELD: &str = "toolUseID";
+
+/// Python's `TypeError` for a `can_use_tool` callback that returned anything but a `PermissionResult`; the type
+/// of the value follows.
+pub(crate) const PYTHON_PERMISSION_RESULT_TYPE_ERROR: &str =
+    "Tool permission callback must return PermissionResult (PermissionResultAllow or PermissionResultDeny), got ";
+
+/// How Python names the type of a `None` result.
+pub(crate) const PYTHON_NONE_TYPE: &str = "<class 'NoneType'>";
+
+/// How Python names the type of a `dict` result.
+pub(crate) const PYTHON_DICT_TYPE: &str = "<class 'dict'>";
+
+/// Stack sizes to try for the validation thread, largest first, so deep schemas reach the frame limit before the
+/// native stack runs out.
+pub(crate) const STACK_SIZES: [usize; 3] = [512 << 20, 64 << 20, 8 << 20];
+
+/// The documents `jsonschema_specifications` ships, which `jsonschema` registers under their own ids.
+pub(crate) const METASCHEMAS: [&str; 20] = [
+    include_str!("upstream/metaschemas/draft3/metaschema.json"),
+    include_str!("upstream/metaschemas/draft4/metaschema.json"),
+    include_str!("upstream/metaschemas/draft6/metaschema.json"),
+    include_str!("upstream/metaschemas/draft7/metaschema.json"),
+    include_str!("upstream/metaschemas/draft201909/metaschema.json"),
+    include_str!("upstream/metaschemas/draft201909/vocabularies/applicator"),
+    include_str!("upstream/metaschemas/draft201909/vocabularies/content"),
+    include_str!("upstream/metaschemas/draft201909/vocabularies/core"),
+    include_str!("upstream/metaschemas/draft201909/vocabularies/format"),
+    include_str!("upstream/metaschemas/draft201909/vocabularies/meta-data"),
+    include_str!("upstream/metaschemas/draft201909/vocabularies/validation"),
+    include_str!("upstream/metaschemas/draft202012/metaschema.json"),
+    include_str!("upstream/metaschemas/draft202012/vocabularies/applicator"),
+    include_str!("upstream/metaschemas/draft202012/vocabularies/content"),
+    include_str!("upstream/metaschemas/draft202012/vocabularies/core"),
+    include_str!("upstream/metaschemas/draft202012/vocabularies/format-annotation"),
+    include_str!("upstream/metaschemas/draft202012/vocabularies/format-assertion"),
+    include_str!("upstream/metaschemas/draft202012/vocabularies/meta-data"),
+    include_str!("upstream/metaschemas/draft202012/vocabularies/unevaluated"),
+    include_str!("upstream/metaschemas/draft202012/vocabularies/validation"),
+];
+
+/// Used by the python_jsonschema_referencing port.
+pub(crate) const NO_SUCH_ANCHOR: &str = "NoSuchAnchor";
+
+/// Used by the python_urllib port.
+pub(crate) const USES_RELATIVE: &[&str] = &[
+    "", "ftp", "http", "gopher", "nntp", "imap", "wais", "file", "https", "shttp", "mms", "prospero", "rtsp", "rtsps",
+    "rtspu", "sftp", "svn", "svn+ssh", "ws", "wss",
+];
+
+/// Used by the python_urllib port.
+pub(crate) const USES_NETLOC: &[&str] = &[
+    "",
+    "ftp",
+    "http",
+    "gopher",
+    "nntp",
+    "telnet",
+    "imap",
+    "wais",
+    "file",
+    "mms",
+    "https",
+    "shttp",
+    "snews",
+    "prospero",
+    "rtsp",
+    "rtsps",
+    "rtspu",
+    "rsync",
+    "svn",
+    "svn+ssh",
+    "sftp",
+    "nfs",
+    "git",
+    "git+ssh",
+    "ws",
+    "wss",
+    "itms-services",
+];
+
+/// Used by the python_urllib port.
+pub(crate) const USES_PARAMS: &[&str] = &[
+    "", "ftp", "hdl", "prospero", "http", "imap", "https", "shttp", "rtsp", "rtsps", "rtspu", "sip", "sips", "mms",
+    "sftp", "tel",
+];
+
+/// Used by the python_re port.
+pub(crate) const OP_FAILURE: u32 = 0;
+
+/// Used by the python_re port.
+pub(crate) const OP_SUCCESS: u32 = 1;
+
+/// Used by the python_re port.
+pub(crate) const OP_ANY: u32 = 2;
+
+/// Used by the python_re port.
+pub(crate) const OP_ANY_ALL: u32 = 3;
+
+/// Used by the python_re port.
+pub(crate) const OP_ASSERT: u32 = 4;
+
+/// Used by the python_re port.
+pub(crate) const OP_ASSERT_NOT: u32 = 5;
+
+/// Used by the python_re port.
+pub(crate) const OP_AT: u32 = 6;
+
+/// Used by the python_re port.
+pub(crate) const OP_BRANCH: u32 = 7;
+
+/// Used by the python_re port.
+pub(crate) const OP_CATEGORY: u32 = 8;
+
+/// Used by the python_re port.
+pub(crate) const OP_CHARSET: u32 = 9;
+
+/// Used by the python_re port.
+pub(crate) const OP_BIGCHARSET: u32 = 10;
+
+/// Used by the python_re port.
+pub(crate) const OP_GROUPREF: u32 = 11;
+
+/// Used by the python_re port.
+pub(crate) const OP_GROUPREF_EXISTS: u32 = 12;
+
+/// Used by the python_re port.
+pub(crate) const OP_IN: u32 = 13;
+
+/// Used by the python_re port.
+pub(crate) const OP_JUMP: u32 = 15;
+
+/// Used by the python_re port.
+pub(crate) const OP_LITERAL: u32 = 16;
+
+/// Used by the python_re port.
+pub(crate) const OP_MARK: u32 = 17;
+
+/// Used by the python_re port.
+pub(crate) const OP_MAX_UNTIL: u32 = 18;
+
+/// Used by the python_re port.
+pub(crate) const OP_MIN_UNTIL: u32 = 19;
+
+/// Used by the python_re port.
+pub(crate) const OP_NOT_LITERAL: u32 = 20;
+
+/// Used by the python_re port.
+pub(crate) const OP_NEGATE: u32 = 21;
+
+/// Used by the python_re port.
+pub(crate) const OP_RANGE: u32 = 22;
+
+/// Used by the python_re port.
+pub(crate) const OP_REPEAT: u32 = 23;
+
+/// Used by the python_re port.
+pub(crate) const OP_REPEAT_ONE: u32 = 24;
+
+/// Used by the python_re port.
+pub(crate) const OP_MIN_REPEAT_ONE: u32 = 26;
+
+/// Used by the python_re port.
+pub(crate) const OP_ATOMIC_GROUP: u32 = 27;
+
+/// Used by the python_re port.
+pub(crate) const OP_POSSESSIVE_REPEAT: u32 = 28;
+
+/// Used by the python_re port.
+pub(crate) const OP_POSSESSIVE_REPEAT_ONE: u32 = 29;
+
+/// Used by the python_re port.
+pub(crate) const OP_GROUPREF_IGNORE: u32 = 30;
+
+/// Used by the python_re port.
+pub(crate) const OP_IN_IGNORE: u32 = 31;
+
+/// Used by the python_re port.
+pub(crate) const OP_LITERAL_IGNORE: u32 = 32;
+
+/// Used by the python_re port.
+pub(crate) const OP_NOT_LITERAL_IGNORE: u32 = 33;
+
+/// Used by the python_re port.
+pub(crate) const OP_GROUPREF_UNI_IGNORE: u32 = 38;
+
+/// Used by the python_re port.
+pub(crate) const OP_IN_UNI_IGNORE: u32 = 39;
+
+/// Used by the python_re port.
+pub(crate) const OP_LITERAL_UNI_IGNORE: u32 = 40;
+
+/// Used by the python_re port.
+pub(crate) const OP_NOT_LITERAL_UNI_IGNORE: u32 = 41;
+
+/// Used by the python_re port.
+pub(crate) const OP_RANGE_UNI_IGNORE: u32 = 42;
+
+/// Used by the python_re port.
+pub(crate) const AT_BEGINNING: u32 = 0;
+
+/// Used by the python_re port.
+pub(crate) const AT_BEGINNING_LINE: u32 = 1;
+
+/// Used by the python_re port.
+pub(crate) const AT_BEGINNING_STRING: u32 = 2;
+
+/// Used by the python_re port.
+pub(crate) const AT_BOUNDARY: u32 = 3;
+
+/// Used by the python_re port.
+pub(crate) const AT_NON_BOUNDARY: u32 = 4;
+
+/// Used by the python_re port.
+pub(crate) const AT_END: u32 = 5;
+
+/// Used by the python_re port.
+pub(crate) const AT_END_LINE: u32 = 6;
+
+/// Used by the python_re port.
+pub(crate) const AT_END_STRING: u32 = 7;
+
+/// Used by the python_re port.
+pub(crate) const AT_UNI_BOUNDARY: u32 = 10;
+
+/// Used by the python_re port.
+pub(crate) const AT_UNI_NON_BOUNDARY: u32 = 11;
+
+/// `CATEGORY_*` base codes; `CH_UNICODE` maps each to the code ten above it.
+pub(crate) const CATEGORY_DIGIT: u32 = 0;
+
+/// Used by the python_re port.
+pub(crate) const CATEGORY_NOT_DIGIT: u32 = 1;
+
+/// Used by the python_re port.
+pub(crate) const CATEGORY_SPACE: u32 = 2;
+
+/// Used by the python_re port.
+pub(crate) const CATEGORY_NOT_SPACE: u32 = 3;
+
+/// Used by the python_re port.
+pub(crate) const CATEGORY_WORD: u32 = 4;
+
+/// Used by the python_re port.
+pub(crate) const CATEGORY_NOT_WORD: u32 = 5;
+
+/// Used by the python_re port.
+pub(crate) const CATEGORY_UNICODE_OFFSET: u32 = 10;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_TEMPLATE: u32 = 1;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_IGNORECASE: u32 = 2;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_LOCALE: u32 = 4;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_MULTILINE: u32 = 8;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_DOTALL: u32 = 16;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_UNICODE: u32 = 32;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_VERBOSE: u32 = 64;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_DEBUG: u32 = 128;
+
+/// Used by the python_re port.
+pub(crate) const FLAG_ASCII: u32 = 256;
+
+/// Used by the python_re port.
+pub(crate) const TYPE_FLAGS: u32 = FLAG_ASCII | FLAG_LOCALE | FLAG_UNICODE;
+
+/// Used by the python_re port.
+pub(crate) const GLOBAL_FLAGS: u32 = FLAG_DEBUG | FLAG_TEMPLATE;
+
+/// `_sre.MAXGROUPS`.
+pub(crate) const MAXGROUPS: u64 = 0x3fff_ffff;
+
+/// `_sre.MAXREPEAT` (`SRE_MAXREPEAT`, a 32-bit `SRE_CODE`).
+pub(crate) const MAXREPEAT: u32 = u32::MAX;
+
+/// `_compiler.MAXCODE`.
+pub(crate) const MAXCODE: u128 = u32::MAX as u128;
+
+/// `_parser.MAXWIDTH`.
+pub(crate) const MAXWIDTH: u128 = 1 << 64;
+
+/// Used by the python_re port.
+pub(crate) const RECURSION_ERROR: &str = "maximum recursion depth exceeded";
+
+/// Used by the python_re port.
+pub(crate) const SPECIAL_CHARS: &str = ".\\[{()*+?^$|";
+
+/// Used by the python_re port.
+pub(crate) const HANGUL_BASE: u32 = 0xAC00;
+
+/// Used by the python_re port.
+pub(crate) const HANGUL_LEADS: &[&str] = &[
+    "G", "GG", "N", "D", "DD", "R", "M", "B", "BB", "S", "SS", "", "J", "JJ", "C", "K", "T", "P", "H",
+];
+
+/// Used by the python_re port.
+pub(crate) const HANGUL_VOWELS: &[&str] = &[
+    "A", "AE", "YA", "YAE", "EO", "E", "YEO", "YE", "O", "WA", "WAE", "OE", "YO", "U", "WEO", "WE", "WI", "YU", "EU",
+    "YI", "I",
+];
+
+/// Used by the python_re port.
+pub(crate) const HANGUL_TRAILS: &[&str] = &[
+    "", "G", "GG", "GS", "N", "NJ", "NH", "D", "L", "LG", "LM", "LB", "LS", "LT", "LP", "LH", "M", "B", "BS", "S",
+    "SS", "NG", "J", "C", "K", "T", "P", "H",
+];
+
+/// Used by the python_re port.
+pub(crate) const HANGUL_PREFIX: &str = "HANGUL SYLLABLE ";
+
+/// Used by the python_re port.
+pub(crate) const CJK_PREFIX: &str = "CJK UNIFIED IDEOGRAPH-";
+
+/// Used by the python_sort port.
+pub(crate) const MIN_GALLOP: usize = 7;
+
+/// CPython 3.12's `Py_C_RECURSION_LIMIT`: a C recursion check that would put more checks than this under way
+/// raises `RecursionError`, whatever the frame limit. The C `repr` and rich comparison of nested containers check
+/// once a level.
+pub(crate) const C_RECURSION_LIMIT: usize = 10_000;
+
+/// The C recursion checks under way when `check_schema` iterates the metaschema's errors, measured from the SDK's
+/// tool handler.
+pub(crate) const CHECK_SCHEMA_HELD: usize = 6;
+
+/// The C recursion checks of resuming a generator from C, which enters a new evaluation loop: `list(...)`,
+/// `next(...)`, `any(...)`, `list += ...`, or a generic `FOR_ITER`.
+pub(crate) const RESUMED: usize = 2;
+
+/// The C recursion checks of calling a builtin that checks before it runs: `any` and `all`, or a generic `CALL`.
+pub(crate) const BUILTIN_CALL: usize = 1;
+
+/// The C recursion checks under way when `best_match` iterates the errors: [`CHECK_SCHEMA_HELD`], the `max` call
+/// and resuming the error generator from C.
+pub(crate) const VALIDATE_HELD: usize = CHECK_SCHEMA_HELD + BUILTIN_CALL + RESUMED;
+
+/// The frames above the caller of `isinstance(value, abc)` reaches the first time a type meets an ABC:
+/// `__instancecheck__`, `_abc_instancecheck`, `__subclasscheck__`, `_abc_subclasscheck` and the subclass hooks.
+pub(crate) const COLD_ABC_FRAMES: usize = 6;
+
+/// Used by the python_jsonschema_drafts port.
+pub(crate) const JSONSCHEMA_DRAFTS_DRAFT7_IN_VALUE: &[&str] = &[
+    "if",
+    "not",
+    "else",
+    "then",
+    "contains",
+    "propertyNames",
+    "additionalItems",
+    "additionalProperties",
+];
+
+/// Used by the python_jsonschema_drafts port.
+pub(crate) const JSONSCHEMA_DRAFTS_DRAFT201909_IN_VALUE: &[&str] = &[
+    "if",
+    "not",
+    "else",
+    "then",
+    "contains",
+    "contentSchema",
+    "propertyNames",
+    "additionalItems",
+    "unevaluatedItems",
+    "additionalProperties",
+    "unevaluatedProperties",
+];
+
+/// Used by the python_jsonschema_drafts port.
+pub(crate) const JSONSCHEMA_DRAFTS_DRAFT202012_IN_VALUE: &[&str] = &[
+    "if",
+    "not",
+    "else",
+    "then",
+    "items",
+    "contains",
+    "contentSchema",
+    "propertyNames",
+    "unevaluatedItems",
+    "additionalProperties",
+    "unevaluatedProperties",
+];
+
+/// `str()` of the `RecursionError` a rich comparison raises past the C recursion checks.
+pub(crate) const COMPARE_RECURSION_ERROR: &str = "maximum recursion depth exceeded in comparison";
+
+/// The C recursion checks a call of the `repr` builtin makes before the repr itself: one.
+pub(crate) const REPR_CALL: usize = 1;
+
+/// The C recursion checks `", ".join(repr(each) for each in values)` makes before each repr: the `str.join` call
+/// (1), resuming the generator expression from C, which enters a new evaluation loop (2), and the `repr` call (1).
+pub(crate) const JOINED_REPR_CALLS: usize = 1 + 2 + REPR_CALL;
+
+/// The `tracing` target of the `warnings.warn` calls the Python SDK makes while validating.
+pub(crate) const PYTHON_WARNINGS: &str = "trogon_claude_agent_sdk::python_warnings";
+
+/// The message of the `DeprecationWarning` `_warn_for_remote_retrieve` emits.
+pub(crate) const REMOTE_RETRIEVE_WARNING: &str = "Automatically retrieving remote references can be a security \
+    vulnerability and is discouraged by the JSON Schema specifications. Relying on this behavior is deprecated and \
+    will shortly become an error. If you are sure you want to remotely retrieve your reference and that it is safe \
+    to do so, you can find instructions for doing so via referencing.Registry in the referencing documentation \
+    (https://referencing.readthedocs.org).";
+
+/// How deep `json.load` nests before the `RecursionError` CPython raises at its default recursion limit, with the
+/// frames a `$ref` lookup in `jsonschema` already holds.
+pub(crate) const JSON_DEPTH: usize = 9990;
+
+/// `MAX_HASH_SEED` of `Python/initconfig.c`.
+pub(crate) const MAX_HASH_SEED: u64 = 4_294_967_295;
+
+/// `ftplib.MAXLINE`.
+pub(crate) const MAX_LINE: usize = 8192;
+
+/// The size of the chunks `TextIOWrapper` asks the socket for.
+pub(crate) const CHUNK: usize = 8192;
+
+/// `_MAXLINE`.
+pub(crate) const HTTP_CLIENT_MAX_LINE: usize = 65536;
+
+/// `_MAXHEADERS`.
+pub(crate) const MAX_HEADERS: usize = 100;
+
+/// `_MAXINTERIMRESPONSES`.
+pub(crate) const MAX_INTERIM_RESPONSES: usize = 100;
+
+/// The `User-Agent` `jsonschema` sends.
+pub(crate) const USER_AGENT: &str = "python-jsonschema (deprecated $ref resolution)";
+
+/// The pattern `PrettyPrinter._pprint_str` splits a line too long to fit with: `re.findall(r'\S*\s*', line)`.
+pub(crate) const WORDS: &str = r"\S*\s*";
+
+/// The frames below `re.findall` that compiling [`WORDS`] reaches while it is not in the `re` cache: `_compile`,
+/// `_compiler.compile`, `_parser.parse`, `_parse_sub`, `_parse`, and the `Tokenizer.get` and `__next` it calls.
+pub(crate) const WORDS_COMPILE_FRAMES: usize = 7;
+
+/// `re._MAXCACHE`.
+pub(crate) const MAX_CACHE: usize = 512;
+
+/// `re._MAXCACHE2`.
+pub(crate) const MAX_CACHE2: usize = 256;
+
+/// The keys of `_cache` when the Python SDK first calls `jsonschema.validate`, oldest first, in a process whose script
+/// imports `claude_agent_sdk` and connects on the pinned CPython: the patterns that the imports of
+/// `claude_agent_sdk` and its dependencies compile, then the version pattern `subprocess_cli.py` matches while
+/// connecting (lines 1148 and 1167). `_cache2` holds the same keys in the same order. A key of a `str` pattern
+/// compiled with no flags is that pattern; `None` stands for one `jsonschema` never looks up: a `bytes` pattern, one
+/// compiled with flags, or one with a lone surrogate.
+pub(crate) const PROCESS: [Option<&str>; 150] = [
+    None,
+    None,
+    None,
+    Some("([\\\u{9}\\\u{a}\\\u{b}\\\u{c}\\\u{d}\\ ]+)"),
+    Some("[a-z][\\.\\!\\?][\\\"\\']?\\Z"),
+    None,
+    None,
+    None,
+    None,
+    None,
+    Some("^(\\d+|\\w+)(\\.\\w+|\\[[^]]+\\])*$"),
+    Some("%(?:\\((?P<key>.*?)\\))?(?P<modifiers>[-#0-9 +*.hlL]*?)[eEfFgGdiouxXcrs%]"),
+    Some("(.*?(?:\\r\\n|\\n|\\r|$))"),
+    Some("^(?:\\s*(\\w+)\\s*\\.)?\\s*(\\w+)"),
+    None,
+    Some("([\u{0}-\u{7f}]+)"),
+    Some("^[a-zA-Z][a-zA-Z0-9_]*$"),
+    None,
+    Some("[.\u{3002}\u{ff0e}\u{ff61}]"),
+    Some("[\u{0}-,/:-@A-Z[-`{-\u{7f}]"),
+    None,
+    None,
+    None,
+    None,
+    Some("[\\x00-\\x1f\\\\\"\\b\\f\\n\\r\\t]"),
+    Some("([\\\\\"]|[^\\ -~])"),
+    None,
+    None,
+    None,
+    Some("(?m)^    "),
+    Some("((\\w+\\.)?Annotated\\[)?(\\w+\\.)?ClassVar\\["),
+    Some("<key>ProductUserVisibleVersion</key>\\s*<string>(.*?)</string>"),
+    Some("-isysroot\\s*(\\S+)"),
+    None,
+    Some("[][\\\\()<>@,:;\".]"),
+    Some("[\\\\\"]"),
+    None,
+    None,
+    Some("[\\041-\\176]+:$"),
+    Some("\\n[^ \\t]+:"),
+    None,
+    Some("[ \\(\\)<>@,;:\\\\\"/\\[\\]\\?=]"),
+    Some("(?m)^        "),
+    Some("(?P<module>[\\w.]+)\\s*(:\\s*(?P<attr>[\\w.]+)\\s*)?((?P<extras>\\[.*\\])\\s*)?$"),
+    Some(
+        "\\s*(?:((?:[\\w.!#$%&\\'*+\\-/=?^_`{|}~]+\\s+)*[\\w.!#$%&\\'*+\\-/=?^_`{|}~]+)|\"((?:[^\"]|\\\")+)\")?\\s*<(.+)>\\s*",
+    ),
+    Some("[-_.]+"),
+    Some("^[a-z]+[A-Za-z0-9]*$"),
+    Some("([0-9A-Za-z])_(?=[0-9A-Z])"),
+    Some("(^_*[A-Z])"),
+    Some("\\d[a-z]"),
+    None,
+    None,
+    Some("\\r\\n|\\r|\\n"),
+    Some("(\\r\\n|\\r|\\n)"),
+    Some("(\\r\\n|\\r|\\n)\\Z"),
+    Some("^(From |[\\041-\\071\\073-\\176]*:|[\\t ])"),
+    None,
+    None,
+    Some("[\u{0}- \u{7f}]"),
+    Some("[\u{0}-\u{1f}]"),
+    Some("[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\\#\\$%\\&'\\*\\+\\-\\.\\^_`\\|\\~:]+"),
+    Some("[\\x00-\\x1F\\x7F]"),
+    Some("\\\\(?:([0-3][0-7][0-7])|(.))"),
+    None,
+    Some("&(#[0-9]+;?|#[xX][0-9a-fA-F]+;?|[^\\t\\n\\f <&#;]{1,32};?)"),
+    Some("{([a-zA-Z_][a-zA-Z0-9_]*)(:[a-zA-Z_][a-zA-Z0-9_]*)?}"),
+    Some("{([a-zA-Z_][a-zA-Z0-9_]*)}"),
+    Some("[a-z][_0-9a-z\\-\\*\\/]{0,255}|[a-z0-9][_0-9a-z\\-\\*\\/]{0,240}@[a-z][_0-9a-z\\-\\*\\/]{0,13}"),
+    Some("[\\x20-\\x2b\\x2d-\\x3c\\x3e-\\x7e]{0,255}[\\x21-\\x2b\\x2d-\\x3c\\x3e-\\x7e]"),
+    Some(
+        "([a-z][_0-9a-z\\-\\*\\/]{0,255}|[a-z0-9][_0-9a-z\\-\\*\\/]{0,240}@[a-z][_0-9a-z\\-\\*\\/]{0,13})=([\\x20-\\x2b\\x2d-\\x3c\\x3e-\\x7e]{0,255}[\\x21-\\x2b\\x2d-\\x3c\\x3e-\\x7e])",
+    ),
+    Some(
+        "[ \\t]*[\\x21\\x23-\\x27\\x2a\\x2b\\x2d\\x2e\\x30-\\x39\\x41-\\x5a\\x5e-\\x7a\\x7c\\x7e]+[ \\t]*=[ \\t]*[\\x21\\x23-\\x2b\\x2d-\\x3a\\x3c-\\x5b\\x5d-\\x7e]*[ \\t]*",
+    ),
+    Some(
+        "[ \\t]*[\\x21\\x23-\\x27\\x2a\\x2b\\x2d\\x2e\\x30-\\x39\\x41-\\x5a\\x5e-\\x7a\\x7c\\x7e]+[ \\t]*=[ \\t]*[\\x20\\x21\\x23-\\x2b\\x2d-\\x3a\\x3c-\\x5b\\x5d-\\x7e]*[ \\t]*",
+    ),
+    Some("[ \\t]*,[ \\t]*"),
+    Some("[\\x21\\x23-\\x27\\x2a\\x2b\\x2d\\x2e\\x30-\\x39\\x41-\\x5a\\x5e-\\x7a\\x7c\\x7e]+"),
+    Some("[\\x21\\x23-\\x2b\\x2d-\\x3a\\x3c-\\x5b\\x5d-\\x7e]*"),
+    Some(
+        "[ \\t]*[\\x21\\x23-\\x27\\x2a\\x2b\\x2d\\x2e\\x30-\\x39\\x41-\\x5a\\x5e-\\x7a\\x7c\\x7e]+[ \\t]*=[ \\t]*[\\x21\\x23-\\x2b\\x2d-\\x3a\\x3c-\\x5b\\x5d-\\x7e]*[ \\t]*|[ \\t]*[\\x21\\x23-\\x27\\x2a\\x2b\\x2d\\x2e\\x30-\\x39\\x41-\\x5a\\x5e-\\x7a\\x7c\\x7e]+[ \\t]*",
+    ),
+    Some("^[ \u{9}]*([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})(?:(-.*)|[ \u{9}]*)$"),
+    Some("[\\w\\.]+"),
+    Some("^=\\?base64\\?(?P<payload>.*)\\?=$"),
+    Some("^[\\x20-\\x7E]*$"),
+    Some("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$"),
+    Some("^-?[0-9]+(\\.[0-9]+)?$"),
+    Some("[A-Z][A-Z0-9_]+$"),
+    None,
+    Some("^(?P<prefix>[a-z]+)://(?P<suffix>.*)$"),
+    Some("^\\s*(\\w+)\\s*"),
+    Some("^\\.\\s*(\\w+)\\s*"),
+    Some("^\\[\\s*(\\w+)\\s*\\]\\s*"),
+    Some("^\\d+$"),
+    Some("%\\(([^)]+)\\)s"),
+    Some("\\$\\{([^}]+)\\}"),
+    Some("%\\(([^)]*)\\)s|."),
+    None,
+    None,
+    None,
+    Some("\\S"),
+    Some("^get(?P<name>.+)$"),
+    None,
+    Some("\\033\\[[0-?]*[ -/]*[@-~]"),
+    Some("^[\\x21-\\x7E]+$"),
+    Some(
+        "[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?",
+    ),
+    None,
+    None,
+    Some("#( Netscape)? HTTP Cookie File"),
+    None,
+    None,
+    None,
+    None,
+    None,
+    Some("^\\s*([^=\\s;,]+)"),
+    Some("^\\s*=\\s*\\\"([^\\\"\\\\]*(?:\\\\.[^\\\"\\\\]*)*)\\\""),
+    Some("^\\s*=\\s*([^\\s;,]*)"),
+    Some("\\\\(.)"),
+    Some("([\\\"\\\\])"),
+    None,
+    Some("%([0-9a-fA-F][0-9a-fA-F])"),
+    Some("\\W"),
+    Some("\\.?[^.]*"),
+    Some("[^.]*"),
+    Some("^\\.+"),
+    None,
+    Some(
+        "\"|\\\\|\u{0}|\u{1}|\u{2}|\u{3}|\u{4}|\u{5}|\u{6}|\u{7}|\u{8}|\\\u{9}|\\\u{a}|\\\u{b}|\\\u{c}|\\\u{d}|\u{e}|\u{f}|\u{10}|\u{11}|\u{12}|\u{13}|\u{14}|\u{15}|\u{16}|\u{17}|\u{18}|\u{19}|\u{1a}|\u{1c}|\u{1d}|\u{1e}|\u{1f}",
+    ),
+    Some("[!#$%&'*+\\-.^_`|~0-9A-Za-z]+"),
+    Some("[\\x00-\\x08\\x0a-\\x1f\\x7f]"),
+    Some("%[A-Fa-f0-9]{2}"),
+    Some(
+        "(?:(?P<scheme>([a-zA-Z][a-zA-Z0-9+.-]*)?):)?(?://(?P<authority>[^/?#]*))?(?P<path>[^?#]*)(?:\\?(?P<query>[^#]*))?(?:#(?P<fragment>.*))?",
+    ),
+    Some("(?:(?P<userinfo>.*)@)?(?P<host>(\\[.*\\]|[^:@]*)):?(?P<port>.*)?"),
+    Some("([a-zA-Z][a-zA-Z0-9+.-]*)?"),
+    Some("[^/?#]*"),
+    Some("[^?#]*"),
+    Some("[^#]*"),
+    Some(".*"),
+    Some("[^@]*"),
+    Some("(\\[.*\\]|[^:]*)"),
+    Some("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"),
+    Some("^\\[.*\\]$"),
+    Some("^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*$"),
+    Some("%[0-9A-Fa-f]{2}"),
+    Some("^[A-Za-z0-9._-]{1,128}$"),
+    None,
+    Some(
+        "^(?:<local-command-stdout>|<session-start-hook>|<tick>|<goal>|\\[Request interrupted by user[^\\]]*\\]|\\s*<ide_opened_file>[\\s\\S]*</ide_opened_file>\\s*$|\\s*<ide_selection>[\\s\\S]*</ide_selection>\\s*$)",
+    ),
+    Some("<command-name>(.*?)</command-name>"),
+    Some("[^a-zA-Z0-9]"),
+    Some("[\u{200b}-\u{200f}\u{202a}-\u{202e}\u{2066}-\u{2069}\u{feff}\u{e000}-\u{f8ff}]"),
+    Some("(?:@[A-Za-z0-9._-]+/)?[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9.!+_-]*)?"),
+    None,
+    Some(";.*\\bextra\\s*=="),
+    Some("[(),\\x00-\\x1f\\x7f-\\x9f\\ufeff]"),
+    None,
+    Some("(\\d{1,9})\\.(\\d{1,9})\\.(\\d{1,9})"),
+];
+
+/// The alphabet of `base64.b64encode`.
+pub(crate) const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// `HTTPRedirectHandler.max_repeats`.
+pub(crate) const MAX_REPEATS: u32 = 4;
+
+/// `HTTPRedirectHandler.max_redirections`.
+pub(crate) const MAX_REDIRECTIONS: usize = 10;
+
+/// `HTTPRedirectHandler.inf_msg`.
+pub(crate) const INFINITE_LOOP: &str = "The HTTP server returned a redirect error that would lead to an infinite loop.\n\
+                             The last 30x error message was:\n";
+
+/// The `OverflowError` `chr` raises for a code point past a C `int`, which a `\U` escape can name.
+pub(crate) const CHR_TOO_LARGE: &str = "Python int too large to convert to C int";
+
+/// The `OverflowError` a repetition bound at or past `MAXREPEAT` raises.
+pub(crate) const REPEAT_TOO_LARGE: &str = "the repetition number is too large";
+
+/// The `ValueError` of `fix_flags` for a str pattern with both the ASCII and UNICODE flags.
+pub(crate) const FLAGS_INCOMPATIBLE: &str = "ASCII and UNICODE flags are incompatible";
+
+/// How the `ValueError` of the `int()` digit limit starts.
+pub(crate) const DIGIT_LIMIT_PREFIX: &str = "Exceeds the limit (";
+
+/// What Python reports when the server closes the connection in the middle of the handshake.
+pub(crate) const EOF: &str = "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol";
+
+/// What OpenSSL reports for a record it cannot take, including one that does not decrypt.
+pub(crate) const RECORD_LAYER_FAILURE: &str = "[SSL] record layer failure";
+
+/// `SSLZeroReturnError`, a `close_notify` alert.
+pub(crate) const CLOSED: &str = "TLS/SSL connection has been closed (EOF)";
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const INTERNAL_ERROR: &str = "[SSL] internal error";
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const MISSING_SUPPORTED_VERSIONS: &str = "[SSL] missing supported versions extension";
+
+/// The alert descriptions OpenSSL names, with the text a fatal one raises.
+pub(crate) const ALERTS: &[(u8, &str)] = &[
+    (
+        10,
+        "[SSL: SSLV3_ALERT_UNEXPECTED_MESSAGE] ssl/tls alert unexpected message",
+    ),
+    (20, "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] ssl/tls alert bad record mac"),
+    (21, "[SSL: TLSV1_ALERT_DECRYPTION_FAILED] tlsv1 alert decryption failed"),
+    (22, "[SSL: TLSV1_ALERT_RECORD_OVERFLOW] tlsv1 alert record overflow"),
+    (
+        30,
+        "[SSL: SSLV3_ALERT_DECOMPRESSION_FAILURE] ssl/tls alert decompression failure",
+    ),
+    (
+        40,
+        "[SSL: SSLV3_ALERT_HANDSHAKE_FAILURE] ssl/tls alert handshake failure",
+    ),
+    (41, "[SSL: SSLV3_ALERT_NO_CERTIFICATE] ssl/tls alert no certificate"),
+    (42, "[SSL: SSLV3_ALERT_BAD_CERTIFICATE] ssl/tls alert bad certificate"),
+    (
+        43,
+        "[SSL: SSLV3_ALERT_UNSUPPORTED_CERTIFICATE] ssl/tls alert unsupported certificate",
+    ),
+    (
+        44,
+        "[SSL: SSLV3_ALERT_CERTIFICATE_REVOKED] ssl/tls alert certificate revoked",
+    ),
+    (
+        45,
+        "[SSL: SSLV3_ALERT_CERTIFICATE_EXPIRED] ssl/tls alert certificate expired",
+    ),
+    (
+        46,
+        "[SSL: SSLV3_ALERT_CERTIFICATE_UNKNOWN] ssl/tls alert certificate unknown",
+    ),
+    (
+        47,
+        "[SSL: SSLV3_ALERT_ILLEGAL_PARAMETER] ssl/tls alert illegal parameter",
+    ),
+    (48, "[SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca"),
+    (49, "[SSL: TLSV1_ALERT_ACCESS_DENIED] tlsv1 alert access denied"),
+    (50, "[SSL: TLSV1_ALERT_DECODE_ERROR] tlsv1 alert decode error"),
+    (51, "[SSL: TLSV1_ALERT_DECRYPT_ERROR] tlsv1 alert decrypt error"),
+    (
+        60,
+        "[SSL: TLSV1_ALERT_EXPORT_RESTRICTION] tlsv1 alert export restriction",
+    ),
+    (70, "[SSL: TLSV1_ALERT_PROTOCOL_VERSION] tlsv1 alert protocol version"),
+    (
+        71,
+        "[SSL: TLSV1_ALERT_INSUFFICIENT_SECURITY] tlsv1 alert insufficient security",
+    ),
+    (80, "[SSL: TLSV1_ALERT_INTERNAL_ERROR] tlsv1 alert internal error"),
+    (
+        86,
+        "[SSL: TLSV1_ALERT_INAPPROPRIATE_FALLBACK] tlsv1 alert inappropriate fallback",
+    ),
+    (90, "[SSL: TLSV1_ALERT_USER_CANCELLED] tlsv1 alert user cancelled"),
+    (100, "[SSL: TLSV1_ALERT_NO_RENEGOTIATION] tlsv1 alert no renegotiation"),
+    (
+        109,
+        "[SSL: TLSV13_ALERT_MISSING_EXTENSION] tlsv13 alert missing extension",
+    ),
+    (110, "[SSL: TLSV1_UNSUPPORTED_EXTENSION] tlsv1 unsupported extension"),
+    (
+        111,
+        "[SSL: TLSV1_CERTIFICATE_UNOBTAINABLE] tlsv1 certificate unobtainable",
+    ),
+    (112, "[SSL: TLSV1_UNRECOGNIZED_NAME] tlsv1 unrecognized name"),
+    (
+        113,
+        "[SSL: TLSV1_BAD_CERTIFICATE_STATUS_RESPONSE] tlsv1 bad certificate status response",
+    ),
+    (
+        114,
+        "[SSL: TLSV1_BAD_CERTIFICATE_HASH_VALUE] tlsv1 bad certificate hash value",
+    ),
+    (115, "[SSL] tlsv1 alert unknown psk identity"),
+    (
+        116,
+        "[SSL: TLSV13_ALERT_CERTIFICATE_REQUIRED] tlsv13 alert certificate required",
+    ),
+    (120, "[SSL] tlsv1 alert no application protocol"),
+];
+
+/// The random of a hello retry request.
+pub(crate) const HELLO_RETRY_RANDOM: [u8; 32] = [
+    0xcf, 0x21, 0xad, 0x74, 0xe5, 0x9a, 0x61, 0x11, 0xbe, 0x1d, 0x8c, 0x02, 0x1e, 0x65, 0xb8, 0x91, 0xc2, 0xa2, 0x11,
+    0x16, 0x7a, 0xbb, 0x8c, 0x5e, 0x07, 0x9e, 0x09, 0xe2, 0xc8, 0xa8, 0x33, 0x9c,
+];
+
+/// The cipher suites Python's default context offers.
+pub(crate) const SENT_SUITES: [u16; 17] = [
+    0x1302, 0x1303, 0x1301, 0xc02c, 0xc030, 0xc02b, 0xc02f, 0xcca9, 0xcca8, 0xc024, 0xc028, 0xc023, 0xc027, 0x009f,
+    0x009e, 0x006b, 0x0067,
+];
+
+/// The groups Python's default context supports.
+pub(crate) const SUPPORTED_GROUPS: [u16; 8] = [0x11ec, 0x001d, 0x0017, 0x001e, 0x0018, 0x0019, 0x0100, 0x0101];
+
+/// The groups `rustls` cannot use. A retry request for one of them leaves `rustls` on a group it can use, while the
+/// gate keeps checking the server's answers against the group it asked for.
+pub(crate) const DETACHED_GROUPS: [u16; 4] = [0x0019, 0x001e, 0x0100, 0x0101];
+
+/// The lengths OpenSSL checks key shares of the groups `rustls` cannot use against.
+pub(crate) const SHARE_LENGTHS: [(u16, usize); 4] = [(0x001e, 56), (0x0019, 133), (0x0100, 256), (0x0101, 384)];
+
+/// The cipher suites OpenSSL 3.5 knows, as inclusive ranges.
+pub(crate) const KNOWN_RANGES: &[(u16, u16)] = &[
+    (0x0001, 0x0002),
+    (0x0007, 0x0007),
+    (0x002c, 0x002f),
+    (0x0032, 0x0035),
+    (0x0038, 0x003d),
+    (0x0040, 0x0041),
+    (0x0044, 0x0046),
+    (0x0067, 0x0067),
+    (0x006a, 0x006d),
+    (0x0081, 0x0081),
+    (0x0083, 0x0084),
+    (0x0087, 0x0089),
+    (0x008c, 0x008d),
+    (0x0090, 0x0091),
+    (0x0094, 0x0096),
+    (0x0099, 0x009f),
+    (0x00a2, 0x00a3),
+    (0x00a6, 0x00ba),
+    (0x00bd, 0x00c0),
+    (0x00c3, 0x00c5),
+    (0x1301, 0x1305),
+    (0xc006, 0xc006),
+    (0xc009, 0xc00a),
+    (0xc010, 0xc010),
+    (0xc013, 0xc015),
+    (0xc018, 0xc019),
+    (0xc01d, 0xc024),
+    (0xc027, 0xc028),
+    (0xc02b, 0xc02c),
+    (0xc02f, 0xc030),
+    (0xc035, 0xc03b),
+    (0xc050, 0xc053),
+    (0xc056, 0xc057),
+    (0xc05c, 0xc05d),
+    (0xc060, 0xc061),
+    (0xc06a, 0xc06f),
+    (0xc072, 0xc073),
+    (0xc076, 0xc077),
+    (0xc094, 0xc0af),
+    (0xc0b4, 0xc0b5),
+    (0xc100, 0xc102),
+    (0xcca8, 0xccae),
+    (0xff85, 0xff85),
+    (0xff87, 0xff87),
+];
+
+/// The messages an extension may appear in, as OpenSSL's `SSL_EXT_*` context bits.
+pub(crate) const CLIENT_HELLO: u16 = 1;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const SERVER_HELLO_12: u16 = 2;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const SERVER_HELLO_13: u16 = 4;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const RETRY_REQUEST: u16 = 8;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const ENCRYPTED_EXTENSIONS: u16 = 16;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const CERTIFICATE_13: u16 = 32;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const CERTIFICATE_REQUEST_13: u16 = 64;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const NEW_SESSION_TICKET_13: u16 = 128;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const TLS12_ONLY: u16 = 256;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const TLS13_ONLY: u16 = 512;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const DTLS_ONLY: u16 = 1024;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const IMPLEMENTATION_ONLY: u16 = 2048;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const SSL3_ALLOWED: u16 = 4096;
+
+/// OpenSSL's table of built-in extensions, in the order it parses them, with their contexts.
+pub(crate) const KNOWN_EXTENSIONS: &[(u16, u16)] = &[
+    (0xff01, CLIENT_HELLO | SERVER_HELLO_12 | TLS12_ONLY | SSL3_ALLOWED),
+    (0x0000, CLIENT_HELLO | SERVER_HELLO_12 | ENCRYPTED_EXTENSIONS),
+    (0x0001, CLIENT_HELLO | SERVER_HELLO_12 | ENCRYPTED_EXTENSIONS),
+    (0x000c, CLIENT_HELLO | TLS12_ONLY),
+    (0x000b, CLIENT_HELLO | SERVER_HELLO_12 | TLS12_ONLY),
+    (0x000a, CLIENT_HELLO | SERVER_HELLO_12 | ENCRYPTED_EXTENSIONS),
+    (0x0023, CLIENT_HELLO | SERVER_HELLO_12 | TLS12_ONLY),
+    (
+        0x0005,
+        CLIENT_HELLO | SERVER_HELLO_12 | CERTIFICATE_13 | CERTIFICATE_REQUEST_13,
+    ),
+    (0x3374, CLIENT_HELLO | SERVER_HELLO_12 | TLS12_ONLY),
+    (0x0010, CLIENT_HELLO | SERVER_HELLO_12 | ENCRYPTED_EXTENSIONS),
+    (
+        0x000e,
+        CLIENT_HELLO | SERVER_HELLO_12 | ENCRYPTED_EXTENSIONS | DTLS_ONLY,
+    ),
+    (0x0016, CLIENT_HELLO | SERVER_HELLO_12 | TLS12_ONLY),
+    (
+        0x0012,
+        CLIENT_HELLO | SERVER_HELLO_12 | CERTIFICATE_13 | CERTIFICATE_REQUEST_13,
+    ),
+    (0x0017, CLIENT_HELLO | SERVER_HELLO_12 | TLS12_ONLY),
+    (0x0032, CLIENT_HELLO | CERTIFICATE_REQUEST_13),
+    (0x0031, CLIENT_HELLO | TLS13_ONLY),
+    (0x0013, CLIENT_HELLO | SERVER_HELLO_12 | ENCRYPTED_EXTENSIONS),
+    (0x0014, CLIENT_HELLO | SERVER_HELLO_12 | ENCRYPTED_EXTENSIONS),
+    (0x000d, CLIENT_HELLO | CERTIFICATE_REQUEST_13),
+    (
+        0x002b,
+        CLIENT_HELLO | SERVER_HELLO_13 | RETRY_REQUEST | IMPLEMENTATION_ONLY,
+    ),
+    (0x002d, CLIENT_HELLO | TLS13_ONLY | IMPLEMENTATION_ONLY),
+    (
+        0x0033,
+        CLIENT_HELLO | SERVER_HELLO_13 | RETRY_REQUEST | TLS13_ONLY | IMPLEMENTATION_ONLY,
+    ),
+    (0x002c, CLIENT_HELLO | RETRY_REQUEST | TLS13_ONLY | IMPLEMENTATION_ONLY),
+    (0xfde8, CLIENT_HELLO | SERVER_HELLO_12 | TLS12_ONLY),
+    (
+        0x001b,
+        CLIENT_HELLO | CERTIFICATE_REQUEST_13 | TLS13_ONLY | IMPLEMENTATION_ONLY,
+    ),
+    (
+        0x002a,
+        CLIENT_HELLO | ENCRYPTED_EXTENSIONS | NEW_SESSION_TICKET_13 | TLS13_ONLY,
+    ),
+    (0x002f, CLIENT_HELLO | CERTIFICATE_REQUEST_13 | TLS13_ONLY),
+    (0x0015, CLIENT_HELLO),
+    (
+        0x0029,
+        CLIENT_HELLO | SERVER_HELLO_13 | TLS13_ONLY | IMPLEMENTATION_ONLY,
+    ),
+];
+
+/// The extensions a server may answer. Python's client hello does not ask for `status_request`, but `rustls` always
+/// does, so a genuine server may acknowledge it.
+pub(crate) const SENT_EXTENSIONS: [u16; 13] = [5, 0xff01, 11, 10, 35, 16, 22, 23, 49, 13, 43, 45, 51];
+
+/// The HTTP methods OpenSSL recognises at the start of a server's first bytes.
+pub(crate) const HTTP_METHODS: [&[u8]; 8] = [
+    b"GET ", b"POST ", b"HEAD ", b"PATCH", b"OPTIO", b"DELET", b"TRACE", b"PUT ",
+];
+
+/// The handshake type the gate gives a change cipher spec, outside the range of real ones.
+pub(crate) const CHANGE_CIPHER_SPEC: u16 = 0x100;
+
+/// The largest record body OpenSSL takes before encryption, and the largest it takes encrypted.
+pub(crate) const MAX_PLAINTEXT: usize = 16384;
+
+/// Used by the python_urlopen_tls_gate port.
+pub(crate) const MAX_CIPHERTEXT: usize = 16640;
+
+/// Where the session id of the client hello sits in the bytes `rustls` writes: after the record header, the handshake
+/// header, the version and the random.
+pub(crate) const SESSION_ID_AT: usize = 43;
+
+/// `PySet_MINSIZE`.
+pub(crate) const MIN_SIZE: usize = 8;
+
+/// `LINEAR_PROBES`.
+pub(crate) const LINEAR_PROBES: usize = 9;
+
+/// `PERTURB_SHIFT`.
+pub(crate) const PERTURB_SHIFT: u32 = 5;
+
+/// The `str` of the `ValueError` `str()` raises for an `int` of more than `sys.get_int_max_str_digits()` digits.
+pub(crate) const INT_STR_LIMIT_TEXT: &str = "Exceeds the limit (4300 digits) for integer string conversion; use \
+                                             sys.set_int_max_str_digits() to increase the limit";
+
+/// The text of the `OverflowError` a size below `ssize_t` raises.
+pub(crate) const READ_SIZE_OVERFLOW: &str = "cannot fit 'int' into an index-sized integer";
+
+/// The OpenSSL source location CPython 3.12 reports for handshake failures.
+pub(crate) const SSL_LOCATION: &str = "(_ssl.c:1011)";
+
+/// Nesting under which the recursion limit of `serde_json` (127 levels) never trips, so its recursive walks run in
+/// place.
+pub(crate) const SHALLOW: usize = 64;
+
+/// The stack of the thread that finds the error of a malformed message nested deeper than [`SHALLOW`].
+pub(crate) const PARSE_STACK: usize = 512 << 20;
+
+/// Containers the Python SDK's message reader enters with `json.loads` before CPython 3.12's C recursion limit
+/// raises: the C scanner checks the limit once per object or array, and the reader task already holds the rest.
+pub(crate) const PYTHON_READER_DEPTH: usize = 9991;
+
+/// The most anyio's `TextReceiveStream` takes from the pipe in one `receive`.
+pub(crate) const PYTHON_CHUNK: usize = 65536;
+
+/// `mimetypes.knownfiles`. On Windows only the registry is read, which raises only when `HKEY_CLASSES_ROOT` cannot
+/// be opened for reading.
+#[cfg(not(windows))]
+pub(crate) const MIME_FILES: [&str; 9] = [
+    "/etc/mime.types",
+    "/etc/httpd/mime.types",
+    "/etc/httpd/conf/mime.types",
+    "/etc/apache/mime.types",
+    "/etc/apache2/mime.types",
+    "/usr/local/etc/httpd/conf/mime.types",
+    "/usr/local/lib/netscape/mime.types",
+    "/usr/local/etc/httpd/conf/mime.types",
+    "/usr/local/etc/mime.types",
+];
+#[cfg(windows)]
+pub(crate) const MIME_FILES: [&str; 0] = [];
+
+/// What `TextIOWrapper` asks `BufferedReader.read1` for, which an empty buffer reads from the file in one call.
+pub(crate) const TEXT_CHUNK: usize = 8192;
+
+/// The code points CPython 3.12's `str.lower()` (Unicode 15.0) leaves as they are and `char::to_lowercase` (Unicode
+/// 17.0 in Rust 1.96) maps: the case pairs Unicode 16.0 added. Everywhere else the two answer the same, which the
+/// golden over every code point in `python_case.json` checks.
+pub(crate) const LOWER_SINCE_15: [RangeInclusive<char>; 9] = [
+    '\u{1c89}'..='\u{1c89}',
+    '\u{a7cb}'..='\u{a7cc}',
+    '\u{a7ce}'..='\u{a7ce}',
+    '\u{a7d2}'..='\u{a7d2}',
+    '\u{a7d4}'..='\u{a7d4}',
+    '\u{a7da}'..='\u{a7da}',
+    '\u{a7dc}'..='\u{a7dc}',
+    '\u{10d50}'..='\u{10d65}',
+    '\u{16ea0}'..='\u{16eb8}',
+];
+
+/// The code points CPython 3.12's `str.upper()` leaves as they are and `char::to_uppercase` maps.
+pub(crate) const UPPER_SINCE_15: [RangeInclusive<char>; 10] = [
+    '\u{19b}'..='\u{19b}',
+    '\u{264}'..='\u{264}',
+    '\u{1c8a}'..='\u{1c8a}',
+    '\u{a7cd}'..='\u{a7cd}',
+    '\u{a7cf}'..='\u{a7cf}',
+    '\u{a7d3}'..='\u{a7d3}',
+    '\u{a7d5}'..='\u{a7d5}',
+    '\u{a7db}'..='\u{a7db}',
+    '\u{10d70}'..='\u{10d85}',
+    '\u{16ebb}'..='\u{16ed3}',
+];
+
+/// The code points that are `Cased` or `Case_Ignorable` in Rust's tables and neither in Unicode 15.0.
+pub(crate) const CONTEXT_SINCE_15: [RangeInclusive<char>; 38] = [
+    '\u{897}'..='\u{897}',
+    '\u{1acf}'..='\u{1add}',
+    '\u{1ae0}'..='\u{1aeb}',
+    '\u{1c89}'..='\u{1c8a}',
+    '\u{a7cb}'..='\u{a7cf}',
+    '\u{a7d2}'..='\u{a7d2}',
+    '\u{a7d4}'..='\u{a7d4}',
+    '\u{a7da}'..='\u{a7dc}',
+    '\u{a7f1}'..='\u{a7f1}',
+    '\u{10d4e}'..='\u{10d4e}',
+    '\u{10d50}'..='\u{10d65}',
+    '\u{10d69}'..='\u{10d6d}',
+    '\u{10d6f}'..='\u{10d85}',
+    '\u{10ec5}'..='\u{10ec5}',
+    '\u{10efa}'..='\u{10efc}',
+    '\u{113bb}'..='\u{113c0}',
+    '\u{113ce}'..='\u{113ce}',
+    '\u{113d0}'..='\u{113d0}',
+    '\u{113d2}'..='\u{113d2}',
+    '\u{113e1}'..='\u{113e2}',
+    '\u{11b60}'..='\u{11b60}',
+    '\u{11b62}'..='\u{11b64}',
+    '\u{11b66}'..='\u{11b66}',
+    '\u{11dd9}'..='\u{11dd9}',
+    '\u{11f5a}'..='\u{11f5a}',
+    '\u{1611e}'..='\u{16129}',
+    '\u{1612d}'..='\u{1612f}',
+    '\u{16d40}'..='\u{16d42}',
+    '\u{16d6b}'..='\u{16d6c}',
+    '\u{16ea0}'..='\u{16eb8}',
+    '\u{16ebb}'..='\u{16ed3}',
+    '\u{16ff2}'..='\u{16ff3}',
+    '\u{1e5ee}'..='\u{1e5ef}',
+    '\u{1e6e3}'..='\u{1e6e3}',
+    '\u{1e6e6}'..='\u{1e6e6}',
+    '\u{1e6ee}'..='\u{1e6ef}',
+    '\u{1e6f5}'..='\u{1e6f5}',
+    '\u{1e6ff}'..='\u{1e6ff}',
+];
+
+/// The recorded tables: sections of hexadecimal ranges and mappings.
+pub(crate) const TABLES: &str = include_str!("upstream/python_nameprep.txt");
+
+/// The `UnicodeError` text for a label of no or too many bytes.
+pub(crate) const EMPTY_OR_TOO_LONG: &str = "label empty or too long";
+
+/// `sace_prefix`, as code points.
+pub(crate) const ACE_PREFIX: [u32; 4] = [0x78, 0x6E, 0x2D, 0x2D];
+
+/// The label separators of the `dots` pattern: full stop, ideographic, fullwidth and halfwidth full stops.
+pub(crate) const DOTS: [u32; 4] = [0x2E, 0x3002, 0xFF0E, 0xFF61];
+
+/// The Hangul constants of `unicodedata.c`.
+pub(crate) const S_BASE: u32 = 0xAC00;
+pub(crate) const L_BASE: u32 = 0x1100;
+pub(crate) const V_BASE: u32 = 0x1161;
+pub(crate) const T_BASE: u32 = 0x11A7;
+pub(crate) const L_COUNT: u32 = 19;
+pub(crate) const V_COUNT: u32 = 21;
+pub(crate) const T_COUNT: u32 = 28;
+pub(crate) const N_COUNT: u32 = V_COUNT * T_COUNT;
+pub(crate) const S_COUNT: u32 = L_COUNT * N_COUNT;
+
+/// `punycode.digits`.
+pub(crate) const PUNYCODE_DIGITS: &[u8; 36] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const FNMATCH_STAR: u32 = '*' as u32;
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const FNMATCH_QUESTION: u32 = '?' as u32;
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const FNMATCH_OPEN: u32 = '[' as u32;
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const FNMATCH_CLOSE: u32 = ']' as u32;
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const FNMATCH_BANG: u32 = '!' as u32;
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const FNMATCH_CARET: u32 = '^' as u32;
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const FNMATCH_HYPHEN: u32 = '-' as u32;
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const FNMATCH_BACKSLASH: u32 = '\\' as u32;
+
+/// The characters `re.escape` puts a backslash before.
+#[cfg(any(test, target_os = "macos", windows))]
+pub(crate) const RE_ESCAPE_SPECIAL: &[u8] = b"()[]{}?*+-|^$\\.&~# \t\n\r\x0b\x0c";
+
+/// The protocols `_get_proxies` reads, in its order.
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) const PROXY_PROTOCOLS: [&str; 5] = ["http", "https", "ftp", "gopher", "socks"];
+
+/// `kCFNumberSInt32Type`.
+#[cfg(target_os = "macos")]
+pub(crate) const CF_NUMBER_SINT32_TYPE: isize = 3;
+
+/// `HKEY_CURRENT_USER`: `(HKEY)(ULONG_PTR)((LONG)0x80000001)`, the `LONG` sign-extended to the width of a pointer.
+#[cfg(windows)]
+pub(crate) const HKEY_CURRENT_USER: isize = -0x7FFF_FFFF;
+/// `KEY_READ`, the access `winreg.OpenKey` asks for by default.
+#[cfg(windows)]
+pub(crate) const KEY_READ: u32 = 0x2_0019;
+#[cfg(windows)]
+pub(crate) const ERROR_SUCCESS: i32 = 0;
+#[cfg(windows)]
+pub(crate) const ERROR_MORE_DATA: i32 = 234;
+/// `ComputerNamePhysicalDnsHostname`, the name `socket.gethostname()` asks `GetComputerNameExW` for.
+#[cfg(windows)]
+pub(crate) const COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME: i32 = 5;
+/// `MAX_COMPUTERNAME_LENGTH`: CPython's first `GetComputerNameExW` buffer holds one unit more.
+#[cfg(windows)]
+pub(crate) const MAX_COMPUTERNAME_LENGTH: u32 = 15;
+/// The buffer `socket_gethostname` (CPython 3.12.16 `Modules/socketmodule.c`) hands `gethostname`, which may fill all
+/// of it but the last byte.
+#[cfg(unix)]
+pub(crate) const GETHOSTNAME_BUFFER: usize = 1024;
+/// `LCMAP_LOWERCASE`.
+#[cfg(windows)]
+pub(crate) const LCMAP_LOWERCASE: u32 = 0x100;
+/// `FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS`.
+#[cfg(windows)]
+pub(crate) const FORMAT_MESSAGE_FLAGS: u32 = 0x100 | 0x1000 | 0x200;
+/// `MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT)`.
+#[cfg(windows)]
+pub(crate) const DEFAULT_LANGUAGE: u32 = 0x400;
+
+#[cfg(windows)]
+pub(crate) const INTERNET_SETTINGS: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+/// `winreg` value types, as `Reg2Py` of `PC/winreg.c` converts them.
+#[cfg(any(test, windows))]
+pub(crate) const REG_SZ: u32 = 1;
+#[cfg(any(test, windows))]
+pub(crate) const REG_EXPAND_SZ: u32 = 2;
+#[cfg(any(test, windows))]
+pub(crate) const REG_DWORD: u32 = 4;
+#[cfg(any(test, windows))]
+pub(crate) const REG_MULTI_SZ: u32 = 7;
+#[cfg(any(test, windows))]
+pub(crate) const REG_QWORD: u32 = 11;
+
+/// The bytes a file starts with when the TypeScript settings reader decodes it as UTF-16LE.
+pub(crate) const UTF16LE_BOM: &[u8] = b"\xff\xfe";
+
+/// The UTF-8 byte order mark the `utf-8-sig` codec drops from the start of a Python settings file.
+pub(crate) const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";

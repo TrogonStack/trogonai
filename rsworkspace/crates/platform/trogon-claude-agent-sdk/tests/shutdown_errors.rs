@@ -275,6 +275,30 @@ async fn t03_a_corrupt_end_of_stream_tail_is_dropped_by_both_styles() -> TestRes
 }
 
 #[tokio::test]
+async fn python_meets_the_json_loads_recursion_limit_even_in_an_unterminated_tail() -> TestResult {
+    let (messages, error) = terminal_error("deep-line", ArgvStyle::Python).await?;
+    assert!(!messages.iter().any(|message| matches!(message, Message::Result(_))));
+    let Some(error @ Error::Recursion(_)) = error else {
+        return Err(std::io::Error::other("expected a recursion error").into());
+    };
+    assert_eq!(
+        error.to_string(),
+        "maximum recursion depth exceeded while decoding a JSON array from a unicode string"
+    );
+
+    let (messages, error) = terminal_error("deep-tail", ArgvStyle::Python).await?;
+    assert!(messages.iter().any(|message| matches!(message, Message::Result(_))));
+    let Some(error @ Error::Recursion(_)) = error else {
+        return Err(std::io::Error::other("expected a recursion error").into());
+    };
+    assert_eq!(
+        error.to_string(),
+        "maximum recursion depth exceeded while decoding a JSON object from a unicode string"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory() -> TestResult {
     let missing = PathBuf::from("/nonexistent-claude-sdk-test/claude");
     let mut missing_cli = options("normal", ArgvStyle::Python)?;

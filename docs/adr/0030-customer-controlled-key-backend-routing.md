@@ -7,6 +7,11 @@ date: 2026-07-18
 
 # ADR#0030: Customer-Controlled Key Backend Routing
 
+> **Related research:** The [portable identity and adapter roadmap](../research/workload-identity/adapter-roadmap.md)
+> inventories current implementation and plans wrapping-backend conformance,
+> service admission and migration. It preserves this draft's baseline adoption
+> gate and the accepted sealing refinements below; it does not accept this ADR.
+
 > **Refined by [ADR#0083](./0083-sealed-content-envelope.md) (2026-10-30).** The
 > Non-Goal on the payload cipher, nonce construction and envelope format is
 > settled for the sealing purpose: AES-256-GCM with random nonces through

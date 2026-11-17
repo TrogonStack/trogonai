@@ -16,7 +16,7 @@ node = "26.3.0"
 pnpm = "11.5.1"
 python = "3.14.5"
 uv = "0.11.18"
-rust = { version = "1.96.0", profile = "minimal", components = "rustfmt,clippy,llvm-tools-preview" }
+rust = { version = "1.96.0", profile = "minimal", components = "rustfmt,clippy,llvm-tools-preview", targets = "wasm32-unknown-unknown" }
 
 [tasks]
 build = { description = "Build all", depends = ["build:rust", "build:go", "build:docs", "build:web"] }

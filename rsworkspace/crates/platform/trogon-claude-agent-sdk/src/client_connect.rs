@@ -111,9 +111,15 @@ impl ClaudeSdkClient {
 
     /// Python `ClaudeSDKClient.query(prompt, session_id)`: writes the prompt in `session_id`. [`ClaudeSdkClient::query`]
     /// writes it in the dialect's default session.
+    ///
+    /// Under the TypeScript style the prompt is written as `sdk.mjs` writes a string prompt, as one text block.
     pub async fn query_in_session(&self, prompt: Prompt, session_id: impl Into<SessionId>) -> Result<(), Error> {
         let mut input = UserInput::from(prompt);
         input.session_id = Some(session_id.into());
+        let input = match self.runtime.handle.style {
+            crate::ArgvStyle::TypeScript => input.into_query_prompt(true),
+            crate::ArgvStyle::Python => input,
+        };
         self.send_input(input).await
     }
 
@@ -128,16 +134,14 @@ impl ClaudeSdkClient {
     }
 
     /// Python `ClaudeSDKClient.query(AsyncIterable, session_id)`: writes each input in turn, in `session_id`
-    /// unless it names one, and leaves stdin open.
+    /// unless it names one, and leaves stdin open. As in Python, a message without a `session_id` key gets it last.
     pub async fn query_stream_in_session<S>(&self, mut stream: S, session_id: impl Into<SessionId>) -> Result<(), Error>
     where
         S: futures_util::Stream<Item = UserInput> + Unpin,
     {
         let session_id = session_id.into();
         while let Some(mut input) = stream.next().await {
-            if input.session_id.is_none() {
-                input.session_id = Some(session_id.clone());
-            }
+            input.fill_session(&session_id);
             self.send_input(input).await?;
         }
         Ok(())

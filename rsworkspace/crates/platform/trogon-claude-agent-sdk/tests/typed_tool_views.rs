@@ -393,7 +393,7 @@ fn tool_use_blocks_expose_a_typed_input_and_keep_the_raw_one() -> TestResult {
     let block = ContentBlock::ToolUse {
         id: ToolUseId::from("toolu_1"),
         name: ToolName::from("Bash"),
-        input: input.clone(),
+        input: input.clone().into(),
     };
     let typed = block.typed_input().ok_or("tool_use block has no typed input")?;
     assert!(is_variant(&format!("{typed:?}"), "BashInput"));
@@ -427,10 +427,8 @@ fn user_messages_expose_a_typed_tool_use_result_and_keep_the_raw_one() -> TestRe
         message.typed_tool_use_result("FutureTool"),
         Some(ToolOutputSchemas::Unknown(result))
     );
-    let without = UserMessage {
-        tool_use_result: None,
-        ..message
-    };
+    let mut without = message;
+    without.tool_use_result = None;
     assert_eq!(without.typed_tool_use_result("Bash"), None);
     Ok(())
 }

@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Enforce the primitive layer policy"
-#MISE dir="tsworkspace"
-set -euo pipefail
-
-exec pnpm check:primitives

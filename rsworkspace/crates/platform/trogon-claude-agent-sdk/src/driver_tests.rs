@@ -8,7 +8,10 @@ use std::{
 use tokio::sync::mpsc;
 
 use super::*;
-use crate::{ToolPermissionRequest, ToolSet, environment_plan::Inherited, process_transport::command};
+use crate::{
+    ToolPermissionRequest, ToolSet, environment_plan::Inherited, process_transport::command,
+    python_c_stack::PythonCStack,
+};
 
 /// A transport the test scripts: documents the driver writes arrive on `written`, and objects sent on
 /// `incoming` are what the driver reads.
@@ -16,6 +19,8 @@ struct ScriptedTransport {
     written: mpsc::UnboundedSender<String>,
     incoming: mpsc::UnboundedReceiver<JsonObject>,
     ready: bool,
+    /// How long each write takes before the document arrives, as a busy pipe or a remote transport would.
+    write_delay: Option<Duration>,
 }
 
 impl Transport for ScriptedTransport {
@@ -24,6 +29,9 @@ impl Transport for ScriptedTransport {
     }
 
     async fn write(&mut self, data: &str) -> Result<(), Error> {
+        if let Some(delay) = self.write_delay {
+            sleep(delay).await;
+        }
         self.written.send(data.to_owned()).map_err(|_| Error::DriverStopped)
     }
 
@@ -77,6 +85,7 @@ impl DriverFixture {
                 written: written_tx,
                 incoming,
                 ready: true,
+                write_delay: None,
             },
             input_ended: false,
             commands: command_rx,
@@ -230,7 +239,7 @@ async fn initialization_owns_admission_until_the_handshake_completes() -> Result
     fixture
         .driver
         .command(Command::Prompt {
-            input: crate::Prompt::from("before handshake").into(),
+            input: Box::new(crate::Prompt::from("before handshake").into()),
             response,
         })
         .await?;
@@ -266,6 +275,251 @@ async fn a_shutdown_already_requested_wins_before_more_input_is_read() -> Result
     let shutdown = std::mem::replace(&mut fixture.shutdown, replacement);
     shutdown.send(()).map_err(|_| Error::DriverStopped)?;
     fixture.driver.event_loop().await?;
+    fixture.finish().await
+}
+
+/// A fixture whose close was already requested before the driver writes, with writes that take `delay`.
+fn closed_before_a_write(delay: Option<Duration>) -> Result<DriverFixture, Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.transport.write_delay = delay;
+    let (replacement, _receiver) = oneshot::channel();
+    let shutdown = std::mem::replace(&mut fixture.shutdown, replacement);
+    shutdown.send(()).map_err(|_| Error::DriverStopped)?;
+    Ok(fixture)
+}
+
+fn prompt_command(text: &str) -> (Command, oneshot::Receiver<Result<(), Error>>) {
+    let (response, receiver) = oneshot::channel();
+    let command = Command::Prompt {
+        input: Box::new(crate::Prompt::from(text).into()),
+        response,
+    };
+    (command, receiver)
+}
+
+/// The close lands after the driver took the prompt, as when `WarmQuery.query` returns and the caller disconnects at
+/// once. A random choice between the close and a transport that is ready drops the prompt half the time, so every
+/// round must write it.
+#[tokio::test(start_paused = true)]
+async fn a_prompt_taken_before_the_close_is_written() -> Result<(), Box<dyn std::error::Error>> {
+    for round in 0..64 {
+        let mut fixture = closed_before_a_write(None)?;
+        let (command, receiver) = prompt_command("taken before the close");
+        fixture.driver.command(command).await?;
+        assert!(matches!(receiver.await?, Ok(())), "round {round}");
+        let written = fixture.harness.written.try_recv()?;
+        assert!(written.contains("taken before the close"), "round {round}: {written}");
+        // The close still ends the run before anything else is read.
+        fixture.driver.event_loop().await?;
+        assert!(fixture.driver.shutdown_seen, "round {round}");
+        fixture.finish().await?;
+    }
+    Ok(())
+}
+
+/// A transport that cannot take the frame now loses to the close, so a CLI that stopped reading cannot hold it.
+#[tokio::test(start_paused = true)]
+async fn a_write_that_has_to_wait_gives_way_to_the_close() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
+    let (command, _receiver) = prompt_command("never drained");
+    let started = Instant::now();
+    let outcome = fixture.driver.command(command).await;
+    assert!(matches!(outcome, Err(Error::ShutdownRequested)), "{outcome:?}");
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(fixture.driver.shutdown_seen);
+    fixture.finish().await
+}
+
+/// The close reached the driver ahead of commands queued before it: the prompts go to stdin in order and everything
+/// else is handed back unapplied.
+#[tokio::test(start_paused = true)]
+async fn prompts_queued_behind_the_close_are_written_and_the_rest_handed_back() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut fixture = closed_before_a_write(None)?;
+    fixture.driver.shutdown_seen = true;
+    let (first, first_written) = prompt_command("queued first");
+    let (initialize, _initialized) = oneshot::channel();
+    let (second, second_written) = prompt_command("queued second");
+    for command in [
+        first,
+        Command::Initialize {
+            first: false,
+            response: initialize,
+        },
+        second,
+    ] {
+        fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+    }
+    let unapplied = fixture.driver.write_queued_prompts().await;
+    assert!(matches!(
+        unapplied.as_slice(),
+        [Command::Initialize { first: false, .. }]
+    ));
+    assert!(matches!(first_written.await?, Ok(())));
+    assert!(matches!(second_written.await?, Ok(())));
+    for expected in ["queued first", "queued second"] {
+        let written = fixture.harness.written.try_recv()?;
+        assert!(written.contains(expected), "{written}");
+    }
+    fixture.finish().await
+}
+
+/// A queued prompt the transport cannot take stops the flush, so the prompts behind it stay unwritten.
+#[tokio::test(start_paused = true)]
+async fn a_queued_prompt_that_cannot_be_written_stops_the_flush() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
+    fixture.driver.shutdown_seen = true;
+    fixture.driver.abort.cancel();
+    let (stuck, _stuck_written) = prompt_command("stuck");
+    let (behind, _behind_written) = prompt_command("behind");
+    for command in [stuck, behind] {
+        fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+    }
+    let started = Instant::now();
+    let unapplied = fixture.driver.write_queued_prompts().await;
+    assert!(unapplied.is_empty());
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::Prompt { .. })
+    ));
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_queue_flushes_prompts_in_order_without_applying_other_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let (control, mut controlled) = oneshot::channel();
+    let (first, first_written) = oneshot::channel();
+    let (finish, mut input_finished) = oneshot::channel();
+    let (second, second_written) = oneshot::channel();
+    for command in [
+        Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("first queued prompt").into()),
+            response: first,
+        },
+        Command::FinishInput {
+            completion: Completion::Run,
+            written: None,
+            response: finish,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("second queued prompt").into()),
+            response: second,
+        },
+    ] {
+        assert!(fixture.commands.try_send(command).is_ok());
+    }
+    fixture.shutdown.send(()).map_err(|_| Error::DriverStopped)?;
+    let (terminal, terminated) = oneshot::channel();
+    fixture.driver.run(Ok(()), terminal).await;
+
+    assert!(matches!(terminated.await?, Ok(())));
+    assert!(matches!(first_written.await?, Ok(())));
+    assert!(matches!(second_written.await?, Ok(())));
+    for expected in ["first queued prompt", "second queued prompt"] {
+        let frame: serde_json::Value = serde_json::from_str(&fixture.harness.written.try_recv()?)?;
+        assert_eq!(
+            frame,
+            serde_json::json!({
+                "type": "user",
+                "message": {"role": "user", "content": expected},
+                "parent_tool_use_id": null,
+            })
+        );
+    }
+    assert!(fixture.harness.written.recv().await.is_none());
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(matches!(
+        input_finished.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_queue_stops_at_first_write_failure_without_draining_later_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.shutdown_seen = true;
+    fixture.harness.written.close();
+    let (control, mut controlled) = oneshot::channel();
+    let (first, mut first_written) = oneshot::channel();
+    let (second, mut second_written) = oneshot::channel();
+    let (finish, mut input_finished) = oneshot::channel();
+    for command in [
+        Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("failed queued prompt").into()),
+            response: first,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("later queued prompt").into()),
+            response: second,
+        },
+        Command::FinishInput {
+            completion: Completion::Run,
+            written: None,
+            response: finish,
+        },
+    ] {
+        assert!(fixture.commands.try_send(command).is_ok());
+    }
+
+    let unapplied = fixture.driver.write_queued_prompts().await;
+
+    assert!(matches!(
+        unapplied.as_slice(),
+        [Command::Control {
+            operation: ControlOperation::Interrupt,
+            ..
+        }]
+    ));
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        first_written.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(matches!(
+        second_written.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        input_finished.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::Prompt { input, .. }) if input.to_wire_json()?["message"]["content"] == "later queued prompt"
+    ));
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::FinishInput { .. })
+    ));
+    assert!(fixture.driver.commands.try_recv().is_none());
+    assert_eq!(fixture.driver.next_id, 0);
+    assert!(fixture.driver.run_state.input_done.is_none());
+    drop(unapplied);
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
     fixture.finish().await
 }
 
@@ -327,7 +581,7 @@ async fn an_abandoned_message_consumer_stops_publication() -> Result<(), Box<dyn
 async fn a_stale_panicked_callback_cannot_terminate_the_current_session() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = DriverFixture::new()?;
     let id = ControlRequestId::from("stale-panic");
-    fixture.driver.spawn_callback(
+    fixture.driver.spawn_callback::<_, serde_json::Value>(
         id.clone(),
         crate::CancellationToken::new(),
         Some(Duration::from_secs(1)),
@@ -442,7 +696,13 @@ fn tool_lists_reach_the_cli_verbatim() -> Result<(), Error> {
         tools: ToolSet::Only(vec![crate::BuiltinToolName::from("Read Bash")]),
         ..ClaudeAgentOptions::default()
     };
-    let command = command(&options, std::path::Path::new("claude"), &Inherited::new(), None)?;
+    let command = command(
+        &options,
+        std::path::Path::new("claude"),
+        &Inherited::new(),
+        None,
+        PythonCStack::CLIENT_CONNECT,
+    )?;
     let arguments: Vec<_> = command
         .as_std()
         .get_args()
@@ -489,7 +749,7 @@ fn argv_delivery_leaves_the_initialize_request_without_plugins() -> Result<(), E
 }
 
 fn derived_label_in(options: &ClaudeAgentOptions, inherited: &Inherited, cli: &std::path::Path) -> Option<String> {
-    let command = command(options, cli, inherited, None).ok()?;
+    let command = command(options, cli, inherited, None, PythonCStack::CLIENT_CONNECT).ok()?;
     command
         .as_std()
         .get_envs()
@@ -538,8 +798,12 @@ async fn the_request_counter_wraps_by_default() -> Result<(), Box<dyn std::error
     let mut fixture = DriverFixture::new()?;
     fixture.driver.argv_style = crate::ArgvStyle::Python;
     fixture.driver.next_id = u64::MAX;
-    assert!(fixture.driver.next_request_id()?.as_str().starts_with("req_0_"));
-    assert!(fixture.driver.next_request_id()?.as_str().starts_with("req_1_"));
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_0_"));
+    assert_eq!(fixture.driver.next_id, 0);
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_1_"));
+    assert_eq!(fixture.driver.next_id, 1);
     fixture.finish().await
 }
 
@@ -619,7 +883,7 @@ async fn an_unanswered_initialize_expires_after_the_typescript_timer_and_rejects
             },
         );
         fixture.driver.held_commands.push_back(Command::Prompt {
-            input: crate::Prompt::from("hi").into(),
+            input: Box::new(crate::Prompt::from("hi").into()),
             response: prompt,
         });
         fixture.driver.held_commands.push_back(Command::Control {
@@ -719,7 +983,7 @@ async fn backpressure_stops_reading_and_overflow_reaches_the_caller() -> Result<
     let reader = async {
         let mut seen = Vec::new();
         while let Some(Message::System(message)) = fixture.messages.recv().await {
-            seen.push(message.subtype);
+            seen.push(message.subtype.clone());
             if seen.len() == 5 {
                 break;
             }
@@ -740,7 +1004,7 @@ async fn a_duplicate_in_flight_request_is_skipped_or_run_by_policy() -> Result<(
         crate::CancellationToken::new(),
         None,
         wire::callback_error_response(&id, "fallback").map(Some),
-        pending(),
+        pending::<Result<Option<serde_json::Value>, ProtocolError>>(),
     );
     assert!(!fixture.driver.admit_callback(&id).await?);
     assert_eq!(fixture.driver.running_callbacks(), 1);
@@ -869,5 +1133,109 @@ fn the_initialize_request_carries_managed_settings_after_the_plugins() -> Result
             ..Default::default()
         },
     )?;
+    Ok(())
+}
+
+/// Deeper than the native stack of a test thread holds a recursive walk over.
+const DEEP: usize = 200_000;
+
+/// `levels` arrays around `null`, built without recursion.
+fn deep_value(levels: usize) -> serde_json::Value {
+    (0..levels).fold(serde_json::Value::Null, |inner, _| {
+        serde_json::Value::Array(vec![inner])
+    })
+}
+
+/// How many arrays `value` opens before its first item that is not one.
+fn array_depth(mut value: &serde_json::Value) -> usize {
+    let mut levels = 0;
+    while let Some(inner) = value.as_array().and_then(|items| items.first()) {
+        levels += 1;
+        value = inner;
+    }
+    levels
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_message_nested_past_the_native_stack_is_decoded_routed_and_dropped() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut fixture = DriverFixture::new()?;
+    let field = |key: &str, value: serde_json::Value| (key.to_owned(), value);
+    let result = JsonObject::from_iter([
+        field("type", "result".into()),
+        field("subtype", "error_during_execution".into()),
+        field("duration_ms", 1.into()),
+        field("duration_api_ms", 1.into()),
+        field("is_error", true.into()),
+        field("num_turns", 1.into()),
+        field("session_id", "s".into()),
+        field("extra", deep_value(DEEP)),
+    ]);
+    let system = JsonObject::from_iter([
+        field("type", "system".into()),
+        field("subtype", "deep".into()),
+        field("payload", deep_value(DEEP)),
+    ]);
+    for object in [result, system] {
+        let frame = fixture.driver.decode_message(object)?;
+        fixture.driver.frame(frame).await?;
+    }
+    assert!(fixture.driver.last_error_result.is_none());
+    let Some(Message::Result(result)) = fixture.messages.recv().await else {
+        return Err("expected the result".into());
+    };
+    assert_eq!(result.additional_fields.get("extra").map(array_depth), Some(DEEP));
+    let Some(Message::System(system)) = fixture.messages.recv().await else {
+        return Err("expected the system message".into());
+    };
+    assert_eq!(system.data.get("payload").map(array_depth), Some(DEEP));
+    drop((result, system));
+    fixture.finish().await
+}
+
+/// Python `close()` leaves each unanswered request to run out its own timeout, whatever kind of request it is, and
+/// one sent without a timeout waits until the caller stops waiting, never answering on its own.
+#[tokio::test(start_paused = true)]
+async fn requests_left_at_python_close_run_out_their_own_timeouts() -> Result<(), Box<dyn std::error::Error>> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let (response, initialize) = oneshot::channel();
+    ControlResponder::Initialize { first: true, response }.time_out_at(Some(deadline));
+    let (response, control) = oneshot::channel();
+    ControlResponder::Control {
+        operation: ControlOperation::SetModel,
+        response,
+    }
+    .time_out_at(Some(deadline));
+    assert!(matches!(
+        initialize.await?,
+        Err(Error::ControlTimeout {
+            operation: ControlOperation::Initialize
+        })
+    ));
+    assert!(matches!(
+        control.await?,
+        Err(Error::ControlTimeout {
+            operation: ControlOperation::SetModel
+        })
+    ));
+    assert!(Instant::now() >= deadline);
+
+    let (response, mut raw) = oneshot::channel();
+    ControlResponder::Raw {
+        operation: ControlOperation::Interrupt,
+        response,
+    }
+    .time_out_at(None);
+    tokio::time::advance(Duration::from_secs(86_400)).await;
+    assert!(matches!(raw.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+    drop(raw);
+    let metrics = tokio::runtime::Handle::current().metrics();
+    for _ in 0..8 {
+        if metrics.num_alive_tasks() == 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(metrics.num_alive_tasks(), 0);
     Ok(())
 }

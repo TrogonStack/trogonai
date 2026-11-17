@@ -4,10 +4,11 @@ use super::{build, reject_windows_metacharacters};
 use crate::{
     ArgvStyle, ClaudeAgentOptions, DangerousPermissionSkip, DebugOutput, HookEvents, PermissionDecision,
     PermissionPrompts, SdkBeta, Skills, TaskBudget, ThinkingConfig, ThinkingDisplay, ToolPermissionRequest, ToolRule,
+    python_c_stack::PythonCStack,
 };
 
 fn render(options: &ClaudeAgentOptions, derived: Option<&Path>) -> Vec<String> {
-    build(options, derived)
+    build(options, derived, PythonCStack::MODULE)
         .unwrap_or_default()
         .iter()
         .map(|token| token.to_string_lossy().into_owned())
@@ -15,7 +16,7 @@ fn render(options: &ClaudeAgentOptions, derived: Option<&Path>) -> Vec<String> {
 }
 
 fn failure(options: &ClaudeAgentOptions) -> String {
-    build(options, None).map_or_else(|error| error.to_string(), |_| String::new())
+    build(options, None, PythonCStack::MODULE).map_or_else(|error| error.to_string(), |_| String::new())
 }
 
 fn handler() -> Arc<dyn crate::ToolPermissionHandler> {
@@ -261,7 +262,7 @@ fn a_callback_with_a_prompt_tool_name_is_rejected_with_each_dialects_text() {
         "can_use_tool callback cannot be used with permission_prompt_tool_name. Please use one or the other."
     );
     options.permission_prompt_tool_name = Some(String::new());
-    assert!(build(&options, None).is_ok());
+    assert!(build(&options, None, PythonCStack::MODULE).is_ok());
 }
 
 #[test]
@@ -279,7 +280,7 @@ fn typescript_rejects_a_fallback_model_equal_to_the_model() {
         argv_style: ArgvStyle::Python,
         ..options
     };
-    assert!(build(&python, None).is_ok());
+    assert!(build(&python, None, PythonCStack::MODULE).is_ok());
 }
 
 #[test]

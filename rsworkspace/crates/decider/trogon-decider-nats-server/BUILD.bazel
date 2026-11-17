@@ -1,38 +1,15 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-decider-nats-server",
-    binaries = {"trogon-decider-nats-server": {}},
-    compile_data = glob(["src/runtime/fixtures/*"]),
-    dev_deps = ["//rsworkspace/crates/platform/grpc-nats-micro"],
+    compile_data = ["src/runtime/fixtures/*"],
+    data = ["//rsworkspace/wasm-components/trogon-schedules-decider:component"],
     integration_tests = {
-        "module_store": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-            # built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
-        "serve": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-            # built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
+        # Starts a NATS server in a container through Docker.
+        "module_store": {"tags": ["requires-network"]},
+        # Starts a NATS server in a container through Docker.
+        "serve": {"tags": ["requires-network"]},
     },
-    # This test loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-    # built by cargo component outside Bazel.
-    unit_test_args = [
-        "--skip",
-        "runtime::tests::a_routed_command_runs_for_the_principal_its_subject_named",
-    ],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider-nats",
-        "//rsworkspace/crates/decider/trogon-decider-runtime",
-        "//rsworkspace/crates/decider/trogon-decider-wasm-runtime",
-        "//rsworkspace/crates/decider/trogon-decider-wit",
-        "//rsworkspace/crates/platform/trogon-identity-types",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogon-telemetry",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
+    # The tests resolve the component through CARGO_MANIFEST_DIR, relative to
+    # the runfiles root at run time.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
 )

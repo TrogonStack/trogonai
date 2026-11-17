@@ -97,9 +97,8 @@ static LAUNCH_DIRECTORY: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// Reads the working directory the settings resolver treats as the launch directory, once per process.
 ///
-/// Upstream reads it when the SDK module is imported, before the caller can change directory. Nothing in this crate
-/// runs at load time, so the read happens the first time the SDK needs it unless a binary calls this at the top of
-/// `main`, which gives the upstream timing. Later calls return the first reading.
+/// Upstream reads it when the SDK module is imported, before the caller can change directory. The loader runs
+/// [`CAPTURE_AT_LOAD`] when the binary that links this crate loads, before `main`, so this returns that reading.
 #[cfg_attr(
     dylint_lib = "trogon_dylint_lints",
     allow(
@@ -109,6 +108,31 @@ static LAUNCH_DIRECTORY: OnceLock<Option<PathBuf>> = OnceLock::new();
 )]
 pub fn capture_launch_directory() -> Option<PathBuf> {
     LAUNCH_DIRECTORY.get_or_init(|| std::env::current_dir().ok()).clone()
+}
+
+/// Takes the launch directory reading when the binary loads, the way importing the SDK module does upstream.
+// SAFETY: the loader calls this initializer once, before `main`, with no arguments it reads; the function only fills
+// a `OnceLock`, which needs no runtime set up by `main`.
+#[used]
+#[cfg_attr(
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+        target_os = "illumos",
+        target_os = "solaris"
+    ),
+    unsafe(link_section = ".init_array")
+)]
+#[cfg_attr(target_vendor = "apple", unsafe(link_section = "__DATA,__mod_init_func"))]
+#[cfg_attr(windows, unsafe(link_section = ".CRT$XCU"))]
+static CAPTURE_AT_LOAD: extern "C" fn() = capture_at_load;
+
+extern "C" fn capture_at_load() {
+    let _ = capture_launch_directory();
 }
 
 #[cfg(test)]

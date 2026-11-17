@@ -27,6 +27,60 @@ _RUST_HOSTS = {
     ),
 }
 
+# Cross-compilation targets the mise `targets` option can add to the Rust pin.
+# Each one gets its own toolchain that runs on the host.
+_RUST_TARGETS = {
+    "wasm32-unknown-unknown": struct(
+        constraints = ["@platforms//cpu:wasm32", "@platforms//os:none"],
+        binary_ext = ".wasm",
+        dylib_ext = ".wasm",
+        staticlib_ext = ".a",
+        stdlib_linkflags = [],
+    ),
+}
+
+_RUST_TARGET_TEMPLATE = """
+rust_stdlib_filegroup(
+    name = "rust_std_{triple}",
+    srcs = glob(["lib/rustlib/{triple}/lib/**"]),
+)
+
+rust_toolchain(
+    name = "rust_impl_{triple}",
+    binary_ext = "{binary_ext}",
+    cargo = "bin/cargo",
+    cargo_clippy = "bin/cargo-clippy",
+    channel = "stable",
+    clippy_driver = "bin/clippy-driver",
+    default_edition = "2024",
+    dylib_ext = "{dylib_ext}",
+    exec_triple = "{host_triple}",
+    linker = ":rust_lld",
+    linker_type = "direct",
+    llvm_cov = "lib/rustlib/{host_triple}/bin/llvm-cov",
+    llvm_lib = ":llvm_lib",
+    llvm_profdata = "lib/rustlib/{host_triple}/bin/llvm-profdata",
+    rust_doc = "bin/rustdoc",
+    rust_objcopy = "lib/rustlib/{host_triple}/bin/rust-objcopy",
+    rust_std = ":rust_std_{triple}",
+    rustc = "bin/rustc",
+    rustc_lib = ":rustc_lib",
+    rustfmt = "bin/rustfmt",
+    staticlib_ext = "{staticlib_ext}",
+    stdlib_linkflags = {stdlib_linkflags},
+    target_triple = "{triple}",
+    version = "{version}",
+)
+
+toolchain(
+    name = "rust_toolchain_{triple}",
+    exec_compatible_with = {exec_constraints},
+    target_compatible_with = {target_constraints},
+    toolchain = ":rust_impl_{triple}",
+    toolchain_type = "@rules_rust//rust:toolchain_type",
+)
+"""
+
 _NODE_HOSTS = {
     ("mac os x", "aarch64"): ["@platforms//os:osx", "@platforms//cpu:aarch64"],
     ("mac os x", "x86_64"): ["@platforms//os:osx", "@platforms//cpu:x86_64"],
@@ -73,6 +127,11 @@ def _mise_tool_impl(rctx):
             break
     if executable == None:
         fail("{}@{} provides no `{}` executable".format(rctx.attr.tool, rctx.attr.version, rctx.attr.executable))
+    if executable == rctx.attr.executable:
+        # The executable sits at the install root, so its file target already
+        # has the public name and an alias of the same name would point at itself.
+        rctx.file("BUILD.bazel", 'exports_files(["{}"])\n'.format(executable))
+        return
     rctx.file("BUILD.bazel", """\
 alias(
     name = "{name}",
@@ -121,9 +180,27 @@ def _mise_rust_impl(rctx):
         fail("rust@{} for {} is not installed; run `mise install rust`".format(version, host.triple))
     source = source.realpath
     rctx.watch_tree(source)
-    for relative in ["bin/rustc", "bin/cargo", "lib/rustlib/{}/bin/llvm-cov".format(host.triple)]:
+    for relative in ["bin/rustc", "bin/cargo", "bin/rustfmt", "lib/rustlib/{}/bin/llvm-cov".format(host.triple)]:
         if not source.get_child(relative).exists:
             fail("The Rust toolchain at {} lacks {}; check the configured components".format(source, relative))
+    targets = []
+    for triple in rctx.attr.targets:
+        target = _RUST_TARGETS.get(triple)
+        if target == None:
+            fail("The mise Rust toolchain does not support the {} target".format(triple))
+        if not source.get_child("lib/rustlib/{}/lib".format(triple)).exists:
+            fail("rust@{} lacks the {} target; run `mise install rust`".format(version, triple))
+        targets.append(_RUST_TARGET_TEMPLATE.format(
+            triple = triple,
+            host_triple = host.triple,
+            version = version,
+            binary_ext = target.binary_ext,
+            dylib_ext = target.dylib_ext,
+            staticlib_ext = target.staticlib_ext,
+            stdlib_linkflags = repr(target.stdlib_linkflags),
+            exec_constraints = repr(host.constraints),
+            target_constraints = repr(target.constraints),
+        ))
     for entry in source.readdir():
         if entry.basename not in _SKIPPED:
             rctx.symlink(entry, entry.basename)
@@ -135,6 +212,7 @@ def _mise_rust_impl(rctx):
         "%{dylib_ext}": host.dylib_ext,
         "%{stdlib_linkflags}": repr(host.stdlib_linkflags),
         "%{strip_level}": repr(host.strip_level),
+        "%{targets}": "".join(targets),
     })
 
 def _mise_hub_impl(rctx):
@@ -179,7 +257,10 @@ mise_node = repository_rule(
 
 mise_rust = repository_rule(
     implementation = _mise_rust_impl,
-    attrs = _INSTALLED | {"_build": attr.label(default = Label("//mise/private:rust.BUILD.bazel.tpl"))},
+    attrs = _INSTALLED | {
+        "targets": attr.string_list(),
+        "_build": attr.label(default = Label("//mise/private:rust.BUILD.bazel.tpl")),
+    },
     environ = _ENVIRON,
     local = True,
     configure = True,

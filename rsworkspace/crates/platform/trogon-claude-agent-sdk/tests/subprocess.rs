@@ -31,7 +31,7 @@ async fn read_result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn Std
     timeout(Duration::from_secs(5), async {
         while let Some(message) = client.next_message().await? {
             if let Message::Result(result) = message {
-                return Ok(result.result.unwrap_or_default());
+                return Ok(result.result.clone().unwrap_or_default());
             }
         }
         Err(std::io::Error::other("fixture ended without a result").into())
@@ -68,7 +68,7 @@ async fn query_preserves_background_continuation_until_idle() -> TestResult {
         let mut results = Vec::new();
         while let Some(message) = response.next_message().await? {
             if let Message::Result(result) = message {
-                results.push(result.result.unwrap_or_default());
+                results.push(result.result.clone().unwrap_or_default());
             }
         }
         Ok::<_, Error>(results)
@@ -86,7 +86,7 @@ async fn s02_non_json_stdout_lines_are_skipped() -> TestResult {
         let mut results = Vec::new();
         while let Some(message) = response.next_message().await? {
             if let Message::Result(result) = message {
-                results.push(result.result.unwrap_or_default());
+                results.push(result.result.clone().unwrap_or_default());
             }
         }
         Ok::<_, Error>(results)
@@ -111,7 +111,7 @@ async fn s05_a_missing_idle_state_ends_the_run_quietly_at_the_ceiling() -> TestR
         let mut results = Vec::new();
         while let Some(message) = response.next_message().await? {
             if let Message::Result(result) = message {
-                results.push(result.result.unwrap_or_default());
+                results.push(result.result.clone().unwrap_or_default());
             }
         }
         Ok::<_, Error>(results)
@@ -582,6 +582,33 @@ async fn process_failure_message_redacts_secrets_from_the_stderr_tail() -> TestR
 }
 
 #[tokio::test]
+async fn python_keeps_the_stderr_tail_it_opts_into_unredacted() -> TestResult {
+    let mut options = options("failure-secret")?;
+    options.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    options.limits.stderr_tail = 1024;
+    let mut client = ClaudeSdkClient::connect(options).await?;
+    client.send_prompt(Prompt::from("failure")).await?;
+    let error = loop {
+        match client.next_message().await {
+            Ok(Some(_)) => {}
+            Err(error) => break error,
+            Ok(None) => return Err(std::io::Error::other("missing error").into()),
+        }
+    };
+    let Error::Process { status, stderr } = error else {
+        return Err(std::io::Error::other("expected process error").into());
+    };
+    assert_eq!(status.code(), Some(7));
+    let secret = format!("sk-{}", "Ab1".repeat(8));
+    assert_eq!(
+        stderr.as_bytes(),
+        format!("rejected key {secret} at startup").as_bytes()
+    );
+    client.disconnect().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn consumer_lag_fails_with_a_bounded_queue() -> TestResult {
     let mut options = options("queue-overflow")?;
     options.limits.message_buffer = trogon_claude_agent_sdk::MessageBuffer::FailWhenFull(QueueCapacity::new(1)?);
@@ -842,7 +869,7 @@ async fn compatibility_tool_result_frames(mode: &str) -> Result<Vec<Option<serde
                     assert_eq!(message.additional_fields["future_outer"], 1);
                     assert_eq!(message.message_fields["future_body"], 2);
                     assert!(!message.additional_fields.contains_key("tool_use_result"));
-                    values.push(message.tool_use_result);
+                    values.push(message.tool_use_result.clone());
                 }
                 Message::Result(_) => return Ok::<_, Error>(values),
                 _ => {}

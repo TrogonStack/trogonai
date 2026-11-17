@@ -321,6 +321,14 @@ const cases = [
     inspect: [extracted],
   },
   { id: 'passes_a_plain_path_through', embedded: '/usr/local/bin/claude' },
+  {
+    id: 'empty_embedded_file_is_extracted_and_reused',
+    env,
+    content: '',
+    hash: createHash('sha256').update('').digest('hex').slice(0, 16),
+    calls: 2,
+    inspect: [rootDir, hashDir, extracted],
+  },
 ];
 
 const results = cases.map(run);

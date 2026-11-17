@@ -65,7 +65,7 @@ pub mod mocks;
 
 pub use async_nats::subject::ToSubject;
 pub use auth::{NatsAuth, NatsConfig};
-pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+pub use client::{FlushClient, PublishClient, QueueSubscribeClient, RequestClient, SubscribeClient};
 pub use connect::{
     ConnectError, connect, connect_once, connect_once_with_inbox_prefix, connect_once_with_reconnect_quarantine,
     connect_with_inbox_prefix,

@@ -10,6 +10,7 @@ use crate::{
     ArgvStyle, ClaudeAgentOptions, Error, Transport,
     adapters::{SpawnProcess, TokioProcessSpawner},
     environment_plan::Inherited,
+    python_c_stack::PythonCStack,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -48,6 +49,7 @@ fn spawn(script: &'static str, argv_style: ArgvStyle) -> Result<ProcessTransport
         parent_environment: Vec::new(),
         startup_marks: false,
         closed: Closed::default(),
+        python_stack: PythonCStack::CLIENT_CONNECT,
     })
 }
 

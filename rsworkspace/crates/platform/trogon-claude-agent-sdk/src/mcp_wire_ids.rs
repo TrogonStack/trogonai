@@ -120,6 +120,16 @@ impl McpWireIds {
             object.insert("id".to_owned(), Value::String(marker(raw)));
         }
     }
+
+    /// [`McpWireIds::echo`] for a response Python holds, whose strings may hold lone surrogates.
+    pub(crate) fn echo_python(&self, response: &mut crate::PythonJsonValue) {
+        if let Some(raw) = &self.id
+            && let crate::PythonJsonValue::Object(object) = response
+            && let Some(slot) = object.get_mut(&crate::PythonString::from("id"))
+        {
+            *slot = crate::PythonJsonValue::from(marker(raw).as_str());
+        }
+    }
 }
 
 fn dialect_value(raw: &RawJsonId) -> Option<Value> {
@@ -157,6 +167,11 @@ pub(crate) fn marker_text(value: &Value) -> Option<String> {
     let Value::String(text) = value else {
         return None;
     };
+    marker_str(text)
+}
+
+/// [`marker_text`] of a string already taken out of its value.
+pub(crate) fn marker_str(text: &str) -> Option<String> {
     let rest = text
         .strip_prefix(constants::PYTHON_ID_MARKER_PREFIX)?
         .strip_prefix(nonce())?

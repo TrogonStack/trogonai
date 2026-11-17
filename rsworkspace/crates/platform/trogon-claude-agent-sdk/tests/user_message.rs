@@ -52,7 +52,7 @@ fn user_tool_results_preserve_every_json_kind_and_omission() -> Result<(), Box<d
         serde_json::json!({"nested": [null, false]}),
     ] {
         message.tool_use_result = Some(serde_json::from_value(value.clone())?);
-        assert_eq!(serde_json::to_value(message.clone().tool_use_result)?, value);
+        assert_eq!(serde_json::to_value(&message.tool_use_result)?, value);
         assert!(message.tool_use_result.is_some());
     }
     Ok(())

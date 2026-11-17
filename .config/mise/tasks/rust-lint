@@ -3,10 +3,10 @@
 #
 # Usage: mise run rust-lint
 #
-# Mirrors the `lint` job in .github/workflows/ci-rust.yml exactly, in order, so a
-# green run locally means a green lint job in CI. Each step prints PASS/FAIL on
-# its own line and the script stops at the first failure, so the offending gate
-# is unambiguous before you push. This exists because fixing one lint error and
+# Runs with Cargo the lint gates CI runs through Bazel (.github/workflows/ci-bazel.yml)
+# and Dylint (.github/workflows/ci-dylint.yml). Each step prints PASS/FAIL on its
+# own line and the script stops at the first failure, so the offending gate is
+# unambiguous before you push. This exists because fixing one lint error and
 # pushing only surfaces the next gate; run this to catch them all at once.
 set -u
 set -o pipefail

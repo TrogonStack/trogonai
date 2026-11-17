@@ -40,7 +40,7 @@ pub(crate) enum Command {
         response: ControlSender,
     },
     Prompt {
-        input: crate::UserInput,
+        input: Box<crate::UserInput>,
         response: oneshot::Sender<Result<(), Error>>,
     },
     Control {
@@ -204,8 +204,34 @@ impl ControlResponder {
     }
 }
 
-/// The response a callback writes; `None` when the request stays unanswered.
-type CallbackOutput = (ControlRequestId, Result<Option<serde_json::Value>, ProtocolError>);
+type CallbackOutput = (ControlRequestId, Result<Option<Outgoing>, ProtocolError>);
+
+/// A frame the driver writes. The Python argv style answers an `mcp_message` with a frame whose strings may hold
+/// lone surrogates, which `serde_json` cannot carry, and writes it as `json.dumps` does.
+enum Outgoing {
+    Json(serde_json::Value),
+    Python(crate::PythonJsonValue),
+}
+
+impl From<serde_json::Value> for Outgoing {
+    fn from(frame: serde_json::Value) -> Self {
+        Self::Json(frame)
+    }
+}
+
+/// `frame` with `response.response.mcp_response` set to `mcp_response`, as the Python `Query` builds it.
+fn python_mcp_frame(frame: serde_json::Value, mcp_response: crate::PythonJsonValue) -> Outgoing {
+    let mut frame = crate::PythonJsonValue::from(frame);
+    let slot = ["response", "response", "mcp_response"]
+        .into_iter()
+        .try_fold(&mut frame, |value, key| {
+            value.as_object_mut()?.get_mut(&crate::PythonString::from(key))
+        });
+    if let Some(slot) = slot {
+        *slot = mcp_response;
+    }
+    Outgoing::Python(frame)
+}
 
 type McpSessions = indexmap::IndexMap<crate::McpServerName, Arc<dyn crate::SdkMcpSession>>;
 
@@ -876,6 +902,7 @@ where
             }
         }
         self.commands.close();
+        self.set_error_result(None);
         drop(self.messages);
         let _ = terminal.send(outcome);
     }
@@ -928,10 +955,22 @@ where
     }
 
     /// Decodes one object the transport yielded. A frame or message that cannot be decoded is a
-    /// `MessageParseError` carrying the raw object.
-    fn decode_message(&self, object: JsonObject) -> Result<Frame, Error> {
-        wire::parse_value(&object, self.message_decoding)
-            .map_err(|error| crate::MessageParseError::new(error, Some(object)).into())
+    /// `MessageParseError` carrying the raw object. The object drops at any nesting.
+    fn decode_message(&self, mut object: JsonObject) -> Result<Frame, Error> {
+        match wire::parse_value(&object, self.message_decoding) {
+            Ok(frame) => {
+                crate::deep_json::clear_object(&mut object);
+                Ok(frame)
+            }
+            Err(error) => Err(crate::MessageParseError::new(error, Some(object)).into()),
+        }
+    }
+
+    /// Replaces the pending error result, dropping the one it held at any nesting.
+    fn set_error_result(&mut self, data: Option<JsonObject>) {
+        if let Some(mut replaced) = std::mem::replace(&mut self.last_error_result, data) {
+            crate::deep_json::clear_object(&mut replaced);
+        }
     }
 
     /// The error for an unsuccessful exit: the last error result when one is pending (Python always, TypeScript
@@ -1152,7 +1191,6 @@ where
         self.transport.expect_control_response(id.as_str());
         Ok(id)
     }
-
     fn controls_full(&self) -> bool {
         // The initialize handshake is not an application control, so it does not use up the limit.
         self.limits.max_pending_controls.is_some_and(|limit| {
@@ -1218,7 +1256,7 @@ where
             IncomingControl::Permission(mut request) => {
                 // `claude_agent_sdk` reads `input`, then checks for a callback, then rebuilds the suggestions,
                 // then reads `tool_name`, answering the first `KeyError` or `from_dict` failure with its message.
-                let input = request.raw_request.get("input").cloned();
+                let input = request.raw_request.get("input").map(crate::deep_json::clone_value);
                 if python && input.is_none() {
                     return self.write_response(wire::callback_error_response(&id, "'input'")).await;
                 }
@@ -1247,7 +1285,7 @@ where
                 let callback_id = id.clone();
                 let fallback = wire::permission_response(
                     &id,
-                    input.clone(),
+                    crate::deep_json::clone_value(&input),
                     tool_use_id.as_ref(),
                     PermissionDecision::deny("Permission callback timed out"),
                     style,
@@ -1693,10 +1731,15 @@ where
                 {
                     object.insert("client_composed".into(), true.into());
                 }
+                // A message object written as given carries its own uuid, so read it from the frame.
+                let uuid = frame
+                    .get("uuid")
+                    .and_then(serde_json::Value::as_str)
+                    .map(crate::MessageId::from);
                 self.write(frame).await?;
                 self.state = State::Running;
                 self.run_end.prompt_written();
-                self.run_state.pending_inputs.push_back(input.uuid.clone());
+                self.run_state.pending_inputs.push_back(uuid);
                 let _ = response.send(Ok(()));
             }
             Command::Control {
@@ -1802,7 +1845,7 @@ where
         match frame {
             Frame::KeepAlive => {}
             // Python clears the pending error result for every message it does not parse.
-            Frame::Unparsed => self.last_error_result = None,
+            Frame::Unparsed => self.set_error_result(None),
             Frame::Message(message) => {
                 let (queued_limit, task_limit) = (
                     self.limits.max_queued_inputs.map(crate::QueueCapacity::get),
@@ -1827,10 +1870,10 @@ where
                 }
                 match &message {
                     Message::Result(result) if result.status == crate::ResultStatus::Error => {
-                        self.last_error_result = Some(crate::error::error_result_data(result));
+                        self.set_error_result(Some(crate::error::error_result_data(result)));
                     }
                     Message::System(system) if system.subtype == "session_state_changed" => {}
-                    _ => self.last_error_result = None,
+                    _ => self.set_error_result(None),
                 }
                 if let Message::System(system) = &message
                     && system.subtype == "commands_changed"
@@ -1923,7 +1966,7 @@ where
                             && let crate::InterruptReceipt::Reported {
                                 cancelled: Some(cancelled),
                                 ..
-                            } = crate::InterruptReceipt::from_json(object.clone())
+                            } = crate::InterruptReceipt::from_json(crate::deep_json::clone_object(object))
                         {
                             self.run_state
                                 .pending_inputs
@@ -2086,20 +2129,22 @@ where
         let message = match message {
             Some(serde_json::Value::Object(message)) => Some(message),
             // An array is an object to `in`, so it is handed over like a notification.
-            Some(serde_json::Value::Array(_)) => None,
+            Some(array @ serde_json::Value::Array(_)) => {
+                crate::deep_json::drop_value(array);
+                None
+            }
             other => {
                 let text = crate::mcp_routing::typescript_not_an_object(other.as_ref(), self.js_runtime);
                 return self.write_response(wire::callback_error_response(&id, &text)).await;
             }
         };
-        if let Some(message) = message
+        let expects_response = message
             .as_ref()
-            .filter(|message| crate::mcp_routing::typescript_expects_response(message))
-        {
+            .is_some_and(crate::mcp_routing::typescript_expects_response);
+        if expects_response && let Some(message) = message {
             if !self.admit_capacity(&id).await? {
                 return Ok(());
             }
-            let message = message.clone();
             let key = format!("{name}:{}", crate::mcp_routing::js_string(message.get("id")));
             let (waiter, answer) = oneshot::channel();
             // Replacing the entry drops the earlier waiter, whose control request is never answered.
@@ -2334,6 +2379,7 @@ where
             let mut mcp_response =
                 crate::mcp_routing::python_error(&message, -32601, format!("Server '{server_name}' not found"));
             ids.echo(&mut mcp_response);
+            crate::deep_json::clear_object(&mut message);
             return self
                 .write_response(wire::success_response(&id, McpResponsePayload { mcp_response }))
                 .await;
@@ -2346,14 +2392,27 @@ where
         let response_id = id.clone();
         let fallback = wire::callback_error_response(&id, "SDK MCP request timed out").map(Some);
         self.spawn_callback(id, signal, self.callback_timeout(), fallback, async move {
-            let mut mcp_response = match session.request(message.clone(), callback_signal).await {
-                Ok(Some(response)) => serde_json::Value::Object(response),
-                Ok(None) => crate::mcp_routing::python_acknowledgment(),
-                Err(crate::McpServerError::Protocol(text)) => crate::mcp_routing::python_error(&message, -32603, text),
-                Err(error) => crate::mcp_routing::python_error(&message, -32603, error.to_string()),
+            let mut mcp_response = match session
+                .request_python(crate::deep_json::clone_object(&message), callback_signal)
+                .await
+            {
+                Ok(Some(response)) => crate::PythonJsonValue::Object(response),
+                Ok(None) => crate::mcp_routing::python_acknowledgment().into(),
+                Err(crate::McpServerError::Protocol(text)) => {
+                    crate::mcp_routing::python_error(&message, -32603, text).into()
+                }
+                Err(error) => crate::mcp_routing::python_error(&message, -32603, error.to_string()).into(),
             };
-            ids.echo(&mut mcp_response);
-            wire::success_response(&response_id, McpResponsePayload { mcp_response }).map(Some)
+            ids.echo_python(&mut mcp_response);
+            crate::deep_json::clear_object(&mut message);
+            // The response goes in once the frame is converted, since `serde_json` cannot carry it.
+            let frame = wire::success_response(
+                &response_id,
+                McpResponsePayload {
+                    mcp_response: serde_json::Value::Null,
+                },
+            );
+            frame.map(|frame| python_mcp_frame(frame, mcp_response)).map(Some)
         });
         Ok(())
     }
@@ -2440,7 +2499,7 @@ where
         outcome
     }
 
-    fn spawn_callback<Fut>(
+    fn spawn_callback<Fut, Out>(
         &mut self,
         id: ControlRequestId,
         signal: crate::CancellationToken,
@@ -2448,18 +2507,19 @@ where
         fallback: Result<Option<serde_json::Value>, ProtocolError>,
         future: Fut,
     ) where
-        Fut: Future<Output = Result<Option<serde_json::Value>, ProtocolError>> + Send + 'static,
+        Fut: Future<Output = Result<Option<Out>, ProtocolError>> + Send + 'static,
+        Out: Into<Outgoing> + Send + 'static,
     {
         let callback_id = id.clone();
         let callback_signal = signal.clone();
         let handle = self.callbacks.spawn(async move {
             let response = match deadline {
-                None => future.await,
+                None => future.await.map(|frame| frame.map(Into::into)),
                 Some(deadline) => match timeout(deadline, future).await {
-                    Ok(response) => response,
+                    Ok(response) => response.map(|frame| frame.map(Into::into)),
                     Err(_) => {
                         callback_signal.cancel();
-                        fallback
+                        fallback.map(|frame| frame.map(Outgoing::from))
                     }
                 },
             };
@@ -2472,7 +2532,7 @@ where
     /// Writes a callback's answer, if it has one.
     async fn write_callback_response(
         &mut self,
-        response: Result<Option<serde_json::Value>, ProtocolError>,
+        response: Result<Option<Outgoing>, ProtocolError>,
     ) -> Result<(), Error> {
         match response.transpose() {
             Some(frame) => self.write_response(frame).await,
@@ -2480,7 +2540,7 @@ where
         }
     }
 
-    async fn write_response(&mut self, frame: Result<serde_json::Value, ProtocolError>) -> Result<(), Error> {
+    async fn write_response(&mut self, frame: Result<impl Into<Outgoing>, ProtocolError>) -> Result<(), Error> {
         let frame = frame?;
         if !self.input_open() {
             // The run has settled and input is closed: a late callback answer has nowhere
@@ -2491,22 +2551,33 @@ where
         self.write(frame).await
     }
 
-    async fn write(&mut self, frame: serde_json::Value) -> Result<(), Error> {
+    async fn write(&mut self, frame: impl Into<Outgoing>) -> Result<(), Error> {
         // Each SDK writes its own JSON spelling: TypeScript `JSON.stringify`, Python `json.dumps`.
-        let mut text = match self.argv_style {
-            crate::ArgvStyle::TypeScript => crate::js_json::to_string(&frame),
-            crate::ArgvStyle::Python => crate::python_json::to_string(&frame).map(crate::mcp_wire_ids::splice_markers),
-        }
-        .map_err(ProtocolError::from)?;
+        let mut text = match frame.into() {
+            Outgoing::Json(frame) => match self.argv_style {
+                crate::ArgvStyle::TypeScript => crate::js_json::to_string(&frame),
+                crate::ArgvStyle::Python => {
+                    crate::python_json::to_string(&frame).map(crate::mcp_wire_ids::splice_markers)
+                }
+            }
+            .map_err(ProtocolError::from)?,
+            // Only the Python argv style builds these.
+            Outgoing::Python(frame) => crate::mcp_wire_ids::splice_markers(crate::python_json_dumps(&frame)),
+        };
         text.push('\n');
         if !self.input_open() {
             return Err(Error::NotReadyForWriting);
         }
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
+        // The driver took this frame before it saw any close, so the caller handed it over first. `sdk.mjs` writes
+        // such a frame to stdin at once and `close()` only ends the stream behind it, so the write is polled first
+        // and goes out when the transport takes it right away. Only a write that has to wait gives way to the close
+        // or the abort, as a JavaScript write still awaiting its transport does.
         tokio::select! {
-            _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
-            () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
+            biased;
             result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
+            () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
+            _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
         }
     }
 }

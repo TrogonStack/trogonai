@@ -42,7 +42,7 @@ async fn result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn StdError
     timeout(Duration::from_secs(5), async {
         while let Some(message) = client.next_message().await? {
             if let Message::Result(result) = message {
-                return Ok(result.result.unwrap_or_default());
+                return Ok(result.result.clone().unwrap_or_default());
             }
         }
         Err(std::io::Error::other("fixture ended before result").into())

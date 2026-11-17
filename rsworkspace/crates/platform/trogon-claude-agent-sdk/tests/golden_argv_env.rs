@@ -14,11 +14,11 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use trogon_claude_agent_sdk::{
-    ArgvStyle, ClaudeAgentOptions, ClaudeCodeMarker, ClaudeSdkClient, Environment, EnvironmentMode, ExtraArgument,
-    HookEvent, HookOutput, HookRegistration, LocalMcpServer, LocalMcpServerOptions, McpDiscovery,
-    McpRemoteServerOptions, McpSdkServerOptions, McpServerDialect, McpServerName, McpServerOptions,
-    McpServerToolPolicy, McpStdioServerOptions, McpToolPermissionPolicy, ScriptRuntime, SdkMcpServer, SdkTools,
-    SystemPrompt, TraceContext, UsdBudget,
+    ArgvStyle, BundledCli, ClaudeAgentOptions, ClaudeCodeMarker, ClaudeSdkClient, ClientAppDerivation, Environment,
+    EnvironmentMode, ExtraArgument, HookEvent, HookOutput, HookRegistration, LocalMcpServer, LocalMcpServerOptions,
+    McpDiscovery, McpRemoteServerOptions, McpSdkServerOptions, McpServerDialect, McpServerName, McpServerOptions,
+    McpServerToolPolicy, McpStdioServerOptions, McpToolPermissionPolicy, SDK_VERSION, ScriptRuntime, SdkMcpServer,
+    SdkTools, SystemPrompt, TraceContext, UsdBudget,
     adapters::{NativeFileSystem, RuntimeAdapters},
     test_support::FixedEnvironment,
 };
@@ -260,6 +260,37 @@ async fn overlay_environment_matches_python() -> Result<(), Box<dyn std::error::
     assert_eq!(
         environment(&capture, "CLAUDE_CODE_SDK_READS_SESSION_STATE"),
         Some(Some("1".into()))
+    );
+    Ok(())
+}
+
+/// TypeScript derives no client app label, so by default even the bundled executable under the Python environment
+/// gets none; `ClientAppDerivation::Bundled` selects Python's trigger, which labels it with this crate.
+#[tokio::test]
+async fn s34_only_the_python_derivation_labels_the_bundled_cli() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let bundled = root.path().join("_bundled");
+    std::fs::create_dir(&bundled)?;
+    std::fs::write(bundled.join("claude"), "")?;
+    std::fs::write(bundled.join("claude.version"), "999.0.0\n")?;
+    let mut options = base();
+    options.cli_path = Some(bundled.join("claude"));
+    options.environment_mode = EnvironmentMode::Overlay;
+
+    let typescript = run(options.clone(), &[]).await?;
+    assert_eq!(
+        environment(&typescript, "CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP"),
+        Some(None)
+    );
+
+    options.client_app_derivation = ClientAppDerivation::Bundled(BundledCli {
+        package_root: root.path().to_path_buf(),
+        pinned_version: "999.0.0".into(),
+    });
+    let python = run(options, &[]).await?;
+    assert_eq!(
+        environment(&python, "CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP"),
+        Some(Some(format!("trogon-claude-agent-sdk/{SDK_VERSION}")))
     );
     Ok(())
 }

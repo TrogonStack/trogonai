@@ -1,8 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "ard-registry",
-    binaries = {"ard-registry-demo": {"crate_root": "src/bin/ard-registry-demo/main.rs"}},
-    crate_features = ["test-support"],
-    deps = ["//rsworkspace/crates/ard/ard-catalog"],
-)
+workspace_crate()

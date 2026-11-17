@@ -1,22 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "trogon-provider-gateway",
-    binaries = {"trogon-provider-gateway": {}},
-    integration_tests = {
-        "otlp_export": {
-            "data": [":trogon-provider-gateway_bin"],
-            "rustc_env": {"CARGO_BIN_EXE_trogon-provider-gateway": "$(rootpath :trogon-provider-gateway_bin)"},
-        },
-        "process": {
-            "data": [":trogon-provider-gateway_bin"],
-            "rustc_env": {"CARGO_BIN_EXE_trogon-provider-gateway": "$(rootpath :trogon-provider-gateway_bin)"},
-        },
-    },
-    version = "0.0.1",
-    deps = [
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogon-telemetry",
-    ],
-)
+workspace_crate()

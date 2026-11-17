@@ -1,0 +1,64 @@
+edition = "2024";
+
+package trogonai.workflows.runs.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/workflows/runs/v1alpha1/run.proto";
+import "trogonai/workflows/runs/v1alpha1/workload_identity.proto";
+
+// Existing Decider command identity/revision rules apply. The protected owner
+// proves a fresh independent admission against the current run/plan and retains
+// the immutable original authority deadline. Renewal never authorizes replay of
+// uncertain dispatches or extends a credential already delivered to a provider.
+message RenewRunIdentityAdmission {
+  option (buf.validate.message).cel = {
+    id: "renew_run_identity_admission.identity"
+    message: "renewal must name this run and a distinct previous admission"
+    expression: "this.admission.run_id == this.run_id && this.admission.admission_id != this.previous_admission_id.value"
+  };
+  WorkflowRunId run_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  RunIdentityAdmissionId previous_admission_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  RunIdentityAdmission admission = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Denial takes effect before later audit/bookkeeping recovery. A withdrawal
+// receipt does not prove physical session closure or remote credential revocation.
+message RunIdentityWithdrawal {
+  WorkflowRunId run_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  RunIdentityAdmissionId admission_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  RunIdentityWithdrawalReason reason = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message WithdrawRunIdentityAdmission {
+  RunIdentityWithdrawal withdrawal = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RunIdentityAdmissionRenewed {
+  option (buf.validate.message).cel = {
+    id: "run_identity_admission_renewed.identity"
+    message: "renewal must name this run and a distinct previous admission"
+    expression: "this.admission.run_id == this.run_id && this.admission.admission_id != this.previous_admission_id.value"
+  };
+  WorkflowRunId run_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  RunIdentityAdmissionId previous_admission_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  RunIdentityAdmission admission = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RunIdentityAdmissionWithdrawn {
+  RunIdentityWithdrawal withdrawal = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum RunIdentityWithdrawalReason {
+  RUN_IDENTITY_WITHDRAWAL_REASON_UNSPECIFIED = 0;
+  RUN_IDENTITY_WITHDRAWAL_REASON_REGISTRATION_WITHDRAWN = 1;
+  RUN_IDENTITY_WITHDRAWAL_REASON_PROFILE_WITHDRAWN = 2;
+  RUN_IDENTITY_WITHDRAWAL_REASON_TRUST_WITHDRAWN = 3;
+  RUN_IDENTITY_WITHDRAWAL_REASON_ORIGINAL_AUTHORITY_ENDED = 4;
+  RUN_IDENTITY_WITHDRAWAL_REASON_SOURCE_UNAVAILABLE = 5;
+}

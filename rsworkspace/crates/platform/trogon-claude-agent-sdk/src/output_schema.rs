@@ -76,6 +76,7 @@ impl OutputSchema {
         self.validator.as_ref().as_ref().err().map(String::as_str)
     }
 
+    #[cfg(test)]
     pub(crate) fn validation_error(&self, instance: &Value) -> Option<String> {
         match self.validator.as_ref() {
             Ok(validator) => validator.validate(instance).err().map(|error| error.to_string()),

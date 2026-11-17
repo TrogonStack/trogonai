@@ -1,7 +1,7 @@
 use super::{build, request_await_initialize};
 use crate::{
     ArgvStyle, ClaudeAgentOptions, ContinueConversation, Customizations, ExtraArgument, LocalPlugin, PluginDelivery,
-    ScriptRuntime, SessionPersistence,
+    ScriptRuntime, SessionPersistence, python_c_stack::PythonCStack,
 };
 
 fn with_plugins(argv_style: ArgvStyle, delivery: PluginDelivery) -> ClaudeAgentOptions {
@@ -55,7 +55,7 @@ fn python_plugins_are_two_token_flags_and_ignore_the_delivery() {
 }
 
 fn tokens(options: &ClaudeAgentOptions) -> Vec<String> {
-    build(options, None)
+    build(options, None, PythonCStack::MODULE)
         .unwrap_or_default()
         .iter()
         .map(|token| token.to_string_lossy().into_owned())

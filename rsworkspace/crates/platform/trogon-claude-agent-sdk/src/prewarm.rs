@@ -737,7 +737,7 @@ impl SpareProcess {
         };
         let held_prompt = settings.is_some();
         // `claim` hands the prompt to `WarmQuery.query`, which writes a string prompt as `query()` does.
-        let prompt = prompt.into().into_sdk_mjs_prompt();
+        let prompt = prompt.into().into_query_prompt(true);
         let (now, later) = if held_prompt {
             (None, Some(prompt))
         } else {

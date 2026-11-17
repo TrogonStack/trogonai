@@ -286,6 +286,7 @@ function readSection(read, roots) {
         settings: result.settings === null ? null : JSON.parse(JSON.stringify(result.settings)),
         documentHasPolicyContent: result.documentHasPolicyContent ?? null,
         loadState: result.loadState,
+        ...(result.errors?.some((error) => error.onlySubstitutes) && { onlySubstitutes: true }),
       },
     };
   });

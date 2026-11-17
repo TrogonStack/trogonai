@@ -93,7 +93,7 @@ fn python_checks_hook_messages_before_the_type() -> Result<(), ProtocolError> {
     let Message::System(system) = *decoded else {
         panic!("expected a system message");
     };
-    assert!(matches!(system.event, SystemEvent::Hook(hook) if hook.hook_event_name.is_empty()));
+    assert!(matches!(&system.event, SystemEvent::Hook(hook) if hook.hook_event_name.is_empty()));
     Ok(())
 }
 

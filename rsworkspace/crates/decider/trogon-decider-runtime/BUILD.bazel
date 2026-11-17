@@ -1,16 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "trogon-decider-runtime",
-    crate_features = ["test-support"],
-    integration_tests = {
-        "execute_command_span": {},
-        "replay_events_metric": {},
-    },
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider",
-        "//rsworkspace/crates/platform/trogon-identity-types",
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
-)
+workspace_crate()

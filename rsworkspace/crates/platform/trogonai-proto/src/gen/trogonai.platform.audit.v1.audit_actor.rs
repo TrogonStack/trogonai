@@ -3,19 +3,21 @@
 
 /// AuditActor is who caused a record.
 ///
-/// It carries the four arms of the API key audit actor (ADR#0078) and one more,
-/// agent, for the platform's own AgentId (ADR#0017). The api_keys package keeps
-/// its own message until it has Rust bindings, so no existing proto moves.
+/// It carries the four arms of the API key audit actor (ADR#0078) and two more:
+/// agent, for the platform's own AgentId (ADR#0017), and service, for a
+/// platform service's bus principal (ADR#0082). The api_keys package keeps its
+/// own message until it has Rust bindings, so no existing proto moves.
 ///
 /// The oneof exists so the unattributed case is a named state rather than an
 /// empty string. There is deliberately no system or component arm: a synthetic
 /// "system" actor would make the audit log claim an authentication that never
-/// happened. The process that wrote a record is named by Integrity.writer_id,
-/// which is a statement about the writer and not about who caused the act. A
-/// runtime point sets the actor from the principal it authenticated, never from
-/// a header. A record projected from an event carries the actor of that event
-/// when its envelope has one and Unattributed when it does not; a projector
-/// never infers one.
+/// happened. A service actor is not that, because the bus authenticated it. The
+/// process that wrote a record is named by Integrity.writer_id, which is a
+/// statement about the writer and not about who caused the act. A runtime point
+/// sets the actor from the principal it authenticated, never from a header. A
+/// record projected from an event carries the actor of that event when its
+/// envelope has one and Unattributed when it does not; a projector never infers
+/// one.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize)]
 #[serde(default)]
@@ -97,6 +99,14 @@ impl ::buffa::Message for AuditActor {
                         += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
                             + inner as u64;
                 }
+                __buffa::oneof::audit_actor::Kind::Service(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
             }
         }
         ::buffa::saturate_size(size)
@@ -145,6 +155,14 @@ impl ::buffa::Message for AuditActor {
                 __buffa::oneof::audit_actor::Kind::Agent(x) => {
                     ::buffa::types::put_len_delimited_header(
                         5u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::audit_actor::Kind::Service(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        6u32,
                         u64::from(__cache.consume_next()),
                         buf,
                     );
@@ -259,6 +277,26 @@ impl ::buffa::Message for AuditActor {
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.kind = ::core::option::Option::Some(
                         __buffa::oneof::audit_actor::Kind::Agent(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::audit_actor::Kind::Service(ref mut existing),
+                ) = self.kind
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.kind = ::core::option::Option::Some(
+                        __buffa::oneof::audit_actor::Kind::Service(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -416,6 +454,30 @@ impl<'de> ::serde::Deserialize<'de> for AuditActor {
                                 }
                                 __oneof_kind = Some(
                                     __buffa::oneof::audit_actor::Kind::Agent(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "service" => {
+                            let v: ::core::option::Option<audit_actor::ServiceActor> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            audit_actor::ServiceActor,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_kind.is_some() {
+                                    return Err(
+                                        ::serde::de::Error::custom(
+                                            "multiple oneof fields set for 'kind'",
+                                        ),
+                                    );
+                                }
+                                __oneof_kind = Some(
+                                    __buffa::oneof::audit_actor::Kind::Service(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -1010,6 +1072,114 @@ pub mod audit_actor {
         from_json: ::buffa::type_registry::any_from_json::<AgentActor>,
         is_wkt: false,
     };
+    /// A platform service acting under its own bus principal, service.{id},
+    /// which the receiver derives from the subject the service was allowed to
+    /// publish on (ADR#0082 Decision 1). It names a caller the bus
+    /// authenticated, never a synthetic system actor.
+    #[derive(Clone, PartialEq, Default)]
+    #[derive(::serde::Serialize, ::serde::Deserialize)]
+    #[serde(default)]
+    pub struct ServiceActor {
+        /// Field 1: `service_id`
+        #[serde(
+            rename = "serviceId",
+            alias = "service_id",
+            with = "::buffa::json_helpers::proto_string"
+        )]
+        pub service_id: ::buffa::alloc::string::String,
+    }
+    impl ::core::fmt::Debug for ServiceActor {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            f.debug_struct("ServiceActor").field("service_id", &self.service_id).finish()
+        }
+    }
+    impl ServiceActor {
+        /// Protobuf type URL for this message, for use with `Any::pack` and
+        /// `Any::unpack_if`.
+        ///
+        /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+        pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.platform.audit.v1.AuditActor.ServiceActor";
+    }
+    ::buffa::impl_default_instance!(ServiceActor);
+    impl ::buffa::MessageName for ServiceActor {
+        const PACKAGE: &'static str = "trogonai.platform.audit.v1";
+        const NAME: &'static str = "AuditActor.ServiceActor";
+        const FULL_NAME: &'static str = "trogonai.platform.audit.v1.AuditActor.ServiceActor";
+        const TYPE_URL: &'static str = "type.googleapis.com/trogonai.platform.audit.v1.AuditActor.ServiceActor";
+    }
+    impl ::buffa::Message for ServiceActor {
+        /// Returns the total encoded size in bytes.
+        ///
+        /// Accumulates in `u64` (which cannot overflow for in-memory
+        /// data) and saturates to `u32` at return, so a message whose
+        /// encoded size exceeds the 2 GiB protobuf limit yields a value
+        /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+        /// points reject, never a silently wrapped size.
+        #[allow(clippy::let_and_return)]
+        fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+            #[allow(unused_imports)]
+            use ::buffa::Enumeration as _;
+            let mut size = 0u64;
+            size += 1u64 + ::buffa::types::string_encoded_len(&self.service_id) as u64;
+            ::buffa::saturate_size(size)
+        }
+        fn write_to(
+            &self,
+            _cache: &mut ::buffa::SizeCache,
+            buf: &mut impl ::buffa::EncodeSink,
+        ) {
+            #[allow(unused_imports)]
+            use ::buffa::Enumeration as _;
+            ::buffa::types::put_string_field(1u32, &self.service_id, buf);
+        }
+        fn merge_field(
+            &mut self,
+            tag: ::buffa::encoding::Tag,
+            buf: &mut impl ::buffa::bytes::Buf,
+            ctx: ::buffa::DecodeContext<'_>,
+        ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+            #[allow(unused_imports)]
+            use ::buffa::bytes::Buf as _;
+            #[allow(unused_imports)]
+            use ::buffa::Enumeration as _;
+            match tag.field_number() {
+                1u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    ::buffa::types::merge_string(&mut self.service_id, buf)?;
+                }
+                _ => {
+                    ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
+                }
+            }
+            ::core::result::Result::Ok(())
+        }
+        fn clear(&mut self) {
+            self.service_id.clear();
+        }
+    }
+    impl ::buffa::json_helpers::ProtoElemJson for ServiceActor {
+        fn serialize_proto_json<S: ::serde::Serializer>(
+            v: &Self,
+            s: S,
+        ) -> ::core::result::Result<S::Ok, S::Error> {
+            ::serde::Serialize::serialize(v, s)
+        }
+        fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+            d: D,
+        ) -> ::core::result::Result<Self, D::Error> {
+            <Self as ::serde::Deserialize>::deserialize(d)
+        }
+    }
+    #[doc(hidden)]
+    pub const __SERVICE_ACTOR_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+        type_url: "type.googleapis.com/trogonai.platform.audit.v1.AuditActor.ServiceActor",
+        to_json: ::buffa::type_registry::any_to_json::<ServiceActor>,
+        from_json: ::buffa::type_registry::any_from_json::<ServiceActor>,
+        is_wkt: false,
+    };
     #[doc(inline)]
     pub use super::__buffa::oneof::audit_actor::Kind;
     #[doc(inline)]
@@ -1032,6 +1202,10 @@ pub mod audit_actor {
     pub use super::__buffa::view::audit_actor::AgentActorView;
     #[doc(inline)]
     pub use super::__buffa::view::audit_actor::AgentActorOwnedView;
+    #[doc(inline)]
+    pub use super::__buffa::view::audit_actor::ServiceActorView;
+    #[doc(inline)]
+    pub use super::__buffa::view::audit_actor::ServiceActorOwnedView;
     #[doc(inline)]
     pub use super::__buffa::view::oneof::audit_actor::Kind as KindView;
 }

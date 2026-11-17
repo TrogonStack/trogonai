@@ -200,6 +200,7 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | `ToolPermissionRequest::typed_input()`, `PermissionDecision::allow_with_input(&ToolInputSchemas)` | `input: dict`, `updated_input: dict` (no tool types) | `input` and `updatedInput` as records, typed by `sdk-tools` `ToolInputSchemas` |
 | `PermissionDecision::Deny`, `DenialDisposition` | `PermissionResultDeny` (`interrupt` only when true) | result written as returned with `toolUseID` appended |
 | `PermissionDecisionClassification` | not applicable | `decisionClassification` |
+| `PermissionDecision::Raw` | `TypeError` error response naming `<class 'dict'>` | result written as returned, its keys in order, with the request's `toolUseID` spread over it |
 | `PermissionDecision::AnsweredOutOfBand`, `ElicitationResponse::AnsweredOutOfBand`, `UserDialogResponse::AnsweredOutOfBand` | `TypeError` error response for a permission request | `null`: no response |
 | `PermissionUpdate` in `updatedPermissions` | `PermissionUpdate.to_dict` (`type`, `destination`, then the fields); an update without a destination is a `PermissionUpdate::Unknown` raw object | the update in declaration order |
 | `ElicitationRequest`, `ElicitationMode::Other` | no elicitation support: unsupported-subtype error | `onElicitation` with any `mode`; `{"action":"decline"}` without a handler |
@@ -245,6 +246,7 @@ Answers match `sdk.mjs` by default and `claude_agent_sdk` under
 | Rust | Python | TypeScript |
 | --- | --- | --- |
 | `Settings` (generated, all 182 declared keys plus unknown keys) | no type; the `settings` option is a string | `Settings` |
+| `DeepJsonValue`, each value of the `extra` map of every generated type | `Any` | the value under an undeclared key (`unknown`) |
 | `SettingsInput::{Path, Json, Inline}` | `settings` string, path or JSON by braces | `Options.settings: string \| Settings` |
 | `ClaudeAgentOptions::managed_settings`, `ManagedSettingsDelivery::{Argv, Initialize}` | none (ignored) | `Options.managedSettings`, `managedSettingsDelivery` |
 | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxFilesystemConfig`, `SandboxCredentialsConfig`, `SandboxIgnoreViolations` (aliases of the generated `Settings.sandbox` types) | `SandboxSettings`, `SandboxNetworkConfig`, `SandboxIgnoreViolations` TypedDicts (subset of the keys) | `SandboxSettings` and its parts |

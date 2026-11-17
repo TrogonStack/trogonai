@@ -46,6 +46,33 @@ fn result(text: &str) -> Value {
     json!({"type":"result","subtype":"success","is_error":false,"duration_ms":1,"duration_api_ms":1,"num_turns":1,"session_id":"fixture-session","result":text,"total_cost_usd":0.0})
 }
 
+/// A system message with 9991 arrays, or objects under the key `a`, nested in it: one past the containers
+/// `json.loads` enters in the Python SDK's message reader.
+fn deep_line(objects: bool) -> String {
+    let (open, close) = if objects { (r#"{"a":"#, "}") } else { ("[", "]") };
+    format!(
+        r#"{{"type":"system","subtype":"deep","v":{}1{}}}"#,
+        open.repeat(9991),
+        close.repeat(9991)
+    )
+}
+
+/// The bytes of the line a reader golden writes, from `FIXTURE_LINE_HEX`.
+fn fixture_line() -> io::Result<Vec<u8>> {
+    let hex = SystemEnvironment
+        .var_os(OsStr::new("FIXTURE_LINE_HEX"))
+        .ok_or_else(|| io::Error::other("FIXTURE_LINE_HEX is unset"))?;
+    hex.as_encoded_bytes()
+        .chunks(2)
+        .map(|pair| {
+            std::str::from_utf8(pair)
+                .ok()
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                .ok_or_else(|| io::Error::other("FIXTURE_LINE_HEX is not hex"))
+        })
+        .collect()
+}
+
 fn assistant(text: &str) -> Value {
     json!({"type":"assistant","message":{"role":"assistant","model":"fixture-model","content":[{"type":"text","text":text}]},"session_id":"fixture-session"})
 }
@@ -167,7 +194,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         match field(&value, "type")? {
             "user" => {
                 assert_eq!(value["message"]["role"], "user");
-                assert_eq!(value["session_id"], "");
+                // A one-shot prompt names the empty session; a streamed message names none.
+                assert!(
+                    value
+                        .get("session_id")
+                        .is_none_or(|session| session.as_str() == Some(""))
+                );
                 assert_eq!(value["parent_tool_use_id"], Value::Null);
                 input_count += 1;
                 if mode == "structured" {
@@ -427,6 +459,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                     "corrupt-tail" => {
                         emit(result(prompt))?;
                         io::stdout().write_all(b"{\"type\":\"resu")?;
+                        io::stdout().flush()?;
+                    }
+                    "deep-line" => {
+                        writeln!(io::stdout(), "{}", deep_line(false))?;
+                        emit(result(prompt))?;
+                    }
+                    "deep-tail" => {
+                        emit(result(prompt))?;
+                        write!(io::stdout(), "{}", deep_line(true))?;
+                        io::stdout().flush()?;
+                    }
+                    "line" => {
+                        io::stdout().write_all(&fixture_line()?)?;
+                        io::stdout().write_all(b"\n")?;
+                        emit(json!({"type":"system","subtype":"after"}))?;
+                        emit(result(prompt))?;
+                    }
+                    "line-tail" => {
+                        emit(json!({"type":"system","subtype":"before"}))?;
+                        emit(result(prompt))?;
+                        io::stdout().write_all(&fixture_line()?)?;
                         io::stdout().flush()?;
                     }
                     "no-result" => return Ok(()),

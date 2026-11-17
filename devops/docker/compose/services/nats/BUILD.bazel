@@ -1,0 +1,24 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+filegroup(
+    name = "bootstrap",
+    srcs = glob(
+        [
+            "*.conf",
+            "*.sh",
+        ],
+        exclude = ["run_from_copy.sh"],
+    ),
+)
+
+sh_test(
+    name = "gateway_env_test",
+    srcs = ["run_from_copy.sh"],
+    args = [
+        "gateway-env.test.sh",
+        "$(rootpaths :bootstrap)",
+    ],
+    data = [":bootstrap"],
+    # Runs the bootstrap in a container through Docker, which pulls its image.
+    tags = ["requires-network"],
+)

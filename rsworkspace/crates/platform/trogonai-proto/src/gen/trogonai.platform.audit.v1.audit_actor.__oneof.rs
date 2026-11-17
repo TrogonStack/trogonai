@@ -21,6 +21,9 @@ pub mod audit_actor {
             ::buffa::alloc::boxed::Box<super::super::super::audit_actor::BreakGlassActor>,
         ),
         Agent(::buffa::alloc::boxed::Box<super::super::super::audit_actor::AgentActor>),
+        Service(
+            ::buffa::alloc::boxed::Box<super::super::super::audit_actor::ServiceActor>,
+        ),
     }
     impl ::buffa::Oneof for Kind {}
     impl From<super::super::super::audit_actor::Unattributed> for Kind {
@@ -78,6 +81,17 @@ pub mod audit_actor {
             Self::Some(Kind::from(v))
         }
     }
+    impl From<super::super::super::audit_actor::ServiceActor> for Kind {
+        fn from(v: super::super::super::audit_actor::ServiceActor) -> Self {
+            Self::Service(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::audit_actor::ServiceActor>
+    for ::core::option::Option<Kind> {
+        fn from(v: super::super::super::audit_actor::ServiceActor) -> Self {
+            Self::Some(Kind::from(v))
+        }
+    }
     impl ::serde::Serialize for Kind {
         fn serialize<S: ::serde::Serializer>(
             &self,
@@ -100,6 +114,9 @@ pub mod audit_actor {
                 }
                 Self::Agent(v) => {
                     map.serialize_entry("agent", &**v)?;
+                }
+                Self::Service(v) => {
+                    map.serialize_entry("service", &**v)?;
                 }
             }
             map.end()

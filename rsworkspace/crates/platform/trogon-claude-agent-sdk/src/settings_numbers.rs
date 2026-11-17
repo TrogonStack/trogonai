@@ -11,7 +11,8 @@
 //!
 //! `json.loads` reads an integer of any size exactly and keeps a whole float a float, which `serde_json` cannot
 //! hold either. A Python-dialect resolve keeps such numbers on its thread, each as a marker double, and turns the
-//! markers back into the exact numbers, or into their nearest `serde_json` numbers, when it ends.
+//! markers back into the exact numbers, or into their nearest `serde_json` numbers, when it ends. Strings that
+//! hold a lone surrogate are kept the same way, in `settings_strings`.
 
 use std::cell::RefCell;
 
@@ -25,6 +26,7 @@ use crate::{
     },
     python_json_value::{PythonJsonValue, PythonNumber},
     settings_dialect::SettingsDialect,
+    settings_strings::{exact_string, python_string, take_strings},
 };
 
 thread_local! {
@@ -85,21 +87,32 @@ pub(crate) fn python_number(number: PythonNumber) -> Value {
     marker.map_or_else(|| approximate(&number), Value::Number)
 }
 
-/// The settings value for a JSON value `json.loads` read.
-pub(crate) fn python_value(value: PythonJsonValue) -> Value {
-    match value {
+/// The settings value for a JSON value `json.loads` read, with each string or key that holds a lone surrogate
+/// as its stand-in while a Python-dialect resolve keeps strings. `None` when such a string has no stand-in, or when
+/// the value holds a code point that already stands for a lone surrogate.
+pub(crate) fn python_value(value: PythonJsonValue) -> Option<Value> {
+    take_strings(&value).then(|| settings_value(value)).flatten()
+}
+
+fn settings_value(mut value: PythonJsonValue) -> Option<Value> {
+    Some(match &mut value {
         PythonJsonValue::Null => Value::Null,
-        PythonJsonValue::Bool(flag) => Value::Bool(flag),
-        PythonJsonValue::Number(number) => python_number(number),
-        PythonJsonValue::String(text) => Value::String(text),
-        PythonJsonValue::Array(items) => Value::Array(items.into_iter().map(python_value).collect()),
-        PythonJsonValue::Object(entries) => Value::Object(
-            entries
+        PythonJsonValue::Bool(flag) => Value::Bool(*flag),
+        PythonJsonValue::Number(number) => python_number(number.clone()),
+        PythonJsonValue::String(text) => Value::String(python_string(std::mem::take(text))?),
+        PythonJsonValue::Array(items) => Value::Array(
+            std::mem::take(items)
                 .into_iter()
-                .map(|(key, entry)| (key, python_value(entry)))
-                .collect(),
+                .map(settings_value)
+                .collect::<Option<_>>()?,
         ),
-    }
+        PythonJsonValue::Object(entries) => Value::Object(
+            std::mem::take(entries)
+                .into_iter()
+                .map(|(key, entry)| Some((python_string(key)?, settings_value(entry)?)))
+                .collect::<Option<_>>()?,
+        ),
+    })
 }
 
 /// The exact number a marker stands for, while the resolve that made it keeps numbers.
@@ -134,8 +147,8 @@ pub(crate) fn approximate_numbers(value: &mut Value) {
     }
 }
 
-/// `value` with every marker turned back into the number it stands for: a kept number, or an infinity.
-pub(crate) fn exact_numbers(value: &Value) -> PythonJsonValue {
+/// `value` with every marker turned back into what it stands for: a kept number, an infinity, or a kept string.
+pub(crate) fn exact_value(value: &Value) -> PythonJsonValue {
     match value {
         Value::Number(number) => PythonJsonValue::Number(kept_number(number).unwrap_or_else(|| {
             match js_value(number).filter(|value| value.is_infinite()) {
@@ -143,11 +156,12 @@ pub(crate) fn exact_numbers(value: &Value) -> PythonJsonValue {
                 None => PythonNumber::from(number),
             }
         })),
-        Value::Array(items) => PythonJsonValue::Array(items.iter().map(exact_numbers).collect()),
+        Value::String(text) => PythonJsonValue::String(exact_string(text)),
+        Value::Array(items) => PythonJsonValue::Array(items.iter().map(exact_value).collect()),
         Value::Object(entries) => PythonJsonValue::Object(
             entries
                 .iter()
-                .map(|(key, entry)| (key.clone(), exact_numbers(entry)))
+                .map(|(key, entry)| (exact_string(key), exact_value(entry)))
                 .collect(),
         ),
         other => PythonJsonValue::from(other),

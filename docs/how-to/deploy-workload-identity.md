@@ -291,6 +291,10 @@ logs do not replace that gate.
 
 ## Isolate live authority streams
 
+Use the [registration operations procedure](./operate-workload-registration.md)
+for the existing producer and runner. It distinguishes independent approval,
+provisioning, publication, emergency denial and fenced recovery.
+
 Provision separate registration and policy buckets for each tenant/project.
 A reader's leader request uses
 `$JS.API.STREAM.MSG.GET.KV_<bucket>`; the selected `last_by_subj` is in its

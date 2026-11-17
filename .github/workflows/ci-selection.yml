@@ -3,106 +3,83 @@ name: CI Selection
 on:
   workflow_call:
     inputs:
+      # Empty skips change selection, and then nothing reads changes.
       filters:
-        required: true
+        required: false
         type: string
-      # Empty skips runner selection, and then nothing reads runners.
-      runner-jobs:
-        description: Job names to place on runners, in priority order.
+        default: ''
+      # Empty skips runner selection, and then nothing reads runs-on-by-job.
+      self-hosted-job-names:
+        description: >-
+          Job names to place on an idle self-hosted runner when one is free,
+          in priority order. Each falls back to a hosted runner otherwise.
         required: false
         type: string
         default: ''
     outputs:
-      rust:
-        value: ${{ jobs.filter.outputs.rust }}
-      go:
-        value: ${{ jobs.filter.outputs.go }}
-      proto:
-        value: ${{ jobs.filter.outputs.proto }}
       changes:
         value: ${{ jobs.filter.outputs.changes }}
-      runners:
-        value: ${{ jobs.runner.outputs.runners }}
+      # JSON object mapping each job in self-hosted-job-names to its runs-on.
+      runs-on-by-job:
+        value: ${{ jobs.choose-runner.outputs.runs-on-by-job }}
+      # How many of those jobs went to a self-hosted runner.
+      self-hosted-count:
+        value: ${{ jobs.choose-runner.outputs.self-hosted-count }}
 
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
-  # A job of its own so that the Google credentials and the Baton key never
-  # share a runner with the selector's dependency install.
-  runner:
-    if: ${{ inputs.runner-jobs != '' }}
+  # Places the jobs named in self-hosted-job-names on an idle self-hosted runner when one
+  # is free and on a hosted runner otherwise. Listing self-hosted runners needs the Baton app, whose key
+  # is readable from main and from pull requests opened from a branch of this
+  # repository. Fork pull requests declare no environment, get no token or
+  # runner labels, and stay on hosted runners.
+  choose-runner:
+    if: ${{ inputs.self-hosted-job-names != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Listing self-hosted runners needs the Baton app; GITHUB_TOKEN cannot.
-    # Its key is readable only from main, where github-app-baton may deploy.
-    # Every other run declares no environment, gets no token, and stays on
-    # hosted runners.
-    environment: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'github-app-baton' || '' }}
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'github-app-baton' || '' }}
     permissions:
       contents: read
       id-token: write
     outputs:
-      runners: ${{ steps.runner.outputs.runners }}
+      runs-on-by-job: ${{ steps.choose-runner.outputs.runs-on-by-job }}
+      self-hosted-count: ${{ steps.choose-runner.outputs.self-hosted-count }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # The three Baton steps may fail without failing CI: the action then
-      # gets no token and keeps every job on hosted runners, as it does for
-      # an API error, and the step summary says so.
-      - name: Google Cloud auth
-        id: gcp
-        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-        continue-on-error: true
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          project_id: ${{ vars.BATON_PROJECT_ID }}
-          workload_identity_provider: ${{ vars.BATON_WORKLOAD_IDENTITY_PROVIDER }}
-
-      - name: Baton key
-        id: baton_key
-        if: ${{ steps.gcp.outcome == 'success' }}
-        continue-on-error: true
-        uses: google-github-actions/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262 # v3.0.0
-        with:
-          secrets: |-
-            private_key:${{ vars.BATON_PRIVATE_KEY_SECRET }}
-
-      # The installation holds no repository, so the token is the
-      # organization's: its only permission is reading self-hosted runners.
+      # return-empty-token: a failure gives an empty token, and a run that declared
+      # no environment reads the provider empty and skips every step. Either
+      # way the next step keeps every job on a hosted runner.
       - name: Baton token
-        id: baton
-        if: ${{ steps.baton_key.outcome == 'success' }}
-        continue-on-error: true
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: baton-token
+        uses: TrogonStack/github-actions/actions/github-app-token/gcp-secret-manager@6ae8d6965cca4cc2eb558cb3705d523459ad9ce9 # github-app-token-gcp-secret-manager@v0.0.1
         with:
-          client-id: ${{ vars.BATON_APP_CLIENT_ID }}
-          private-key: ${{ steps.baton_key.outputs.private_key }}
-          owner: ${{ github.repository_owner }}
+          on-failure: return-empty-token
+          gcp-workload-identity-provider: ${{ vars.BATON_WORKLOAD_IDENTITY_PROVIDER }}
+          gcp-project-id: ${{ vars.BATON_PROJECT_ID }}
+          gcp-private-key-secret: ${{ vars.BATON_PRIVATE_KEY_SECRET }}
+          github-app-client-id: ${{ vars.BATON_APP_CLIENT_ID }}
+          # The installation holds no repository, so the token is the
+          # organization's: its only permission is reading self-hosted runners.
           permission-organization-self-hosted-runners: read
 
-      # The action falls back on its own for API errors and a missing token,
-      # so a failure here is a bug or a bad input, and it fails the job
-      # instead of leaving runs-on unreadable.
+      # Falls back on its own for a missing token and API errors, so a failure
+      # here is a bad input and fails the job rather than leave runs-on unset.
       - name: Choose runner
-        id: runner
-        uses: ./.github/actions/runs-on-fallback
+        id: choose-runner
+        uses: TrogonStack/github-actions/actions/runs-on-fallback@a0991af3376f69ef203fe9a8ceab3aa666cf04ec # runs-on-fallback@v0.1.0
         with:
-          github-token: ${{ steps.baton.outputs.token }}
-          primary-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
-          scope: organization
-          jobs: ${{ inputs.runner-jobs }}
+          runner-list-token: ${{ steps.baton-token.outputs.token }}
+          self-hosted-labels: ${{ vars.SELF_HOSTED_RUNNER_LABELS }}
+          runner-scope: organization
+          job-names: ${{ inputs.self-hosted-job-names }}
 
   filter:
+    if: ${{ inputs.filters != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      rust: ${{ steps.filter.outputs.rust || 'true' }}
-      go: ${{ steps.filter.outputs.go || 'true' }}
-      proto: ${{ steps.filter.outputs.proto || 'true' }}
       changes: ${{ steps.filter.outputs.changes || '["go","javascript-typescript","rust"]' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -15,7 +15,7 @@ test-support = []
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true, features = ["float_roundtrip", "preserve_order"] }
+serde_json = { workspace = true, features = ["float_roundtrip", "preserve_order", "raw_value", "unbounded_depth"] }
 indexmap = { version = "=2.14.0", features = ["serde"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
@@ -26,6 +26,7 @@ url = { workspace = true }
 regex = "=1.12.3"
 regress = { version = "=0.12.0", features = ["utf16"] }
 reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
+hyper = { version = "=1.12.0", default-features = false, features = ["client", "http1"] }
 uuid = { workspace = true }
 sha2 = { workspace = true }
 icu_collator = "=2.4.0"
@@ -33,6 +34,9 @@ unicode-normalization = "=0.1.26"
 unicode-general-category = "=1.1.0"
 futures-util = { workspace = true, features = ["sink"] }
 tracing = { workspace = true }
+rustls = { workspace = true, features = ["tls12"] }
+rustls-native-certs = "=0.8.3"
+typed-arena = "=2.0.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.186"

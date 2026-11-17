@@ -625,7 +625,7 @@
     },
     {
       "id": "s18-user-input-blocks",
-      "concept": "User input content validation",
+      "concept": "User input content and message fields",
       "python": {
         "file": "src/claude_agent_sdk/client.py",
         "line_start": 288,
@@ -643,16 +643,22 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "User input is written verbatim; the CLI and API validate content."
+        "behavior": "User input is written verbatim; the CLI and API validate content. A streamed message keeps its key order, unknown keys and every SDKUserMessage field. A string query() prompt is one text block in sdk.mjs and a string in Python."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
-        "value_contracts::s18_structured_input_blocks_pass_through_unvalidated"
+        "value_contracts::s18_structured_input_blocks_pass_through_unvalidated",
+        "user_input_writes::a_string_prompt_is_written_as_each_sdk_writes_it",
+        "user_input_writes::a_streamed_message_is_written_as_given",
+        "user_input_writes::a_one_shot_message_prompt_is_written_as_given",
+        "user_input::structured_input_carries_blocks_and_every_field_in_declaration_order",
+        "user_input::a_message_object_is_written_as_given_with_typed_fields_overlaid"
       ],
       "rust": [
-        "src/user_input.rs"
+        "src/user_input.rs",
+        "src/user_input_priority.rs"
       ]
     },
     {
@@ -981,7 +987,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "TypeScript is the default dialect and hands every field to the callback as sent, keeping broken suggestions as PermissionUpdate::Unknown; ArgvStyle::Python reproduces claude_agent_sdk's from_dict errors and the order it raises them in."
+        "reason": "TypeScript is the default dialect and hands every field to the callback as sent, keeping broken suggestions as PermissionUpdate::Unknown and the request in ToolPermissionRequest::raw_request, and PermissionDecision::Raw returns them to the CLI unchanged; ArgvStyle::Python reproduces claude_agent_sdk from_dict errors and the order it raises them in."
       },
       "contracts": [
         "golden_inbound_control::permission_suggestions_reach_each_dialect_like_its_sdk",
@@ -1593,6 +1599,350 @@
       ]
     },
     {
+      "id": "m15-python-tool-argument-recursion-limits",
+      "concept": "CPython recursion limits while the Python SDK validates tool arguments",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 632,
+        "sha256": "0fa69433fbf5c59db302f48147e58dc307ef3031bc8abba6ff2a102a05a8e519"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs validates tool arguments in Node, which has no CPython frame or C recursion limit."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool calls jsonschema.validate(instance=arguments, schema=...) in the host process, and a RecursionError becomes the error result text. The frame limit is sys.getrecursionlimit(), 1000 unless the host program raises it, as neither claude_agent_sdk nor mcp calls sys.setrecursionlimit; the C recursion limit is CPython 3.12's fixed 10000. McpServerDialect::Python has no setting for either: RecursionModel::default() in src/python_recursion_model.rs fixes the frame limit at 1000 with jsonschema.validate at frame 17, the module is private to the crate, RecursionModel::new is only built by unit tests, and validate_retrieving, the only validation the Python dialect runs, takes the default. Under that limit the C checks held by const, enum and items never reach 10000: at a frame limit of 200000, const passes the C limit at nesting 3332 and enum at 3331, and a draft 7 items chain stays clean to 6000, while at 1000 const and enum pass the frame limit at nesting 326 and items at 161, as python_recursion.json records. The any() of the type keyword holds its checks only while is_type runs, which never descends into the instance, and the message repr runs after any() returns, so the type cases of python_recursion.json (repr boundary 9990 and 9991), python_recursion_limits.json (every frame offset at limits 1000 to 1009) and python_compare.json (type, anyOf, not and not not at 9980 to 9986) match in depth and message. jsonschema 4.26.0 (validators.py SHA256 97f171b995b4b0ca05530a9366a1252fb1753f99f3cb7b1068b6d9aab1096fa5) runs the RefResolver branch of _validate_reference, lines 472 to 483, only when the resolver field of line 235 is set; validate builds its validator from the schema alone at line 1329, check_schema from the metaschema and format checker at line 311, and only the deprecated resolver property at line 333 sets that field, so run_tool never reaches line 481."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "value_contracts::m15_python_dialect_meets_the_default_recursion_limit_the_python_sdk_never_raises"
+      ],
+      "rust": [
+        "src/lib.rs",
+        "src/python_recursion_model.rs",
+        "src/python_jsonschema.rs",
+        "src/sdk_mcp_python.rs"
+      ]
+    },
+    {
+      "id": "m16-python-settings-recursion-limits",
+      "concept": "CPython recursion limits while the Python SDK merges the sandbox into the settings value",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 461,
+        "line_end": 474,
+        "sha256": "568cc3ccd95c88400876e953f14c99cd4b54427b3442deee5236092731016178"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs merges the sandbox into a settings object the caller already holds and writes it with JSON.stringify; it parses no settings text, so no CPython recursion limit applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "_build_settings_value runs json.loads on the settings text, or on the file it names, when a sandbox is set, and catches only OSError, ValueError and TypeError as \"Failed to load settings: ...\", so the RecursionError of a deeply nested document reaches the caller bare. CPython 3.12's json C scanner makes one C recursion check per array or object it enters against the fixed Py_C_RECURSION_LIMIT of 10000, which sys.setrecursionlimit does not move, and the checks already open where json.loads runs count against it: a plain function holds 3, ClaudeSDKClient.connect under asyncio.run holds 7, and query() holds 13, so json.loads reads 9997, 9993 and 9987 nested objects there and raises \"maximum recursion depth exceeded while decoding a JSON object from a unicode string\" one level deeper. python_settings_goldens.py records each boundary from CPython 3.12.16 and the pinned claude_agent_sdk, searched with a fresh event loop and checked again after a first call, so caches a first call fills do not move it, together with the --settings value at each boundary and the values for settings text holding lone surrogate escapes, which json.loads keeps in the str and json.dumps writes back as escapes. PythonCStack in src/python_c_stack.rs holds those counts: ClaudeSdkClient::connect and connect_with_adapters build the command with CLIENT_CONNECT, the query functions with QUERY, and python_settings_value loads the text with that depth instead of a fixed cap, keeps the RecursionError message without the \"Failed to load settings\" prefix, and dumps without recursing. The Python dialect of the settings engine reads a settings file with the same json.loads, so it reads as deeply: ResolverState::with_python_c_stack picks the caller, PythonCStack::MODULE by default, read_document loads the text with that depth, and resolve_python_settings_with_state and resolve_settings_in_dialect_with_state run the Python dialect on a thread with SETTINGS_ENGINE_STACK_BYTES of stack, since the engine walks the document recursively. python_settings_file_goldens.py records the depth of a settings file each caller reads, with json.dumps of the deepest value it keeps, and settings files holding lone surrogate escapes, which the Python dialect keeps as json.loads does: each string or key with a lone surrogate stands in the engine's values as the string with each surrogate moved to a private-use code point of the same UTF-16 length (src/settings_strings.rs), and resolve_python_settings_with_state turns it back into the exact str. Before it reads any document, a Python-dialect resolve reserves every private-use code point its inputs hold, the settings texts with their escapes, the managed settings, the settings paths and the working directory, and picks each stand-in among the rest, so a private-use code point read anywhere in the resolve never turns into a lone surrogate; python_settings_file_goldens.py records groups of such files, each read on its own by the pinned SDK. _build_settings_value reads a settings file with Path.read_text(encoding=\"utf-8-sig\"), which drops one leading byte order mark, decodes a file that is only a prefix of one to nothing, raises UnicodeDecodeError on bytes that are not UTF-8 with positions counted after the mark, and turns each \\r\\n and lone \\r into \\n before json.loads counts lines; a missing file's OSError quotes repr of the path, whose bytes that are not UTF-8 os.fsdecode holds as lone surrogates U+DC80 to U+DCFF. python_settings_goldens.py records settings files of such bytes and missing paths under such working directories, and python_settings_value matches each message byte for byte through read_text_utf8_sig (src/python_text_file.rs) and python_text::repr (src/python_text.rs). The Python dialect of the settings engine reads every settings file the same way and skips one that read raises on, as it skips a file json.loads rejects, since the Python SDK has no resolveSettings and resolveSettings drops every file it cannot read or parse. The exception _build_settings_value raises is a CLIConnectionError, a ClaudeSDKError, raised from the UnicodeDecodeError, OSError, JSONDecodeError, integer ValueError or TypeError it caught; ClaudeSDKClient.connect and query() raise it as is while they build the command, after the CLI is found and before it starts. python_settings_goldens.py records, for settings files the utf-8-sig codec cannot decode, the class, message and __cause__ each caller raises, with the cause's encoding, object (the bytes after any byte order mark), start, end and reason. python_settings_value returns Error::SettingsLoad with a SettingsLoadError (src/settings_load_error.rs) whose cause is a SettingsLoadCauseError, the decode case carrying a PythonUnicodeDecodeError (src/python_unicode_decode_error.rs) with those fields, and connect and query start no command."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "python_settings_value::client_connect_reads_settings_as_deep_as_claude_sdk_client_connect",
+        "python_settings_value::query_reads_settings_as_deep_as_python_query",
+        "settings_resolve_python_depth::a_settings_file_reads_as_deep_as_json_loads_in_a_plain_function",
+        "settings_resolve_python_depth::a_settings_file_reads_as_deep_as_json_loads_under_claude_sdk_client_connect",
+        "settings_resolve_python_depth::a_settings_file_reads_as_deep_as_json_loads_under_query",
+        "settings_resolve_python_depth::the_python_dialect_reads_as_deep_as_a_plain_function_by_default",
+        "settings_resolve_python_surrogates::a_settings_file_keeps_its_lone_surrogates_as_json_loads_does",
+        "settings_resolve_python_surrogates::a_private_use_code_point_in_another_input_never_turns_into_a_lone_surrogate",
+        "settings_resolve_python_surrogates::a_private_use_code_point_in_a_settings_path_stays_in_the_sources",
+        "settings_resolve_python_surrogates::the_python_dialect_reads_a_settings_file_as_read_text_with_utf_8_sig_does",
+        "python_settings_value::an_undecodable_settings_file_raises_what_connect_and_query_raise"
+      ],
+      "rust": [
+        "src/argv.rs",
+        "src/client.rs",
+        "src/constants.rs",
+        "src/process_transport.rs",
+        "src/python_c_stack.rs",
+        "src/python_json_value.rs",
+        "src/settings_option.rs",
+        "src/settings_read.rs",
+        "src/settings_resolve.rs",
+        "src/settings_resolve_sources.rs",
+        "src/python_text_file.rs",
+        "src/python_unicode_decode_error.rs",
+        "src/settings_load_error.rs",
+        "src/error.rs",
+        "src/settings_resolve_state.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
+      "id": "m17-python-remote-ref-close-timing",
+      "concept": "When the Python SDK closes the connections urlopen opened for a remote $ref",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no CPython connection close timing applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any retrieval error into the error result text, and jsonschema 4.26.0 (validators.py SHA256 97f171b995b4b0ca05530a9366a1252fb1753f99f3cb7b1068b6d9aab1096fa5) reads each remote document with `with urlopen(request) as response:` and json.load. CPython 3.12.16 closes every connection of that call before the tool result is written: HTTPResponse closes its socket at body end through _close_conn (http/client.py SHA256 c2c0694155837d72fc710a4138e5d1e53ae1a652b117a2e23a5b1b0db527a0f9), http_error_302 runs fp.read() and fp.close() before it follows a redirect (urllib/request.py SHA256 b6a7860356d99186e7ad1b35c47f2f09d7524a398096214d8c276277947b672c, lines 742 and 743), and the HTTPError that http_error_default raises with the open fp, or any other error that holds the response, is freed by refcount when the except clause ends, also with the cycle collector disabled. python_close_goldens.py records, through Query._handle_control_request and SdkMcpBridge, each server end of each call at the moment the control response is written: a client FIN for every connection, an RST only for a 404 whose 20000 byte body stays unread past the 8 KiB socket buffer, five connections for a redirect loop and two for one hop. The Python dialect's urlopen in src/python_urlopen.rs and src/python_http_client.rs closes at the same points, reading through 8 KiB buffers, so the server sees the same FIN or RST before the answer, as the contract checks over the full Python dialect MCP server."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "remote_schema_retriever::python_dialect_closes_each_retrieval_connection_before_the_call_answers"
+      ],
+      "rust": [
+        "src/python_http_client.rs",
+        "src/python_urlopen.rs",
+        "src/urlopen_retriever.rs"
+      ]
+    },
+    {
+      "id": "m19-python-tls-hello-retry-groups",
+      "concept": "TLS after a HelloRetryRequest for a group rustls does not implement while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. That context supports X25519MLKEM768, X25519, P-256, X448, P-384, P-521, ffdhe2048 and ffdhe3072. When the server answers the ClientHello with a HelloRetryRequest for X448, P-521, ffdhe2048 or ffdhe3072, OpenSSL sends a second ClientHello with a key share in that group and completes the handshake in it."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "rustls implements none of those four groups. src/python_urlopen_tls_gate.rs checks the retry request and the server hello against the group the server asked for, but hands rustls a retry request for P-256, so the second ClientHello carries a P-256 share where OpenSSL's carries one in the requested group, and once the server hello picks that group the first encrypted record fails with \"[SSL] record layer failure\" where Python completes the handshake. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_hello_retry_for_a_group_rustls_lacks_is_answered_with_a_p256_share"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m20-python-tls-suites-without-rustls",
+      "concept": "TLS 1.2 DHE and CBC cipher suites the Python SDK accepts while it retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. Under TLS 1.2 that context offers, besides the AEAD ECDHE suites, ECDHE-ECDSA and ECDHE-RSA with AES-CBC and SHA-256 or SHA-384, and DHE-RSA with AES-GCM or with AES-CBC and SHA-256, and a server that picks one of them completes the handshake, or fails with OpenSSL's text for what it sent."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "rustls implements none of these suites. src/python_urlopen_tls_gate.rs checks a server hello that picks one with OpenSSL's rules, then tells rustls the server chose the AES-128-GCM suite with the same signature algorithm, ECDHE-ECDSA for the ECDSA suites and ECDHE-RSA for the others, so the key exchange and what follows it are read as that suite and a server that goes on with the suite it picked gets a rustls error text where Python connects or reports OpenSSL's text. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_dhe_key_exchange_is_read_as_the_ecdhe_suite_rustls_implements"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m21-python-tls-rewritten-server-hello-transcript",
+      "concept": "The handshake transcript after the TLS gate rewrites a server hello while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. OpenSSL hashes the server hello into the handshake transcript exactly as the server sent it, so a server that carries on after a hello OpenSSL accepts reaches the Finished check with the transcript both ends hold."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "Where a server's hello would make rustls fail first with a text of its own while OpenSSL carries on, src/python_urlopen_tls_gate.rs hands rustls a rewritten hello, with a suite rustls implements, without the extensions rustls refuses, or with the session id rustls expects. rustls hashes the rewritten bytes, so its transcript differs from the server's and the Finished check fails with the rustls text where Python completes the handshake. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::rustls_hashes_the_server_hello_the_gate_rewrote"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m22-python-tls-after-server-hello",
+      "concept": "ssl.SSLError texts for handshake messages after the server hello while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. OpenSSL checks the certificate, certificate status, server key exchange, encrypted extensions, certificate request, certificate verify and Finished messages that follow the server hello, and each failure raises ssl.SSLError with an OpenSSL reason, which urlopen raises as URLError."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_tls_gate.rs applies OpenSSL's record, alert and handshake framing rules and its server hello rules, then lets rustls read the contents of the messages that follow. A server that breaks the protocol there gets the rustls error text, except the certificate failures src/python_urlopen_tls.rs words as OpenSSL does: a self-signed certificate, a missing issuer, a name or address mismatch, and an expired or not yet valid certificate. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::messages_after_the_server_hello_fail_with_the_rustls_text_except_certificate_failures"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m23-python-tls-encrypted-alerts",
+      "concept": "Alerts a server sends in the encrypted phase of the handshake while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. OpenSSL raises ssl.SSLError with its text for a fatal alert it decrypts during the handshake, as it does for an alert it reads in the clear."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_tls_gate.rs cannot read encrypted records: under TLS 1.3 it passes them to rustls until the handshake is over, and under TLS 1.2 it steps aside at the server's change cipher spec. rustls decrypts the alerts in them, so their error text is the rustls text, while an alert in the clear gets OpenSSL's text from alert_text in the gate. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::an_encrypted_handshake_alert_raises_the_rustls_text"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m24-python-tls-handshake-message-cap",
+      "concept": "The largest handshake message a server may send while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. OpenSSL accepts a server hello of up to 65607 bytes and a certificate, server key exchange or certificate request message of up to 102400 bytes, and raises \"[SSL: EXCESSIVE_MESSAGE_SIZE] excessive message size\" past each limit."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_tls_gate.rs applies OpenSSL's limits to the messages it reads in the clear, but rustls refuses any handshake message longer than 65535 bytes, so a TLS 1.2 certificate, server key exchange or certificate request message of 65536 to 102400 bytes, and a TLS 1.3 certificate message of that size, which the gate never sees, fail with the rustls text where Python reads them. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_certificate_message_past_65535_bytes_fails_with_the_rustls_text"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs"
+      ]
+    },
+    {
+      "id": "m25-python-tls-read-errors",
+      "concept": "Errors while the Python SDK reads the body of a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. json.load reads the body through the ssl socket after the handshake, and a server that breaks the protocol there makes response.read() raise ssl.SSLError with OpenSSL's text."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "The body is read through rustls, so the io::Error a read of the body returns carries the rustls text instead of OpenSSL's. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_body_read_error_carries_the_rustls_text"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/python_urlopen_tls_gate.rs",
+        "src/python_http_client.rs"
+      ]
+    },
+    {
+      "id": "m26-python-tls-trust-directory-lookup",
+      "concept": "When the trusted roots of SSL_CERT_DIR are read while the Python SDK retrieves a remote $ref over https",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so no OpenSSL handshake applies."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "run_tool validates the arguments inside try blocks whose except Exception as e turns any error into the error result text, and jsonschema 4.26.0 reads each remote https document through urlopen, whose default context in CPython 3.12.16 runs OpenSSL 3.5. urlopen builds that context with its opener on the first call, whatever the scheme. OpenSSL reads SSL_CERT_FILE then, but looks a certificate up in the hashed SSL_CERT_DIR directory at each handshake, so a root written there as its subject hash with a .0 suffix after the first urlopen is trusted by the next https retrieval. python_tls_context.json records it as the directory_read_at_each_handshake case."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_tls.rs builds the rustls root store when the context is built, on the first retrieval, from SSL_CERT_FILE and SSL_CERT_DIR read through the environment adapter, so a root written to the directory afterwards is not trusted and the retrieval fails with the certificate verify failed text where Python connects. The other seven cases of python_tls_context.json match, and building the context fails on neither side, so no other trust store error text differs. UrlopenRetriever::open, which is public, returns the text; through validation a failed retrieval is Unresolvable on both sides, so there only success against failure shows. The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+      },
+      "contracts": [
+        "remote_schema_tls::a_root_written_to_ssl_cert_dir_after_the_first_retrieval_is_not_trusted"
+      ],
+      "rust": [
+        "src/python_urlopen_tls.rs",
+        "src/urlopen_retriever.rs"
+      ]
+    },
+    {
       "id": "r01-queue-capacity",
       "concept": "Queue capacity bounds",
       "python": {
@@ -1865,10 +2215,12 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript dialect redacts with the same eighteen patterns in the same order, run on a matcher with JavaScript semantics; ArgvStyle::Python keeps its tail unredacted."
+        "reason": "The TypeScript dialect redacts with the same eighteen patterns in the same order, run on a matcher with JavaScript semantics; ArgvStyle::Python puts no stderr in its errors under Limits::python(), as claude_agent_sdk does, and leaves a tail opted into through Limits::stderr_tail unredacted."
       },
       "contracts": [
         "subprocess::process_failure_message_redacts_secrets_from_the_stderr_tail",
+        "subprocess::python_keeps_the_stderr_tail_it_opts_into_unredacted",
+        "upstream_defaults::the_python_preset_selects_the_python_sdk_values",
         "shutdown_errors::t10_a_missing_executable_is_reported_by_path_and_a_missing_cwd_by_directory"
       ],
       "rust": [
@@ -2284,7 +2636,7 @@
       },
       "contracts": [
         "value_contracts::s18_structured_input_blocks_pass_through_unvalidated",
-        "user_input::structured_input_carries_blocks_and_every_identity_field"
+        "user_input::structured_input_carries_blocks_and_every_field_in_declaration_order"
       ],
       "rust": [
         "src/user_input.rs"
@@ -2559,6 +2911,188 @@
       ]
     },
     {
+      "id": "r31-typed-settings-lone-surrogates",
+      "concept": "Lone surrogates in typed resolved settings",
+      "python": {
+        "status": "absent",
+        "reason": "The pinned Python SDK returns no typed settings: json.loads keeps a lone surrogate in a str, which resolve_python_settings returns exactly."
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs returns resolved settings as JavaScript values, whose strings hold lone surrogates; it has no typed settings. Row r32 covers how the TypeScript dialect reads them."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Both SDKs keep a lone surrogate of a settings file, escaped or decoded from UTF-16LE, in the strings they return."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "A Rust String cannot hold a lone surrogate, so the typed ResolvedSettings holds U+FFFD for each one in either dialect; of keys that become equal, the last entry stays in the place of the first. The untyped resolve_python_settings result keeps the exact str. The TypeScript dialect has no untyped result yet, so its lone surrogates reach callers only as U+FFFD."
+      },
+      "contracts": [
+        "settings_resolve_python_surrogates::the_typed_python_dialect_keeps_a_file_with_lone_surrogates_as_u_fffd",
+        "settings_resolve_ts_surrogates::the_typescript_dialect_reads_settings_files_as_resolve_settings_does_on_node"
+      ],
+      "rust": [
+        "src/settings_resolve.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
+      "id": "r32-typescript-settings-file-text",
+      "concept": "Text of a settings file the TypeScript resolver reads",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK reads a settings file with Path.read_text(encoding=\"utf-8-sig\"); row m16 covers that reading."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function kx(e){if(e.byteLength===0)return\"utf8\";",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 143,
+        "sha256": "376d1b92ee822f5344928d697754c696be27000ea1bd8f57c77c75039dfa0b90"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "resolveSettings reads a settings file with readFileSync in the encoding kx picks: UTF-16LE when the bytes start FF FE, else UTF-8, which Node decodes with U+FFFD for each maximal invalid subpart; UTF-16LE decoding drops a trailing odd byte and keeps every lone UTF-16 unit. The reader turns each \\r\\n into \\n, skips text that trims to nothing, strips one leading U+FEFF and hands the rest to JSON.parse, which keeps a lone surrogate escape in the string it returns and pairs an escaped or raw high surrogate with the low one after it. read_node_text in src/node_text_file.rs gives the same text, with each lone unit spelled as its \\uXXXX escape, or as U+FFFD after an odd run of backslashes, so JSON.parse and serde_json accept and reject the same documents, and stand_in_escapes in src/settings_strings.rs moves each lone surrogate escape to a private-use stand-in chosen apart from every private-use code point the resolve reads, as the Python dialect does. ts_settings_file_goldens.py records resolveSettings of the pinned package on Node over escaped, raw UTF-8, UTF-16LE and byte order mark cases, union merges and stand-in collisions. resolve_settings_json_with_state prints the whole resolved object as JSON.stringify prints it, with escape_stand_ins in src/settings_strings.rs spelling each stand-in as the escape of its lone surrogate, and the goldens record that text with the sandbox root taken off every path. The settings schema builds the document, schema objects and records by assignment, so assigns_a_member in src/settings_schema.rs drops a __proto__ member there and a value passed through whole keeps it."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_ts_surrogates::the_typescript_dialect_reads_settings_files_as_resolve_settings_does_on_node",
+        "settings_resolve_ts_surrogates::the_typescript_dialect_prints_the_resolved_object_with_its_lone_surrogates_as_json_stringify_does"
+      ],
+      "rust": [
+        "src/node_text_file.rs",
+        "src/settings_read.rs",
+        "src/settings_resolve.rs",
+        "src/settings_resolve_sources.rs",
+        "src/settings_schema.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
+      "id": "r33-typescript-settings-file-depth",
+      "concept": "Nesting depth of a settings file the TypeScript resolver reads, skips and rejects",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK reads a settings file with json.loads, whose depth CPython's C recursion limit bounds; row m16 covers that reading."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function Fu(e,t,n,r){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 460,
+        "sha256": "40c0a7ad04c3e9051580587172cb40d19cdd439f517c79bd5d21f243bab4ccc1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "resolveSettings reads each settings file through Fu: the reader parses it with JSON.parse, which nests as deeply as the heap allows, then copies it with structuredClone and walks it with the settings schema inside a try, so a document either walk runs out of stack on is skipped like one that does not parse. Fu then copies the document it caches once more with structuredClone outside the try, and the effective merge recurses through lodash mergeWith with the settings customizer, so running out of stack in either rejects resolveSettings with RangeError \"Maximum call stack size exceeded\". Policy settings take another path and skip the cache copy: the managed reader parses each document and walks it inside the try that turns an overflow into an unreadable document, the managed file merges into its folder outside that try and rejects, each drop-in is copied and merges inside it, so an overflow there keeps what the merge wrote, leaves the file tier unloaded and gives up on the rest of the folder, and the admin settings merge onto a fresh object outside it. resolveSettings evaluates the managed settings three times, for the settings, their origin and whether the machine policy loaded, each on a stack of its own, while the reader caches each document from the first evaluation that reads it, so a later evaluation reads the drop-ins an earlier one gave up before. ManagedReader in src/settings_managed_reader.rs reads and merges managed documents that way, with PolicyBudgets in src/node_stack.rs holding the budgets of each evaluation, and ts_managed_settings_goldens.py records the boundaries, a partly merged drop-in, the reads of the later evaluations and lone surrogates in managed documents. How deep each pass goes depends on the Node release, the platform and, on macOS, how much of the stack the command line and environment fill at startup: on Node 24.13.1 each pass costs a fixed number of stack bytes per object and per array it enters, against a budget that the startup bytes come off on darwin arm64 and that V8 sets below them on Linux. NodeStack in src/node_stack.rs holds those costs as NodeStack::NODE_24_DARWIN_ARM64, with a default startup of 4384 bytes, NodeStack::NODE_24_LINUX_ARM64 and NodeStack::NODE_24_LINUX_X64; NodeStack::for_build_target, the default, picks the profile of the platform the crate is built for, NodeStack::with_startup_bytes moves the startup and ResolverState::with_node_stack picks the profile. Each recorder holds the boundaries of every platform and records the goldens of the one it runs on, one golden file per platform, and the depth and managed contracts check every profile against its own. The TypeScript dialect parses a settings file past serde_json's nesting limit (src/settings_parse_deep.rs), skips it when NodeStack::reads says a read walk runs out, and rejects with ResolveSettingsError::MaximumCallStack when the cache copy or a merge does. ts_settings_depth_goldens.py records resolveSettings of the pinned package on Node at each boundary, with Node started on exactly the default startup bytes. The settings customizer joins two arrays without walking into them, so a result nests deeper than the merge can; the oracle prints such a result without recursing, past the depth where JSON.stringify runs out. lodash reads each member through safeGet, which answers undefined for __proto__, so an array or object under that key merges nothing while a scalar there is written, and it walks members in for...in order, array indices first; merge_within in src/node_merge.rs merges every TypeScript settings file that way, and the proto_merge case of ts_settings_file_goldens.py records it. Each read pass also spends a fixed number of bytes at the array or object that ends a path, by whether it is empty or holds scalars, and the merge spends more where V8 compiles part of lodash the first time the process runs it (the first member assigned, the first arrays finished) and on an array holding members while lodash isIndex has tested fewer than two keys in the process, since V8 compiles the regular expression isIndex tests with to bytecode on its first test and to machine code on its second, wherever the array sits. The merges of one resolve, the later managed evaluations included, share MergeWarmth (src/node_merge_warmth.rs) in the order upstream runs them, with MergeCost (src/node_merge_cost.rs) holding those costs. lodash still enters an array or object up to MergeCost::descent_reach bytes past the stack its level needs, merges its members and runs out as it returns from it, when lodash Stack.delete runs; a compile of the isIndex pattern that runs out of stack, the bytecode one where the level and MergeCost::first_array fit and the machine code one anywhere in that reach, rejects resolveSettings with SyntaxError \"Invalid regular expression: /^(?:0|[1-9]\\d*)$/: Stack overflow\", which merge_within returns as ResolveSettingsError::InvalidRegularExpression. MergeCost::later_compile is what the machine code compile spends more in a merge after the one that compiled the pattern to bytecode when a background compile lands while the merge runs; every profile sets it to 0, since each assumes no background compile lands. The goldens record what Node answers with every function kept in the interpreter, after Node with its concurrent compile tiers off answered the same, and list under observed the cases Node answers more than one way with its default flags on each host, which the engine answers as one of. The leaf_, copy_, merge_ and merge_index_compile_ cases of ts_settings_depth_goldens.py and the machine_after_held_ cases of ts_managed_settings_goldens.py record each boundary. A merge whose path assigns a scalar at most levels gets optimized by V8 while it runs, after a number of calls that varies between runs of the same process, and then reaches deeper than the profile says; NodeStack follows the unoptimized merge, which every run reaches."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_ts_depth::the_typescript_dialect_reads_deep_settings_files_as_resolve_settings_does_on_node",
+        "settings_resolve_ts_managed::the_typescript_dialect_reads_managed_settings_as_resolve_settings_does_on_node",
+        "settings_resolve_ts_surrogates::the_typescript_dialect_reads_settings_files_as_resolve_settings_does_on_node"
+      ],
+      "rust": [
+        "src/node_managed_pass.rs",
+        "src/node_merge.rs",
+        "src/node_merge_call.rs",
+        "src/node_merge_cost.rs",
+        "src/node_merge_room.rs",
+        "src/node_merge_warmth.rs",
+        "src/node_stack.rs",
+        "src/settings_managed_reader.rs",
+        "src/settings_parse_deep.rs",
+        "src/settings_policy_parse.rs",
+        "src/settings_read.rs",
+        "src/settings_resolve.rs",
+        "src/settings_resolve_error.rs",
+        "src/settings_resolve_policy.rs",
+        "src/settings_resolve_values.rs"
+      ]
+    },
+    {
+      "id": "r34-typescript-settings-array-merge",
+      "concept": "Arrays the TypeScript resolver merges into array-like objects and objects it merges into arrays",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK merges settings with its own merge of dicts and lists, which turns no object into an array and leaves no hole or named property in a list."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function y4e(e,t,n,r,o,s,i){var a=Uf(e,n),",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 382,
+        "sha256": "8f1864176838fe9e2cb0b0a0bf030fab9beff871adda7143c3edfe820ba97d93"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "lodash mergeWith merges the settings files through baseMergeDeep (y4e): an array merged into an array-like object, one whose length is a number that is a whole number from 0 to 2^53 - 1, copies it with copyArray first, Array(length) throwing RangeError \"Invalid array length\" past 2^32 - 1, so the copy holds the index members below the length and holes elsewhere. An object merged into an array it holds merges into it as into any object: each index member sets an element, leaving holes past the end, length converts its value with ToNumber and truncates or extends the array, throwing RangeError \"Invalid array length\" when that is not a whole number from 0 to 2^32 - 1, and every other member sets a named property JSON.stringify never prints. An array merged from walks every index below its length, so a hole merges as undefined, the settings customizer joins two arrays through a Set, keeping one undefined, and JSON.stringify prints each hole or undefined element as null; a merge that leaves more holes than a V8 string can print rejects resolveSettings with RangeError \"Invalid string length\". A drop-in whose merge throws gives up on the rest of the managed folder, as an overflow does, and a fresh array or object merged from a source leaves out each array or object under __proto__, which safeGet hides, while the source keeps it. merge_within in src/node_merge.rs merges that way, keeping holes as runs and named properties after the elements with the ArrayMark of the resolve (src/js_array.rs, src/js_array_mark.rs), which settle turns into what JSON.stringify prints once the resolve is done, and ts_settings_merge_goldens.py records the cases."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_ts_merge::the_typescript_dialect_merges_arrays_and_array_like_objects_as_resolve_settings_does_on_node",
+        "settings_resolve_ts_merge::the_typed_result_holds_the_effective_settings_the_merge_of_arrays_gives"
+      ],
+      "rust": [
+        "src/js_array.rs",
+        "src/js_array_mark.rs",
+        "src/node_merge.rs",
+        "src/settings_resolve.rs",
+        "src/settings_resolve_policy.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
+      "id": "r35-settings-string-length-units",
+      "concept": "Lengths the settings schema checks on strings holding lone surrogates and characters past the Basic Multilingual Plane",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK passes the settings file to the CLI without checking it against a schema, so no length of a settings string is checked."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function Bg(e){let t=e.length;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 142,
+        "sha256": "a57e4b289503674295d79be83cd4f580290ac264d6a7c7eec4ff410dc507ab96"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A zod length check reads the length of a string in UTF-16 units and, once that passes its bound (past the maximum, from the minimum to twice it, or from the exact length to twice it), counts its code points with Bg instead, a surrogate pair counting once and a lone surrogate once, so policyHelpers.linux.path keeps 1024 code points however many units they take. A refine that reads e.length, as authServerMetadataUrl does, counts UTF-16 units, a character past the Basic Multilingual Plane counting twice. The settings engine stands each lone surrogate as a private-use code point no input holds, from plane 15 or 16 once every one of the Basic Multilingual Plane is taken, and js_length in src/settings_strings.rs counts each such stand-in as the one unit of its surrogate, so neither kind of check moves a boundary and no depth changes: settings_stand_in_goldens.py records both kinds of check at their bounds and the read, merge and Python depth boundaries with stand-ins in the leaf."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_stand_ins::a_stand_in_past_the_basic_multilingual_plane_resolves_as_resolve_settings_does_on_node",
+        "settings_resolve_stand_ins::the_typed_result_counts_a_stand_in_as_one_unit_in_both_dialects",
+        "settings_resolve_stand_ins::a_stand_in_past_the_basic_multilingual_plane_moves_no_typescript_depth_boundary",
+        "settings_resolve_stand_ins::a_stand_in_past_the_basic_multilingual_plane_moves_no_python_depth_boundary"
+      ],
+      "rust": [
+        "src/js_array.rs",
+        "src/settings_schema.rs",
+        "src/settings_schema_builtins.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
       "id": "s29-hook-matcher-omitted",
       "concept": "Hook registration without a matcher",
       "python": {
@@ -2653,6 +3187,7 @@
       },
       "contracts": [
         "bundled_cli::bundled_cli_is_a_file_under_the_bundled_directory",
+        "bundled_cli_discovery::only_a_named_bundled_root_is_searched_before_path",
         "subprocess::connect_spawns_the_bundled_cli_under_the_configured_root"
       ],
       "rust": [
@@ -2749,7 +3284,8 @@
       "contracts": [
         "bundled_cli::the_bundled_cli_derives_a_label_only_when_the_pin_and_its_record_qualify",
         "bundled_cli::a_bundled_cli_without_a_record_counts_as_too_old",
-        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label"
+        "bundled_cli::only_the_executable_found_in_the_bundled_directory_derives_a_label",
+        "golden_argv_env::s34_only_the_python_derivation_labels_the_bundled_cli"
       ],
       "rust": [
         "src/bundled_cli.rs"
@@ -3059,11 +3595,50 @@
         "kind": "upstream"
       },
       "contracts": [
-        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects"
+        "initialize_options::every_case_matches_the_captured_initialize_bytes_in_both_dialects",
+        "user_input_writes::a_streamed_message_is_written_as_given"
       ],
       "rust": [
         "src/driver.rs",
         "src/version_check.rs"
+      ]
+    },
+    {
+      "id": "m18-python-system-proxy-undefined-reads",
+      "concept": "System proxy values CPython crashes on or reads from uninitialized memory while the Python SDK retrieves a remote $ref",
+      "python": {
+        "file": "src/claude_agent_sdk/__init__.py",
+        "line_start": 628,
+        "line_end": 641,
+        "sha256": "4518466c32152d520fd894456058be2d8a77a23bad4a995d232de4b860b0a69f"
+      },
+      "typescript": {
+        "status": "absent",
+        "reason": "sdk.mjs resolves no remote $ref through CPython's urlopen, so it reads neither the macOS system configuration nor the Windows registry."
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "With no proxy variable set, urlopen in CPython 3.12.16 reads proxies from the macOS system configuration through _scproxy, and from the Windows registry through winreg as getproxies_registry and proxy_bypass_registry read it. _scproxy sends a value of the wrong type, such as a host that is not a string, a message it does not answer, which raises an NSException that ends the interpreter. winreg.QueryValueEx converts the whole buffer it allocated with Reg2Py, so a REG_DWORD or REG_QWORD shorter than its width, and any bytes past what the second RegQueryValueExW wrote, are read from uninitialized memory."
+      },
+      "decision": {
+        "kind": "rust-adaptation",
+        "reason": "src/python_urlopen_sysconf.rs leaves a value of the wrong type out, as if it were absent, because a crashed process has no answer to match. src/python_urlopen_registry.rs zeroes the buffer, so a short integer and the rest of a shorter answer read as zero bytes. Reg2Py and the Windows error classes are checked against expectations worked by hand from Python/winreg.c, PC/errmap.h and Objects/exceptions.c, because the recording host has no winreg; getproxies_registry and proxy_bypass_registry are recorded from CPython over a fake winreg."
+      },
+      "contracts": [
+        "src/python_urlopen_sysconf_tests.rs::reads_the_system_configuration_as_scproxy_and_urllib_read_it",
+        "src/python_urlopen_sysconf_tests.rs::a_string_is_cut_at_its_first_nul_and_a_lone_surrogate_does_not_convert",
+        "src/python_urlopen_registry_tests.rs::reads_the_registry_as_getproxies_registry_and_proxy_bypass_registry_read_it",
+        "src/python_urlopen_registry_tests.rs::an_integer_is_read_little_endian_and_zero_without_data",
+        "src/python_urlopen_registry_tests.rs::a_string_is_cut_at_its_first_nul_and_keeps_a_lone_surrogate",
+        "src/python_urlopen_registry_tests.rs::a_multi_string_drops_one_final_nul_and_splits_at_each_other",
+        "src/python_urlopen_registry_tests.rs::any_other_type_is_its_bytes_or_none_without_data",
+        "src/python_urlopen_registry_tests.rs::a_windows_error_is_the_oserror_python_raises_for_its_code",
+        "src/python_urlopen_registry_tests.rs::a_windows_error_code_maps_to_the_class_of_its_errno"
+      ],
+      "rust": [
+        "src/python_urlopen_registry.rs",
+        "src/python_urlopen_registry_windows.rs",
+        "src/python_urlopen_sysconf.rs"
       ]
     },
     {
@@ -3562,12 +4137,14 @@
         "behavior": "Python passes a str or Path mcp_servers value to --mcp-config as given, instead of the generated config. TypeScript has no such form."
       },
       "decision": {
-        "kind": "follow-python",
-        "reason": "The form exists only in Python. ClaudeAgentOptions::mcp_config carries the str or Path value verbatim as its own --mcp-config value, text or path alike."
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default and builds --mcp-config from the server map, ClaudeAgentOptions::mcp_servers. ClaudeAgentOptions::mcp_config is carried verbatim as its own --mcp-config value under either dialect, text or path alike, and stands in for the str or Path form only Python has."
       },
       "contracts": [
+        "golden_argv_env::typescript_mcp_config_matches_upstream_bytes",
         "golden_argv_env::python_mcp_config_path_is_passed_verbatim",
-        "golden_argv_env::python_mcp_config_json_text_is_passed_verbatim"
+        "golden_argv_env::python_mcp_config_json_text_is_passed_verbatim",
+        "golden_argv_env::typescript_mcp_config_path_is_passed_verbatim"
       ],
       "rust": [
         "src/argv.rs"
@@ -3597,7 +4174,7 @@
       },
       "decision": {
         "kind": "follow-typescript",
-        "reason": "The TypeScript shape is the default; ArgvStyle::Python writes the Python shape byte for byte."
+        "reason": "The TypeScript shape is the default, and PermissionDecision::Raw writes a result no typed variant expresses as returned, with the request toolUseID spread over it; ArgvStyle::Python writes the Python shape byte for byte and answers a raw result with the TypeError Python raises for a dict."
       },
       "contracts": [
         "golden_inbound_control::permission_decisions_are_written_byte_for_byte",
@@ -3742,6 +4319,1447 @@
       ],
       "rust": [
         "src/bridge_gitcmd.rs"
+      ]
+    },
+    {
+      "id": "bw-attach-passes-no-hold-options",
+      "concept": "attachBridgeSession builds the session client without any hold option",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "retainUndeliveredOnClose:!0});function D(){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 700,
+        "span_after": 40,
+        "sha256": "80eaca8e1f0e595846198cdf1b1c1e8ab8b73748620b6cece5c7c260b12617d5"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The client is built from the session url, ingress token, epoch, heartbeat and auth options only, so followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs, streamEventFirstFlushMs, guardsClientRows, launchFlushPolicy and inboundReadReceipts keep their defaults and nothing is held. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-served-policy-holds-need-the-option",
+      "concept": "servedPolicyHolds only answers for a client that follows the served policy",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "servedPolicyHolds(){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 260,
+        "sha256": "7a555f0efb1208f2ccbc127399ee83b825e915446e80662fe64bef6200f389b6"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Without followsServedPolicy the served flush policy is stored and never consulted, so a served policy never delays an upload. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-may-hold-uploads-gate",
+      "concept": "mayHoldUploads gates every upload hold",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "return this.noSubscriberUploadHoldMs>0||this.servedPolicyHolds()",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 160,
+        "sha256": "525800a2b8f75cb9ba402cee38b48ce8b82b6cdd58ad19a0d17ed3f720e3a084"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "With the default options the gate is closed, so no event post waits for a subscriber or a policy. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-subscriber-report-is-stored-only",
+      "concept": "The has_subscribers answer of an events post is stored without holding anything",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "setHasSubscribers(y.data?.has_subscribers,\"no_report\")",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 120,
+        "sha256": "1370e99cb1c2455940cd9377ce27a634095a6b8fcf7d2660b9e57d5aafb993ea"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The reported value is recorded, and with noSubscriberUploadHoldMs at its default of 0 no later post waits on it. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-flush-policy-is-stored-only",
+      "concept": "The event_flush_policy of a heartbeat answer is stored without holding anything",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "takeUpFlushPolicy(e.event_flush_policy)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 160,
+        "sha256": "6f6d29531205a0cabf2f25c3a00d0871d277f1eb0e171b85bbed024771ec1b04"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The served policy is taken up on the heartbeat answer, and with followsServedPolicy unset no hold follows from it. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-reply-degraded-is-always-false",
+      "concept": "The reply_degraded flag every worker status report carries is always false",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "degraded:!1",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 120,
+        "span_after": 80,
+        "sha256": "8c0612c21b1dbba61e983ff223763bab2f35d21abb811e2ece4c8c6307bcb61e"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Every worker status report sends internal_metadata.reply_degraded from e3() (byte offset 1057818). e3 returns gUe().degraded, gUe returns hUe.of(host), and hUe is built by the factory () => ({degraded:!1}) at 856394. hUe and gUe each occur twice in package/bridge.mjs (definition and single reader), and no code writes a degraded property, so the reported value is always false. The Rust port sends false by default and exposes set_reply_degraded only as an opt-in Rust extension."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::requires_action_details_ride_along_and_always_send"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-events-post-offer-needs-served-policy",
+      "concept": "offerToEventsPost returns unless the served_policy rule is in force",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "offerToEventsPost(e,t){if(t.rule!==\"served_policy\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 260,
+        "sha256": "3fa87f190d2bbec068628696d7de7cc0164932369cfe6c0548b421c08c2e4bb3"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Without the served_policy rule nothing is offered for a hold, so every events post goes out on the normal flush. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-receipts-ride-needs-served-policy",
+      "concept": "Read receipts ride an events post only for a client that follows the served policy",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "receiptsMayRide(){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 200,
+        "sha256": "6ffc35b9166015b72756a8849c566f7a72ccd0ee81f49373177a9fe9c0087373"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Without followsServedPolicy no receipt rides an events post, so /worker/event-batch is never used from the attach path. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client",
+        "bridge_worker::delivery_acknowledgements_match_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-transport-factory-reads-named-options",
+      "concept": "The transport factory reads named options only and has two call sites",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "async function RC(e){let{sessionUrl:t,ingressToken:n,sessionId:r,initialSequenceNum:o,getAuthToken:s}=e",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 20,
+        "span_after": 1400,
+        "sha256": "d1d176b9f41fb6be184932514fad6341378d7362fda37e3365fb3d4e48886dee"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "RC builds the SSE transport and the session client from named keys of its argument; the attach path and reconnectTransport are its only callers."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_session::the_recorded_attach_cases_are_reproduced"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-handle-surface",
+      "concept": "The handle attachBridgeSession returns reaches only the attach-path operations",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "return D(),w.connect(),{sessionId:t,getSequenceNum(){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 80,
+        "span_after": 900,
+        "sha256": "5047fbd472fc31e494f44457880956797f95b2c6f29243b7423bc0f30057997f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The handle exposes sequence, state, metadata, event writes and reportDelivery; it offers no way to set a hold option, to write through the internal event writer or to note an unrun event."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::delivery_acknowledgements_match_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-internal-event-writer-has-no-caller",
+      "concept": "getInternalEventWriter is on the transport object and attachBridgeSession never calls it",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "getInternalEventWriter",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 80,
+        "span_after": 120,
+        "sha256": "e0ff7f03109473c212e9e4a4ceccba3f0530690996b60a2ba44d0a579d965d6f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The internal events uploader is never started from the attach path."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::the_handle_offers_no_internal_hooks"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-urgent-lane-needs-the-option",
+      "concept": "The urgent client event lane needs servedCallRequestsJumpQueue",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.servedCallRequestsJumpQueue()){if(!this.holdsAcrossModelCalls()",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 200,
+        "span_after": 260,
+        "sha256": "2080c0ca17210e5869c323bb4b9c75a4a217f7096f3794b56c64ab9cf1c3e7de"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The option is read as n?.servedCallRequestsJumpQueue?.()===true and attachBridgeSession passes none, so control requests never jump the queue. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::control_traffic_is_posted_in_write_order"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-gather-wait-needs-both-windows",
+      "concept": "waitForMoreMs needs liveTwinWaitMs and streamEventFirstFlushMs above zero",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.liveTwinWaitMs>0&&this.streamEventFirstFlushMs>0",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 80,
+        "span_after": 300,
+        "sha256": "23848727be41af2c8da7639fcb088816b49457424d18d447a5175b780afb48ff"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Both windows default to 0 and attachBridgeSession passes neither, so no flush waits to gather more events. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-unrun-ack-has-no-caller",
+      "concept": "noteUnrun has no caller on the attach path",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "noteUnrun(e,t){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 240,
+        "sha256": "ebc1b1b7aa7e46d68e8e72e2712938bf623887fa6deabd57e43d69f98264c8c1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The unrun delivery acknowledgement is never sent."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::the_handle_offers_no_internal_hooks"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-owed-client-rows-need-guards",
+      "concept": "sendOwedClientRowsAgain only runs for a client that guards client rows",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "sendOwedClientRowsAgain(e){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 260,
+        "sha256": "c919c56a4f643125da8faba1b971c8f68420f715f8d7b10728589a86637027de"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "guardsClientRows is never passed, so no owed client row is sent again. No package export can pass followsServedPolicy, noSubscriberUploadHoldMs, servedCallRequestsJumpQueue, liveTwinWaitMs or streamEventFirstFlushMs: those names occur only in package/bridge.mjs (not in sdk.mjs, core*.mjs, browser-sdk.js or extractFromBunfs.js), whose exports are attachBridgeSession, createCodeSession, fetchRemoteCredentials and the three type guards. The transport factory RC (byte offset 1191953) is called at 1198037 (attachBridgeSession) and 1199847 (reconnectTransport), both with a literal option object of sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose; RC reads named keys of its argument and spreads only processExiting, so no caller option can carry those keys through. The session client class yt is constructed once, inside RC (1193029)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::client_events_match_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-stream-client-options-unset",
+      "concept": "attachBridgeSession builds the SSE transport from the session url and headers only",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "let d=new AC(l,{},{sessionId:r,initialSequenceNum:o,getAuthHeaders:a,connectTimeoutMs:e.sseConnectTimeoutMs,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 80,
+        "span_after": 330,
+        "sha256": "5bfd2431d534ff9be1ef488a35a7ab213b27e6f7c70a95c80e3f60207918457b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The transport constructor gets sessionId, initialSequenceNum, getAuthHeaders and the connect timeout, keepalive, long poll and pool options read from the argument of RC, which the attach path never sets; requireStreamEvidence, streamOpener, mostMembersInAFrame and lighterFrame are not passed at all, so they keep their defaults."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_stream::every_recorded_stream_case_is_reproduced"
+      ],
+      "rust": [
+        "src/bridge_worker_stream.rs"
+      ]
+    },
+    {
+      "id": "bw-non-origin-403-needs-the-option",
+      "concept": "The windowed non-origin 403 policy is set only for nonOrigin403Retry on a client that reads the stream",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "m=(e.nonOrigin403Retry??!1)&&p,g=m&&f;if(m)d.setNonOriginRejectionPolicy(",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 160,
+        "sha256": "df11405f835ffc914e9d3e331d5c49f2db204c95af3f6217795e6b6f2d7812e2"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "attachBridgeSession passes no nonOrigin403Retry, so the policy is never set and a 403 on the stream closes the session at once with the status as the code, with or without an edge header (recorded: a_forbidden_stream_closes_the_session and a_forbidden_stream_from_the_edge_closes_the_session)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_stream::every_recorded_stream_case_is_reproduced"
+      ],
+      "rust": [
+        "src/bridge_worker_stream.rs"
+      ]
+    },
+    {
+      "id": "bw-self-heal-heartbeats-needs-the-option",
+      "concept": "The heartbeat-lost close 4093 needs selfHealHeartbeats",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "f=(e.selfHealHeartbeats??!1)&&p",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 80,
+        "sha256": "884320b81f1239926d1c9b091421f3df16f4c16b3affde57e5528396d465ad0a"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "selfHealHeartbeats is read from the argument of RC and the attach path never sets it, so onHeartbeatLost is not given to the session client and 4093 is never reported."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::heartbeats_match_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-typed-close-codes-need-the-option",
+      "concept": "Terminal request-path conditions close with 4090 unless causeTypedCloseCodes is set",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "let v=e.causeTypedCloseCodes?U5[y]:4090;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 240,
+        "sha256": "a60af0f4360df72127c15cbbf1ae9aff0860239952664aab859b5913fee65ce8"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "causeTypedCloseCodes is never passed by the attach path, so every terminal request-path condition closes with 4090 and 4094 is never reported."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_session::a_conflict_while_starting_closes_the_session_with_4090"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
+      ]
+    },
+    {
+      "id": "bw-close-without-a-code-is-unreachable",
+      "concept": "The 4092 close needs the transport to close with no code",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "d.setOnClose((v,k)=>{S(v??4092,void 0,k)})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 60,
+        "sha256": "b9834626d5ac721913cb5efd50a2620e684119717dcd33addb5d21fcd590e118"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The only calls of emitClose are at offsets 1169204 (with the HTTP status of a permanent refusal) and the definition at 1179246, so the close callback always gets a number and 4092 is never reported."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_stream::every_recorded_stream_case_is_reproduced"
+      ],
+      "rust": [
+        "src/bridge_worker_stream.rs"
+      ]
+    },
+    {
+      "id": "bw-long-poll-needs-the-fallback-option",
+      "concept": "The long poll mode needs longPollFallback or initialLongPollMode",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.longPollFallback=l,this.longPollMode=d??!1,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 120,
+        "sha256": "2c5beae7dd5c74dfbd2125571564f267dcf1a0128fb1a619113c4794ccc8797c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The attach path passes neither option, so the transport never switches to long polls, however many connections stay silent."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_stream::every_recorded_stream_case_is_reproduced"
+      ],
+      "rust": [
+        "src/bridge_worker_stream.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-probe-support-is-not-advertised",
+      "concept": "The session client advertises probe support only when told to",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.advertiseHeartbeatProbeSupport=n?.advertiseHeartbeatProbeSupport??!1",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 40,
+        "span_after": 120,
+        "sha256": "39f4808422c5421b1628a93a0a589d374e14bfa70268dac874d0bed4881e85c4"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The attach path never passes advertiseHeartbeatProbeSupport, so the service is not told probes are understood; a heartbeat_probe frame the service sends anyway is still acted on (recorded: a_heartbeat_probe_sends_a_heartbeat_at_once)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_stream::every_recorded_stream_case_is_reproduced"
+      ],
+      "rust": [
+        "src/bridge_worker_stream.rs"
+      ]
+    },
+    {
+      "id": "bw-attestation-filter-never-enforces",
+      "concept": "The attestation event filter set by attach has a policy that never enforces",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "function _$(e){return CNe(e,_n().attestation.filterPolicy?.()??eNe,!1,!0)}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 20,
+        "span_after": 120,
+        "sha256": "726c1072e365c81e55294a404c3e188a48907133c48f8b20cdaee300b74802bb"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The filter reads _n().attestation.filterPolicy() and falls back to the default policy eNe, whose enforce is false. The only places that name filterPolicy are the field initializer filterPolicy=void 0 (offset 359293), its reader (360296) and _$ (836001); nothing assigns it, and _n is not exported, so no option, setting, environment variable or server reply turns enforce on and a frame is never dropped for its device_attestation_status (recorded: frames_with_any_attestation_status_are_delivered)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_stream::every_recorded_stream_case_is_reproduced"
+      ],
+      "rust": [
+        "src/bridge_worker_stream.rs"
+      ]
+    },
+    {
+      "id": "bw-sleep-notice-subscription-is-not-passed",
+      "concept": "The transport's sleep notice subscription is not given by the attach path",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.stopListeningForSleep=S?.(this.onSleepNotice)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 80,
+        "span_after": 120,
+        "sha256": "014fa36621698c050664d6c1d0261fce2074074a7c72dde49a9326b3cc076df8"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The subscription is an optional constructor option (offset 1165431, handler onSleepNotice at 1183851). RC builds the transport at 1192363 with sessionId, initialSequenceNum, getAuthHeaders and the connect timeout, keepalive, long poll and pool options only, so the notice never arrives and the reopen after a process sleep happens only through the liveness check (ported, recorded: a_stream_that_slept_is_reopened_at_once)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_stream::every_recorded_stream_case_is_reproduced"
+      ],
+      "rust": [
+        "src/bridge_worker_stream.rs"
+      ]
+    },
+    {
+      "id": "bw-queued-notification-buffer-is-not-passed",
+      "concept": "attachBridgeSession passes the inbound router no notification buffer",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "w.setOnData((P)=>{J4(P,y,v,i?void 0:u,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 20,
+        "span_after": 360,
+        "sha256": "7450f1fa4ee789f85ca2dca2a3e39884535a98e89f33dfc9396ea7d8e597af86"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "J4 takes the buffer for queued notifications that do not parse as the eighth argument and the attach call (offset 1198305) passes seven, so an invalid queued_notification is dropped (recorded: pure.inbound cases with buffer false)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_inbound::every_recorded_line_is_routed_like_the_upstream_router"
+      ],
+      "rust": [
+        "src/bridge_worker_inbound.rs"
+      ]
+    },
+    {
+      "id": "bw-control-outbound-only-never-reads-a-stream",
+      "concept": "The control dispatcher's outbound-only rejection can never run",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "!e.outboundOnly&&!_)d.connect()",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 200,
+        "span_after": 40,
+        "sha256": "bb942bc9e60024657f3f4f6a25a21d3a3523f0db7dc71773417508137b0ae298"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The read stream is opened only when outboundOnly is false, so in outbound-only mode setOnData never fires and the dispatcher branch that answers every non-initialize request with the outbound-only error (t$ offset 810501) has no caller; the Rust dispatcher omits it (anchor at offset 1197367)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-exiting-refusal-flag-is-never-set",
+      "concept": "The control dispatcher's process-exiting refusal can never run",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "class $4{committed=!1}var bPe=new $4;function G4(){return bPe.committed}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 40,
+        "sha256": "9494a03ef3fdedaec6c676749afd6094ed72ae9c3d9b0b4a6f9e6c4e68afba24"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The only write of committed is the field initializer (false) and G4 is the only reader, so the branch that refuses non-allowlisted subtypes because the process is exiting (t$ offset 810261) never runs; the Rust dispatcher omits it (anchor at offset 799863)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-shared-answer-is-not-passed",
+      "concept": "The attach call passes no shared control answerer",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "let ge=t.answerSharedControlRequest?.(e.request);",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 20,
+        "span_after": 260,
+        "sha256": "478a838700f3d2e7cf8e02414e144a978909bcac8ea5daa91187cd3aec205305"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The attach path calls t$ with a fixed option set that has no answerSharedControlRequest (offset 1198729), so the shared-answer branches and the liveReply marker e$ are skipped; the Rust dispatcher omits them (anchor at offset 810766)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-initialize-callbacks-are-not-passed",
+      "concept": "Initialize receives none of the optional host callbacks",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "let I=[];if(!o)try{I=a?.()??[]}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 60,
+        "span_after": 120,
+        "sha256": "6430984b18ecf243f62e7b0f4e298acc34408467ed15d05887a9aed956976c7f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The attach call passes neither getCommands, getInitializeState, reportsInboundReadReceipts, onDialogKindsDeclared nor onClientInitialize, so commands stay empty, no read-receipt flag or extra state is merged and no callback runs; the Rust initialize answer is the recorded fixed shape (anchor at offset 811469)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-set-color-callback-is-not-passed",
+      "concept": "set_color has no registered callback on the attach path",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "case\"set_color\":{let I=y?.(e.request.color);",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 220,
+        "sha256": "8ea508b2a94587ed54b2ecd0ba2a641ea7fb6b7619d19910e73f95e97288c5a2"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "onSetColor is not passed by the attach call, so only the unsupported answer is reachable; the registered ok and error branches are skipped (anchor at offset 814991)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-workspace-callbacks-are-not-passed",
+      "concept": "file_suggestions, read_file, get_workspace_diff and get_context_usage have no registered callback",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "case\"file_suggestions\":{if(!v){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 200,
+        "sha256": "5d22f075029fc4fbe6e36a3f19d28c75ba15fecb1bdd67e3ee0dd2ff7ba2dee0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "onFileSuggestions, onReadFile, onGetWorkspaceDiff and onGetContextUsage are not passed by the attach call, so each answers unsupported and the async responders those cases start (Or, qb with the workspace diff timeout) are skipped (anchor at offset 815333)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-mcp-callbacks-are-not-passed",
+      "concept": "mcp_authenticate, mcp_oauth_callback_url and mcp_reconnect have no registered callback",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "case\"mcp_authenticate\":case\"mcp_oauth_callback_url\":case\"mcp_reconnect\":{",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 330,
+        "sha256": "9c22b5cca63950ab1191b12d34f3d4750e3d9c39e8a2b952df52855ef53b3fb3"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "None of onMcpAuthenticate, onMcpOauthCallbackUrl or onMcpReconnect is passed by the attach call, so the three subtypes always answer unsupported (anchor at offset 816624)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-apply-flag-settings-callback-is-not-passed",
+      "concept": "apply_flag_settings has no registered callback",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "case\"apply_flag_settings\":{let I=qPe(e.request.settings)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 380,
+        "sha256": "3f542dab408917c747a2a4e4ab30c203f628801043812688864c71396d42c382"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "onApplyFlagSettings is not passed by the attach call, so after the settings validator the registered branch (and its telemetry) is skipped and the not-registered answer is the only success-free outcome (anchor at offset 817107)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-mcp-set-servers-callback-is-not-passed",
+      "concept": "mcp_set_servers has no registered callback",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "else try{V=B(I)}catch(q){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 200,
+        "span_after": 260,
+        "sha256": "a13a9d44a8542a216b88cbc42541c26ea08d1103e82e17c4886dfd5a9c673ad4"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "onMcpSetServers is not passed by the attach call, so the try and catch around the handler and the VPe result formatting are skipped; only the hint acknowledgement, the object check and the unsupported answer are reachable (anchor at offset 818094)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-cancel-async-message-callback-is-not-passed",
+      "concept": "cancel_async_message has no registered callback",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "if(!m){ie(\"bridge_cancel_queued_message\",\"not_supported\")",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 200,
+        "sha256": "aef81b2355718c70c0bc02e191a62ab4ec1b7446faddea28fb34efad19234685"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "onCancelAsyncMessage is not passed by the attach call, so the registered branch with its cancelled result and telemetry is skipped (anchor at offset 819832)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-control-fork-callback-is-not-passed",
+      "concept": "fork_conversation has no registered callback and hasPendingPrompts is never passed",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the control dispatcher exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "case\"fork_conversation\":{if(j){Or(e,de,r,j(e.request,{promptPending:fe?.()??!1",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 160,
+        "sha256": "e29ff2ba29b96f5061b8c9f87aa2861a6616503be86517b791141b9a303da6cf"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The attach call passes neither onForkConversation nor hasPendingPrompts (offset 1198300 call), so fork_conversation always takes the fixed forked:false requires_remote_control_server success reply and the registered branch with promptPending is skipped (anchor at offset 821546)"
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_control::control_requests_are_answered_as_the_recorded_session_answered"
+      ],
+      "rust": [
+        "src/bridge_worker_control.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-idle-tracker-is-not-passed",
+      "concept": "the heartbeat idle tracker and the reactivation beat it arms",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "idleTracker:e.idleTracker,beatOnReactivation:(e.beatOnReactivation??!1)&&p,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 120,
+        "sha256": "9a3e1f3ee548eee9f5ea59d22d52d4a56997e4b2bd13fe75726d860d50db56ce"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The attach entrypoint calls the transport factory with only sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose (offsets 1197558 and 1199368), so idleTracker is undefined: every idleTracker?. call in the heartbeat path is a no-op, and beatOnReactivation is false because the constructor also needs an idleTracker (offset 1028334)."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-stale-reconnect-beat-is-off",
+      "concept": "the beat sent after a stale reconnect",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "beatOnStaleReconnect:(e.beatOnStaleReconnect??!1)&&p,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 80,
+        "sha256": "218dec90e3363d2c7f44774639a07c43b1c05f929c0346d1b2bd5cbd0ee2251d"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The attach entrypoint calls the transport factory with only sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose (offsets 1197558 and 1199368), so beatOnStaleReconnect is false, and e.beatOnStaleReconnect is never passed by the attach entrypoint; the resync_stale beat never runs."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-cadence-skip-is-off",
+      "concept": "skipping a cadence beat that an events post made redundant",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "canSkipCadenceBeat(e){let t=this.heartbeatIntervalMs*(1+this.heartbeatJitterFraction);if(!this.skipRedundantHeartbeats||this.closed",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 40,
+        "sha256": "340c2c6936336c4690674426c9a0aab7d86cad63a374418c826e06f3fc61b428"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The attach entrypoint calls the transport factory with only sessionUrl, ingressToken, sessionId, epoch, initialSequenceNum, heartbeatIntervalMs, outboundOnly, getAuthToken and retainUndeliveredOnClose (offsets 1197558 and 1199368), so skipRedundantHeartbeats is undefined and the constructor stores false (offset 1028457); setFeatureGatedOptions, the only other writer, has no caller. canSkipCadenceBeat is always false and every tick sends a beat."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-feature-gated-setter-has-no-caller",
+      "concept": "setFeatureGatedOptions",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "setFeatureGatedOptions({advertiseHeartbeatProbeSupport:e,beatOnStaleReconnect:t,beatOnReactivation:n,skipRedundantHeartbeats:r}){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 120,
+        "sha256": "ecc87ce3ee688cf675e4819b00e01fb9aa3095f325d786bbec7456c7f427c678"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The only occurrence of setFeatureGatedOptions in the bundle is its definition, so the probe, stale-reconnect, reactivation and cadence-skip settings keep their constructor values for the life of the worker."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-worker-socket-is-not-passed",
+      "concept": "answering a beat over the worker socket",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "b=a?void 0:t===\"/worker/heartbeat\"?this.workerSocket?.beat(_,o,(x)=>u?.(x)):this.workerSocket?.carry(t,_,o)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 60,
+        "sha256": "e01c5e2f52e2c7f3fdb46b3e6592b23aa525cdb3dc641d197e066906bdc16b6b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "workerSocket is not in the option list the factory builds for the worker client (offset 1192554), so workerSocket?.beat and workerSocket?.carry yield undefined, every request goes over fetch, and onLateSocketAnswer (used only with the socket) never fires."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-nothing-accepted-stop-is-not-passed",
+      "concept": "stopping the worker when nothing was accepted for a long time",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.stopWhenNothingAccepted=n?.stopWhenNothingAccepted,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 60,
+        "sha256": "e92c8abcc83c26a790b2a95295727cb0a4b574d2aff34ca1aa30e21f2fe51d43"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "stopWhenNothingAccepted is not in the factory option list (offset 1192554), so it is undefined and the guarded stop in the beat failure path (offset 1067638) never runs."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-lost-streak-has-no-observer",
+      "concept": "the consecutive heartbeat failure streak",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.onHeartbeatLost=n?.onHeartbeatLost,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 60,
+        "sha256": "9478de963054fb4bbeca191729a2481cb5b126369782176bfc66116d7de9c39f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "onHeartbeatLost is passed only when selfHealHeartbeats is set (existing row bw-self-heal-heartbeats-needs-the-option), so the streak counters (consecutiveHeartbeatFailures, heartbeatStreakStartedAtMs, heartbeatLostFiredForStreak) are written but nothing reads them with an effect."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-keep-alive-needs-a-refcount",
+      "concept": "the keep_alive event cadence and its CLAUDE_CODE_REMOTE_SEND_KEEPALIVES flag",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "function sm(){for(let e of hu().statesByKey.values())if(e.refcount>0&&!c6(e))return!0;return!1}",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 20,
+        "sha256": "8139b187a7d27c435d6dda10277b771bf85921a3da165672ba68f329484aff31"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The keep_alive branch of the cadence tick needs F.CLAUDE_CODE_REMOTE_SEND_KEEPALIVES and sm(). sm() is true only when some keep-alive state has refcount above zero, and refcount appears in the bundle only in its initial value 0 and in reads (offsets 950919 to 953420), never incremented, so sm() is always false and the branch is dead even with the flag set."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-keep-alives-alone-are-withheld",
+      "concept": "keep-alive events that go out without a turn, and the jitter floor they add",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.providerWithheldReason=r===void 0?()=>\"provider-unknown\":()=>r()?void 0:\"data-residency\"",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 20,
+        "sha256": "dbc9e3fb12b37460793b1aec7a2301bdbae8d713ff7d929075f84bea353c7e59"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "keepAlivesGoAlone() requires providerWithheldReason() to be undefined. isFirstPartyProvider is not in the factory option list, so r is undefined and the reason is always provider-unknown; keepAlivesGoAlone is false, the jitter floor term of startHeartbeat is 0, and noteEventsPostFailed never takes its keep-alive-alone path."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-jitter-fraction-is-zero",
+      "concept": "the heartbeat jitter fraction",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.heartbeatJitterFraction=n?.heartbeatJitterFraction??0,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 20,
+        "sha256": "39ecf948d6b4dbb128dc209a67c439bba6904f888b67646957d829ff335df0fa"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "heartbeatJitterFraction is e.heartbeatJitterFraction in the factory list, which the attach entrypoint does not pass, so it is 0 and the spread of startHeartbeat is 0. Math.random is still drawn once per schedule, which the Rust timer does through the jitter source of the pacing."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-heartbeat-refreshed-auth-is-not-passed",
+      "concept": "adopting refreshed credentials from a heartbeat answer",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the heartbeat timer exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.adoptRefreshedAuth=n?.adoptRefreshedAuth,",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 40,
+        "sha256": "13946adc4bf5e885e83b2e675833151dcac000828775497f8f261ba39aa0df72"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "adoptRefreshedAuth is not in the factory option list (offset 1192554), so the refreshed_auth handling in the beat answer and the token-lifetime clamp (which also need advertiseHeartbeatProbeSupport) never run."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker_heartbeat::the_default_interval_beats_every_twenty_seconds"
+      ],
+      "rust": [
+        "src/bridge_worker_heartbeat.rs"
+      ]
+    },
+    {
+      "id": "bw-unwatched-thinking-buffer-needs-the-hold-option",
+      "concept": "thinking_tokens rows of an unwatched running session are buffered only with noSubscriberUploadHoldMs",
+      "python": {
+        "status": "absent",
+        "reason": "Python has no bridge worker client; the attach path exists only in the TypeScript bridge."
+      },
+      "typescript": {
+        "file": "package/bridge.mjs",
+        "anchor": "this.unwatched()&&this.currentState===\"running\")&&this.streamEventFlushIntervalMs>0&&v5(C)",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 260,
+        "span_after": 60,
+        "sha256": "127d4ef8a28a912a528cb22a83d9c5ef0ac96822b60de673c023b5341c668b4e"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The unwatched() arm of the thinking_tokens buffering condition is unwatched() (noSubscriberUploadHoldMs above zero and a reported has_subscribers of false) with the session state running. noSubscriberUploadHoldMs is set from the option object of RC, which attachBridgeSession and reconnectTransport build as a literal without it, so unwatched() is always false and that arm never buffers. The other arms need noSubscriberStreamEventFlushIntervalMs or dropUnwatchedStreamEvents, which no export passes either; the first arm (streamEventFirstFlushMs above zero) is the window the Rust session already replays."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "bridge_worker::served_hold_inputs_hold_nothing_like_the_upstream_client"
+      ],
+      "rust": [
+        "src/bridge_worker.rs"
       ]
     },
     {
@@ -3925,13 +5943,14 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg."
+        "behavior": "The launch directory is read once when the SDK module is imported, before the caller can change directory, is null when process.cwd throws, and is ignored when CLAUDE_CODE_SESSION_KIND is bg. Rust reads it from an image-load initializer, and loading the image that holds the crate is the moment its code enters the process, as importing the module is upstream, so a library loaded later captures it at that load just as a dynamic import does."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "Rust runs nothing at load time: capture_launch_directory reads the directory once into a OnceLock the first time the settings resolver needs it, and a binary that calls it at the top of main gets the upstream import-time reading."
+        "kind": "upstream"
       },
       "contracts": [
+        "launch_directory::the_launch_directory_is_read_when_the_binary_loads",
+        "settings_resolve_connector::the_launch_directory_and_node_dialect_can_be_given",
         "src/adapters/environment_tests.rs::the_launch_directory_is_read_once_and_kept",
         "src/settings_resolve_state_tests.rs::the_process_state_keeps_the_captured_launch_directory",
         "src/connector_vetting_tests.rs::replays_every_helper_probe_recorded_from_the_bundle"
@@ -4060,7 +6079,8 @@
         "behavior": "Neither SDK fails for a missing HOME. TypeScript calls Node os.homedir(): HOME as set (even empty), else the passwd entry of the effective user, and it throws a system error only when there is no entry; the result is joined with path.join, which normalizes dot segments, repeated separators and empty bases. Python calls Path.home() (expanduser): HOME as set (even empty, which becomes the root directory), else the passwd entry of the real user, else it raises RuntimeError; a home that still starts with a tilde also raises, and dot-dot segments are kept. Both read the process environment, not options.env. Rust ports the exact algorithms: Node path.win32.join and normalize over UTF-16 code units, CPython ntpath.expanduser, splitroot and join with the pathlib PureWindowsPath normalization, byte-exact POSIX homes that are not UTF-8 (lossy UTF-8 for Node, surrogate escapes for Python), and the Windows process-token profile directory that libuv asks. Python has no Windows passwd fallback. The Python dialect reports a missing home as the RuntimeError text through SessionFiles::from_environment and the session helpers instead of an empty result."
       },
       "decision": {
-        "kind": "upstream"
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect and resolves the home with Node os.homedir() (the effective user's passwd entry) joined by path.join. SummaryDialect::Python on the session store options selects Path.home(): the real user's passwd entry, the RuntimeError text when there is none or the home starts with a tilde, and dot-dot segments kept. SessionFiles::from_environment and the CLI discovery port Python-only entry points, so they always follow Python."
       },
       "contracts": [
         "home_directory::an_unset_home_resolves_to_the_passwd_home_in_both_dialects",
@@ -4555,11 +6575,51 @@
         "client_lifecycle_connect::query_writes_in_the_default_session",
         "client_lifecycle_connect::query_in_session_writes_in_that_session",
         "client_lifecycle_connect::query_stream_fills_the_default_session",
-        "client_lifecycle_connect::query_stream_in_session_keeps_named_sessions"
+        "client_lifecycle_connect::query_stream_in_session_keeps_named_sessions",
+        "user_input_writes::python_client_query_writes_the_session_last",
+        "user_input_writes::typescript_client_query_writes_the_sdk_mjs_string_prompt",
+        "user_input_writes::python_client_query_stream_fills_only_an_unnamed_session"
       ],
       "rust": [
         "src/client.rs",
         "src/client_connect.rs"
+      ]
+    },
+    {
+      "id": "c35-child-descriptors",
+      "concept": "Which descriptors above stderr the CLI child keeps",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 828,
+        "line_end": 836,
+        "sha256": "9827b8acafb514ed0f55792f99f2ea7400de0039c17f9e9fec7bb09f251b1e06"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a=Ket(t,n,{cwd:r,stdio:[\"pipe\",\"pipe\",\"pipe\"],signal:s,env:o,windowsHide:!0})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 0,
+        "sha256": "7547db7b52c107cfbb25b6568d2f26b0b6ed79f2216655e4b184eea82ec2f4d8"
+      },
+      "upstream": {
+        "verdict": "disagree",
+        "behavior": "Python starts the CLI with anyio.open_process, which is subprocess.Popen with close_fds=True, so the child keeps only its stdio on every platform. TypeScript starts it with child_process.spawn, that is libuv, which on Apple platforms calls posix_spawn with POSIX_SPAWN_CLOEXEC_DEFAULT, so only the stdio passes, and elsewhere forks and leaves the child every descriptor that is not close-on-exec."
+      },
+      "decision": {
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect: on Apple platforms the SDK's own spawn marks every descriptor above stderr close-on-exec in the child, and elsewhere it leaves them as they are. ArgvStyle::Python marks them on every platform, as close_fds=True closes them. A spawn_claude_code_process function decides for itself which descriptors its child keeps."
+      },
+      "contracts": [
+        "inherited_descriptors::the_child_keeps_inheritable_descriptors_only_where_the_dialect_upstream_does",
+        "src/inherited_descriptors/tests.rs::keeping_only_stdio_marks_an_inheritable_descriptor_close_on_exec",
+        "src/inherited_descriptors/tests.rs::the_python_dialect_passes_only_stdio_everywhere_and_typescript_only_on_apple"
+      ],
+      "rust": [
+        "src/inherited_descriptors.rs",
+        "src/process_options.rs",
+        "src/process_transport.rs"
       ]
     },
     {
@@ -4949,6 +7009,461 @@
       ],
       "rust": [
         "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "r36-policy-marketplace-lists",
+      "concept": "Managed strictKnownMarketplaces and blockedMarketplaces read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"strictKnownMarketplaces\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 456,
+        "sha256": "291b0d4baaf97b66178e207c59ce84b51e4765512171659abc24021009aeafbf"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through B3: null reads as unset, a source that can never match is dropped from strictKnownMarketplaces and kept in blockedMarketplaces, an entry that cannot be read is dropped alone, and any other value that is not an array becomes an empty allowlist for strictKnownMarketplaces and is dropped for blockedMarketplaces."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_policy_marketplace_tests.rs::flags_the_sources_that_can_never_match",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs",
+        "src/settings_policy_marketplace.rs"
+      ]
+    },
+    {
+      "id": "r37-policy-mcp-server-lists",
+      "concept": "Managed allowedMcpServers and deniedMcpServers read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedMcpServers\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 435,
+        "sha256": "fd980e204ac358e1ed1e20c660f83dc8a9b50562983a081e452fa87370b3f32d"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through j3, dropping each entry that fails its server schema; a list that cannot be read at all becomes an empty allowlist for allowedMcpServers and is dropped for deniedMcpServers."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r38-policy-enabled-plugins",
+      "concept": "Managed enabledPlugins read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"enabledPlugins\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 844,
+        "sha256": "c9352db0c5588aa9eceddd1838dfeb0ba9087b55584ed8da445cfbe8beb73f14"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps each enabledPlugins entry whose value is true, false or a list of version constraints and drops every other entry alone; a record whose every entry was dropped, and a value that is not a record, are dropped."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r39-policy-model-lists",
+      "concept": "Managed availableModels and deniedModels read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"availableModels\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 630,
+        "sha256": "032ba3e0f6ca89184f64a7b4bcf2d828054c4c02f2e8a920512297951b5f61ec"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps the string entries of availableModels and passes deniedModels through nk; a value that is not an array becomes an empty allowlist for availableModels and is dropped for deniedModels."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r40-policy-hook-allowlists",
+      "concept": "Managed allowedHttpHookUrls and httpHookAllowedEnvVars read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedHttpHookUrls\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 197,
+        "sha256": "8a385f51dff8168d66f16c1549feba213c30d6c3ed0367e0a84fbeae07df0d81"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through NS: string entries are kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r41-policy-channel-plugins",
+      "concept": "Managed allowedChannelPlugins read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedChannelPlugins\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 253,
+        "sha256": "111325d2b499ecfb962f99ab208a1202b32d23ab5a8432ceb09b0bf6948fb5b1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads allowedChannelPlugins through NS with the b5e entry schema: a plugin@marketplace string or a plugin and marketplace object is kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r42-policy-gateway-networks",
+      "concept": "Managed gatewayInternalNetworks read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"gatewayInternalNetworks\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 207,
+        "sha256": "8521af513dd006c90e1a66f43cb5f3c71c4ca64662f91ef1c73f5183e5282c8c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps gatewayInternalNetworks only as an array of strings; any other value becomes the single unreadable marker, which refuses gateway sign-in for that source."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema.rs"
+      ]
+    },
+    {
+      "id": "r43-policy-forced-login-orgs",
+      "concept": "Managed forceLoginOrgUUID read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"forceLoginOrgUUID\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 186,
+        "sha256": "ca46417f50f588efba69b7d47032ec903ad5006daa502f5a0df2f4771bc6b6f9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps forceLoginOrgUUID when it is a string or an array of strings; any other value becomes an empty array, so no organization may log in."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs"
+      ]
+    },
+    {
+      "id": "r44-policy-allowed-providers",
+      "concept": "Managed allowedProviders read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedProviders\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 207,
+        "sha256": "0a0dce4ebd7a2347e46a8725b2881ec31a17d84572b57885bbb3d2efb76d44dd"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads allowedProviders through NS with the hk provider names: known names are kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs",
+        "src/constants.rs"
+      ]
+    },
+    {
+      "id": "r45-policy-helper",
+      "concept": "Managed policyHelper read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"policyHelper\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 2599,
+        "sha256": "099bd8af0b25149bd15d4d3decad5b3ba94412f1f31c9cd86b9f5036064e798c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The singular policyHelper reader only records notes for the fields that belong elsewhere and reads null as unset; its value is whatever the helper schema keeps, so unknown fields are stripped and a value the schema rejects is dropped."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema.rs"
+      ]
+    },
+    {
+      "id": "r46-policy-sandbox-credentials",
+      "concept": "Managed sandbox.credentials read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"sandbox\",()=>{let R=O({files:M(\"files\",yS(),",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 4253,
+        "sha256": "68620293cf5050489a6bf835ed246d2bb82fe9c660b3e7882e8f64fa31cb23f9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads sandbox.credentials so that an entry that cannot be read never unprotects what it names: a file or variable entry keeps blocking it, an AWS pair keeps suppressing the implicit pairing, and a SigV4 shape stays denied; a block that is not an object reads as the fail-closed skeleton."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_schema_policy_credentials_tests.rs::file_prefix_hashes_the_file_name_like_upstream",
+        "src/settings_schema_policy_credentials_tests.rs::a_schema_without_the_credential_lists_reads_nothing",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_credentials.rs"
+      ]
+    },
+    {
+      "id": "r47-policy-document-closing",
+      "concept": "The checks the policy parser runs after every key is read",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": ".check((R)=>{R.issues.push(...r.wrongDocumentIssues(R.value,F))})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 269,
+        "span_after": 502,
+        "sha256": "6c52185cd2fb1e9be0b6adde9cce63498f476075c7182e78c60ba6397c9870c2"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP deletes every key whose reader yielded undefined and notes a source whose only policy content is stand-ins as onlySubstitutes. The wrongDocumentIssues check flags only a key the document holds that the document cP was built from did not, and j7e and lE parse the very document they built cP from, so it never adds an issue."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_resolve_policy_tests.rs::a_tier_of_only_stand_ins_does_not_shut_the_parent_out",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_read.rs",
+        "src/settings_policy_content.rs"
+      ]
+    },
+    {
+      "id": "r48-managed-object-reads",
+      "concept": "Managed documents handed over as objects (pm)",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function j7e(e,t){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 402,
+        "span_after": 598,
+        "sha256": "feb10e464760aae75365160a925de7a24c346f824fd2c6227cc28fb8c3af7cc0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "pm reads a managed document handed over as an object, such as the registry, plist, remote or parent settings, through j7e: the same cP parser a managed file goes through, under the name of the source it came from."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_resolve_policy_tests.rs::a_document_handed_over_reads_through_the_policy_schema",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_resolve_tier.rs",
+        "src/settings_resolve.rs",
+        "src/settings_read.rs"
+      ]
+    },
+    {
+      "id": "r49-managed-only-substitutes-tier",
+      "concept": "A managed tier made only of stand-ins",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function rX(e,t,n,r,o){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 235,
+        "sha256": "aa5323c6076fb26f9b80ac233dea53a33133001c846ef549f556239874ab004f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "rX marks a merged managed tier that holds only stand-ins and none of its own authored values as onlySubstitutes, and Nu then keeps that tier from shutting out the lower managed source."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_resolve_policy_tests.rs::a_tier_of_only_stand_ins_does_not_shut_the_parent_out",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_resolve_policy.rs",
+        "src/settings_resolve_tier.rs"
       ]
     }
   ]

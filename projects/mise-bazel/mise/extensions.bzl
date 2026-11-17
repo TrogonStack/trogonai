@@ -14,6 +14,15 @@ def _pin(tool, pin):
     # Backend tools such as `ubi:owner/name` install an executable named after the project.
     return pin["version"], pin.get("exe", tool.split(":")[-1].split("/")[-1])
 
+def _targets(tool, pin):
+    pin = pin[0] if type(pin) == "list" and pin else pin
+    targets = pin.get("targets", "") if type(pin) == "dict" else ""
+    if type(targets) == "string":
+        targets = [t.strip() for t in targets.split(",")]
+    if type(targets) != "list":
+        fail("{} has a malformed targets option".format(tool))
+    return [t for t in targets if t]
+
 def _repository(tool):
     return "mise_" + "".join([c if c.isalnum() else "_" for c in tool.elems()])
 
@@ -30,7 +39,7 @@ def _mise_impl(mctx):
         elif tool == "node":
             mise_node(name = name, tool = tool, version = version)
         elif tool == "rust":
-            mise_rust(name = name, tool = tool, version = version)
+            mise_rust(name = name, tool = tool, version = version, targets = _targets(tool, pin))
         else:
             mise_tool(name = name, tool = tool, version = version, executable = executable)
             executables[executable] = name

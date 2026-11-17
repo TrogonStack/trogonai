@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run the Bazel lint aspects over the migrated native Bazel targets"
+set -euo pipefail
+
+exec bazel build --config=lint //... "$@"

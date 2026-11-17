@@ -1,15 +1,21 @@
 //! The Python dialect of `LocalMcpServer`: the `mcp.server.Server` that `create_sdk_mcp_server` builds, as the
 //! Python SDK bridge answers it, with its `jsonschema` error selection and its tool content conversion.
 
-use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error, typescript::initialize_issues};
+use super::{
+    LocalMcpSession, McpServerError, RequestId, ServerState, python_object, tool_error, typescript::initialize_issues,
+};
 use crate::{
-    CallbackError, CancellationToken, JsonObject, McpToolRequest, ToolResultStatus, constants,
+    CallbackError, CancellationToken, JsonObject, McpToolRequest, PythonJsonObject, PythonString, ToolResultStatus,
+    constants, deep_json,
     jsonrpc_message::{self, JsonRpcKind},
     python_json::{is_truthy, python_repr},
-    python_value_repr::repr as py_repr,
+    python_json_load::drop_python_deep,
+    python_json_value::PythonJsonValue,
+    python_jsonschema::{self, Outcome},
+    python_value_repr::repr_json as py_repr,
 };
 use serde_json::Value;
-use std::{cmp::Reverse, sync::atomic::Ordering};
+use std::sync::atomic::Ordering;
 
 /// `_build_input_schema`: a schema with a string `type` and `properties` is sent as declared; any other mapping
 /// is read as parameter names whose values are not Python types, each of which becomes a required string.
@@ -27,11 +33,70 @@ pub(crate) fn input_schema(declared: &JsonObject) -> JsonObject {
     ])
 }
 
+/// A response, with the text of the exception a tool's validation raised, which the `serde_json` response holds
+/// with each lone surrogate read as U+FFFD.
+struct Answer {
+    response: JsonObject,
+    raised: Option<PythonString>,
+}
+
+impl Answer {
+    /// The response as Python holds it, with the raised text as it is.
+    fn into_python(self) -> PythonJsonObject {
+        let mut response = python_object(self.response);
+        if let Some(text) = self.raised {
+            response.insert(PythonString::from("result"), python_tool_error(text));
+        }
+        response
+    }
+}
+
+impl From<JsonObject> for Answer {
+    fn from(response: JsonObject) -> Self {
+        Self { response, raised: None }
+    }
+}
+
+/// The result [`tool_error`] builds, with its keys sorted, as Python holds it: the text as it is.
+fn python_tool_error(text: PythonString) -> PythonJsonValue {
+    let block = PythonJsonObject::from_iter([
+        (PythonString::from("text"), PythonJsonValue::String(text)),
+        (
+            PythonString::from("type"),
+            PythonJsonValue::String(PythonString::from("text")),
+        ),
+    ]);
+    PythonJsonValue::Object(PythonJsonObject::from_iter([
+        (
+            PythonString::from("content"),
+            PythonJsonValue::Array(vec![PythonJsonValue::Object(block)]),
+        ),
+        (PythonString::from("isError"), PythonJsonValue::Bool(true)),
+    ]))
+}
+
 pub(crate) async fn request(
     session: &LocalMcpSession,
     message: JsonObject,
     signal: CancellationToken,
 ) -> Result<Option<JsonObject>, McpServerError> {
+    Ok(answer(session, message, signal).await?.map(|answer| answer.response))
+}
+
+/// [`request`] as Python holds the response, whose raised text may hold a lone surrogate.
+pub(crate) async fn request_python(
+    session: &LocalMcpSession,
+    message: JsonObject,
+    signal: CancellationToken,
+) -> Result<Option<PythonJsonObject>, McpServerError> {
+    Ok(answer(session, message, signal).await?.map(Answer::into_python))
+}
+
+async fn answer(
+    session: &LocalMcpSession,
+    message: JsonObject,
+    signal: CancellationToken,
+) -> Result<Option<Answer>, McpServerError> {
     if session.stopped.load(Ordering::SeqCst) {
         // The bridge answers every message with the failure until an `initialize` starts a new session.
         if message.get("method").and_then(Value::as_str) != Some("initialize") {
@@ -82,12 +147,12 @@ pub(crate) async fn request(
         // A handler's `CancelledError` ends the server's `run()`, and the bridge closes every request in flight.
         Some(Err(McpServerError::Callback(CallbackError::Cancelled))) if !signal.is_cancelled() => {
             session.stop();
-            Ok(Some(failure(&id, -32000, "Connection closed")))
+            Ok(Some(failure(&id, -32000, "Connection closed").into()))
         }
         None if signal.is_cancelled() => Err(CallbackError::Cancelled.into()),
-        None if session.stopped.load(Ordering::SeqCst) => Ok(Some(failure(&id, -32000, "Connection closed"))),
+        None if session.stopped.load(Ordering::SeqCst) => Ok(Some(failure(&id, -32000, "Connection closed").into())),
         // The bridge answers a request that `notifications/cancelled` names, which the server leaves unanswered.
-        None => Ok(Some(failure(&id, -32800, "Request cancelled"))),
+        None => Ok(Some(failure(&id, -32800, "Request cancelled").into())),
         Some(answer) => answer.map(Some),
     }
 }
@@ -137,9 +202,9 @@ async fn dispatch(
     params: Option<&JsonObject>,
     id: &RequestId,
     signal: CancellationToken,
-) -> Result<JsonObject, McpServerError> {
+) -> Result<Answer, McpServerError> {
     if !constants::PYTHON_MCP_METHODS.contains(&method) {
-        return Ok(error(id, -32601, "Method not found", method));
+        return Ok(error(id, -32601, "Method not found", method).into());
     }
     let meta_is_invalid = params
         .and_then(|params| params.get("_meta"))
@@ -150,9 +215,10 @@ async fn dispatch(
         || (method == "tools/call" && !call_params_are_valid(params))
         || (!initializes && method != "ping" && !session.initialized.load(Ordering::SeqCst))
     {
-        return Ok(error(id, -32602, "Invalid request parameters", ""));
+        return Ok(error(id, -32602, "Invalid request parameters", "").into());
     }
     let state = &session.state;
+    let mut raised = None;
     let result = match method {
         "initialize" => {
             session.initialized.store(true, Ordering::SeqCst);
@@ -162,14 +228,21 @@ async fn dispatch(
             "tools".into(),
             Value::Array(list_tools(state)),
         )])),
-        "tools/call" => call_tool(state, params, signal).await?,
+        "tools/call" => match call_tool(state, params, signal).await? {
+            Ok((result, text)) => {
+                raised = text;
+                result
+            }
+            Err(error) => return Ok(errored(id, error).into()),
+        },
         _ => Value::Object(JsonObject::new()),
     };
-    Ok(JsonObject::from_iter([
+    let response = JsonObject::from_iter([
         ("jsonrpc".into(), "2.0".into()),
         ("id".into(), id.value.clone()),
         ("result".into(), sort_keys(result)),
-    ]))
+    ]);
+    Ok(Answer { response, raised })
 }
 
 /// `InitializeRequestParams` under pydantic. The zod issues decide everything except the two models whose
@@ -234,11 +307,18 @@ fn icons_are_valid(icons: Option<&Value>) -> bool {
 }
 
 fn error(id: &RequestId, code: i32, message: &str, data: &str) -> JsonObject {
-    let error = JsonObject::from_iter([
-        ("code".into(), code.into()),
-        ("message".into(), message.into()),
-        ("data".into(), data.into()),
-    ]);
+    errored(
+        id,
+        JsonObject::from_iter([
+            ("code".into(), code.into()),
+            ("message".into(), message.into()),
+            ("data".into(), data.into()),
+        ]),
+    )
+}
+
+/// The JSON-RPC error response carrying `error`.
+fn errored(id: &RequestId, error: JsonObject) -> JsonObject {
     JsonObject::from_iter([
         ("jsonrpc".into(), "2.0".into()),
         ("id".into(), id.value.clone()),
@@ -317,45 +397,71 @@ fn list_tools(state: &ServerState) -> Vec<Value> {
         .collect()
 }
 
+/// The `tools/call` result with the text of the exception validation raised, which the result carries lossily,
+/// or the JSON-RPC `error` of an exception that escaped the tool handler: `str()` of a
+/// `SchemaError` too deep to pretty-print raises `RecursionError` inside the handler's `except`, and the `mcp`
+/// server answers it with code 0 and the exception text. The arguments and the schema are copied and dropped
+/// without recursion, since Python takes them at any nesting.
 async fn call_tool(
     state: &ServerState,
     params: Option<&JsonObject>,
     signal: CancellationToken,
-) -> Result<Value, McpServerError> {
+) -> Result<Result<(Value, Option<PythonString>), JsonObject>, McpServerError> {
     let name = params
         .and_then(|params| params.get("name"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let arguments = match params.and_then(|params| params.get("arguments")) {
-        Some(Value::Object(arguments)) => arguments.clone(),
-        _ => JsonObject::new(),
-    };
     let tool = state.tools.as_ref().and_then(|tools| tools.get(name));
     let (Some(tool), Some(schema)) = (tool, state.python_schemas.get(name)) else {
-        return Ok(tool_error(format!("Tool '{name}' not found")));
+        return Ok(Ok((tool_error(format!("Tool '{name}' not found")), None)));
     };
-    if let Some(error) = schema.compile_error() {
-        return Ok(tool_error(error.to_owned()));
-    }
-    let instance = Value::Object(arguments.clone());
-    if !schema.is_valid(&instance)
-        && let Some(message) = best_match(schema.as_json(), &instance).or_else(|| schema.validation_error(&instance))
-    {
-        return Ok(tool_error(format!("Input validation error: {message}")));
+    let arguments = match params.and_then(|params| params.get("arguments")) {
+        Some(Value::Object(arguments)) => deep_json::clone_object(arguments),
+        _ => JsonObject::new(),
+    };
+    let instance = PythonJsonValue::from(&arguments);
+    let schema = PythonJsonValue::from(schema.as_json());
+    let outcome = python_jsonschema::validate_retrieving(
+        &schema,
+        &instance,
+        state.remote_schema_retriever.as_ref(),
+        &state.re_cache,
+        state.hash_secret,
+    );
+    drop_python_deep(instance);
+    drop_python_deep(schema);
+    let rejected = match outcome {
+        Outcome::Valid => None,
+        Outcome::Invalid(message) => Some(Ok((tool_error(format!("Input validation error: {message}")), None))),
+        Outcome::Raised(text) => {
+            let lossy = text.to_str_lossy().into_owned();
+            Some(Ok((tool_error(lossy), Some(text))))
+        }
+        Outcome::Escaped(message) => Some(Err(JsonObject::from_iter([
+            ("code".into(), 0.into()),
+            ("message".into(), message.into()),
+        ]))),
+    };
+    if let Some(answer) = rejected {
+        deep_json::drop_value(Value::Object(arguments));
+        return Ok(answer);
     }
     match tool.call(McpToolRequest { arguments, signal }).await {
         Ok(output) => match convert_content(&output.content) {
-            Ok(content) => Ok(Value::Object(JsonObject::from_iter([
-                ("content".into(), Value::Array(content)),
-                (
-                    "isError".into(),
-                    matches!(output.status, ToolResultStatus::Error).into(),
-                ),
-            ]))),
-            Err(message) => Ok(tool_error(message)),
+            Ok(content) => {
+                let result = JsonObject::from_iter([
+                    ("content".into(), Value::Array(content)),
+                    (
+                        "isError".into(),
+                        matches!(output.status, ToolResultStatus::Error).into(),
+                    ),
+                ]);
+                Ok(Ok((Value::Object(result), None)))
+            }
+            Err(message) => Ok(Ok((tool_error(message), None))),
         },
         Err(CallbackError::Cancelled) => Err(CallbackError::Cancelled.into()),
-        Err(CallbackError::Failed(error)) => Ok(tool_error(error.to_string())),
+        Err(CallbackError::Failed(error)) => Ok(Ok((tool_error(error.to_string()), None))),
     }
 }
 
@@ -435,204 +541,6 @@ fn sort_keys(value: Value) -> Value {
         }
         Value::Array(items) => Value::Array(items.into_iter().map(sort_keys).collect()),
         other => other,
-    }
-}
-
-/// One step of a `jsonschema` error path.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum Segment {
-    Index(usize),
-    Key(String),
-}
-
-struct Failure {
-    path: Vec<Segment>,
-    message: String,
-    matches_type: bool,
-}
-
-/// The message of `jsonschema.exceptions.best_match` over the errors of the keywords this port reads: the shallowest
-/// error, then the latest sibling, then one whose instance matches its schema's `type`, keeping the first of ties.
-fn best_match(schema: &JsonObject, instance: &Value) -> Option<String> {
-    let mut failures = Vec::new();
-    collect(schema, instance, &mut Vec::new(), &mut failures);
-    let relevance = |failure: &Failure| (Reverse(failure.path.len()), failure.path.clone(), !failure.matches_type);
-    let mut best: Option<&Failure> = None;
-    for failure in &failures {
-        if best.is_none_or(|best| relevance(failure) > relevance(best)) {
-            best = Some(failure);
-        }
-    }
-    best.map(|failure| failure.message.clone())
-}
-
-/// The errors `Draft202012Validator.iter_errors` yields, in schema keyword order.
-fn collect(schema: &JsonObject, instance: &Value, at: &mut Vec<Segment>, failures: &mut Vec<Failure>) {
-    let matches_type = schema_type_matches(schema, instance);
-    let fail = |failures: &mut Vec<Failure>, message: String, at: &[Segment]| {
-        failures.push(Failure {
-            path: at.to_vec(),
-            message,
-            matches_type,
-        });
-    };
-    let mut nested = Vec::new();
-    for (keyword, value) in schema {
-        match (keyword.as_str(), value, instance) {
-            ("type", expected, _) if !matches_type => {
-                let names = match expected {
-                    Value::Array(names) => names.iter().map(py_repr).collect::<Vec<_>>().join(", "),
-                    other => py_repr(other),
-                };
-                fail(
-                    failures,
-                    format!("{} is not of type {names}", py_repr(instance)),
-                    at.as_slice(),
-                );
-            }
-            ("properties", Value::Object(properties), Value::Object(object)) => {
-                for (name, property) in properties {
-                    if let Some(item) = object.get(name) {
-                        nested.push((Segment::Key(name.clone()), property, item));
-                    }
-                }
-            }
-            ("required", Value::Array(names), Value::Object(object)) => {
-                for name in names.iter().filter_map(Value::as_str) {
-                    if !object.contains_key(name) {
-                        fail(
-                            failures,
-                            format!("{} is a required property", python_repr(name)),
-                            at.as_slice(),
-                        );
-                    }
-                }
-            }
-            ("items", Value::Object(_), Value::Array(items)) if !schema.contains_key("prefixItems") => {
-                for (index, item) in items.iter().enumerate() {
-                    nested.push((Segment::Index(index), value, item));
-                }
-            }
-            ("enum", Value::Array(options), _) => {
-                if !options.iter().any(|option| py_equal(option, instance)) {
-                    fail(
-                        failures,
-                        format!("{} is not one of {}", py_repr(instance), py_repr(value)),
-                        at.as_slice(),
-                    );
-                }
-            }
-            ("const", constant, _) => {
-                if !py_equal(constant, instance) {
-                    fail(failures, format!("{} was expected", py_repr(constant)), at.as_slice());
-                }
-            }
-            ("minLength", Value::Number(limit), Value::String(text)) => {
-                if let Some(limit) = limit.as_f64()
-                    && (text.chars().count() as f64) < limit
-                {
-                    let message = if limit == 1.0 {
-                        "should be non-empty"
-                    } else {
-                        "is too short"
-                    };
-                    fail(failures, format!("{} {message}", py_repr(instance)), at.as_slice());
-                }
-            }
-            ("maxLength", Value::Number(limit), Value::String(text)) => {
-                if let Some(limit) = limit.as_f64()
-                    && (text.chars().count() as f64) > limit
-                {
-                    let message = if limit == 0.0 {
-                        "is expected to be empty"
-                    } else {
-                        "is too long"
-                    };
-                    fail(failures, format!("{} {message}", py_repr(instance)), at.as_slice());
-                }
-            }
-            ("minimum", Value::Number(limit), Value::Number(number)) if number.as_f64() < limit.as_f64() => {
-                fail(
-                    failures,
-                    format!("{} is less than the minimum of {}", py_repr(instance), py_repr(value)),
-                    at.as_slice(),
-                );
-            }
-            ("maximum", Value::Number(limit), Value::Number(number)) if number.as_f64() > limit.as_f64() => {
-                fail(
-                    failures,
-                    format!(
-                        "{} is greater than the maximum of {}",
-                        py_repr(instance),
-                        py_repr(value)
-                    ),
-                    at.as_slice(),
-                );
-            }
-            _ => {}
-        }
-        // Subschemas report in the position of the keyword that reaches them.
-        for (segment, subschema, item) in nested.drain(..) {
-            at.push(segment);
-            match subschema {
-                Value::Object(subschema) => collect(subschema, item, at, failures),
-                Value::Bool(false) => failures.push(Failure {
-                    path: at.clone(),
-                    message: format!("False schema does not allow {}", py_repr(item)),
-                    matches_type: false,
-                }),
-                _ => {}
-            }
-            at.pop();
-        }
-    }
-}
-
-/// `ValidationError._matches_type`: whether the instance has one of the types the schema names.
-fn schema_type_matches(schema: &JsonObject, instance: &Value) -> bool {
-    match schema.get("type") {
-        Some(Value::String(name)) => is_type(instance, name),
-        Some(Value::Array(names)) => names
-            .iter()
-            .filter_map(Value::as_str)
-            .any(|name| is_type(instance, name)),
-        _ => false,
-    }
-}
-
-/// The draft 2020-12 type checker: an integer may be a float with no fraction, and a boolean is not a number.
-fn is_type(instance: &Value, name: &str) -> bool {
-    match (name, instance) {
-        ("string", Value::String(_))
-        | ("number", Value::Number(_))
-        | ("boolean", Value::Bool(_))
-        | ("null", Value::Null)
-        | ("object", Value::Object(_))
-        | ("array", Value::Array(_)) => true,
-        ("integer", Value::Number(number)) => {
-            number.is_i64() || number.is_u64() || number.as_f64().is_some_and(|float| float.fract() == 0.0)
-        }
-        _ => false,
-    }
-}
-
-/// `jsonschema._utils.equal`: booleans never equal numbers, numbers compare by value, containers recursively.
-fn py_equal(left: &Value, right: &Value) -> bool {
-    match (left, right) {
-        (Value::Number(left), Value::Number(right)) => match (left.as_i64(), right.as_i64()) {
-            (Some(left), Some(right)) => left == right,
-            _ => left.as_f64() == right.as_f64(),
-        },
-        (Value::Array(left), Value::Array(right)) => {
-            left.len() == right.len() && left.iter().zip(right).all(|(left, right)| py_equal(left, right))
-        }
-        (Value::Object(left), Value::Object(right)) => {
-            left.len() == right.len()
-                && left
-                    .iter()
-                    .all(|(key, value)| right.get(key).is_some_and(|other| py_equal(value, other)))
-        }
-        _ => left == right,
     }
 }
 

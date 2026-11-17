@@ -4,7 +4,7 @@ use crate::agent::test_support::{
 };
 use crate::error::AGENT_UNAVAILABLE;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{NewSessionRequest, NewSessionResponse, SessionId};
+use agent_client_protocol::v1::schema::{NewSessionRequest, NewSessionResponse, SessionId};
 use std::time::Duration;
 
 #[tokio::test]
@@ -30,7 +30,7 @@ async fn new_session_returns_error_when_nats_request_fails() {
     let request = NewSessionRequest::new(".");
     let err = bridge.new_session(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(AGENT_UNAVAILABLE));
 }
 
 #[tokio::test]
@@ -42,7 +42,7 @@ async fn new_session_returns_error_when_response_is_invalid_json() {
     let err = bridge.new_session(request).await.unwrap_err();
 
     assert_eq!(err.message, "Invalid response from agent");
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]

@@ -1,10 +1,23 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
-# The JavaScript sources of the GitHub Actions in this repository, copied to
-# the output tree so the action tests under //tests/github_actions can import
-# them by their relative path.
-js_library(
-    name = "actions",
-    srcs = glob(["actions/*/lib/**/*.mjs"]),
-    visibility = ["//tests/github_actions:__pkg__"],
+# Lints every workflow, so a broken expression, a bad runner label, or a wrong
+# input to a local action fails here instead of on GitHub after the merge. The
+# local action metadata is included because actionlint reads it to check the
+# inputs that workflows pass to those actions.
+sh_test(
+    name = "actionlint_test",
+    srcs = ["actionlint_test.sh"],
+    args = [
+        "$(rootpath @mise//tools/actionlint)",
+        "$(rootpaths :workflows)",
+    ],
+    data = [
+        ":workflows",
+        "@mise//tools/actionlint",
+    ] + glob(["actions/*/action.yml"]),
+)
+
+filegroup(
+    name = "workflows",
+    srcs = glob(["workflows/*.yml"]),
 )

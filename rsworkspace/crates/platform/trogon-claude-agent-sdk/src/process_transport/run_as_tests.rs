@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::command;
-use crate::{ClaudeAgentOptions, environment_plan::Inherited, transport::Transport};
+use crate::{ClaudeAgentOptions, environment_plan::Inherited, python_c_stack::PythonCStack, transport::Transport};
 
 fn current_uid() -> u32 {
     // SAFETY: `getuid` takes no arguments and cannot fail.
@@ -9,7 +9,14 @@ fn current_uid() -> u32 {
 }
 
 async fn run(options: &ClaudeAgentOptions) -> Result<std::process::ExitStatus, std::io::Error> {
-    let mut command = command(options, Path::new("true"), &Inherited::new(), None).map_err(std::io::Error::other)?;
+    let mut command = command(
+        options,
+        Path::new("true"),
+        &Inherited::new(),
+        None,
+        PythonCStack::CLIENT_CONNECT,
+    )
+    .map_err(std::io::Error::other)?;
     command.spawn()?.wait().await
 }
 
@@ -48,7 +55,14 @@ async fn the_unchanged_identity_uid_is_refused_before_spawning() {
         run_as_uid: Some(u32::MAX),
         ..ClaudeAgentOptions::default()
     };
-    let error = command(&options, Path::new("true"), &Inherited::new(), None).err();
+    let error = command(
+        &options,
+        Path::new("true"),
+        &Inherited::new(),
+        None,
+        PythonCStack::CLIENT_CONNECT,
+    )
+    .err();
     assert!(matches!(error, Some(crate::Error::Io(ref io)) if io.kind() == std::io::ErrorKind::InvalidInput));
 }
 
@@ -58,7 +72,14 @@ async fn an_unknown_user_fails_before_spawning() {
         user: Some("trogon-no-such-user-x".into()),
         ..ClaudeAgentOptions::default()
     };
-    let error = command(&options, Path::new("true"), &Inherited::new(), None).err();
+    let error = command(
+        &options,
+        Path::new("true"),
+        &Inherited::new(),
+        None,
+        PythonCStack::CLIENT_CONNECT,
+    )
+    .err();
     assert!(matches!(error, Some(crate::Error::Io(ref io)) if io.kind() == std::io::ErrorKind::NotFound));
 }
 
@@ -77,6 +98,7 @@ async fn killing_a_process_that_already_exited_succeeds_and_marks_the_stop_as_fo
         parent_environment: Vec::new(),
         startup_marks: false,
         closed: super::Closed::default(),
+        python_stack: PythonCStack::CLIENT_CONNECT,
     })?;
     let child = transport.child.as_mut().ok_or("the child was handed off")?;
     assert!(child.wait().await?.success());

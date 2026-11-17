@@ -1,4 +1,4 @@
-use crate::client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+use crate::client::{FlushClient, PublishClient, QueueSubscribeClient, RequestClient, SubscribeClient};
 use async_nats::client::{SubscribeError, SubscribeErrorKind};
 use async_nats::subject::ToSubject;
 use futures::StreamExt;
@@ -14,6 +14,7 @@ pub struct MockError(pub String);
 pub struct MockNatsClient {
     published: Arc<Mutex<Vec<PublishedMessage>>>,
     subscribed_subjects: Arc<Mutex<Vec<String>>>,
+    queue_subscriptions: Arc<Mutex<Vec<(String, String)>>>,
     subscribe_streams: Arc<Mutex<std::collections::VecDeque<mpsc::UnboundedReceiver<async_nats::Message>>>>,
 }
 
@@ -29,10 +30,13 @@ impl MockNatsClient {
         Self {
             published: Arc::new(Mutex::new(Vec::new())),
             subscribed_subjects: Arc::new(Mutex::new(Vec::new())),
+            queue_subscriptions: Arc::new(Mutex::new(Vec::new())),
             subscribe_streams: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         }
     }
 
+    /// Queues a stream for the next subscription, plain or queue group, in the
+    /// order the subscriptions are made.
     pub fn inject_messages(&self) -> mpsc::UnboundedSender<async_nats::Message> {
         let (tx, rx) = mpsc::unbounded();
         self.subscribe_streams.lock().unwrap().push_back(rx);
@@ -68,6 +72,21 @@ impl MockNatsClient {
 
     pub fn subscribed_to(&self) -> Vec<String> {
         self.subscribed_subjects.lock().unwrap().clone()
+    }
+
+    /// The `(subject, queue_group)` of every queue subscription, in order.
+    pub fn queue_subscribed_to(&self) -> Vec<(String, String)> {
+        self.queue_subscriptions.lock().unwrap().clone()
+    }
+
+    fn next_subscription(&self, operation: &str) -> Result<BoxStream<'static, async_nats::Message>, SubscribeError> {
+        match self.subscribe_streams.lock().unwrap().pop_front() {
+            Some(rx) => Ok(rx.boxed()),
+            None => Err(SubscribeError::with_source(
+                SubscribeErrorKind::Other,
+                MockError(format!("mock: {operation} not implemented")),
+            )),
+        }
     }
 }
 
@@ -199,6 +218,10 @@ impl AdvancedMockNatsClient {
         self.base.subscribed_to()
     }
 
+    pub fn queue_subscribed_to(&self) -> Vec<(String, String)> {
+        self.base.queue_subscribed_to()
+    }
+
     pub fn clear_responses(&self) {
         self.request_responses.lock().unwrap().clear();
     }
@@ -224,13 +247,25 @@ impl SubscribeClient for MockNatsClient {
             .unwrap()
             .push(subject.to_subject().to_string());
 
-        match self.subscribe_streams.lock().unwrap().pop_front() {
-            Some(rx) => Ok(rx.boxed()),
-            None => Err(SubscribeError::with_source(
-                SubscribeErrorKind::Other,
-                MockError("mock: subscribe not implemented".to_string()),
-            )),
-        }
+        self.next_subscription("subscribe")
+    }
+}
+
+impl QueueSubscribeClient for MockNatsClient {
+    type QueueSubscribeError = SubscribeError;
+    type QueueSubscription = BoxStream<'static, async_nats::Message>;
+
+    async fn queue_subscribe<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        queue_group: String,
+    ) -> Result<Self::QueueSubscription, SubscribeError> {
+        self.queue_subscriptions
+            .lock()
+            .unwrap()
+            .push((subject.to_subject().to_string(), queue_group));
+
+        self.next_subscription("queue subscribe")
     }
 }
 
@@ -279,6 +314,19 @@ impl SubscribeClient for AdvancedMockNatsClient {
 
     async fn subscribe<S: ToSubject + Send>(&self, subject: S) -> Result<Self::Subscription, SubscribeError> {
         self.base.subscribe(subject).await
+    }
+}
+
+impl QueueSubscribeClient for AdvancedMockNatsClient {
+    type QueueSubscribeError = SubscribeError;
+    type QueueSubscription = BoxStream<'static, async_nats::Message>;
+
+    async fn queue_subscribe<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        queue_group: String,
+    ) -> Result<Self::QueueSubscription, SubscribeError> {
+        self.base.queue_subscribe(subject, queue_group).await
     }
 }
 

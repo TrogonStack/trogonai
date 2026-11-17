@@ -1,13 +1,8 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-# Built for the host, as the all-features Cargo test run does; the wasm32
-# component itself is still built by cargo component.
+# Also built for the host, as the all-features Cargo test run does. The wasm32
+# component is :component, checked by :component_test. export_decider! expands
+# to wit_bindgen over the WIT contract.
 workspace_crate(
-    name = "trogon-act-chain-decider",
-    # export_decider! expands to wit_bindgen over the WIT contract.
     compile_data = ["//rsworkspace/crates/decider/trogon-decider-wit:wit"],
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider",
-        "//rsworkspace/crates/decider/trogon-decider-guest-sdk",
-    ],
 )

@@ -119,6 +119,14 @@ enum UpdateWire {
     },
 }
 
+impl crate::deep_json::OwnedValues for PermissionUpdate {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut Value)) {
+        if let Self::Unknown(object) = self {
+            crate::deep_json::OwnedValues::each_value(object, visit);
+        }
+    }
+}
+
 impl PermissionUpdate {
     pub fn from_wire_json(value: JsonObject) -> Result<Self, PermissionUpdateError> {
         if let Some(kind) = value.get("type").and_then(Value::as_str)

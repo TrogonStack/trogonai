@@ -1,6 +1,7 @@
 load("@rules_rust//cargo:cargo_toolchain.bzl", "cargo_toolchain")
 load("@rules_rust//rust:rust_stdlib_filegroup.bzl", "rust_stdlib_filegroup")
 load("@rules_rust//rust:rust_toolchain.bzl", "rust_toolchain")
+load("@rules_rust//rust:rustfmt_toolchain.bzl", "rustfmt_toolchain")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -102,4 +103,20 @@ toolchain(
     toolchain_type = "@rules_rust//cargo:toolchain_type",
 )
 
+rustfmt_toolchain(
+    name = "rustfmt_impl",
+    rustc = "bin/rustc",
+    rustc_lib = ":rustc_lib",
+    rustfmt = "bin/rustfmt",
+)
+
+toolchain(
+    name = "rustfmt_toolchain",
+    exec_compatible_with = %{constraints},
+    target_compatible_with = %{constraints},
+    toolchain = ":rustfmt_impl",
+    toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
+)
+
+%{targets}
 exports_files(["ROOT"])

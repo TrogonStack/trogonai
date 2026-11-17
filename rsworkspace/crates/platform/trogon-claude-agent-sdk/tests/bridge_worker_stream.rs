@@ -115,7 +115,7 @@ fn the_reconnect_delay_grows_to_a_cap_with_jitter() -> TestResult {
 fn frames_are_cut_the_way_the_upstream_parser_cuts_them() -> TestResult {
     let goldens = goldens()?;
     let cases = list(&goldens["pure"]["stream"], "frames")?;
-    assert!(cases.len() >= 28, "only {} frame cases", cases.len());
+    assert!(cases.len() >= 30, "only {} frame cases", cases.len());
     for case in cases {
         let mut parser = FrameParser::default();
         let mut frames = Vec::new();

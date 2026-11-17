@@ -1,12 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "trogon-jwks-publisher",
-    dev_deps = ["//rsworkspace/crates/aauth/trogon-aauth-verify"],
-    integration_tests = {
-        "mint_and_verify_roundtrip": {},
-        "publisher_router": {},
-    },
-    version = "0.0.1",
-    deps = ["//rsworkspace/crates/platform/trogon-identity-types"],
-)
+workspace_crate()

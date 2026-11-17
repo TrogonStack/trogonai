@@ -3,15 +3,20 @@ use std::{
     io,
     path::{Path, PathBuf},
 };
+#[cfg(unix)]
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::{
-    ArgvStyle, ClaudeAgentOptions, ExtraArgument, ManagedSettingsDelivery, PluginDelivery, SandboxSettings, Settings,
-    SettingsInput, adapters::ReadFile, argv::build_with,
+    ArgvStyle, ClaudeAgentOptions, Error, ExtraArgument, ManagedSettingsDelivery, PluginDelivery, SandboxSettings,
+    Settings, SettingsInput, SettingsLoadCauseError, UnicodeDecodeReason, adapters::ReadFile, argv::build_with,
+    python_c_stack::PythonCStack,
 };
 
 const GOLDENS: &str = include_str!("../../tests/fixtures/settings_option/goldens.json");
+const PYTHON_SETTINGS: &str = include_str!("../../tests/fixtures/settings_option/python_settings.json");
 const SETTINGS_FILE: &str = r#"{"permissions":{"allow":["Bash(ls)"]},"sandbox":{"enabled":false,"network":{"allowedDomains":["a.example"],"httpProxyPort":8080}},"éx":"ü"}"#;
 
 /// Serves one settings file for `settings_file.json` and records every path asked for.
@@ -70,7 +75,7 @@ fn typescript(options: ClaudeAgentOptions) -> ClaudeAgentOptions {
 }
 
 fn run(options: &ClaudeAgentOptions, files: &Files) -> Result<Vec<String>, String> {
-    build_with(options, None, files)
+    build_with(options, None, files, PythonCStack::MODULE)
         .map(|argv| argv.iter().map(|token| token.to_string_lossy().into_owned()).collect())
         .map_err(|error| error.to_string())
 }
@@ -96,14 +101,7 @@ fn expect_python(name: &str, options: ClaudeAgentOptions) {
     };
     let got = run(&options, &Files::new());
     match want["error"].as_str() {
-        Some(error) => {
-            let got = got.err().unwrap_or_default();
-            let error = error.split(" Expecting ").next().unwrap_or(error);
-            assert!(got.starts_with("Failed to load settings: "), "{name}: {got}");
-            if error.contains("[Errno") {
-                assert_eq!(got, error, "{name}");
-            }
-        }
+        Some(error) => assert_eq!(got, Err(error.to_owned()), "{name}"),
         None => {
             let want: Vec<String> = serde_json::from_value(want["argv"].clone()).unwrap_or_default();
             assert_eq!(got, Ok(want), "{name}");
@@ -534,4 +532,178 @@ fn python_strips_settings_text_as_str_strip_does() {
     let files = Files::new();
     assert!(run(&options("\u{feff}{\"a\": 1}"), &files).is_err());
     assert_eq!(*files.asked.borrow(), [PathBuf::from("\u{feff}{\"a\": 1}")]);
+}
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+fn python_sandboxed(text: impl Into<String>) -> ClaudeAgentOptions {
+    ClaudeAgentOptions {
+        argv_style: ArgvStyle::Python,
+        settings: Some(SettingsInput::from_wire_string(text)),
+        sandbox: sandbox(r#"{"enabled":true}"#),
+        ..Default::default()
+    }
+}
+
+fn settings_value(argv: &[String]) -> Option<String> {
+    let position = argv.iter().position(|token| token == "--settings")?;
+    argv.get(position + 1).cloned()
+}
+
+#[test]
+fn python_keeps_lone_surrogate_escapes_in_the_settings_value() -> TestResult {
+    let goldens: Value = serde_json::from_str(PYTHON_SETTINGS)?;
+    let pairs = goldens["surrogates"]
+        .as_array()
+        .ok_or("the goldens have no surrogate pairs")?;
+    let mut expected = Vec::new();
+    let mut actual = Vec::new();
+    for pair in pairs {
+        let text = pair[0].as_str().ok_or("a surrogate pair has no settings text")?;
+        expected.push(pair[1].as_str().map(str::to_owned));
+        actual.push(settings_value(&run(&python_sandboxed(text), &Files::new())?));
+    }
+    assert_eq!((pairs.len(), actual), (4, expected));
+    Ok(())
+}
+
+#[test]
+fn python_settings_nest_as_deep_as_json_loads_reads_them_in_a_plain_python_call() -> TestResult {
+    let goldens: Value = serde_json::from_str(PYTHON_SETTINGS)?;
+    let module = goldens["depth"]
+        .as_array()
+        .and_then(|entries| entries.iter().find(|entry| entry["caller"] == "module"))
+        .ok_or("the goldens have no module depth")?;
+    let loads = usize::try_from(module["loads"].as_u64().ok_or("the module depth has no loads")?)?;
+    let nested = |depth: usize| format!("{}null{}", "{\"a\":".repeat(depth), "}".repeat(depth));
+    let value = settings_value(&run(&python_sandboxed(nested(loads)), &Files::new())?).ok_or("no --settings value")?;
+    let digest: String = Sha256::digest(value.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let refused = run(&python_sandboxed(nested(loads + 1)), &Files::new()).map(|argv| settings_value(&argv));
+    let actual = (Some(digest), u64::try_from(value.len()).ok(), refused);
+    let expected = (
+        module["value_sha256"].as_str().map(str::to_owned),
+        module["value_length"].as_u64(),
+        Err(module["error"].as_str().unwrap_or_default().to_owned()),
+    );
+    assert_eq!(actual, expected);
+    Ok(())
+}
+
+/// The bytes of a `files` entry of the Python goldens: hex before and after a run of `a` bytes.
+fn golden_file(entry: &Value) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let head = hex_bytes(entry[0].as_str().ok_or("a settings file has no head")?)?;
+    let pad = usize::try_from(entry[1].as_u64().ok_or("a settings file has no padding")?)?;
+    let tail = hex_bytes(entry[2].as_str().ok_or("a settings file has no tail")?)?;
+    Ok([head, vec![b'a'; pad], tail].concat())
+}
+
+fn hex_bytes(text: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
+    (0..text.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(text.get(at..at + 2).unwrap_or_default(), 16))
+        .collect()
+}
+
+#[test]
+fn python_reads_a_settings_file_as_read_text_with_utf_8_sig_does() -> TestResult {
+    let goldens: Value = serde_json::from_str(PYTHON_SETTINGS)?;
+    let entries = goldens["files"]
+        .as_array()
+        .ok_or("the goldens have no settings files")?;
+    let mut expected = Vec::new();
+    let mut actual = Vec::new();
+    for entry in entries {
+        let mut files = Files::new();
+        files.contents = golden_file(entry)?;
+        let text = entry[3][1].as_str().ok_or("a settings file has no outcome")?.to_owned();
+        expected.push(if entry[3][0] == "value" {
+            Ok(Some(text))
+        } else {
+            Err(text)
+        });
+        actual.push(run(&python_sandboxed("settings_file.json"), &files).map(|argv| settings_value(&argv)));
+    }
+    assert_eq!((entries.len(), actual), (31, expected));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn python_quotes_a_missing_settings_file_with_the_repr_of_its_fsdecoded_path() -> TestResult {
+    let goldens: Value = serde_json::from_str(PYTHON_SETTINGS)?;
+    let entries = goldens["missing_paths"]
+        .as_array()
+        .ok_or("the goldens have no missing paths")?;
+    let mut expected = Vec::new();
+    let mut actual = Vec::new();
+    for entry in entries {
+        let cwd = hex_bytes(entry[0].as_str().ok_or("a missing path has no cwd")?)?;
+        expected.push(Err(entry[1]
+            .as_str()
+            .ok_or("a missing path has no message")?
+            .to_owned()));
+        let options = ClaudeAgentOptions {
+            cwd: Some(PathBuf::from(OsStr::from_bytes(&cwd))),
+            ..python_sandboxed("none.json")
+        };
+        actual.push(run(&options, &Files::new()).map(|argv| settings_value(&argv)));
+    }
+    assert_eq!((entries.len(), actual), (10, expected));
+    Ok(())
+}
+
+/// The `__cause__` of the `CLIConnectionError` Python raises, as the name of its class, with the fields of a
+/// `UnicodeDecodeError`; a `RecursionError` is not caught, so it is no settings load error.
+fn load_cause(name: &str, contents: &[u8]) -> String {
+    let mut files = Files::new();
+    files.contents = contents.to_vec();
+    match build_with(&python_sandboxed(name), None, &files, PythonCStack::MODULE) {
+        Err(Error::SettingsLoad(error)) => match error.cause() {
+            SettingsLoadCauseError::Os(_) => "OSError".to_owned(),
+            SettingsLoadCauseError::UnicodeDecode(cause) => format!(
+                "UnicodeDecodeError {} {:?} {} {} {:?}",
+                cause.encoding(),
+                cause.object(),
+                cause.start(),
+                cause.end(),
+                cause.reason()
+            ),
+            SettingsLoadCauseError::JsonDecode(_) => "JSONDecodeError".to_owned(),
+            SettingsLoadCauseError::Integer(_) => "ValueError".to_owned(),
+            SettingsLoadCauseError::Type(_) => "TypeError".to_owned(),
+        },
+        Err(error) => format!("not a settings load error: {error}"),
+        Ok(_) => "loaded".to_owned(),
+    }
+}
+
+#[test]
+fn a_python_settings_load_error_carries_the_exception_python_caught() {
+    let many_digits = format!(r#"{{"n":{}}}"#, "1".repeat(4301));
+    let deep = format!("{}{}", "[".repeat(10_000), "]".repeat(10_000));
+    let actual = [
+        load_cause("none.json", b""),
+        load_cause("settings_file.json", b"\xef\xbb\xbf{\"x\":\"\xe2\x82"),
+        load_cause("settings_file.json", b"{"),
+        load_cause("settings_file.json", many_digits.as_bytes()),
+        load_cause("settings_file.json", b"[]"),
+        load_cause("settings_file.json", deep.as_bytes()),
+    ];
+    let expected = [
+        "OSError".to_owned(),
+        format!(
+            "UnicodeDecodeError utf-8 {:?} 6 8 {:?}",
+            b"{\"x\":\"\xe2\x82",
+            UnicodeDecodeReason::UnexpectedEndOfData
+        ),
+        "JSONDecodeError".to_owned(),
+        "ValueError".to_owned(),
+        "TypeError".to_owned(),
+        "not a settings load error: maximum recursion depth exceeded while decoding a JSON array from a unicode string"
+            .to_owned(),
+    ];
+    assert_eq!(actual, expected);
 }

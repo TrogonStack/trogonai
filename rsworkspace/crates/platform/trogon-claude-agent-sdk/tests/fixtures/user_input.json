@@ -1,0 +1,126 @@
+{
+ "messages": {
+  "full": {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi"
+     }
+    ]
+   },
+   "parent_tool_use_id": "toolu_1",
+   "isSynthetic": true,
+   "tool_use_result": {
+    "ok": 1
+   },
+   "priority": "next",
+   "origin": {
+    "kind": "human"
+   },
+   "shouldQuery": false,
+   "timestamp": "2026-01-01T00:00:00.000Z",
+   "uuid": "00000000-0000-4000-8000-000000000003",
+   "pasted_content": [
+    "p",
+    [
+     {
+      "type": "text",
+      "text": "b"
+     }
+    ]
+   ],
+   "inline_pastes": [
+    "q"
+   ],
+   "session_id": "s1",
+   "agent_id": "a1",
+   "subagent_type": "general-purpose",
+   "task_description": "d",
+   "future_field": {
+    "nested": [
+     1,
+     2
+    ]
+   }
+  },
+  "reordered": {
+   "future_field": 1,
+   "client_composed": false,
+   "message": {
+    "content": "pléin",
+    "role": "user"
+   },
+   "type": "user",
+   "parent_tool_use_id": null
+  }
+ },
+ "typescript": {
+  "string_prompt": [
+   "{\"type\":\"user\",\"session_id\":\"\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"héllo\"}]},\"parent_tool_use_id\":null}"
+  ],
+  "string_prompt_verbatim": [
+   "{\"type\":\"user\",\"session_id\":\"\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"héllo\"}]},\"parent_tool_use_id\":null,\"client_composed\":true}"
+  ],
+  "stream_min": [
+   "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"plain\"},\"parent_tool_use_id\":null}"
+  ],
+  "stream_full": [
+   "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]},\"parent_tool_use_id\":\"toolu_1\",\"isSynthetic\":true,\"tool_use_result\":{\"ok\":1},\"priority\":\"next\",\"origin\":{\"kind\":\"human\"},\"shouldQuery\":false,\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"uuid\":\"00000000-0000-4000-8000-000000000003\",\"pasted_content\":[\"p\",[{\"type\":\"text\",\"text\":\"b\"}]],\"inline_pastes\":[\"q\"],\"session_id\":\"s1\",\"agent_id\":\"a1\",\"subagent_type\":\"general-purpose\",\"task_description\":\"d\",\"future_field\":{\"nested\":[1,2]}}"
+  ],
+  "stream_full_verbatim": [
+   "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]},\"parent_tool_use_id\":\"toolu_1\",\"isSynthetic\":true,\"tool_use_result\":{\"ok\":1},\"priority\":\"next\",\"origin\":{\"kind\":\"human\"},\"shouldQuery\":false,\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"uuid\":\"00000000-0000-4000-8000-000000000003\",\"pasted_content\":[\"p\",[{\"type\":\"text\",\"text\":\"b\"}]],\"inline_pastes\":[\"q\"],\"session_id\":\"s1\",\"agent_id\":\"a1\",\"subagent_type\":\"general-purpose\",\"task_description\":\"d\",\"future_field\":{\"nested\":[1,2]},\"client_composed\":true}"
+  ],
+  "stream_reordered": [
+   "{\"future_field\":1,\"client_composed\":false,\"message\":{\"content\":\"pléin\",\"role\":\"user\"},\"type\":\"user\",\"parent_tool_use_id\":null}"
+  ],
+  "stream_reordered_verbatim": [
+   "{\"future_field\":1,\"client_composed\":true,\"message\":{\"content\":\"pléin\",\"role\":\"user\"},\"type\":\"user\",\"parent_tool_use_id\":null}"
+  ]
+ },
+ "python": {
+  "string_prompt": [
+   "{\"type\": \"user\", \"session_id\": \"\", \"message\": {\"role\": \"user\", \"content\": \"h\\u00e9llo\"}, \"parent_tool_use_id\": null}"
+  ],
+  "string_prompt_verbatim": [
+   "{\"type\": \"user\", \"session_id\": \"\", \"message\": {\"role\": \"user\", \"content\": \"h\\u00e9llo\"}, \"parent_tool_use_id\": null, \"client_composed\": true}"
+  ],
+  "stream_min": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"plain\"}, \"parent_tool_use_id\": null}"
+  ],
+  "stream_full": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"hi\"}]}, \"parent_tool_use_id\": \"toolu_1\", \"isSynthetic\": true, \"tool_use_result\": {\"ok\": 1}, \"priority\": \"next\", \"origin\": {\"kind\": \"human\"}, \"shouldQuery\": false, \"timestamp\": \"2026-01-01T00:00:00.000Z\", \"uuid\": \"00000000-0000-4000-8000-000000000003\", \"pasted_content\": [\"p\", [{\"type\": \"text\", \"text\": \"b\"}]], \"inline_pastes\": [\"q\"], \"session_id\": \"s1\", \"agent_id\": \"a1\", \"subagent_type\": \"general-purpose\", \"task_description\": \"d\", \"future_field\": {\"nested\": [1, 2]}}"
+  ],
+  "stream_full_verbatim": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"hi\"}]}, \"parent_tool_use_id\": \"toolu_1\", \"isSynthetic\": true, \"tool_use_result\": {\"ok\": 1}, \"priority\": \"next\", \"origin\": {\"kind\": \"human\"}, \"shouldQuery\": false, \"timestamp\": \"2026-01-01T00:00:00.000Z\", \"uuid\": \"00000000-0000-4000-8000-000000000003\", \"pasted_content\": [\"p\", [{\"type\": \"text\", \"text\": \"b\"}]], \"inline_pastes\": [\"q\"], \"session_id\": \"s1\", \"agent_id\": \"a1\", \"subagent_type\": \"general-purpose\", \"task_description\": \"d\", \"future_field\": {\"nested\": [1, 2]}, \"client_composed\": true}"
+  ],
+  "stream_reordered": [
+   "{\"future_field\": 1, \"client_composed\": false, \"message\": {\"content\": \"pl\\u00e9in\", \"role\": \"user\"}, \"type\": \"user\", \"parent_tool_use_id\": null}"
+  ],
+  "stream_reordered_verbatim": [
+   "{\"future_field\": 1, \"client_composed\": true, \"message\": {\"content\": \"pl\\u00e9in\", \"role\": \"user\"}, \"type\": \"user\", \"parent_tool_use_id\": null}"
+  ],
+  "client_query": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"h\\u00e9llo\"}, \"parent_tool_use_id\": null, \"session_id\": \"default\"}"
+  ],
+  "client_query_in_session": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"x\"}, \"parent_tool_use_id\": null, \"session_id\": \"s\"}"
+  ],
+  "client_query_verbatim": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"x\"}, \"parent_tool_use_id\": null, \"session_id\": \"default\", \"client_composed\": true}"
+  ],
+  "client_query_stream": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"one\"}, \"parent_tool_use_id\": null, \"future_field\": 1, \"session_id\": \"default\"}",
+   "{\"type\": \"user\", \"session_id\": \"keep\", \"message\": {\"role\": \"user\", \"content\": \"two\"}, \"parent_tool_use_id\": null}"
+  ],
+  "client_query_stream_in_session": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"one\"}, \"parent_tool_use_id\": null, \"future_field\": 1, \"session_id\": \"q\"}",
+   "{\"type\": \"user\", \"session_id\": \"keep\", \"message\": {\"role\": \"user\", \"content\": \"two\"}, \"parent_tool_use_id\": null}"
+  ],
+  "client_query_stream_verbatim": [
+   "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"one\"}, \"parent_tool_use_id\": null, \"future_field\": 1, \"session_id\": \"default\", \"client_composed\": true}"
+  ]
+ }
+}

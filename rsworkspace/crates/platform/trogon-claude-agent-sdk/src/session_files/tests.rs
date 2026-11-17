@@ -1,6 +1,13 @@
-use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
+use std::{
+    cell::Cell,
+    collections::BTreeMap,
+    ffi::OsString,
+    path::PathBuf,
+    process::{Command, Stdio},
+    time::{Duration, UNIX_EPOCH},
+};
 
-use super::SessionFiles;
+use super::{SessionFiles, wait_until};
 use crate::HomeDirectoryError;
 use crate::test_support::{FixedEnvironment, WithPasswd};
 
@@ -61,4 +68,23 @@ fn no_home_directory_at_all_is_the_python_runtime_error() {
         projects(&environment(&[], None)).err().map(|error| error.message()),
         Some("Could not determine home directory.")
     );
+}
+
+#[test]
+fn a_child_still_running_at_the_deadline_is_killed_and_reaped() -> std::io::Result<()> {
+    // `cat` waits on the open stdin pipe, so only the deadline ends the wait.
+    let mut child = Command::new("cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()?;
+    let deadline = UNIX_EPOCH + Duration::from_secs(1);
+    let polls = Cell::new(0);
+    let now = || {
+        polls.set(polls.get() + 1);
+        if polls.get() == 1 { UNIX_EPOCH } else { deadline }
+    };
+    assert_eq!(wait_until(&mut child, deadline, now), None);
+    assert_eq!(polls.get(), 2);
+    assert!(child.try_wait()?.is_some());
+    Ok(())
 }

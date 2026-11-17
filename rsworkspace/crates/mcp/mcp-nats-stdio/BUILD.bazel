@@ -1,13 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "mcp-nats-stdio",
-    binaries = {"mcp-nats-stdio": {}},
-    library = False,
-    version = "0.0.1",
-    deps = [
-        "//rsworkspace/crates/mcp/mcp-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogon-telemetry",
-    ],
-)
+workspace_crate()

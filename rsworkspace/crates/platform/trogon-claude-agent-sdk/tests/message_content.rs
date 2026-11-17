@@ -15,11 +15,11 @@ fn message_content_keeps_text_thinking_tool_calls_and_extensions() -> TestResult
         ContentBlock::ToolUse {
             id: ToolUseId::from("tool-one"),
             name: ToolName::from("Read"),
-            input: input.clone(),
+            input: input.clone().into(),
         },
         ContentBlock::Unknown {
             kind: "future_block".into(),
-            data: fields.clone(),
+            data: fields.clone().into(),
         },
     ];
     assert!(matches!(&blocks[0], ContentBlock::Text { text } if text == "visible"));

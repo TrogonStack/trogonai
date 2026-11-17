@@ -97,6 +97,12 @@ pub(crate) fn python_repr(text: &str) -> String {
     crate::python_text::repr(&crate::python_text::from_str(text))
 }
 
+/// Python `str.strip()` whitespace: `str.isspace`, which is the Unicode `White_Space` set plus the four
+/// information separators.
+pub(crate) fn is_python_whitespace(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}')
+}
+
 /// Python truthiness of the value `json.loads` reads from this JSON.
 pub(crate) fn is_truthy(value: &serde_json::Value) -> bool {
     match value {

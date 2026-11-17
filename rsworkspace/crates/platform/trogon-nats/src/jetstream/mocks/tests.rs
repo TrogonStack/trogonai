@@ -475,6 +475,51 @@ async fn mock_publish_message_missing_reads_return_not_found() {
 }
 
 #[tokio::test]
+async fn mock_publish_message_reads_the_first_message_of_a_subject_from_a_sequence() {
+    let publisher = MockJetStreamPublishMessage::new();
+    for (id, subject) in [
+        ("event-1", "events.alpha"),
+        ("event-2", "events.beta"),
+        ("event-3", "events.alpha"),
+    ] {
+        publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id(id)
+                    .payload(Bytes::from(id))
+                    .outbound_message(subject),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+    }
+
+    let first = publisher
+        .get_first_raw_message_by_subject("events.alpha", 1)
+        .await
+        .unwrap();
+    let next = publisher
+        .get_first_raw_message_by_subject("events.alpha", 2)
+        .await
+        .unwrap();
+    let past_the_end = publisher
+        .get_first_raw_message_by_subject("events.alpha", 4)
+        .await
+        .unwrap_err();
+    let other_subject = publisher
+        .get_first_raw_message_by_subject("events.missing", 1)
+        .await
+        .unwrap_err();
+
+    assert_eq!(first.sequence, 1);
+    assert_eq!(next.sequence, 3);
+    assert_eq!(next.payload, Bytes::from_static(b"event-3"));
+    assert_eq!(past_the_end.kind(), LastRawMessageErrorKind::NoMessageFound);
+    assert_eq!(other_subject.kind(), LastRawMessageErrorKind::NoMessageFound);
+}
+
+#[tokio::test]
 async fn mock_publisher_fails_when_configured() {
     let pub_mock = MockJetStreamPublisher::new();
     pub_mock.fail_next_js_publish();

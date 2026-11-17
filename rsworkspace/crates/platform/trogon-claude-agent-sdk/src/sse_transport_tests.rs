@@ -11,8 +11,10 @@
 use std::{
     error::Error as StdError,
     sync::atomic::{AtomicUsize, Ordering},
+    task::Poll,
 };
 
+use futures_util::poll;
 use serde_json::{Map, json};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -92,6 +94,7 @@ struct Seen {
 struct Server {
     origin: String,
     seen: Arc<Mutex<Seen>>,
+    first_post: Arc<Notify>,
 }
 
 impl Server {
@@ -112,12 +115,24 @@ async fn serve(gets: Value, posts: Value) -> Result<Server, Box<dyn StdError>> {
     let origin = format!("http://{}", listener.local_addr()?);
     let seen = Arc::new(Mutex::new(Seen::default()));
     let shared = Arc::clone(&seen);
+    let first_post = Arc::new(Notify::new());
+    let posted = Arc::clone(&first_post);
     tokio::spawn(async move {
         while let Ok((socket, _)) = listener.accept().await {
-            tokio::spawn(connection(socket, gets.clone(), posts.clone(), Arc::clone(&shared)));
+            tokio::spawn(connection(
+                socket,
+                gets.clone(),
+                posts.clone(),
+                Arc::clone(&shared),
+                Arc::clone(&posted),
+            ));
         }
     });
-    Ok(Server { origin, seen })
+    Ok(Server {
+        origin,
+        seen,
+        first_post,
+    })
 }
 
 struct Request {
@@ -163,7 +178,7 @@ async fn read_request(socket: &mut TcpStream, buffer: &mut Vec<u8>) -> Option<Re
     Some(Request { method, headers, body })
 }
 
-async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<Mutex<Seen>>) {
+async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<Mutex<Seen>>, first_post: Arc<Notify>) {
     let mut buffer = Vec::new();
     while let Some(request) = read_request(&mut socket, &mut buffer).await {
         let is_post = request.method == "POST";
@@ -186,6 +201,9 @@ async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<
             list.push(entry);
             list.len() - 1
         };
+        if is_post && index == 0 {
+            first_post.notify_one();
+        }
         let script = if is_post {
             posts.get(index).cloned().unwrap_or_else(|| json!({"status": 200}))
         } else {
@@ -294,6 +312,41 @@ fn without_uuids(posts: &mut Value) {
     }
 }
 
+async fn write_many(
+    transport: &SseTransport,
+    server: &Server,
+    amount: u64,
+    pending_writes: &mut tokio::task::JoinSet<Result<(), Error>>,
+) -> usize {
+    if amount == 0 {
+        return 0;
+    }
+    if transport
+        .shared
+        .write(&json!({"type": "user", "n": 0}).to_string())
+        .await
+        .is_err()
+    {
+        return 0;
+    }
+    server.first_post.notified().await;
+    let mut resolved = 1;
+    for n in 1..amount {
+        let shared = Arc::clone(&transport.shared);
+        let line = json!({"type": "user", "n": n}).to_string();
+        let mut write = Box::pin(async move { shared.write(&line).await });
+        // Cooperative scheduler yields must not be mistaken for queue backpressure.
+        match poll!(tokio::task::unconstrained(write.as_mut())) {
+            Poll::Ready(Ok(())) => resolved += 1,
+            Poll::Ready(Err(_)) => {}
+            Poll::Pending => {
+                pending_writes.spawn(write);
+            }
+        }
+    }
+    resolved
+}
+
 async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
     let golden = golden(name)?;
     let spec = &golden["spec"];
@@ -344,6 +397,7 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
     let handle = transport.handle();
     transport.connect().await?;
     let mut results = Vec::new();
+    let mut pending_writes = tokio::task::JoinSet::new();
     for action in spec["actions"].as_array().into_iter().flatten() {
         let name = action[0].as_str().unwrap_or_default();
         let argument = &action[1];
@@ -367,19 +421,14 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
                 }
             }
             "writeMany" => {
-                let resolved = Arc::new(AtomicUsize::new(0));
-                for n in 0..argument.as_u64().unwrap_or_default() {
-                    let shared = Arc::clone(&transport.shared);
-                    let resolved = Arc::clone(&resolved);
-                    let line = json!({"type": "user", "n": n}).to_string();
-                    tokio::spawn(async move {
-                        if shared.write(&line).await.is_ok() {
-                            resolved.fetch_add(1, Ordering::SeqCst);
-                        }
-                    });
-                }
-                sleep(Duration::from_millis(300)).await;
-                json!({"resolved": resolved.load(Ordering::SeqCst)})
+                let resolved = write_many(
+                    &transport,
+                    &server,
+                    argument.as_u64().unwrap_or_default(),
+                    &mut pending_writes,
+                )
+                .await;
+                json!({"resolved": resolved})
             }
             "waitGets" => {
                 let wanted = usize::try_from(argument.as_u64().unwrap_or_default())?;
@@ -407,6 +456,9 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
             }
             "close" => {
                 transport.close().await?;
+                while let Some(result) = pending_writes.join_next().await {
+                    result??;
+                }
                 sleep(Duration::from_millis(10)).await;
                 json!({"closed": true})
             }
@@ -456,6 +508,50 @@ async fn replays(name: &str) -> TestResult {
     assert_eq!(replay.results, expected, "{name}: results");
     assert_eq!(replay.gets, replay.golden["gets"], "{name}: stream requests");
     assert_eq!(replay.posts, replay.golden["posts"], "{name}: writes");
+    Ok(())
+}
+
+#[tokio::test]
+async fn queue_snapshot_waits_for_admission_after_the_sampling_timer_elapsed() -> TestResult {
+    let server = serve(json!([hold()]), json!([{"status": 200, "end": "hang"}])).await?;
+    let options = SseOptions::new(
+        format!("{}/stream", server.origin),
+        format!("{}/send", server.origin),
+        "session-1",
+    );
+    let mut transport = SseTransport::new(options).with_time_divisor(100);
+    let mut ready = transport.shared.first_ready.subscribe();
+    transport.connect().await?;
+    assert!(
+        ready
+            .wait_for(Option::is_some)
+            .await?
+            .as_ref()
+            .is_some_and(Result::is_ok)
+    );
+    let mut pending_writes = tokio::task::JoinSet::new();
+    tokio::time::pause();
+    let mut batch = Box::pin(write_many(&transport, &server, 1005, &mut pending_writes));
+    assert!(poll!(batch.as_mut()).is_pending());
+    let mut advance = Box::pin(tokio::time::advance(Duration::from_millis(300)));
+    let _ = poll!(advance.as_mut());
+    drop(advance);
+    tokio::time::resume();
+    assert_eq!(batch.await, 1001);
+    assert_eq!(pending_writes.len(), 4);
+    {
+        let next = pending_writes.join_next();
+        tokio::pin!(next);
+        assert!(poll!(next.as_mut()).is_pending());
+    }
+    assert_eq!(server.posts(), 1);
+    transport.close().await?;
+    let mut settled_after_close = 0;
+    while let Some(result) = pending_writes.join_next().await {
+        result??;
+        settled_after_close += 1;
+    }
+    assert_eq!(settled_after_close, 4);
     Ok(())
 }
 

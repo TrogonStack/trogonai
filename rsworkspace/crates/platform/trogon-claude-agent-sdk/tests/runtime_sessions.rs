@@ -37,7 +37,7 @@ async fn receive_result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn 
     timeout(Duration::from_secs(4), async {
         while let Some(message) = client.next_message().await? {
             if let Message::Result(result) = message {
-                return Ok(result.result.unwrap_or_default());
+                return Ok(result.result.clone().unwrap_or_default());
             }
         }
         Err(std::io::Error::other("missing result").into())

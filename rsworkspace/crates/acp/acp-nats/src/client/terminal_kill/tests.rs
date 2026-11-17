@@ -18,7 +18,7 @@ async fn handle_success_publishes_response_to_reply_subject() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
     let request = KillTerminalRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "term-001".to_string(),
     );
     let (headers, payload) = make_wire_request(&request);
@@ -36,7 +36,7 @@ async fn handle_no_reply_does_not_call_client_or_publish() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
     let request = KillTerminalRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "term-001".to_string(),
     );
     let (headers, payload) = make_wire_request(&request);
@@ -72,7 +72,7 @@ async fn handle_session_id_mismatch_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
     let request = KillTerminalRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-b"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-b"),
         "term-001".to_string(),
     );
     let (headers, payload) = make_wire_request(&request);
@@ -87,7 +87,7 @@ async fn handle_client_error_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = TerminalKillFailingClient;
     let request = KillTerminalRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "term-001".to_string(),
     );
     let (headers, payload) = make_wire_request(&request);
@@ -108,7 +108,7 @@ async fn handle_success_publish_failure_exercises_error_path() {
     nats.fail_next_publish();
     let client = MockClient::new();
     let request = KillTerminalRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "term-001".to_string(),
     );
     let (headers, payload) = make_wire_request(&request);
@@ -124,7 +124,7 @@ async fn handle_success_flush_failure_exercises_warn_path() {
     nats.fail_next_flush();
     let client = MockClient::new();
     let request = KillTerminalRequest::new(
-        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        agent_client_protocol::v1::schema::SessionId::from("sess-1"),
         "term-001".to_string(),
     );
     let (headers, payload) = make_wire_request(&request);
@@ -137,35 +137,35 @@ async fn handle_success_flush_failure_exercises_warn_path() {
 #[test]
 fn error_code_and_message_client_error_preserves_client_code() {
     let err = TerminalKillError::ClientError(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "bad terminal id",
     ));
     let (code, message) = error_code_and_message(&err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "bad terminal id");
 }
 
 #[test]
 fn error_code_and_message_invalid_params() {
     let err = TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "bad params",
     ));
     let (code, message) = error_code_and_message(&err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "bad params");
 }
 
 #[test]
 fn terminal_kill_error_display() {
     let invalid_params = TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "bad params",
     ));
     assert_eq!(invalid_params.to_string(), "invalid params: bad params");
 
     let client_err = TerminalKillError::ClientError(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "client fail",
     ));
     assert_eq!(client_err.to_string(), "client error: client fail");
@@ -174,13 +174,13 @@ fn terminal_kill_error_display() {
 #[test]
 fn terminal_kill_error_source() {
     let invalid_params = TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "bad params",
     ));
     assert!(invalid_params.source().is_some());
 
     let client_err = TerminalKillError::ClientError(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "client fail",
     ));
     assert!(client_err.source().is_some());

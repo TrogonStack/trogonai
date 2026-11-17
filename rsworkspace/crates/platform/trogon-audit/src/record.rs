@@ -9,7 +9,7 @@ use buffa_types::google::protobuf::{Duration as ProtoDuration, Timestamp};
 use trogonai_proto::agents::agents::v1alpha1::AgentId;
 use trogonai_proto::hierarchy::v1alpha1::NodeId;
 use trogonai_proto::platform::audit::v1::audit_actor::{
-    AgentActor, ApiKeyActor, BreakGlassActor, HumanSessionActor, Unattributed,
+    AgentActor, ApiKeyActor, BreakGlassActor, HumanSessionActor, ServiceActor, Unattributed,
 };
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::audit::v1::{
@@ -257,6 +257,10 @@ fn audit_actor(actor: &Actor) -> AuditActor {
             agent_id: MessageField::some(agent_id(id.as_str())),
         }
         .into(),
+        Actor::Service { service_id } => ServiceActor {
+            service_id: service_id.to_string(),
+        }
+        .into(),
     };
     AuditActor { kind }
 }
@@ -303,6 +307,7 @@ fn gateway_surface(surface: Surface) -> GatewaySurface {
     match surface {
         Surface::A2aIngress => GatewaySurface::GATEWAY_SURFACE_A2A_INGRESS,
         Surface::Egress => GatewaySurface::GATEWAY_SURFACE_EGRESS,
+        Surface::SecretsRelease => GatewaySurface::GATEWAY_SURFACE_SECRETS_RELEASE,
     }
 }
 
@@ -355,6 +360,7 @@ fn credential_use(facts: &CredentialFacts) -> CredentialUse {
         binding_id: facts.binding_id.to_string(),
         destination: facts.destination.as_ref().map(ToString::to_string),
         decision_record_id: facts.decision_record_id.map(|id| id.to_string()),
+        location: facts.location.as_ref().map(ToString::to_string),
     }
 }
 

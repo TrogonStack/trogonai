@@ -37,9 +37,9 @@ kind is representable without being treated as a human-origin authorization.
 | --- | --- | --- | --- |
 | Content::Text / Content::Blocks | UserMessage.content: str or list[ContentBlock] | SDKUserMessage.message: MessageParam | String or Vec<ContentBlock>; no envelope decoding. |
 | Text / Thinking | TextBlock / ThinkingBlock | SDKAssistantMessage.message: BetaMessage | String text, or thinking and signature strings. |
-| ToolUse | ToolUseBlock.id/name/input | BetaMessage content tool-use blocks | ToolUseId/ToolName wrappers and JsonObject input. |
-| ToolResult | ToolResultBlock.tool_use_id/content/is_error | MessageParam content tool-result blocks | ToolUseId, raw JSON content, and separate NotReported/Success/Error status. |
-| ServerToolUse / ServerToolResult | ServerToolUseBlock / ServerToolResultBlock (from `server_tool_use` and `advisor_tool_result`) | BetaMessage server tool blocks | ToolUseId, name, JsonObject input; raw JSON result content. |
+| ToolUse | ToolUseBlock.id/name/input | BetaMessage content tool-use blocks | ToolUseId/ToolName wrappers and DeepJsonObject input, a JsonObject that drops at any nesting. |
+| ToolResult | ToolResultBlock.tool_use_id/content/is_error | MessageParam content tool-result blocks | ToolUseId, raw JSON content as DeepJsonValue, and separate NotReported/Success/Error status. |
+| ServerToolUse / ServerToolResult | ServerToolUseBlock / ServerToolResultBlock (from `server_tool_use` and `advisor_tool_result`) | BetaMessage server tool blocks | ToolUseId, name, DeepJsonObject input; raw JSON result content as DeepJsonValue. |
 | Unknown | Any block kind Python does not parse | TypeScript content references contain a broader block family | The block `type` and the block without it. TypeScript decoding keeps every block it cannot type here; Python decoding skips them as `parse_message` does. |
 
 ToolResultStatus distinguishes absent error status from explicit success and
@@ -93,6 +93,15 @@ run completion, queued-turn accounting, cancellation or process shutdown.
 | origin | optional MessageOrigin | origin?: SDKMessageOrigin | Optional origin object; `MessageOrigin::validated` opts in to refusing a `kind` among the extension fields. |
 | tool_use_result | optional dict[str, Any] | tool_use_result?: unknown | Option<Value> retains every JSON kind; None is omitted data and Some(Value::Null) is explicitly present null. Both pinned SDKs pass the wire value through unchanged; tool_use_result_object gives the dictionary view Python annotates, and `typed_tool_use_result(tool_name)` the `sdk-tools` output type TypeScript declares for that tool. |
 | additional_fields / message_fields | No separate typed extension fields | Envelope and MessageParam scopes differ | Explicit maps preserve manually supplied outer and nested extension data. |
+
+## User input
+
+| Rust field family | Python streamed message | TypeScript SDKUserMessage | Written representation |
+| --- | --- | --- | --- |
+| content | str or list of blocks | message: MessageParam | `UserInput::from(Prompt)` text or `UserInput::blocks`; a `query()` string prompt is one text block under TypeScript and a string under Python. |
+| parent_tool_use_id / isSynthetic / tool_use_result / priority / origin / shouldQuery / timestamp / client_composed / uuid / pasted_content / inline_pastes / session_id / agent_id / subagent_type / task_description | dict keys written as given | declared SDKUserMessage fields | Optional typed fields written in declaration order; `UserInputPriority` keeps unknown strings. |
+| additional_fields | dict keys written as given | extra keys written as given | Appended after the typed fields without replacing them. |
+| `UserInput::from_json` | streamed dict written as given | streamed object written as given | The object as given, key order included; typed fields set afterwards replace keys in place or append. |
 
 ## Partial events
 

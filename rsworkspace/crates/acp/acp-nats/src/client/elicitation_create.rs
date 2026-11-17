@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{CreateElicitationRequest, CreateElicitationResponse, ElicitationScope};
+use agent_client_protocol::v1::schema::{CreateElicitationRequest, CreateElicitationResponse, ElicitationScope};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_ELICITATION_CREATE;
@@ -21,10 +21,10 @@ pub enum ElicitationCreateError {
 pub fn error_code_and_message(e: &ElicitationCreateError) -> (ErrorCode, String) {
     match e {
         ElicitationCreateError::InvalidRequest(inner) => (
-            ErrorCode::InvalidParams,
+            ErrorCode::INVALID_PARAMS,
             format!("Invalid elicitation/create request: {}", inner),
         ),
-        ElicitationCreateError::SessionMismatch { .. } => (ErrorCode::InvalidParams, e.to_string()),
+        ElicitationCreateError::SessionMismatch { .. } => (ErrorCode::INVALID_PARAMS, e.to_string()),
         ElicitationCreateError::ClientError(inner) => (inner.code, inner.message.clone()),
     }
 }

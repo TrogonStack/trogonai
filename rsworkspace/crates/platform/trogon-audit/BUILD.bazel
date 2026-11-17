@@ -1,13 +1,6 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-audit",
-    crate_features = ["test-support"],
     # Some unit tests start a NATS JetStream server in a container through Docker.
     unit_test_tags = ["requires-network"],
-    deps = [
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogonai-proto",
-    ],
 )

@@ -918,6 +918,47 @@ async fn m02_m03_local_mcp_reports_tool_failures_as_error_results_before_invokin
     Ok(())
 }
 
+/// `McpServerDialect::Python` validates arguments under CPython's default recursion limit of 1000, which neither the
+/// Python SDK nor the `mcp` package raises and no option of this crate changes: a `const` of lists nested 325 deep
+/// compares within it, and one level deeper the call answers with the `RecursionError` text.
+#[tokio::test]
+async fn m15_python_dialect_meets_the_default_recursion_limit_the_python_sdk_never_raises() -> TestResult {
+    let nested = |depth: usize| (0..depth).fold(json!(1), |inner, _| Value::Array(vec![inner]));
+    for (depth, expected) in [(325, ("ok", false)), (326, ("maximum recursion depth exceeded", true))] {
+        let tool = SdkTool::from(SdkToolOptions {
+            name: McpToolName::from("nested"),
+            description: "nested".into(),
+            input_schema: McpToolInputSchema::new(object(
+                json!({"type":"object","properties":{"v":{"const":nested(depth)}}}),
+            )?),
+            handler: Arc::new(|_request: McpToolRequest| async { Ok::<_, CallbackError>(McpToolOutput::text("ok")) }),
+            annotations: None,
+            search_hint: None,
+            always_load: false,
+        });
+        let server = LocalMcpServer::from(LocalMcpServerOptions {
+            tools: Some(tool.into()),
+            dialect: McpServerDialect::Python,
+            ..LocalMcpServerOptions::new(McpServerName::from("python"))
+        });
+        let session = ready(&server).await?;
+        let response = rpc(
+            session.as_ref(),
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+                "name":"nested","arguments":{"v":nested(depth)}
+            }}),
+        )
+        .await?;
+        let result = &response["result"];
+        let actual = (
+            result["content"][0]["text"].as_str().unwrap_or_default(),
+            result["isError"].as_bool().unwrap_or(false),
+        );
+        assert_eq!(actual, expected, "nested {depth} deep");
+    }
+    Ok(())
+}
+
 #[test]
 fn output_schema_debug_does_not_disclose_schema_contents() -> TestResult {
     let schema = OutputSchema::new(object(json!({"type":"object","description":"fixture-private-schema"}))?);

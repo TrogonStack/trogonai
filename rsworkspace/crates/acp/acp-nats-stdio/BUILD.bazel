@@ -1,14 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "acp-nats-stdio",
-    binaries = {"acp-nats-stdio": {}},
-    library = False,
-    version = "0.0.1",
-    deps = [
-        "//rsworkspace/crates/acp/acp-nats",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogon-telemetry",
-    ],
-)
+workspace_crate()

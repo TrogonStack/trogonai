@@ -1,11 +1,3 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate(
-    name = "a2a-nats-server",
-    binaries = {"a2a-nats-server": {}},
-    deps = [
-        "//rsworkspace/crates/a2a/a2a-nats",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-std",
-    ],
-)
+workspace_crate()

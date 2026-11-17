@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Test tsworkspace"
-#MISE dir="tsworkspace"
-set -euo pipefail
-
-exec pnpm test

@@ -1,34 +1,24 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "a2a-gateway",
-    # The workspace imports spicedb-grpc-tonic under the name authzed.
-    aliases = {"@crates//:spicedb-grpc-tonic": "authzed"},
-    binaries = {"a2a-gateway": {}},
-    # Cargo CI tests every feature at once; the default-features run is not mirrored.
-    crate_features = ["spicedb"],
-    dev_deps = ["//rsworkspace/crates/platform/trogonai-proto"],
+    # Deployments build without spicedb, so that feature set is checked too.
+    feature_variants = {"default": []},
     integration_tests = {
-        # Runs the docker CLI against the repository's devops/ directory, which
-        # lies outside this Bazel package.
+        # Runs the docker CLI against the repository's devops/ directory, which lies
+        # outside this Bazel package.
         "compose_bootstrap_jwt": {"tags": ["manual"]},
         "default_build_enforces_policy": {"tags": ["requires-network"]},
         "imported_reply": {"tags": ["requires-network"]},
-        "owner_emit_error": {},
         "run_smoke": {"tags": ["requires-network"]},
-        "runtime_process": {
-            "data": [":a2a-gateway_bin"],
-            "rustc_env": {"CARGO_BIN_EXE_a2a-gateway": "$(rootpath :a2a-gateway_bin)"},
-            "tags": ["requires-network"],
-        },
-        # Reads a2a-pack/policies through CARGO_MANIFEST_DIR/../, which is a
-        # sibling Bazel package that does not export those files yet.
+        "runtime_process": {"tags": ["requires-network"]},
+        # Reads a2a-pack/policies through CARGO_MANIFEST_DIR/../, which is a sibling
+        # Bazel package that does not export those files yet.
         "tier1_declarative_bundles": {"tags": ["manual"]},
         # Copies wasm fixtures from a2a-redaction/tests/fixtures, a sibling Bazel
         # package that does not export them yet.
         "tier3_manifest_boot": {"tags": ["manual"]},
     },
-    # These two read a2a-redaction/tests/fixtures/identity_redact_part.wasm through
+    # These read a2a-redaction/tests/fixtures/identity_redact_part.wasm through
     # CARGO_MANIFEST_DIR/../, which the unit test target cannot resolve.
     unit_test_args = [
         "--skip",
@@ -40,20 +30,4 @@ workspace_crate(
     ],
     # Some tests start a NATS server in a container through Docker.
     unit_test_tags = ["requires-network"],
-    # The @crates labels are optional dependencies of the enabled features. No
-    # workspace member enables those features, so crate_universe leaves them out.
-    deps = [
-        "//rsworkspace/crates/a2a/a2a-auth-callout",
-        "//rsworkspace/crates/a2a/a2a-nats",
-        "//rsworkspace/crates/a2a/a2a-pack",
-        "//rsworkspace/crates/a2a/a2a-redaction",
-        "//rsworkspace/crates/platform/trogon-audit",
-        "//rsworkspace/crates/platform/trogon-identity-types",
-        "//rsworkspace/crates/platform/trogon-nats",
-        "//rsworkspace/crates/platform/trogon-semconv",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogon-telemetry",
-        "@crates//:spicedb-grpc-tonic",
-        "@crates//:tonic",
-    ],
 )

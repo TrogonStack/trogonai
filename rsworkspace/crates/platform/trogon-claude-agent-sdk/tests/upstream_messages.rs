@@ -73,7 +73,11 @@ fn unknown(sample: &Value) -> Result<Message, &'static str> {
         Some(Value::String(kind)) => kind,
         _ => return Err("sample has no string type"),
     };
-    Ok(Message::Unknown { kind, data, raw })
+    Ok(Message::Unknown {
+        kind,
+        data: data.into(),
+        raw: raw.into(),
+    })
 }
 
 /// The member a decoded union holds, read from its `Debug` form.

@@ -167,9 +167,28 @@ pub enum Error {
     /// Python `CLIJSONDecodeError`.
     #[error(transparent)]
     JsonDecode(#[from] JsonDecodeError),
+    /// Python `RecursionError` from `json.loads`: a CLI stdout line nested past the C recursion limit of the Python
+    /// SDK's message reader. It is not a `CLIJSONDecodeError`, so an unterminated tail at end of file raises it too.
+    #[error("{0}")]
+    Recursion(&'static str),
+    /// Python `ValueError` from `json.loads`: a CLI stdout line holds an integer of more than 4,300 digits, which
+    /// `int` does not convert. It is not a `CLIJSONDecodeError`, so an unterminated tail at end of file raises it too.
+    #[error("{0}")]
+    IntDigits(String),
+    /// Python `UnicodeDecodeError`: CLI stdout is not UTF-8. Python decodes each chunk it reads from the pipe as it
+    /// arrives, so the position counts from the start of that chunk and the lines before it in the chunk are lost.
+    #[error("{0}")]
+    UnicodeDecode(String),
+    /// TypeScript `TypeError`: a CLI stdout line is the JSON `null`, whose `type` the message loop reads.
+    #[error("{0}")]
+    NullMessage(&'static str),
     /// An option the upstream SDK rejects before it starts the CLI.
     #[error(transparent)]
     Option(#[from] crate::OptionError),
+    /// Python `CLIConnectionError("Failed to load settings: ...")`, raised while the command is built when the
+    /// settings a sandbox is merged into cannot be loaded.
+    #[error(transparent)]
+    SettingsLoad(#[from] crate::SettingsLoadError),
     /// Python `MessageParseError`.
     #[error(transparent)]
     MessageParse(#[from] MessageParseError),
@@ -630,6 +649,14 @@ impl MessageParseError {
     }
 }
 
+impl crate::deep_json::OwnedValues for MessageParseError {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        crate::deep_json::OwnedValues::each_value(&mut self.data, visit);
+    }
+}
+
+crate::deep_json::drop_values_iteratively!(MessageParseError);
+
 /// TypeScript `AbortError`: the operation was cancelled by the caller.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("{message}")]
@@ -660,6 +687,14 @@ pub struct ResultError {
     data: JsonObject,
     exit_code: Option<i32>,
 }
+
+impl crate::deep_json::OwnedValues for ResultError {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        crate::deep_json::OwnedValues::each_value(&mut self.data, visit);
+    }
+}
+
+crate::deep_json::drop_values_iteratively!(ResultError);
 
 impl ResultError {
     pub(crate) fn new(message: String, data: JsonObject, exit_code: Option<i32>) -> Self {
@@ -811,7 +846,7 @@ pub(crate) fn typescript_error_result_text(data: &JsonObject) -> Option<String> 
 
 /// The `result` frame as a JSON object, for `ResultError::data`.
 pub(crate) fn error_result_data(result: &crate::ResultMessage) -> JsonObject {
-    let mut data = result.additional_fields.clone();
+    let mut data = crate::deep_json::clone_object(&result.additional_fields);
     data.insert("type".into(), "result".into());
     data.insert("subtype".into(), result.subtype.clone().into());
     data.insert("is_error".into(), true.into());

@@ -23,7 +23,7 @@ pub enum WritePrecondition {
     NoStream,
     /// Append only if the stream already contains events.
     ///
-    /// For a decider whose [`initial_state`](crate::Decider::initial_state) is itself a valid
+    /// For a decider whose state [`Default`] is itself a valid
     /// state, folding zero events and folding a created-but-quiet aggregate produce the same
     /// state, so [`decide`](crate::Decider::decide) cannot tell "never created" from "created,
     /// nothing has happened yet". That distinction lives only in the stream's emptiness, which

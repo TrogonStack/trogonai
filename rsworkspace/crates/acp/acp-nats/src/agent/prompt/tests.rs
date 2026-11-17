@@ -16,7 +16,9 @@ fn make_nats_msg(payload: &[u8], headers: Option<async_nats::HeaderMap>) -> asyn
     }
 }
 
-use crate::agent::test_support::{MockJs, reply_when_published};
+use crate::agent::test_support::{
+    MockJs, has_error_metric, has_request_metric, mock_bridge_with_metrics, reply_when_published,
+};
 
 type RespTx = futures::channel::mpsc::UnboundedSender<Result<MockJsMessage, trogon_nats::mocks::MockError>>;
 
@@ -79,7 +81,7 @@ async fn prompt_rejects_invalid_session_id() {
     let err = handle(&bridge, PromptRequest::new("invalid.session.id", vec![]))
         .await
         .unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidParams);
+    assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]
@@ -170,6 +172,84 @@ async fn prompt_js_bad_response_payload() {
 }
 
 #[tokio::test]
+async fn prompt_terminates_invalid_results_and_response_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    for (case, mut body, error_projection) in [
+        (
+            "invalid result",
+            serde_json::json!({"jsonrpc": "2.0", "result": null}),
+            None,
+        ),
+        (
+            "request on the response stream",
+            serde_json::json!({"jsonrpc": "2.0", "method": "session/prompt", "params": {}}),
+            None,
+        ),
+        (
+            "conflicting error-code projection",
+            serde_json::json!({"jsonrpc": "2.0", "result": {"stopReason": "end_turn"}}),
+            Some("-32603"),
+        ),
+    ] {
+        let (mock, js, bridge, exporter, provider) = mock_bridge_with_metrics();
+        let _cancel_tx = mock.inject_messages();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(consumer);
+
+        let reply = async {
+            let request = loop {
+                if let Some(request) = js
+                    .publisher
+                    .published_messages()
+                    .into_iter()
+                    .find(|message| message.headers.get(jsonrpc_nats::HEADER_ID).is_some())
+                {
+                    break request;
+                }
+                tokio::task::yield_now().await;
+            };
+            let literal = request
+                .headers
+                .get(jsonrpc_nats::HEADER_ID)
+                .ok_or("published request has no id")?;
+            body["id"] = serde_json::from_str(literal.as_str())?;
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert(jsonrpc_nats::HEADER_ID, literal.as_str());
+            if let Some(code) = error_projection {
+                headers.insert(jsonrpc_nats::HEADER_ERROR_CODE, code);
+            }
+            let message = MockJsMessage::new(make_nats_msg(&serde_json::to_vec(&body)?, Some(headers)));
+            let observed = message.clone();
+            assert!(tx.unbounded_send(Ok(message)).is_ok());
+            Ok::<_, Box<dyn std::error::Error>>(observed)
+        };
+        let request = PromptRequest::new(
+            "s1",
+            vec![agent_client_protocol::v1::schema::ContentBlock::from("Continue.")],
+        );
+        let prompt = crate::AgentHandler::prompt(&bridge, request);
+        tokio::pin!(prompt);
+        let observed = tokio::select! {
+            _result = &mut prompt => return Err("prompt completed before the correlated response".into()),
+            observed = reply => observed?,
+        };
+        let error = prompt.await.err().ok_or("invalid response was accepted")?;
+
+        assert_eq!(error.code, ErrorCode::INTERNAL_ERROR, "{case}");
+        assert_eq!(error.message, "bad response payload", "{case}");
+        assert_eq!(
+            observed.signals(),
+            vec![AckKindSnapshot::AckWith(AckKindValue::Term)],
+            "{case}"
+        );
+        provider.force_flush()?;
+        let metrics = exporter.get_finished_metrics()?;
+        assert!(has_error_metric(&metrics, "prompt", "bad_response_payload"), "{case}");
+        assert!(has_request_metric(&metrics, "prompt", false), "{case}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn prompt_js_agent_error_response() {
     let (mock, js, bridge) = mock_bridge();
     let _cancel_tx = mock.inject_messages();
@@ -177,13 +257,13 @@ async fn prompt_js_agent_error_response() {
     let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    let agent_err = Error::new(ErrorCode::InternalError.into(), "agent blew up");
+    let agent_err = Error::new(ErrorCode::INTERNAL_ERROR, "agent blew up");
     reply_error_when_published(&js, resp_tx, &agent_err);
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
     assert!(err.message.contains("agent blew up"));
 }
 

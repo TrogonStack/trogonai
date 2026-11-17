@@ -1,6 +1,7 @@
 mod environment;
 mod extract;
 mod filesystem;
+mod get_addr_info_resolver;
 mod host;
 mod http;
 mod passwd;
@@ -12,6 +13,7 @@ pub use environment::{
 };
 pub use extract::*;
 pub use filesystem::*;
+pub use get_addr_info_resolver::{GetAddrInfoResolver, NameLookupError};
 pub use host::*;
 pub use http::HttpExecute;
 pub use process::{SpawnProcess, TokioProcessSpawner};

@@ -1,0 +1,238 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/platform/workload_federation/v1alpha1/assertion_algorithm.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+// Explicit configured HTTPS origin/path. No credential, query or fragment is
+// accepted. Admission also checks TLS identity, DNS/address safety and exact
+// endpoint policy; a token never supplies this URL (ADR#0053).
+message TrustEndpoint {
+  string url = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      uri: true
+      pattern: "^https://[^/?#@]+(/[^?#]*)?$"
+    }
+  ];
+}
+
+// A trust domain is an exact namespace, not a DNS-hostname assertion.
+message SpiffeTrustDomain {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-z0-9._-]+$"
+    }
+  ];
+}
+
+// Public certificate DER only. Ingress parses it and validates its CA role;
+// message shape cannot establish either property. No private key is accepted.
+message PublicTrustCertificate {
+  bytes der = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 16384
+    }
+  ];
+}
+
+// These are selected local limits, not a claim about HTTP cache directives or
+// remote revocation. Explicit removal bypasses stale-cache tolerance.
+message TrustRefreshPolicy {
+  option (buf.validate.message).cel = {
+    id: "trust_refresh_policy.interval"
+    message: "refresh interval must fit within the approved staleness bound"
+    expression: "this.max_staleness >= this.refresh_interval"
+  };
+  google.protobuf.Duration refresh_interval = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+  google.protobuf.Duration max_staleness = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+  google.protobuf.Duration rotation_overlap = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gte = {}
+  ];
+}
+
+// The https_web SPIFFE endpoint profile authenticates through Web PKI. The
+// deployment deliberately refuses redirects; that is stricter local policy,
+// not a requirement attributed to the SPIFFE standard.
+message SpiffeHttpsWebEndpoint {
+  TrustEndpoint endpoint = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The independently authenticated bootstrap roots belong to the exact endpoint
+// identity, never a pooled foreign-domain CA store. Endpoint and bundle domains
+// need not be equal; their association is governed explicitly (ADR#0098).
+message SpiffeHttpsSpiffeEndpoint {
+  TrustEndpoint endpoint = 1 [features.field_presence = LEGACY_REQUIRED];
+  string expected_spiffe_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^spiffe://[a-z0-9._-]+(/[^?#]*)?$"
+    }
+  ];
+  repeated PublicTrustCertificate bootstrap_roots = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 16
+  }];
+}
+
+// One approved domain-to-bundle relationship. It is directional and does not
+// admit platform subjects or grant transitive trust. Bundle validation preserves
+// this exact domain association and refuses cross-domain CA substitution.
+message SpiffeTrustProfile {
+  SpiffeTrustDomain trust_domain = 1 [features.field_presence = LEGACY_REQUIRED];
+  oneof endpoint_profile {
+    option (buf.validate.oneof).required = true;
+    SpiffeHttpsWebEndpoint https_web = 2;
+    SpiffeHttpsSpiffeEndpoint https_spiffe = 3;
+  }
+  TrustRefreshPolicy refresh = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Literal approved discovery/JWKS locations. Verification requires exact issuer
+// discovery equality and refuses token-directed URLs or profile fallback.
+message OidcDiscoveryKeySource {
+  TrustEndpoint discovery = 1 [features.field_presence = LEGACY_REQUIRED];
+  TrustEndpoint jwks = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Public JWK Set JSON, bounded at 256 KiB. Admission parses the actual keys,
+// checks algorithms/purpose, rejects private JWK members and validates rotation; this is not credential data.
+message OidcPinnedJwks {
+  bytes jwks_json = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 262144
+    }
+  ];
+}
+
+// Bounds are explicit profile policy. Resource ceilings are 64 KiB per token,
+// 128 keys, 64 claims and a 30-second request, with at most 120 seconds skew.
+// Signature, time, claim and HTTP enforcement remain ingress obligations.
+message OidcVerificationPolicy {
+  repeated AssertionAlgorithm allowed_algorithms = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 4
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  google.protobuf.Duration max_token_lifetime = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration.gt = {}
+  ];
+  google.protobuf.Duration clock_skew = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gte: {}
+      lte: {seconds: 120}
+    }
+  ];
+  uint32 max_token_bytes = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint32 max_jwks_keys = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gt: 0
+      lte: 128
+    }
+  ];
+  uint32 max_claims = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gt: 0
+      lte: 64
+    }
+  ];
+  google.protobuf.Duration request_timeout = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 30}
+    }
+  ];
+}
+
+// Only configured issuers/audiences are eligible. An OIDC subject is namespaced
+// by this registration and still needs a separate binding and live operation
+// policy. This is workload admission, not interactive person delegation.
+message OidcTrustProfile {
+  TrustEndpoint issuer = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated string audiences = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 32
+    unique: true
+    items: {
+      string: {
+        min_len: 1
+        max_len: 2048
+      }
+    }
+  }];
+  oneof key_source {
+    option (buf.validate.oneof).required = true;
+    OidcDiscoveryKeySource discovery = 3;
+    OidcPinnedJwks pinned_jwks = 4;
+  }
+  OidcVerificationPolicy verification = 5 [features.field_presence = LEGACY_REQUIRED];
+  TrustRefreshPolicy refresh = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// This is the explicit payload encoded by TrustRegistration.artifact. Its own
+// reference/digest is outside the Definition, avoiding a recursive preimage.
+// Issuer/domain identity is immutable; a different issuer/domain is a new owner.
+message TrustRegistrationDefinition {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 contract_version = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+  oneof protocol {
+    option (buf.validate.oneof).required = true;
+    SpiffeTrustProfile spiffe = 3;
+    OidcTrustProfile oidc = 4;
+  }
+}
+
+// A typed projection plus the exact immutable Definition artifact. Ingress and
+// replay verify hash, type/version and decoded equality before admission.
+message TrustRegistration {
+  option (buf.validate.message).cel = {
+    id: "trust_registration.scope"
+    message: "trust registration reference and definition must have the same scope"
+    expression: "this.trust_registration_ref.scope == this.definition.scope"
+  };
+  TrustRegistrationRef trust_registration_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  TrustRegistrationDefinition definition = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationArtifact artifact = 3 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,3 +1,11 @@
+# This package sits inside the //proto module, so it hands its schema to the
+# checks there.
+filegroup(
+    name = "sources",
+    srcs = glob(["*.proto"]),
+    visibility = ["//proto:__pkg__"],
+)
+
 filegroup(
     name = "schedule_fixture_sources",
     srcs = [

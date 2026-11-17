@@ -6,7 +6,12 @@ use serde_json::Value;
 
 use crate::{
     ControlRequestId, DenialDisposition, JsonObject, Message, MessageDecoding, PermissionDecision, ProtocolError,
-    ToolName, ToolPermissionRequest, ToolUseId, message_decode::Decoded,
+    ToolName, ToolPermissionRequest, ToolUseId,
+    constants::{
+        PERMISSION_TOOL_USE_ID_FIELD, PYTHON_DICT_TYPE, PYTHON_NONE_TYPE, PYTHON_PERMISSION_RESULT_TYPE_ERROR,
+    },
+    deep_json::OwnedValues,
+    message_decode::Decoded,
 };
 
 pub(crate) enum Frame {
@@ -78,6 +83,44 @@ pub(crate) enum ControlResponse {
         message: String,
         error_code: Option<Value>,
     },
+}
+
+impl OwnedValues for Frame {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut Value)) {
+        match self {
+            Self::Message(message) => message.each_value(visit),
+            Self::ControlRequest { request, .. } => request.each_value(visit),
+            Self::ControlResponse {
+                response: ControlResponse::Success(response),
+                ..
+            } => response.each_value(visit),
+            Self::ControlResponse {
+                response: ControlResponse::Error { error_code, .. },
+                ..
+            } => error_code.each_value(visit),
+            Self::TranscriptMirror { entries, .. } => entries.each_value(visit),
+            Self::KeepAlive | Self::Unparsed | Self::Cancel { .. } => {}
+        }
+    }
+}
+
+impl OwnedValues for IncomingControl {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut Value)) {
+        match self {
+            Self::Permission(request) => request.each_value(visit),
+            Self::Hook { input, .. } => input.each_value(visit),
+            Self::Mcp { server_name, message } => {
+                server_name.each_value(visit);
+                message.each_value(visit);
+            }
+            Self::Elicitation(request) => request.requested_schema.each_value(visit),
+            Self::UserDialog { payload, .. } | Self::Ui { payload, .. } => payload.each_value(visit),
+            Self::OAuthTokenRefresh { kind, .. } => kind.each_value(visit),
+            Self::HostAuthTokenRefresh { status } => status.each_value(visit),
+            Self::RemoteControlWork { session_id } => session_id.each_value(visit),
+            Self::Unsupported { .. } => {}
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -300,8 +343,18 @@ pub(crate) fn parse_frame(bytes: &[u8]) -> Result<Frame, ProtocolError> {
     parse_value(&serde_json::from_slice(bytes)?, MessageDecoding::TypeScript)
 }
 
-/// Decodes an object a [`crate::Transport`] already parsed as JSON.
+/// Decodes an object a [`crate::Transport`] already parsed as JSON, at any nesting: the recursive decoding runs
+/// over the object with its deep containers set aside, and copies of them go back into the frame afterwards.
 pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<Frame, ProtocolError> {
+    let Some(detached) = crate::deep_json::detach(object) else {
+        return parse_shallow(object, mode);
+    };
+    let mut frame = parse_shallow(&detached.skeleton, mode)?;
+    frame.each_value(&mut |value| detached.reattach(value));
+    Ok(frame)
+}
+
+fn parse_shallow(object: &JsonObject, mode: MessageDecoding) -> Result<Frame, ProtocolError> {
     let data = || object.clone();
     Ok(match object.get("type").and_then(Value::as_str) {
         Some("control_request") => {
@@ -427,8 +480,10 @@ pub(crate) fn mcp_forward(id: &ControlRequestId, request: Value) -> Result<Value
 
 /// The `can_use_tool` answer in the dialect's shape, or `None` when the host answered out of band.
 ///
-/// TypeScript writes `{...result, toolUseID}` with `updatedInput` only when the handler set it. Python sends the
-/// original input when the handler left it unset and never adds `toolUseID`.
+/// TypeScript writes `{...result, toolUseID}` with `updatedInput` only when the handler set it; a raw result keeps
+/// its keys in order, takes the request's `toolUseID` in place of its own and loses its own when the request had
+/// none, as the spread does. Python sends the original input when the handler left it unset, never adds
+/// `toolUseID`, and rejects a raw result as it rejects a `dict`.
 /// `input` is the wire `input` Python echoes as `updatedInput` when the handler leaves it unset.
 pub(crate) fn permission_response(
     id: &ControlRequestId,
@@ -479,11 +534,23 @@ pub(crate) fn permission_response(
         },
         PermissionDecision::AnsweredOutOfBand if typescript => return Ok(None),
         PermissionDecision::AnsweredOutOfBand => {
-            return callback_error_response(
-                id,
-                "Tool permission callback must return PermissionResult (PermissionResultAllow or PermissionResultDeny), got <class 'NoneType'>",
-            )
-            .map(Some);
+            return callback_error_response(id, &format!("{PYTHON_PERMISSION_RESULT_TYPE_ERROR}{PYTHON_NONE_TYPE}"))
+                .map(Some);
+        }
+        PermissionDecision::Raw(mut result) if typescript => {
+            match tool_use_id {
+                Some(tool_use_id) => {
+                    result.insert(PERMISSION_TOOL_USE_ID_FIELD.to_owned(), Value::from(tool_use_id));
+                }
+                None => {
+                    result.shift_remove(PERMISSION_TOOL_USE_ID_FIELD);
+                }
+            }
+            return success_response(id, result).map(Some);
+        }
+        PermissionDecision::Raw(_) => {
+            return callback_error_response(id, &format!("{PYTHON_PERMISSION_RESULT_TYPE_ERROR}{PYTHON_DICT_TYPE}"))
+                .map(Some);
         }
         PermissionDecision::Failed { message } => return callback_error_response(id, &message).map(Some),
     };

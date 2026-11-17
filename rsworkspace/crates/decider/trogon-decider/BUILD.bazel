@@ -1,6 +1,8 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-decider",
-    crate_features = ["test-support"],
+    integration_tests = {
+        # trybuild shells out to cargo to build the fixtures, which Bazel cannot provide.
+        "trybuild": {"tags": ["manual"]},
+    },
 )

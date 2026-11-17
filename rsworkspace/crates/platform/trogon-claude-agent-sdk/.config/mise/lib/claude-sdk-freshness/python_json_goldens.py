@@ -6,9 +6,13 @@ usage: python3 -I python_json_goldens.py OUT_FILE [--check]
 
 `numbers` pairs the bit pattern of a finite double (16 hex digits) with `json.dumps(value)`. `documents` pairs
 JSON source text with `json.dumps(json.loads(text))`, which covers exact integers, float spellings, the NaN and
-Infinity constants, duplicate keys and string escapes. `refused` pairs text `json.loads` refuses with the kind of
-error and, for the errors whose text the Rust port reproduces, the message. The corpus is drawn from a seeded
-generator, so the output only changes when this script or CPython's number printing does.
+Infinity constants, duplicate keys, string escapes and lone surrogates. `refused` records text `json.loads`
+refuses as `[text, kind, message]`, the kind being `decode` for `JSONDecodeError` and `integer` for the
+`ValueError` of an integer past the digit limit. `fuzzed` records `[text, kind, payload]` for short texts drawn
+from JSON's punctuation and near misses of its tokens, the kind being `ok` with `json.dumps(json.loads(text))` or
+the kind of the error with its message. `recursion` records `[opening, count, message]` for text nested past
+Python's recursion limit. The corpus is drawn from a seeded generator, so the output only changes when this
+script or CPython's json module does.
 """
 
 import json
@@ -114,6 +118,8 @@ hand_written = [
     '"\\ud83d\\ude00 é 日本 \\u00e9 \U0001f600"',
     '{"\\u0000":"\\u0000","\\n":"\\t","\\"":"\\\\"}',
     '{"a":[1.0,2.50,-0.0,1e21,1e+21,1E-7,0.1e1,10e-1,1e-5,1.5e-5]}',
+    '"\\ud800"', '"\\udc00\\ud800"', '{"\\ud800":1}', '"\\ud83d\\u0041"', '"\\ud83d\\ude00\\ud83d"',
+    '"\\ud83d\\ud83d\\ude00"', '{"\\ud800":1,"\\udc00":2,"\\ud800":3}',
 ]
 
 refused_texts = [
@@ -166,15 +172,48 @@ def refusal(source):
     try:
         json.loads(source)
     except json.JSONDecodeError as error:
-        if str(error).startswith("Unexpected UTF-8 BOM"):
-            return [source, "bom", str(error)]
-        return [source, "syntax", None]
+        return [source, "decode", str(error)]
     except ValueError as error:
         return [source, "integer", str(error)]
     raise SystemExit(f"json.loads accepted {source!r}")
 
 
 refused = [refusal(source) for source in refused_texts]
+
+fuzz_alphabet = list('{}[]",: \t\n\r0123456789.eE+-nultrfasNIy\\/bu') + ["D", "d", "C", "8", "\x01", "\ufeff", "é", "A",
+                                                                       "F", "g"]
+fuzz_pieces = ["null", "true", "false", "NaN", "Infinity", "-Infinity", "\\u", "\\ud83d", "\\ude00", "\\ud83d\\ude00",
+               "\\uD800", "\\u12", '"a"', "1.5e+3", "-0", "0.", "1e", "1e+", '{"a":1}', "[1,2]", "\n", '"\\', '\\"']
+
+
+def fuzz_text():
+    return "".join(pick(fuzz_pieces) if below(100) < 35 else pick(fuzz_alphabet) for _ in range(below(11)))
+
+
+def outcome(source):
+    try:
+        return [source, "ok", json.dumps(json.loads(source))]
+    except json.JSONDecodeError as error:
+        return [source, "decode", str(error)]
+    except ValueError as error:
+        return [source, "integer", str(error)]
+
+
+fuzz_sources = {}
+while len(fuzz_sources) < 4000:
+    fuzz_sources.setdefault(fuzz_text(), None)
+fuzzed = [outcome(source) for source in fuzz_sources]
+
+
+def recursion(opening, count):
+    try:
+        json.loads(opening * count)
+    except RecursionError as error:
+        return [opening, count, str(error)]
+    raise SystemExit(f"json.loads read {count} of {opening!r}")
+
+
+recursions = [recursion("[", 100000), recursion('{"a":', 100000), recursion("[ ", 100000), recursion('{"a": ', 100000)]
 
 
 def lines(pairs):
@@ -185,7 +224,9 @@ body = (
     "{\n"
     f'  "numbers": [\n{lines(sorted(numbers.items(), key=lambda item: item[0]))}\n  ],\n'
     f'  "documents": [\n{lines(documents)}\n  ],\n'
-    f'  "refused": [\n{lines(refused)}\n  ]\n'
+    f'  "refused": [\n{lines(refused)}\n  ],\n'
+    f'  "fuzzed": [\n{lines(fuzzed)}\n  ],\n'
+    f'  "recursion": [\n{lines(recursions)}\n  ]\n'
     "}\n"
 )
 

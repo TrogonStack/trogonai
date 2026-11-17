@@ -1,18 +1,15 @@
-//! The value tokens of JSON text that `serde_json` does not read the way `JSON.parse` or Python's `json.loads`
-//! reads them. `serde_json` refuses a number past the double range, where both upstream parsers read an infinity,
-//! and refuses Python's `NaN`, `Infinity` and `-Infinity`. A scan respells those tokens so that `serde_json` reads
-//! the text, and lists every number and `null` in text order, which is the order `serde_json` visits them in, so
-//! a visitor can read each one back from its spelling.
+//! The value tokens of JSON text that `serde_json` does not read the way `JSON.parse` reads them. `serde_json`
+//! refuses a number past the double range, where `JSON.parse` reads an infinity. A scan respells those tokens so
+//! that `serde_json` reads the text, and lists every number and `null` in text order, which is the order
+//! `serde_json` visits them in, so a visitor can read each one back from its spelling.
 
 /// A number or `null` value of the text, in text order.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Token<'a> {
     /// A number token as written. It may fall outside the JSON grammar; `serde_json` then refuses the text.
     Number(&'a str),
     /// `null`.
     Null,
-    /// Python's `NaN`, `Infinity` or `-Infinity`, respelled `null`.
-    Constant(f64),
 }
 
 /// The text `serde_json` reads in place of the original, and the number and `null` tokens of the original.
@@ -23,20 +20,14 @@ pub(crate) struct Scan<'a> {
     pub(crate) respelled: bool,
 }
 
-/// Scans `text`. A number in the JSON grammar past the double range is respelled `0`. With `python_constants`,
-/// `NaN`, `Infinity` and `-Infinity` are respelled `null`. A respelled token never joins its neighbors into a
-/// different token, so text that is not JSON stays text that is not JSON.
-pub(crate) fn scan(text: &str, python_constants: bool) -> Scan<'_> {
+/// Scans `text`. A number in the JSON grammar past the double range is respelled `0`, which never joins its
+/// neighbors into a different token, so text that is not JSON stays text that is not JSON.
+pub(crate) fn scan(text: &str) -> Scan<'_> {
     let bytes = text.as_bytes();
     let mut spelled = String::with_capacity(text.len());
     let mut tokens = Vec::new();
     let mut copied = 0;
     let mut index = 0;
-    let respell = |start: usize, end: usize, with: &str, spelled: &mut String, copied: &mut usize| {
-        spelled.push_str(text.get(*copied..start).unwrap_or_default());
-        spelled.push_str(with);
-        *copied = end;
-    };
     while let Some(&byte) = bytes.get(index) {
         match byte {
             b'"' => index = string_end(bytes, index + 1),
@@ -46,32 +37,19 @@ pub(crate) fn scan(text: &str, python_constants: bool) -> Scan<'_> {
                     matches!(byte, b'0'..=b'9' | b'+' | b'-' | b'.' | b'e' | b'E')
                 });
                 let token = text.get(start..index).unwrap_or_default();
-                let word_end = run_end(bytes, index, |byte| byte.is_ascii_alphabetic());
-                if python_constants && token == "-" && text.get(index..word_end) == Some("Infinity") {
-                    respell(start, word_end, "null", &mut spelled, &mut copied);
-                    tokens.push(Token::Constant(f64::NEG_INFINITY));
-                    index = word_end;
-                    continue;
-                }
                 if overflows(token).is_some() {
-                    respell(start, index, "0", &mut spelled, &mut copied);
+                    spelled.push_str(text.get(copied..start).unwrap_or_default());
+                    spelled.push('0');
+                    copied = index;
                 }
                 tokens.push(Token::Number(token));
             }
             byte if byte.is_ascii_alphabetic() => {
                 let start = index;
                 index = run_end(bytes, index, |byte| byte.is_ascii_alphabetic());
-                let constant = match text.get(start..index).unwrap_or_default() {
-                    "null" => {
-                        tokens.push(Token::Null);
-                        continue;
-                    }
-                    "NaN" if python_constants => f64::NAN,
-                    "Infinity" if python_constants => f64::INFINITY,
-                    _ => continue,
-                };
-                respell(start, index, "null", &mut spelled, &mut copied);
-                tokens.push(Token::Constant(constant));
+                if text.get(start..index) == Some("null") {
+                    tokens.push(Token::Null);
+                }
             }
             _ => index += 1,
         }

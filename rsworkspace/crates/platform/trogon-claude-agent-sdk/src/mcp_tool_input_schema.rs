@@ -44,6 +44,7 @@ impl McpToolInputSchema {
         self.0.compile_error()
     }
 
+    #[cfg(test)]
     pub(crate) fn validation_error(&self, instance: &Value) -> Option<String> {
         self.0.validation_error(instance)
     }

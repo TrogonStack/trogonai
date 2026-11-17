@@ -1,34 +1,16 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    name = "trogon-decider-sim",
-    crate_features = ["test-support"],
-    dev_deps = [
-        "//rsworkspace/cli/trogon-decider-test",
-        "//rsworkspace/crates/scheduler/trogon-scheduler-domain",
+    data = [
+        "//.config/bazel:wasm-tools",
+        "//rsworkspace/wasm-components/trogon-schedules-decider:component",
     ],
+    # The import check runs wasm-tools, which is not on the sandbox PATH.
+    env = {"WASM_TOOLS": "$(rootpath //.config/bazel:wasm-tools)"},
     integration_tests = {
-        "parity_schedules": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm and
-            # cli/trogon-decider-test/schedules.yaml through CARGO_MANIFEST_DIR; the wasm
-            # component is built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
-        "schedules": {
-            # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
-            # built by cargo component outside Bazel.
-            "tags": ["manual"],
-        },
+        "parity_schedules": {"data": ["//rsworkspace/cli/trogon-decider-test:schedules.yaml"]},
     },
-    # The @crates labels are optional dependencies of the enabled features. No
-    # workspace member enables those features, so crate_universe leaves them out.
-    deps = [
-        "//rsworkspace/crates/decider/trogon-decider",
-        "//rsworkspace/crates/decider/trogon-decider-guest-sdk",
-        "//rsworkspace/crates/decider/trogon-decider-wasm-runtime",
-        "//rsworkspace/crates/decider/trogon-decider-wit",
-        "//rsworkspace/crates/platform/trogon-std",
-        "//rsworkspace/crates/platform/trogonai-proto",
-        "@crates//:buffa",
-    ],
+    # SimFixture and the parity test resolve the component and schedules.yaml
+    # through CARGO_MANIFEST_DIR, relative to the runfiles root at run time.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
 )

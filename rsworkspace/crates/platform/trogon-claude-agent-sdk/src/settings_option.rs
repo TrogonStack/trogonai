@@ -16,14 +16,19 @@ use serde_json::{Map, Value};
 
 use crate::{
     ClaudeAgentOptions, Error, ManagedSettingsDelivery, OptionError, SandboxSettings, SettingsInput,
+    SettingsLoadCauseError, SettingsLoadError,
     adapters::ReadFile,
     constants::{
         SANDBOX_FORBIDDEN_KEYS, SANDBOX_MERGED_LISTS, SANDBOX_PROXY_PORTS, SANDBOX_REPLACED_OBJECTS,
         SETTINGS_PATH_WITH_SANDBOX_ERROR,
     },
     process_options::ArgvStyle,
-    python_json_value::{PythonJsonValue, PythonNumber, python_json_dumps, python_json_loads},
+    python_c_stack::PythonCStack,
+    python_json_error::PythonJsonError,
+    python_json_load::{drop_python_deep, loads_text},
+    python_json_value::{PythonJsonValue, PythonNumber, python_json_dumps},
     python_text,
+    python_text_file::read_text_utf8_sig,
     settings_json::{js_normalize, js_stringify, python_dumps},
     settings_numbers::same_value_zero,
 };
@@ -237,7 +242,7 @@ fn merge_sandbox(settings: Option<&OsString>, mut sandbox: Map<String, Value>) -
 }
 
 fn sandbox_object(sandbox: &SandboxSettings) -> Result<Map<String, Value>, Error> {
-    match serde_json::to_value(sandbox).map_err(crate::ProtocolError::from)? {
+    match crate::deep_json::encode(sandbox).map_err(crate::ProtocolError::from)? {
         Value::Object(map) => Ok(map),
         _ => Ok(Map::new()),
     }
@@ -329,8 +334,15 @@ fn python_join(cwd: Option<&Path>, settings: &str) -> PathBuf {
     }
 }
 
-/// Python `_build_settings_value`: the `--settings` value, `None` when none is passed.
-pub(crate) fn python_settings_value<R>(options: &ClaudeAgentOptions, files: &R) -> Result<Option<String>, Error>
+/// Python `_build_settings_value`: the `--settings` value, `None` when none is passed. `stack` is where Python
+/// calls it, which sets how deeply the settings text may nest before `json.loads` raises `RecursionError`. That
+/// error is not one of the `OSError`, `ValueError` and `TypeError` the function turns into the
+/// [`SettingsLoadError`] it raises, so it keeps its own message.
+pub(crate) fn python_settings_value<R>(
+    options: &ClaudeAgentOptions,
+    files: &R,
+    stack: PythonCStack,
+) -> Result<Option<String>, Error>
 where
     R: ReadFile<Error = io::Error>,
 {
@@ -338,7 +350,8 @@ where
     let Some(sandbox) = &options.sandbox else {
         return Ok(settings.filter(|text| !text.is_empty()));
     };
-    let failed = |reason: String| -> Error { OptionError::new(format!("Failed to load settings: {reason}")).into() };
+    let failed = |cause: SettingsLoadCauseError| -> Error { SettingsLoadError::new(cause).into() };
+    let sandbox = PythonJsonValue::from(&Value::Object(sandbox_object(sandbox)?));
     let mut document = PythonJsonValue::Object(IndexMap::new());
     if let Some(settings) = settings {
         let trimmed = crate::session_mutations::py_strip(&settings).to_owned();
@@ -348,30 +361,28 @@ where
             let path = python_join(options.cwd.as_deref(), &trimmed);
             let bytes = files
                 .read_file(&path)
-                .map_err(|error| failed(python_os_error(&error, &path)))?;
-            let text = String::from_utf8(bytes).map_err(|error| {
-                failed(format!(
-                    "'utf-8' codec can't decode byte 0x{:02x} in position {}: invalid start byte",
-                    error
-                        .as_bytes()
-                        .get(error.utf8_error().valid_up_to())
-                        .copied()
-                        .unwrap_or_default(),
-                    error.utf8_error().valid_up_to()
-                ))
-            })?;
-            text.strip_prefix('\u{feff}').map(str::to_owned).unwrap_or(text)
+                .map_err(|error| failed(SettingsLoadCauseError::Os(python_os_error(&error, &path))))?;
+            read_text_utf8_sig(&bytes).map_err(|error| failed(SettingsLoadCauseError::UnicodeDecode(error)))?
         };
-        document = python_json_loads(&text).map_err(|error| failed(error.to_string()))?;
+        document = loads_text(&text, stack.json_depth()).map_err(|error| match error {
+            PythonJsonError::Recursion(_) => OptionError::new(error.to_string()).into(),
+            PythonJsonError::Decode(error) => failed(SettingsLoadCauseError::JsonDecode(error)),
+            PythonJsonError::Integer(error) => failed(SettingsLoadCauseError::Integer(error)),
+        })?;
     }
-    let PythonJsonValue::Object(map) = &mut document else {
-        return Err(failed(python_type_error(&document).to_owned()));
+    let mut map = match &mut document {
+        PythonJsonValue::Object(map) => std::mem::take(map),
+        other => {
+            return Err(failed(SettingsLoadCauseError::Type(
+                python_type_error(other).to_owned(),
+            )));
+        }
     };
-    map.insert(
-        "sandbox".into(),
-        PythonJsonValue::from(&Value::Object(sandbox_object(sandbox)?)),
-    );
-    Ok(Some(python_json_dumps(&document)))
+    map.insert("sandbox".into(), sandbox);
+    let document = PythonJsonValue::Object(map);
+    let text = python_json_dumps(&document);
+    drop_python_deep(document);
+    Ok(Some(text))
 }
 
 #[cfg(test)]

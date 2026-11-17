@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{KillTerminalRequest, KillTerminalResponse};
+use agent_client_protocol::v1::schema::{KillTerminalRequest, KillTerminalResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_TERMINAL_KILL;
@@ -18,7 +18,7 @@ pub enum TerminalKillError {
 
 fn invalid_params_error(message: impl Into<String>) -> TerminalKillError {
     TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
-        i32::from(ErrorCode::InvalidParams),
+        i32::from(ErrorCode::INVALID_PARAMS),
         message.into(),
     ))
 }

@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Install the docs dependencies from the lockfile"
-#MISE dir="docs"
-set -euo pipefail
-
-exec pnpm install --frozen-lockfile

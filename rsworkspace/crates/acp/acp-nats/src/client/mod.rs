@@ -39,23 +39,19 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient>(
 ) {
     let response_id = response_id_from_request_headers(headers);
     let error = agent_client_protocol::Error::new(
-        ErrorCode::Other(AGENT_UNAVAILABLE).into(),
+        ErrorCode::new(AGENT_UNAVAILABLE),
         "Client proxy overloaded; retry with backoff",
     );
-    match encode_agent_error(response_id, &error) {
-        Ok(encoded) => {
-            let reply_headers = merge_jsonrpc_headers(crate::nats::headers_with_trace_context(), encoded.headers);
-            if let Err(e) = nats
-                .publish_with_headers(reply_to.to_string(), reply_headers, encoded.body)
-                .await
-            {
-                warn!(error = %e, "Failed to publish backpressure error reply");
-            }
-            if let Err(e) = nats.flush().await {
-                warn!(error = %e, "Failed to flush backpressure error reply");
-            }
-        }
-        Err(e) => warn!(error = %e, "Failed to encode backpressure error reply"),
+    let encoded = encode_agent_error(response_id, &error);
+    let reply_headers = merge_jsonrpc_headers(crate::nats::headers_with_trace_context(), encoded.headers);
+    if let Err(e) = nats
+        .publish_with_headers(reply_to.to_string(), reply_headers, encoded.body)
+        .await
+    {
+        warn!(error = %e, "Failed to publish backpressure error reply");
+    }
+    if let Err(e) = nats.flush().await {
+        warn!(error = %e, "Failed to flush backpressure error reply");
     }
 }
 

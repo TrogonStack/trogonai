@@ -194,6 +194,16 @@ pub trait JetStreamLastRawMessageBySubject: Send + 'static {
     ) -> impl Future<Output = Result<StreamMessage, LastRawMessageError>> + Send;
 }
 
+/// Reads, from the stream leader, the first message on `subject` at or after
+/// `sequence`.
+pub trait JetStreamFirstRawMessageBySubject: Send + Sync + 'static {
+    fn get_first_raw_message_by_subject(
+        &self,
+        subject: &str,
+        sequence: u64,
+    ) -> impl Future<Output = Result<StreamMessage, stream::RawMessageError>> + Send;
+}
+
 pub trait JetStreamGetStreamInfo: Send + Sync + Clone + 'static {
     fn get_info(&self) -> impl Future<Output = Result<stream::Info, stream::InfoError>> + Send;
 }
@@ -361,6 +371,16 @@ impl<I: Send + Sync + 'static> JetStreamDeleteConsumer for jetstream::stream::St
 impl JetStreamLastRawMessageBySubject for jetstream::stream::Stream {
     async fn get_last_raw_message_by_subject(&self, subject: &str) -> Result<StreamMessage, LastRawMessageError> {
         jetstream::stream::Stream::get_last_raw_message_by_subject(self, subject).await
+    }
+}
+
+impl JetStreamFirstRawMessageBySubject for jetstream::stream::Stream {
+    async fn get_first_raw_message_by_subject(
+        &self,
+        subject: &str,
+        sequence: u64,
+    ) -> Result<StreamMessage, stream::RawMessageError> {
+        jetstream::stream::Stream::get_first_raw_message_by_subject(self, subject, sequence).await
     }
 }
 

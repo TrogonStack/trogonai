@@ -1,0 +1,924 @@
+{
+  "templates": {
+    "spiffe": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SubjectBinding",
+      "payload": {
+        "subjectBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "trust_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            }
+          },
+          "spiffe": {
+            "trustDomain": {
+              "value": "example.test"
+            },
+            "spiffeId": "spiffe://example.test/worker"
+          },
+          "principalId": {
+            "value": "principal_1"
+          },
+          "permittedOperationIds": [
+            {
+              "value": "workflow.start"
+            }
+          ],
+          "maxSessionLifetime": "300s",
+          "replay": {
+            "reusableWithinOriginalValidity": {}
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpIChUKCHRlbmFudF8xEglwcm9qZWN0XzESLwoHdHJ1c3RfMRABGAEiIGEYoBhZVwj2ki7wue6JS5ktF8cx1wdJvvcGgY/qPS3SMg0KC3ByaW5jaXBhbF8xOhAKDndvcmtmbG93LnN0YXJ0QgMIrAJKAgoAIi4KDgoMZXhhbXBsZS50ZXN0EhxzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvd29ya2Vy"
+        }
+      }
+    },
+    "oidc": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SubjectBinding",
+      "payload": {
+        "subjectBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_oidc",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "V5ZRvq+PTzWokJ7YjlwB6NOhwmcFiVE5MAPSxHDBaPE="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "oidc_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "hqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgk="
+            }
+          },
+          "principalId": {
+            "value": "principal_1"
+          },
+          "permittedOperationIds": [
+            {
+              "value": "workflow.start"
+            }
+          ],
+          "maxSessionLifetime": "300s",
+          "replay": {
+            "reusableWithinOriginalValidity": {}
+          },
+          "oidc": {
+            "subject": "repo:example/worker:environment:production",
+            "audience": "trogon-workflows",
+            "claims": [
+              {
+                "claim": "event_name",
+                "values": [
+                  "workflow_dispatch"
+                ]
+              }
+            ],
+            "githubActions": {
+              "repositoryId": "101",
+              "repositoryOwnerId": "202",
+              "subjectFormat": 2,
+              "workflowRef": "example/worker/.github/workflows/deploy.yml@refs/heads/main",
+              "allowedEvents": [
+                "workflow_dispatch"
+              ],
+              "ref": "refs/heads/main",
+              "environment": "production",
+              "allowForkOrigin": false,
+              "reusableWorkflow": {
+                "jobWorkflowRef": "example/worker/.github/workflows/reusable.yml@refs/heads/main",
+                "jobWorkflowSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            }
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpHChUKCHRlbmFudF8xEglwcm9qZWN0XzESLgoGb2lkY18xEAEYASIghqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgkyDQoLcHJpbmNpcGFsXzE6EAoOd29ya2Zsb3cuc3RhcnRCAwisAkoCCgAqyAIKKnJlcG86ZXhhbXBsZS93b3JrZXI6ZW52aXJvbm1lbnQ6cHJvZHVjdGlvbhIQdHJvZ29uLXdvcmtmbG93cxofCgpldmVudF9uYW1lEhF3b3JrZmxvd19kaXNwYXRjaCrmAQoDMTAxEgMyMDIYAiI7ZXhhbXBsZS93b3JrZXIvLmdpdGh1Yi93b3JrZmxvd3MvZGVwbG95LnltbEByZWZzL2hlYWRzL21haW4qEXdvcmtmbG93X2Rpc3BhdGNoMg9yZWZzL2hlYWRzL21haW46CnByb2R1Y3Rpb25CaQo9ZXhhbXBsZS93b3JrZXIvLmdpdGh1Yi93b3JrZmxvd3MvcmV1c2FibGUueW1sQHJlZnMvaGVhZHMvbWFpbhIoYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYUgA"
+        }
+      }
+    },
+    "kube": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SubjectBinding",
+      "payload": {
+        "subjectBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_kube",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "75JY+e7ieoO9mzO42TpYCgo04/gQfmbPajxx4qCUHyg="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "oidc_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "hqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgk="
+            }
+          },
+          "principalId": {
+            "value": "principal_1"
+          },
+          "permittedOperationIds": [
+            {
+              "value": "workflow.start"
+            }
+          ],
+          "maxSessionLifetime": "300s",
+          "replay": {
+            "reusableWithinOriginalValidity": {}
+          },
+          "oidc": {
+            "subject": "system:serviceaccount:workers:executor",
+            "audience": "trogon-workflows",
+            "kubernetes": {
+              "clusterId": "cluster_1",
+              "namespace": "workers",
+              "serviceAccount": "executor",
+              "serviceAccountUid": "service_account_1",
+              "verificationMode": 2,
+              "requireBoundObject": true
+            }
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpHChUKCHRlbmFudF8xEglwcm9qZWN0XzESLgoGb2lkY18xEAEYASIghqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgkyDQoLcHJpbmNpcGFsXzE6EAoOd29ya2Zsb3cuc3RhcnRCAwisAkoCCgAqcQomc3lzdGVtOnNlcnZpY2VhY2NvdW50OndvcmtlcnM6ZXhlY3V0b3ISEHRyb2dvbi13b3JrZmxvd3MyNQoJY2x1c3Rlcl8xEgd3b3JrZXJzGghleGVjdXRvciIRc2VydmljZV9hY2NvdW50XzEoAjAB"
+        }
+      }
+    },
+    "activation": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SubjectBindingActivation",
+      "payload": {
+        "subjectBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+          }
+        },
+        "approvalRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+          },
+          "approvalId": {
+            "value": "approval_1"
+          },
+          "ownerKind": 2,
+          "operationPurpose": 1
+        },
+        "validationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+          },
+          "validationId": {
+            "value": "validation_1"
+          },
+          "ownerKind": 2,
+          "operationPurpose": 1
+        }
+      }
+    },
+    "state": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SubjectBindingState",
+      "payload": {
+        "configuration": {
+          "subjectBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "subject_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+            }
+          },
+          "definition": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "contractVersion": 1,
+            "trustRegistrationRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "trust_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+              }
+            },
+            "spiffe": {
+              "trustDomain": {
+                "value": "example.test"
+              },
+              "spiffeId": "spiffe://example.test/worker"
+            },
+            "principalId": {
+              "value": "principal_1"
+            },
+            "permittedOperationIds": [
+              {
+                "value": "workflow.start"
+              }
+            ],
+            "maxSessionLifetime": "300s",
+            "replay": {
+              "reusableWithinOriginalValidity": {}
+            }
+          },
+          "artifact": {
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpIChUKCHRlbmFudF8xEglwcm9qZWN0XzESLwoHdHJ1c3RfMRABGAEiIGEYoBhZVwj2ki7wue6JS5ktF8cx1wdJvvcGgY/qPS3SMg0KC3ByaW5jaXBhbF8xOhAKDndvcmtmbG93LnN0YXJ0QgMIrAJKAgoAIi4KDgoMZXhhbXBsZS50ZXN0EhxzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvd29ya2Vy"
+          }
+        },
+        "lifecycle": 2,
+        "admission": 1,
+        "activation": {
+          "subjectBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "subject_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+            }
+          },
+          "approvalRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "subject_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+            },
+            "approvalId": {
+              "value": "approval_1"
+            },
+            "ownerKind": 2,
+            "operationPurpose": 1
+          },
+          "validationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "subject_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+            },
+            "validationId": {
+              "value": "validation_1"
+            },
+            "ownerKind": 2,
+            "operationPurpose": 1
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.InboundAdmissionEvidence",
+      "payload": {
+        "admissionId": {
+          "value": "inbound_1"
+        },
+        "subjectBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "vZFWddVK89sZ47Yc4eiTlDRc+tHpIKCK4P8/W8/1qvw="
+          }
+        },
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "principalId": {
+          "value": "principal_1"
+        },
+        "admittedAt": "2030-01-01T00:00:00Z",
+        "sourceExpiresAt": "2030-01-01T00:05:00Z",
+        "expiresAt": "2030-01-01T00:04:00Z",
+        "peerLeafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      }
+    },
+    "generic": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SubjectBinding",
+      "payload": {
+        "subjectBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_generic_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "yDY9adzRb8Wno+3dkdzES+h8ultrTfq62oLybPzOcJY="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "oidc_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "hqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgk="
+            }
+          },
+          "principalId": {
+            "value": "principal_1"
+          },
+          "permittedOperationIds": [
+            {
+              "value": "workflow.start"
+            }
+          ],
+          "maxSessionLifetime": "300s",
+          "replay": {
+            "reusableWithinOriginalValidity": {}
+          },
+          "oidc": {
+            "subject": "repo:example/worker:environment:production",
+            "audience": "trogon-workflows",
+            "claims": [
+              {
+                "claim": "event_name",
+                "values": [
+                  "workflow_dispatch"
+                ]
+              }
+            ],
+            "generic": {}
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpHChUKCHRlbmFudF8xEglwcm9qZWN0XzESLgoGb2lkY18xEAEYASIghqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgkyDQoLcHJpbmNpcGFsXzE6EAoOd29ya2Zsb3cuc3RhcnRCAwisAkoCCgAqYQoqcmVwbzpleGFtcGxlL3dvcmtlcjplbnZpcm9ubWVudDpwcm9kdWN0aW9uEhB0cm9nb24td29ya2Zsb3dzGh8KCmV2ZW50X25hbWUSEXdvcmtmbG93X2Rpc3BhdGNoIgA="
+        }
+      }
+    },
+    "bearer": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.InboundAdmissionEvidence",
+      "payload": {
+        "admissionId": {
+          "value": "inbound_1"
+        },
+        "subjectBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_oidc",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "V5ZRvq+PTzWokJ7YjlwB6NOhwmcFiVE5MAPSxHDBaPE="
+          }
+        },
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "oidc_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "hqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgk="
+          }
+        },
+        "principalId": {
+          "value": "principal_1"
+        },
+        "admittedAt": "2030-01-01T00:00:00Z",
+        "sourceExpiresAt": "2030-01-01T00:05:00Z",
+        "expiresAt": "2030-01-01T00:04:00Z",
+        "bearer": {}
+      }
+    },
+    "one-time": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SubjectBinding",
+      "payload": {
+        "subjectBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "subject_one_time_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "EdeSm0eVeVTLfQljyipLs/Xx29K8zTIxG/icWMMwGCc="
+          }
+        },
+        "definition": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "contractVersion": 1,
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "oidc_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "hqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgk="
+            }
+          },
+          "principalId": {
+            "value": "principal_1"
+          },
+          "permittedOperationIds": [
+            {
+              "value": "workflow.start"
+            }
+          ],
+          "maxSessionLifetime": "300s",
+          "replay": {
+            "oneTimeIdentifierClaim": "jti"
+          },
+          "oidc": {
+            "subject": "repo:example/worker:environment:production",
+            "audience": "trogon-workflows",
+            "claims": [
+              {
+                "claim": "event_name",
+                "values": [
+                  "workflow_dispatch"
+                ]
+              }
+            ],
+            "generic": {}
+          }
+        },
+        "artifact": {
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpHChUKCHRlbmFudF8xEglwcm9qZWN0XzESLgoGb2lkY18xEAEYASIghqXYGlm/Drg12xge5OxIefvWwSDVg7TccfE1AEeYWgkyDQoLcHJpbmNpcGFsXzE6EAoOd29ya2Zsb3cuc3RhcnRCAwisAkoFEgNqdGkqYQoqcmVwbzpleGFtcGxlL3dvcmtlcjplbnZpcm9ubWVudDpwcm9kdWN0aW9uEhB0cm9nb24td29ya2Zsb3dzGh8KCmV2ZW50X25hbWUSEXdvcmtmbG93X2Rpc3BhdGNoIgA="
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "inbound/inbound spiffe schema positive",
+      "template": "spiffe"
+    },
+    {
+      "name": "inbound/inbound oidc schema positive",
+      "template": "oidc"
+    },
+    {
+      "name": "inbound/inbound kube schema positive",
+      "template": "kube"
+    },
+    {
+      "name": "inbound/inbound activation schema positive",
+      "template": "activation"
+    },
+    {
+      "name": "inbound/inbound state schema positive",
+      "template": "state"
+    },
+    {
+      "name": "inbound/inbound evidence schema positive",
+      "template": "evidence"
+    },
+    {
+      "name": "inbound/inbound SPIFFE domain substitution refused",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/spiffeId",
+          "value": "spiffe://other.test/worker"
+        }
+      ],
+      "violations": [
+        "SPIFFE subject must belong to its exact declared trust domain"
+      ]
+    },
+    {
+      "name": "inbound/inbound trust cannot cross tenant",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/trustRegistrationRef/scope/tenant",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "subject binding and trust registration must have the same scope"
+      ]
+    },
+    {
+      "name": "inbound/inbound binding reference cannot cross project",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/subjectBindingRef/scope/project",
+          "value": "project_2"
+        }
+      ],
+      "violations": [
+        "subject binding reference and definition must have the same scope"
+      ]
+    },
+    {
+      "name": "inbound/inbound principal cannot be empty",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/principalId/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "inbound/inbound operations cannot be empty",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/permittedOperationIds",
+          "value": []
+        }
+      ],
+      "violations": [
+        "must contain at least 1 item"
+      ]
+    },
+    {
+      "name": "inbound/native SPIFFE does not invent a replay claim",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/replay",
+          "value": {
+            "oneTimeIdentifierClaim": "jti"
+          }
+        }
+      ],
+      "violations": [
+        "native SPIFFE admission cannot use an OIDC replay identifier"
+      ]
+    },
+    {
+      "name": "inbound/inbound wildcard subject refused",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/subject",
+          "value": "*"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "inbound/inbound wildcard claim value refused",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/claims/0/values",
+          "value": [
+            "*"
+          ]
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "inbound/inbound issuer cannot be overridden as extra claim",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/claims/0/claim",
+          "value": "iss"
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "inbound/GitHub immutable repository id required",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/githubActions/repositoryId",
+          "value": "example/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "inbound/GitHub configured subject format cannot be unspecified",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/githubActions/subjectFormat",
+          "value": 0
+        }
+      ],
+      "violations": [
+        "must not be in list"
+      ]
+    },
+    {
+      "name": "inbound/GitHub complete reusable workflow commit required",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/githubActions/reusableWorkflow/jobWorkflowSha",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "violations": [
+        "a reusable workflow digest must be a complete SHA-1 or SHA-256 commit id"
+      ]
+    },
+    {
+      "name": "inbound/inbound one literal requirement per claim",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/definition/oidc/claims/-",
+          "value": {
+            "claim": "event_name",
+            "values": [
+              "push"
+            ]
+          }
+        }
+      ],
+      "violations": [
+        "an OIDC claim must have exactly one requirement"
+      ]
+    },
+    {
+      "name": "inbound/Kubernetes subject cannot select another namespace",
+      "template": "kube",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/subject",
+          "value": "system:serviceaccount:other:executor"
+        }
+      ],
+      "violations": [
+        "Kubernetes subject must match the exact namespace and service account"
+      ]
+    },
+    {
+      "name": "inbound/offline JWT cannot claim bound-object revocation",
+      "template": "kube",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/kubernetes/verificationMode",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "bound-object revocation requires the token-review profile"
+      ]
+    },
+    {
+      "name": "inbound/inbound activation cannot reuse trust-owner approval",
+      "template": "activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvalRef/ownerKind",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "activation receipts must bind the exact target scope and version"
+      ]
+    },
+    {
+      "name": "inbound/inbound evidence cannot cross scope",
+      "template": "evidence",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/trustRegistrationRef/scope/tenant",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "inbound binding and trust evidence must have the same scope"
+      ]
+    },
+    {
+      "name": "inbound/inbound lease cannot outlive original evidence",
+      "template": "evidence",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": "2030-01-01T00:05:01Z"
+        }
+      ],
+      "violations": [
+        "inbound admission must expire after admission and no later than its original source"
+      ]
+    },
+    {
+      "name": "inbound/inbound lease cannot be empty",
+      "template": "evidence",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": "2030-01-01T00:00:00Z"
+        }
+      ],
+      "violations": [
+        "inbound admission must expire after admission and no later than its original source"
+      ]
+    },
+    {
+      "name": "inbound/inbound peer fingerprint exact length",
+      "template": "evidence",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/peerLeafSha256",
+          "value": "AQ=="
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
+    },
+    {
+      "name": "inbound/generic issuer profile schema shape",
+      "template": "generic"
+    },
+    {
+      "name": "inbound/bearer evidence makes no holder-possession claim",
+      "template": "bearer"
+    },
+    {
+      "name": "inbound/one-time redemption uses explicit issuer claim",
+      "template": "one-time"
+    },
+    {
+      "name": "inbound/session authority has a positive configured bound",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/maxSessionLifetime",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "must be greater than 0s"
+      ]
+    },
+    {
+      "name": "principal binding reuses the platform control-character refusal",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/principalId/value",
+          "value": "principal\nspoof"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    }
+  ]
+}

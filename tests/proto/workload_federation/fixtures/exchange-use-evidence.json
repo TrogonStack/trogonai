@@ -1,0 +1,745 @@
+{
+  "templates": {
+    "authority": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.FederationAuthorityEvidence",
+      "payload": {
+        "source": {
+          "localWorkload": {
+            "spiffeId": "spiffe://example.test/worker",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          }
+        },
+        "recipientBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          }
+        },
+        "authorizationId": {
+          "value": "authority_1"
+        },
+        "policyRevisionId": {
+          "value": "policy_1"
+        },
+        "authorityHolderId": {
+          "value": "holder_1"
+        },
+        "admittedAt": "2030-01-01T00:00:00Z",
+        "originalAuthorityExpiresAt": "2030-01-01T00:05:00Z",
+        "localActivation": {
+          "binding": {
+            "spiffeId": "spiffe://example.test/worker",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 3
+          },
+          "recoveryFence": "1",
+          "registrationRevision": "1",
+          "trustRevision": "1",
+          "sourceRevision": "1",
+          "activationRevision": "1",
+          "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "notBefore": "2030-01-01T00:00:00Z",
+          "expiresAt": "2030-01-01T01:00:00Z"
+        },
+        "sourceRegistrationExpiresAt": "2030-01-01T00:05:00Z"
+      }
+    },
+    "foreign-authority": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.FederationAuthorityEvidence",
+      "payload": {
+        "source": {
+          "subjectBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "subject_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+            }
+          }
+        },
+        "recipientBindingRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "recipient_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+          }
+        },
+        "authorizationId": {
+          "value": "authority_1"
+        },
+        "policyRevisionId": {
+          "value": "policy_1"
+        },
+        "authorityHolderId": {
+          "value": "holder_1"
+        },
+        "admittedAt": "2030-01-01T00:00:00Z",
+        "originalAuthorityExpiresAt": "2030-01-01T00:05:00Z",
+        "inboundAdmission": {
+          "admissionId": {
+            "value": "admission_1"
+          },
+          "subjectBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "subject_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+            }
+          },
+          "trustRegistrationRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "trust_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+            }
+          },
+          "principalId": {
+            "value": "principal_1"
+          },
+          "admittedAt": "2030-01-01T00:00:00Z",
+          "sourceExpiresAt": "2030-01-01T00:10:00Z",
+          "expiresAt": "2030-01-01T00:05:00Z",
+          "bearer": {}
+        }
+      }
+    },
+    "exchange": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.FederationExchangeRecord",
+      "payload": {
+        "exchangeId": {
+          "value": "exchange_1"
+        },
+        "attemptNumber": 1,
+        "authority": {
+          "source": {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/worker",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          },
+          "recipientBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "recipient_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+            }
+          },
+          "authorizationId": {
+            "value": "authority_1"
+          },
+          "policyRevisionId": {
+            "value": "policy_1"
+          },
+          "authorityHolderId": {
+            "value": "holder_1"
+          },
+          "admittedAt": "2030-01-01T00:00:00Z",
+          "originalAuthorityExpiresAt": "2030-01-01T00:05:00Z",
+          "localActivation": {
+            "binding": {
+              "spiffeId": "spiffe://example.test/worker",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            },
+            "recoveryFence": "1",
+            "registrationRevision": "1",
+            "trustRevision": "1",
+            "sourceRevision": "1",
+            "activationRevision": "1",
+            "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "notBefore": "2030-01-01T00:00:00Z",
+            "expiresAt": "2030-01-01T01:00:00Z"
+          },
+          "sourceRegistrationExpiresAt": "2030-01-01T00:05:00Z"
+        },
+        "operationId": {
+          "value": "read_resource"
+        },
+        "startedAt": "2030-01-01T00:00:10Z",
+        "finishedAt": "2030-01-01T00:00:11Z",
+        "providerRequest": {
+          "absence": 1
+        },
+        "issued": {
+          "providerExpiresAt": "2030-01-01T00:15:10Z",
+          "permittedLocalUseUntil": "2030-01-01T00:01:11Z",
+          "disposition": 1
+        },
+        "requestId": {
+          "value": "request_1"
+        },
+        "holderPublicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      }
+    },
+    "use": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.FederationUseRecord",
+      "payload": {
+        "useId": {
+          "value": "use_1"
+        },
+        "completed": {
+          "admission": {
+            "authority": {
+              "source": {
+                "localWorkload": {
+                  "spiffeId": "spiffe://example.test/worker",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                }
+              },
+              "recipientBindingRef": {
+                "scope": {
+                  "tenant": "tenant_1",
+                  "project": "project_1"
+                },
+                "version": {
+                  "id": "recipient_1",
+                  "revision": "1",
+                  "recoveryFence": "1",
+                  "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+                }
+              },
+              "authorizationId": {
+                "value": "authority_1"
+              },
+              "policyRevisionId": {
+                "value": "policy_1"
+              },
+              "authorityHolderId": {
+                "value": "holder_1"
+              },
+              "admittedAt": "2030-01-01T00:00:00Z",
+              "originalAuthorityExpiresAt": "2030-01-01T00:05:00Z",
+              "localActivation": {
+                "binding": {
+                  "spiffeId": "spiffe://example.test/worker",
+                  "tenant": "tenant_1",
+                  "project": "project_1",
+                  "role": 3
+                },
+                "recoveryFence": "1",
+                "registrationRevision": "1",
+                "trustRevision": "1",
+                "sourceRevision": "1",
+                "activationRevision": "1",
+                "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                "notBefore": "2030-01-01T00:00:00Z",
+                "expiresAt": "2030-01-01T01:00:00Z"
+              },
+              "sourceRegistrationExpiresAt": "2030-01-01T00:05:00Z"
+            },
+            "exchangeId": {
+              "value": "exchange_1"
+            },
+            "operationId": {
+              "value": "read_resource"
+            },
+            "checkedAt": "2030-01-01T00:00:20Z",
+            "permittedLocalUseUntil": "2030-01-01T00:01:11Z",
+            "providerExpiresAt": "2030-01-01T00:15:10Z",
+            "useHandleId": {
+              "value": "handle_1"
+            },
+            "holderPublicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+          },
+          "finishedAt": "2030-01-01T00:00:21Z",
+          "providerRequest": {
+            "absence": 1
+          }
+        }
+      }
+    },
+    "late-refusal": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.FederationExchangeRecord",
+      "payload": {
+        "exchangeId": {
+          "value": "exchange_1"
+        },
+        "attemptNumber": 1,
+        "authority": {
+          "source": {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/worker",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          },
+          "recipientBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "recipient_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+            }
+          },
+          "authorizationId": {
+            "value": "authority_1"
+          },
+          "policyRevisionId": {
+            "value": "policy_1"
+          },
+          "authorityHolderId": {
+            "value": "holder_1"
+          },
+          "admittedAt": "2030-01-01T00:00:00Z",
+          "originalAuthorityExpiresAt": "2030-01-01T00:05:00Z",
+          "localActivation": {
+            "binding": {
+              "spiffeId": "spiffe://example.test/worker",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            },
+            "recoveryFence": "1",
+            "registrationRevision": "1",
+            "trustRevision": "1",
+            "sourceRevision": "1",
+            "activationRevision": "1",
+            "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "notBefore": "2030-01-01T00:00:00Z",
+            "expiresAt": "2030-01-01T01:00:00Z"
+          },
+          "sourceRegistrationExpiresAt": "2030-01-01T00:05:00Z"
+        },
+        "operationId": {
+          "value": "read_resource"
+        },
+        "startedAt": "2030-01-01T00:06:00Z",
+        "finishedAt": "2030-01-01T00:06:01Z",
+        "providerRequest": {
+          "absence": 3
+        },
+        "requestId": {
+          "value": "request_1"
+        },
+        "holderPublicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "failed": {
+          "kind": 8
+        }
+      }
+    },
+    "uncertain": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.FederationExchangeRecord",
+      "payload": {
+        "exchangeId": {
+          "value": "exchange_1"
+        },
+        "attemptNumber": 1,
+        "authority": {
+          "source": {
+            "localWorkload": {
+              "spiffeId": "spiffe://example.test/worker",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            }
+          },
+          "recipientBindingRef": {
+            "scope": {
+              "tenant": "tenant_1",
+              "project": "project_1"
+            },
+            "version": {
+              "id": "recipient_1",
+              "revision": "1",
+              "recoveryFence": "1",
+              "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+            }
+          },
+          "authorizationId": {
+            "value": "authority_1"
+          },
+          "policyRevisionId": {
+            "value": "policy_1"
+          },
+          "authorityHolderId": {
+            "value": "holder_1"
+          },
+          "admittedAt": "2030-01-01T00:00:00Z",
+          "originalAuthorityExpiresAt": "2030-01-01T00:05:00Z",
+          "localActivation": {
+            "binding": {
+              "spiffeId": "spiffe://example.test/worker",
+              "tenant": "tenant_1",
+              "project": "project_1",
+              "role": 3
+            },
+            "recoveryFence": "1",
+            "registrationRevision": "1",
+            "trustRevision": "1",
+            "sourceRevision": "1",
+            "activationRevision": "1",
+            "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+            "notBefore": "2030-01-01T00:00:00Z",
+            "expiresAt": "2030-01-01T01:00:00Z"
+          },
+          "sourceRegistrationExpiresAt": "2030-01-01T00:05:00Z"
+        },
+        "operationId": {
+          "value": "read_resource"
+        },
+        "startedAt": "2030-01-01T00:00:10Z",
+        "finishedAt": "2030-01-01T00:00:11Z",
+        "providerRequest": {
+          "absence": 2
+        },
+        "requestId": {
+          "value": "request_1"
+        },
+        "holderPublicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "uncertain": {
+          "reason": 1
+        }
+      }
+    },
+    "denied": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.FederationUseRecord",
+      "payload": {
+        "useId": {
+          "value": "use_denied_1"
+        },
+        "denied": {
+          "authority": {
+            "source": {
+              "localWorkload": {
+                "spiffeId": "spiffe://example.test/worker",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              }
+            },
+            "recipientBindingRef": {
+              "scope": {
+                "tenant": "tenant_1",
+                "project": "project_1"
+              },
+              "version": {
+                "id": "recipient_1",
+                "revision": "1",
+                "recoveryFence": "1",
+                "configurationSha256": "RjVdXap0pbqZ0OrgcgNMxwkKEi+Cjdis5ZIYLuJqm8E="
+              }
+            },
+            "authorizationId": {
+              "value": "authority_1"
+            },
+            "policyRevisionId": {
+              "value": "policy_1"
+            },
+            "authorityHolderId": {
+              "value": "holder_1"
+            },
+            "admittedAt": "2030-01-01T00:00:00Z",
+            "originalAuthorityExpiresAt": "2030-01-01T00:05:00Z",
+            "localActivation": {
+              "binding": {
+                "spiffeId": "spiffe://example.test/worker",
+                "tenant": "tenant_1",
+                "project": "project_1",
+                "role": 3
+              },
+              "recoveryFence": "1",
+              "registrationRevision": "1",
+              "trustRevision": "1",
+              "sourceRevision": "1",
+              "activationRevision": "1",
+              "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+              "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+              "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+              "notBefore": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z"
+            },
+            "sourceRegistrationExpiresAt": "2030-01-01T00:05:00Z"
+          },
+          "operationId": {
+            "value": "read_resource"
+          },
+          "failure": {
+            "kind": 8
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "local authority retains original registration expiry",
+      "template": "authority",
+      "violations": []
+    },
+    {
+      "name": "foreign authority retains verified inbound admission",
+      "template": "foreign-authority",
+      "violations": []
+    },
+    {
+      "name": "provider token outlives local use without extending it",
+      "template": "exchange",
+      "violations": []
+    },
+    {
+      "name": "use retains broker handle and holder correlation",
+      "template": "use",
+      "violations": []
+    },
+    {
+      "name": "authority cannot extend original registration",
+      "template": "authority",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/originalAuthorityExpiresAt",
+          "value": "2030-01-01T00:05:01Z"
+        }
+      ],
+      "violations": [
+        "local authority requires matching activation evidence within its certificate lifetime"
+      ]
+    },
+    {
+      "name": "authority cannot re-observe registration as a fresh long lease",
+      "template": "authority",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/sourceRegistrationExpiresAt",
+          "value": "2030-01-01T00:10:00Z"
+        }
+      ],
+      "violations": [
+        "local authority requires matching activation evidence within its certificate lifetime"
+      ]
+    },
+    {
+      "name": "authority cannot change local activation binding",
+      "template": "authority",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/localActivation/binding/spiffeId",
+          "value": "spiffe://example.test/other"
+        }
+      ],
+      "violations": [
+        "local authority requires matching activation evidence within its certificate lifetime"
+      ]
+    },
+    {
+      "name": "foreign authority cannot omit original admission",
+      "template": "foreign-authority",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/inboundAdmission"
+        }
+      ],
+      "violations": [
+        "local authority requires matching activation evidence within its certificate lifetime"
+      ]
+    },
+    {
+      "name": "foreign authority cannot switch admitted subject",
+      "template": "foreign-authority",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/inboundAdmission/subjectBindingRef/version/id",
+          "value": "subject_2"
+        }
+      ],
+      "violations": [
+        "local authority requires matching activation evidence within its certificate lifetime"
+      ]
+    },
+    {
+      "name": "issued local use cannot exceed original authority",
+      "template": "exchange",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/issued/permittedLocalUseUntil",
+          "value": "2030-01-01T00:05:01Z"
+        }
+      ],
+      "violations": [
+        "issued credentials cannot extend original authority"
+      ]
+    },
+    {
+      "name": "retained exchange cannot finish after permitted use ended",
+      "template": "exchange",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/finishedAt",
+          "value": "2030-01-01T00:01:12Z"
+        }
+      ],
+      "violations": [
+        "retained credentials require current post-exchange authority"
+      ]
+    },
+    {
+      "name": "issued exchange cannot claim no dispatch",
+      "template": "exchange",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/providerRequest/absence",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "issued or uncertain exchanges cannot claim that no request was dispatched"
+      ]
+    },
+    {
+      "name": "expired original authority can record undispatched refusal",
+      "template": "late-refusal",
+      "violations": []
+    },
+    {
+      "name": "late refusal cannot claim issued credential",
+      "template": "late-refusal",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/failed"
+        },
+        {
+          "op": "add",
+          "path": "/issued",
+          "value": {
+            "providerExpiresAt": "2030-01-01T00:15:10Z",
+            "permittedLocalUseUntil": "2030-01-01T00:01:11Z",
+            "disposition": 1
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequest/absence",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "an exchange outside original authority must be an explicit undispatched expiry or withdrawal refusal"
+      ]
+    },
+    {
+      "name": "late unobserved request cannot masquerade as local refusal",
+      "template": "late-refusal",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/providerRequest/absence",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "an exchange outside original authority must be an explicit undispatched expiry or withdrawal refusal"
+      ]
+    },
+    {
+      "name": "post-dispatch uncertainty is explicit",
+      "template": "uncertain",
+      "violations": []
+    },
+    {
+      "name": "use cannot start after local permitted use",
+      "template": "use",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/completed/admission/checkedAt",
+          "value": "2030-01-01T00:05:01Z"
+        }
+      ],
+      "violations": [
+        "resource use admission must remain inside original and provider validity"
+      ]
+    },
+    {
+      "name": "use cannot claim never dispatched",
+      "template": "use",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/completed/providerRequest/absence",
+          "value": 3
+        }
+      ],
+      "violations": [
+        "completed use cannot claim that no request was dispatched"
+      ]
+    },
+    {
+      "name": "settlement may honestly arrive after local deadline",
+      "template": "use",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/completed/finishedAt",
+          "value": "2030-01-01T00:10:00Z"
+        }
+      ],
+      "violations": []
+    },
+    {
+      "name": "use denial retains original expired authority evidence",
+      "template": "denied",
+      "violations": []
+    }
+  ]
+}

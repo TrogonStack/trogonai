@@ -30,17 +30,13 @@ fn result_messages_keep_optional_payloads_costs_identity_and_extensions() -> Tes
         additional_fields: metadata.clone(),
         raw: JsonObject::new(),
     };
-    let unreported = ResultMessage {
-        errors: None,
-        ..result.clone()
-    };
-    let unreported_errors = unreported.clone().errors;
+    let mut unreported = result.clone();
+    unreported.errors = None;
+    let unreported_errors = unreported.errors.clone();
     assert_eq!(unreported_errors, None);
-    let reported_empty = ResultMessage {
-        errors: Some(Vec::new()),
-        ..result.clone()
-    };
-    let empty_errors = reported_empty.clone().errors;
+    let mut reported_empty = result.clone();
+    reported_empty.errors = Some(Vec::new());
+    let empty_errors = reported_empty.errors.clone();
     assert_eq!(empty_errors, Some(Vec::new()));
     assert_eq!(result.clone().status, ResultStatus::Error);
     assert_eq!(result.structured_output.as_ref(), Some(&serde_json::Value::Null));

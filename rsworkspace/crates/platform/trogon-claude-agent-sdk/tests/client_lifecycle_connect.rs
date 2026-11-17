@@ -155,21 +155,23 @@ async fn connect_with_verbatim_text_stamps_it() -> TestResult {
     Ok(())
 }
 
-/// `sdk.mjs` `query({prompt: string})`: the TypeScript style writes the prompt in the empty session. `sdk.mjs`
-/// sends the text as one text block; the string content here is the structured-input gap tracked separately.
+/// `sdk.mjs` `query({prompt: string})`: the TypeScript style writes the prompt in the empty session, as one text
+/// block.
 #[tokio::test]
 async fn connect_with_text_under_typescript_uses_the_empty_session() -> TestResult {
     let lines = record(ArgvStyle::TypeScript, |_| {}, "x", nothing).await?;
-    assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0]["session_id"], "");
-    assert_eq!(lines[0]["parent_tool_use_id"], Value::Null);
-    assert_eq!(lines[0]["message"]["content"], "x");
+    assert_eq!(
+        lines,
+        [
+            json!({"type":"user","session_id":"","message":{"role":"user","content":[{"type":"text","text":"x"}]},
+                "parent_tool_use_id":null})
+        ]
+    );
     Ok(())
 }
 
 /// Python `ClaudeSDKClient.connect(AsyncIterable)`: a background task streams the inputs as given, then ends
-/// stdin. Python leaves out the session id of an input that names none; this writes it empty, which is the
-/// raw-input gap tracked separately.
+/// stdin. An input that names no session goes without one, as Python writes it.
 #[tokio::test]
 async fn connect_with_a_stream_streams_it_in_the_background() -> TestResult {
     for style in [ArgvStyle::Python, ArgvStyle::TypeScript] {
@@ -178,7 +180,8 @@ async fn connect_with_a_stream_streams_it_in_the_background() -> TestResult {
         let client = client.connect(ConnectPrompt::stream(stream)).await?;
         let lines = user_lines(server).await?;
         client.disconnect().await?;
-        assert_eq!(lines, [python_user("one", ""), python_user("two", "keep")], "{style:?}");
+        let unnamed = json!({"type":"user","message":{"role":"user","content":"one"},"parent_tool_use_id":null});
+        assert_eq!(lines, [unnamed, python_user("two", "keep")], "{style:?}");
     }
     Ok(())
 }
@@ -265,7 +268,7 @@ async fn scope_connects_runs_the_body_and_disconnects() -> TestResult {
             client.query(Prompt::from("x")).await?;
             while let Some(message) = client.next_message().await? {
                 if let Message::Result(result) = message {
-                    return Ok(result.result);
+                    return Ok(result.result.clone());
                 }
             }
             Err(Error::UnexpectedEof)

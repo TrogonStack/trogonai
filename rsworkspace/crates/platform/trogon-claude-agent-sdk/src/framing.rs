@@ -1,6 +1,8 @@
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 
-use crate::{Error, StderrTail, error::JsonDecodeError};
+use crate::constants::PYTHON_CHUNK;
+use crate::python_urlopen_text::python_decode;
+use crate::{ArgvStyle, Error, StderrTail, error::JsonDecodeError};
 
 pub(crate) struct FrameReader<R> {
     reader: BufReader<R>,
@@ -9,6 +11,48 @@ pub(crate) struct FrameReader<R> {
     chars: usize,
     limit: Option<usize>,
     tail: bool,
+    style: ArgvStyle,
+    /// Whether the next read takes a new chunk from the pipe, which Python decodes as it arrives.
+    fresh: bool,
+    /// The bytes of a character the last chunk cut off, which Python's incremental decoder holds back.
+    held: Vec<u8>,
+    /// TypeScript lines a frame split at a lone `\r`, waiting to be read.
+    split: std::collections::VecDeque<Vec<u8>>,
+}
+
+/// The lines Node's `readline` reads from a frame already split at `\n`: it also ends a line at a lone `\r`, at
+/// U+2028 and at U+2029. Lenient decoding never joins the bytes of either separator to a byte before them, so they
+/// split the bytes as they split the decoded text.
+fn typescript_lines(frame: Vec<u8>) -> Vec<Vec<u8>> {
+    const SEPARATORS: [&[u8]; 2] = ["\u{2028}".as_bytes(), "\u{2029}".as_bytes()];
+    if !frame.iter().any(|byte| matches!(byte, b'\r' | 0xE2)) {
+        return vec![frame];
+    }
+    let mut lines = vec![Vec::new()];
+    let mut rest = frame.as_slice();
+    while let Some((&byte, after)) = rest.split_first() {
+        let separator = if byte == b'\r' {
+            Some(1)
+        } else {
+            SEPARATORS
+                .iter()
+                .find(|separator| rest.starts_with(separator))
+                .map(|separator| separator.len())
+        };
+        match separator {
+            Some(width) => {
+                lines.push(Vec::new());
+                rest = rest.get(width..).unwrap_or_default();
+            }
+            None => {
+                if let Some(line) = lines.last_mut() {
+                    line.push(byte);
+                }
+                rest = after;
+            }
+        }
+    }
+    lines
 }
 
 /// Python counts the decoded characters of a line: every byte that is not a UTF-8 continuation byte.
@@ -24,14 +68,20 @@ fn guard(limit: Option<usize>, length: usize) -> Result<(), Error> {
 }
 
 impl<R: AsyncRead + Unpin> FrameReader<R> {
-    /// `limit` is Python's `max_buffer_size`; TypeScript has no such bound, so `None` keeps every line.
-    pub(crate) fn new(reader: R, limit: Option<usize>) -> Self {
+    /// `limit` is Python's `max_buffer_size`; TypeScript has no such bound, so `None` keeps every line. Python
+    /// decodes stdout strictly as each chunk arrives and splits lines at `\n`; TypeScript decodes it leniently, which
+    /// the reader of each line does, and also splits lines at a lone `\r`, U+2028 and U+2029.
+    pub(crate) fn new(reader: R, limit: Option<usize>, style: ArgvStyle) -> Self {
         Self {
-            reader: BufReader::new(reader),
+            reader: BufReader::with_capacity(PYTHON_CHUNK, reader),
             buffer: Vec::new(),
             chars: 0,
             limit,
             tail: false,
+            style,
+            fresh: true,
+            held: Vec::new(),
+            split: std::collections::VecDeque::new(),
         }
     }
 
@@ -41,10 +91,27 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     }
 
     pub(crate) async fn next(&mut self) -> Result<Option<Vec<u8>>, Error> {
+        if let Some(line) = self.split.pop_front() {
+            return Ok(Some(line));
+        }
+        let Some(frame) = self.next_frame().await? else {
+            return Ok(None);
+        };
+        if self.style == ArgvStyle::Python {
+            return Ok(Some(frame));
+        }
+        self.split.extend(typescript_lines(frame));
+        Ok(self.split.pop_front())
+    }
+
+    async fn next_frame(&mut self) -> Result<Option<Vec<u8>>, Error> {
         self.tail = false;
         loop {
             let available = self.reader.fill_buf().await.map_err(Error::Io)?;
             if available.is_empty() {
+                // Python's decoder is never flushed, so the bytes of a character cut off at the end are lost.
+                self.buffer.truncate(self.buffer.len().saturating_sub(self.held.len()));
+                self.held.clear();
                 self.tail = !self.buffer.is_empty();
                 self.chars = 0;
                 return Ok(if self.buffer.is_empty() {
@@ -53,13 +120,21 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
                     Some(std::mem::take(&mut self.buffer))
                 });
             }
+            if self.fresh && self.style == ArgvStyle::Python {
+                let mut decoded = std::mem::take(&mut self.held);
+                decoded.extend_from_slice(available);
+                let held = python_decode(&decoded).map_err(Error::UnicodeDecode)?;
+                self.held = decoded.split_off(decoded.len() - held);
+            }
             let newline = available.iter().position(|byte| *byte == b'\n');
             let count = newline.map_or(available.len(), |index| index + 1);
-            // A finished line is measured without its newline; an unfinished one by everything received.
+            self.fresh = count == available.len();
+            // A finished line is measured without its newline; an unfinished one by everything decoded.
             let length = self
                 .chars
                 .saturating_add(chars_in(&available[..newline.unwrap_or(count)]));
-            guard(self.limit, length)?;
+            let held = usize::from(newline.is_none() && !self.held.is_empty());
+            guard(self.limit, length.saturating_sub(held))?;
             self.buffer.extend_from_slice(&available[..count]);
             self.chars = length;
             self.reader.consume(count);

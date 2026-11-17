@@ -798,7 +798,6 @@ Credential metadata should be queryable without exposing credential material:
 CredentialMetadata
   ref
   status
-  storage_backend
   created_at
   created_by
   rotated_at

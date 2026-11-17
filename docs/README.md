@@ -4,6 +4,13 @@ Browse the [documentation home](./index.md) for the full project navigation.
 Documents distinguish proposed architecture, normative contract reference and
 runtime acceptance evidence.
 
+## Protocols
+
+- Understand [how A2A, ACP and MCP fit together](./architecture/agent-protocols.md).
+- Look up [protocol support, transports and known gaps](./reference/agent-protocols.md).
+- Check the detailed [ACP conformance matrix](./architecture/acp-conformance.md).
+- Browse the [protocols product showcase](./product/protocols.md).
+
 ## Development verification
 
 [Verify scheduler decisions with Hydro](./how-to/verify-scheduler-with-hydro.md)
@@ -12,11 +19,28 @@ deciders for each order. Its scope is separate from broker and processor recover
 
 ## Workload identity
 
-The proposed [workload identity profile](./reference/workload-identity.md)
-defines attested bootstrap, issuer isolation, rotating credentials, independent
-authorization and provider token protection. Its implementation and verification
-checklists distinguish runtime foundations from deployment acceptance. The
-governing [ADR#0098](./adr/0098-attested-workload-identity.md) remains draft.
+Start with [Workload identity and portable trust](./architecture/workload-identity.md)
+for workload terminology, SPIRE responsibilities and independent authorization.
+The [runtime reference](./reference/workload-identity.md) and
+[deployment procedure](./how-to/deploy-workload-identity.md) distinguish
+implemented foundations from deployment acceptance. The governing
+[ADR#0098](./adr/0098-attested-workload-identity.md) remains draft.
+
+The [configuration contract reference](./reference/workload-identity-configuration.md)
+maps existing and proposed protobuf owners, saved workflow identity requirements,
+run admission, exact artifacts and approval boundaries.
+
+Use [Operate workload registration](./how-to/operate-workload-registration.md)
+to connect a protected approval controller and recover a producer, and
+[Integrate workload identity](./how-to/integrate-workload-identity.md) to retain
+current identity through a trusted host's handshakes and established sessions.
+
+The [portable identity research](./research/workload-identity/README.md)
+connects the [federation proposal](./research/workload-identity/federation.md)
+with the [identity/KMS adapter roadmap](./research/workload-identity/adapter-roadmap.md).
+It records optional environment/provider profiles, existing implementation,
+ADR decisions still needed and acceptance gates. These proposals do not change
+ADR status or establish deployed adapter support.
 
 ## Third-party connections
 
