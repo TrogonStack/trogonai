@@ -219,6 +219,7 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_dialect;
+mod settings_exact;
 mod settings_input;
 mod settings_json;
 mod settings_load_error;
@@ -537,14 +538,17 @@ pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_ent
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use settings_dialect::SettingsDialect;
+pub use settings_exact::js_stringify_exact;
 pub use settings_input::SettingsInput;
 pub use settings_json::js_stringify;
 pub use settings_load_error::{SettingsLoadCauseError, SettingsLoadError};
 pub use settings_resolve::{
     filter_escalating_default_mode, resolve_python_settings, resolve_python_settings_with,
-    resolve_python_settings_with_state, resolve_settings, resolve_settings_in_dialect,
-    resolve_settings_in_dialect_with, resolve_settings_in_dialect_with_state, resolve_settings_json_with,
-    resolve_settings_json_with_state, resolve_settings_with, resolve_settings_with_state,
+    resolve_python_settings_with_state, resolve_settings, resolve_settings_exact, resolve_settings_exact_in_dialect,
+    resolve_settings_exact_in_dialect_with, resolve_settings_exact_in_dialect_with_state, resolve_settings_exact_with,
+    resolve_settings_exact_with_state, resolve_settings_in_dialect, resolve_settings_in_dialect_with,
+    resolve_settings_in_dialect_with_state, resolve_settings_json_with, resolve_settings_json_with_state,
+    resolve_settings_with, resolve_settings_with_state,
 };
 pub use settings_resolve_error::ResolveSettingsError;
 pub use settings_resolve_reread::PolicyRereads;

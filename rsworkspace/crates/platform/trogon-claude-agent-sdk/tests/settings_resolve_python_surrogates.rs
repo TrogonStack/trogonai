@@ -5,7 +5,8 @@
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
     DeepJsonValue, PythonJsonValue, ResolveSettingsOptions, ResolverState, SettingsDialect, python_json_dumps,
-    python_json_loads, resolve_python_settings_with_state, resolve_settings_in_dialect_with_state,
+    python_json_loads, resolve_python_settings_with_state, resolve_settings_exact_in_dialect_with,
+    resolve_settings_in_dialect_with_state,
 };
 
 #[path = "support/fake_settings_host.rs"]
@@ -48,6 +49,28 @@ fn a_settings_file_keeps_its_lone_surrogates_as_json_loads_does() -> TestResult 
     for (text, member) in &files {
         let host = FakeHost::linux().file(USER_SETTINGS, text);
         let resolved = resolve_python_settings_with_state(&host, &options()?, &ResolverState::new())?;
+        expected.push(Some(member.clone()));
+        actual.push(
+            resolved
+                .get("effective")
+                .and_then(|effective| effective.get("x"))
+                .map(python_json_dumps),
+        );
+    }
+    assert_eq!((files.len(), actual), (8, expected));
+    Ok(())
+}
+
+/// The dialect-selecting exact resolve returns the Python result for the Python dialect, so each string keeps the
+/// lone surrogates `json.loads` read and prints as `json.dumps` prints it.
+#[test]
+fn the_exact_resolve_in_the_python_dialect_keeps_lone_surrogates_as_json_loads_does() -> TestResult {
+    let files = surrogate_files()?;
+    let mut expected = Vec::new();
+    let mut actual = Vec::new();
+    for (text, member) in &files {
+        let host = FakeHost::linux().file(USER_SETTINGS, text);
+        let resolved = resolve_settings_exact_in_dialect_with(&host, &options()?, SettingsDialect::Python)?;
         expected.push(Some(member.clone()));
         actual.push(
             resolved

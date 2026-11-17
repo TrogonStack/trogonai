@@ -2,12 +2,14 @@
 //! reads, against what the pinned TypeScript `resolveSettings` returns on Node. The goldens come from
 //! `ts_settings_file_goldens.py`, with every lone surrogate as U+FFFD, as the typed `ResolvedSettings` holds it, and
 //! as `JSON.stringify` prints the object `resolveSettings` returns, with every lone surrogate kept, plus one case that
-//! merges `__proto__` members and index-like keys as lodash `mergeWith` does.
+//! merges `__proto__` members and index-like keys as lodash `mergeWith` does. The exact result holds every string
+//! `resolveSettings` returns, which the `JSON.stringify` text spells with each lone surrogate escaped.
 
 use serde_json::{Value, json};
 use trogon_claude_agent_sdk::{
-    DeepJsonValue, ResolveSettingsOptions, ResolverState, js_stringify, resolve_settings_json_with,
-    resolve_settings_with_state,
+    DeepJsonValue, PythonJsonValue, ResolveSettingsOptions, ResolverState, SettingsDialect, js_stringify,
+    js_stringify_exact, python_json_loads, resolve_settings_exact_in_dialect_with, resolve_settings_exact_with,
+    resolve_settings_json_with, resolve_settings_with_state,
 };
 
 #[path = "support/fake_settings_host.rs"]
@@ -86,6 +88,63 @@ fn the_typescript_dialect_prints_the_resolved_object_with_its_lone_surrogates_as
         let text = resolve_settings_json_with(&host(entry)?, &options)?;
         expected.push((name.to_owned(), entry["result"].as_str().map(str::to_owned)));
         actual.push((name.to_owned(), Some(text)));
+    }
+    assert_eq!((entries.len(), actual), (18, expected));
+    Ok(())
+}
+
+/// Whether a string or key anywhere in `value` holds a lone surrogate.
+fn holds_a_lone_surrogate(value: &PythonJsonValue) -> bool {
+    match value {
+        PythonJsonValue::String(text) => text.as_str().is_none(),
+        PythonJsonValue::Array(items) => items.iter().any(holds_a_lone_surrogate),
+        PythonJsonValue::Object(entries) => entries
+            .iter()
+            .any(|(key, entry)| key.as_str().is_none() || holds_a_lone_surrogate(entry)),
+        _ => false,
+    }
+}
+
+/// The exact result of each `files` entry of the goldens is the object the pinned `resolveSettings` returns, read
+/// back from its `JSON.stringify` text with every lone surrogate kept, and prints as that text byte for byte.
+#[test]
+fn the_typescript_dialect_returns_the_strings_resolve_settings_returns_with_their_lone_surrogates() -> TestResult {
+    let goldens: Value = serde_json::from_str(GOLDENS)?;
+    let entries = goldens["files"]
+        .as_array()
+        .ok_or("the goldens have no settings files")?;
+    let mut expected = Vec::new();
+    let mut actual = Vec::new();
+    let mut lone = 0;
+    for entry in entries {
+        let name = entry["name"].as_str().ok_or("a case has no name")?;
+        let text = entry["result"].as_str().ok_or("a case has no result")?;
+        let options: ResolveSettingsOptions = serde_json::from_value(json!({}))?;
+        let exact = resolve_settings_exact_with(&host(entry)?, &options)?;
+        lone += usize::from(holds_a_lone_surrogate(&exact));
+        let printed = js_stringify_exact(&exact);
+        expected.push((name.to_owned(), Some(python_json_loads(text)?), text.to_owned()));
+        actual.push((name.to_owned(), Some(exact), printed));
+    }
+    assert_eq!((entries.len(), lone, actual), (18, 8, expected));
+    Ok(())
+}
+
+/// The dialect-selecting exact resolve returns the TypeScript result for the TypeScript dialect.
+#[test]
+fn the_exact_resolve_in_the_typescript_dialect_is_the_typescript_result() -> TestResult {
+    let goldens: Value = serde_json::from_str(GOLDENS)?;
+    let entries = goldens["files"]
+        .as_array()
+        .ok_or("the goldens have no settings files")?;
+    let mut expected = Vec::new();
+    let mut actual = Vec::new();
+    for entry in entries {
+        let name = entry["name"].as_str().ok_or("a case has no name")?;
+        let options: ResolveSettingsOptions = serde_json::from_value(json!({}))?;
+        let exact = resolve_settings_exact_in_dialect_with(&host(entry)?, &options, SettingsDialect::TypeScript)?;
+        expected.push((name.to_owned(), entry["result"].as_str().map(str::to_owned)));
+        actual.push((name.to_owned(), Some(js_stringify_exact(&exact))));
     }
     assert_eq!((entries.len(), actual), (18, expected));
     Ok(())
