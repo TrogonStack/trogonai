@@ -314,13 +314,11 @@ pub(crate) struct Held {
     only_held_content: bool,
     /// Allow lists only the restricted documents set (`heldAllowLists`).
     allow_lists: Vec<&'static str>,
-    /// How the file tier orders its keys: restricted documents leave the order the restriction built.
-    key_order: PolicyKeyOrder,
 }
 
 /// How the policy settings order their keys. Upstream parses every document with the settings schema as it reads it,
-/// so a tier read as written lists its keys in schema order, while a tier the resolver builds afterwards (the
-/// parent's slice, or what a user-writable file may only restrict) keeps the order it was built in.
+/// so a tier read as written lists its keys in schema order, while what the resolver builds afterwards (the parent's
+/// slice, the admin the tiers make, or what a user-writable file may only restrict) keeps the order it was built in.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum PolicyKeyOrder {
     #[default]
@@ -424,7 +422,6 @@ fn read_managed_file<H: SettingsHost>(
     if added.is_empty() {
         return Ok((held, flags));
     }
-    flags.key_order = PolicyKeyOrder::Composed;
     let only_added = kept.is_empty();
     let mut settings = if only_added {
         added.clone()
@@ -936,10 +933,10 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
     let origin = composition.origin(kind, evaluation);
     let file_did_not_load = file.load_state == LoadState::DidNotLoad;
     let reevaluates = reader.has_stack() && file_did_not_load;
-    let admin_order = if (composition.selection.file_index == Some(0) || composition.selection.withheld_only)
-        && composition.admin.is_some()
-    {
-        held.key_order
+    // Every tier lists its keys in schema order as it is read, and `iE` never sorts the admin it builds from them, so
+    // a value a demoted tier binds more restrictively follows the keys of the tier that won.
+    let admin_order = if composition.admin.is_some() {
+        PolicyKeyOrder::Composed
     } else {
         PolicyKeyOrder::Schema
     };
