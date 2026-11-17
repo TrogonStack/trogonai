@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -5,6 +6,10 @@ use std::sync::{
 use std::time::Duration;
 
 use trogon_credential_domain::{CredentialIdentity, CredentialRef, CredentialScope};
+use trogon_nats::jetstream::{
+    JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueUpdate,
+    MockJetStreamKvClient, MockJetStreamKvStore,
+};
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_secret_store::{
     MockOpenBaoSecretStore, SecretMaterial, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
@@ -216,10 +221,195 @@ async fn generic_webhooks_registry_refuses_expiring_config_without_rewriting_it(
 
     assert!(matches!(
         open_registry(&context, &config).await,
-        Err(RegistryOpenError::Configuration { field: "retention" })
+        Err(RegistryOpenError::Configuration {
+            field: RegistryConfigurationField::Retention,
+        })
     ));
     let unchanged = context.get_key_value(config.registry_bucket.as_str()).await.unwrap();
     assert_eq!(unchanged.status().await.unwrap().max_age(), Duration::from_secs(60));
+}
+
+type RegistryStatusChange = fn(&mut kv::bucket::Status);
+
+#[derive(Clone, Debug)]
+struct RegistryStatusStore {
+    inner: MockJetStreamKvStore,
+    change: RegistryStatusChange,
+}
+
+impl JetStreamKeyValueStatus for RegistryStatusStore {
+    async fn status(&self) -> Result<kv::bucket::Status, kv::StatusError> {
+        let mut status = self.inner.status().await?;
+        status.info.config.subjects = vec![format!("$KV.{}.>", status.bucket)];
+        (self.change)(&mut status);
+        Ok(status)
+    }
+}
+
+impl JetStreamKeyValueCreateWithTtl for RegistryStatusStore {
+    async fn create_with_ttl(&self, key: &str, value: bytes::Bytes, ttl: Duration) -> Result<u64, kv::CreateError> {
+        self.inner.create_with_ttl(key, value, ttl).await
+    }
+}
+
+impl JetStreamKeyValueUpdate for RegistryStatusStore {
+    async fn update(&self, key: &str, value: bytes::Bytes, revision: u64) -> Result<u64, kv::UpdateError> {
+        self.inner.update(key, value, revision).await
+    }
+}
+
+impl JetStreamKeyValueDeleteExpectRevision for RegistryStatusStore {
+    async fn delete_expect_revision(&self, key: &str, revision: Option<u64>) -> Result<(), kv::DeleteError> {
+        self.inner.delete_expect_revision(key, revision).await
+    }
+}
+
+#[derive(Clone)]
+struct RegistryStatusClient {
+    inner: MockJetStreamKvClient,
+    store: RegistryStatusStore,
+}
+
+impl JetStreamGetKeyValue for RegistryStatusClient {
+    type Store = RegistryStatusStore;
+
+    async fn get_key_value<T: Into<String> + Send>(&self, bucket: T) -> Result<Self::Store, context::KeyValueError> {
+        let inner = self.inner.get_key_value(bucket).await?;
+        Ok(RegistryStatusStore {
+            inner,
+            change: self.store.change,
+        })
+    }
+}
+
+impl JetStreamCreateKeyValue for RegistryStatusClient {
+    type Store = RegistryStatusStore;
+
+    async fn create_key_value(&self, config: kv::Config) -> Result<Self::Store, context::CreateKeyValueError> {
+        let inner = self.inner.create_key_value(config).await?;
+        Ok(RegistryStatusStore {
+            inner,
+            change: self.store.change,
+        })
+    }
+}
+
+fn registry_status_client(config: &WebhookConfig, change: RegistryStatusChange) -> RegistryStatusClient {
+    let inner = MockJetStreamKvClient::new();
+    let store = MockJetStreamKvStore::new();
+    store.set_bucket_name(config.registry_bucket.as_str());
+    store.set_settings(1, Duration::ZERO, false, None);
+    inner.set_get_result(store.clone());
+    RegistryStatusClient {
+        inner,
+        store: RegistryStatusStore { inner: store, change },
+    }
+}
+
+fn assert_registry_was_not_rewritten(client: &RegistryStatusClient, config: &WebhookConfig) {
+    assert_eq!(client.inner.requested_buckets(), [config.registry_bucket.as_str()]);
+    assert!(client.inner.create_configs().is_empty());
+    assert!(client.store.inner.create_with_ttl_calls().is_empty());
+    assert!(client.store.inner.update_calls().is_empty());
+    assert!(client.store.inner.delete_calls().is_empty());
+}
+
+#[tokio::test]
+async fn generic_webhooks_compatible_registry_status_preserves_operator_limits() {
+    let config = config();
+    let client = registry_status_client(&config, |status| {
+        status.info.config.description = Some("operator-owned-description".to_owned());
+        status.info.config.max_bytes = 1_000_000;
+    });
+
+    let reopened = open_registry(&client, &config).await.unwrap();
+
+    let status = reopened.status().await.unwrap();
+    assert_eq!(status.bucket(), config.registry_bucket.as_str());
+    assert_eq!(status.history(), 1);
+    assert!(status.max_age().is_zero());
+    assert_eq!(status.info.config.max_bytes, 1_000_000);
+    assert_eq!(
+        status.info.config.description.as_deref(),
+        Some("operator-owned-description")
+    );
+    assert_registry_was_not_rewritten(&client, &config);
+}
+
+#[tokio::test]
+async fn generic_webhooks_incompatible_registry_status_reports_the_typed_constraint_without_rewriting() {
+    let cases: [(RegistryStatusChange, RegistryConfigurationField, &str); 9] = [
+        (
+            |status| status.bucket = "OTHER_ENDPOINTS".to_owned(),
+            RegistryConfigurationField::BucketName,
+            "bucket name",
+        ),
+        (
+            |status| status.info.config.max_age = Duration::from_secs(60),
+            RegistryConfigurationField::Retention,
+            "retention",
+        ),
+        (
+            |status| status.info.config.max_messages_per_subject = 2,
+            RegistryConfigurationField::History,
+            "history",
+        ),
+        (
+            |status| status.info.config.subjects.push("$KV.OTHER_ENDPOINTS.>".to_owned()),
+            RegistryConfigurationField::Subjects,
+            "subjects",
+        ),
+        (
+            |status| status.info.config.storage = async_nats::jetstream::stream::StorageType::Memory,
+            RegistryConfigurationField::Storage,
+            "storage",
+        ),
+        (
+            |status| {
+                status.info.config.mirror = Some(async_nats::jetstream::stream::Source {
+                    name: "KV_OTHER_ENDPOINTS".to_owned(),
+                    ..Default::default()
+                });
+            },
+            RegistryConfigurationField::ReplicationSources,
+            "replication sources",
+        ),
+        (
+            |status| {
+                status.info.config.sources = Some(vec![async_nats::jetstream::stream::Source {
+                    name: "KV_OTHER_ENDPOINTS".to_owned(),
+                    ..Default::default()
+                }]);
+            },
+            RegistryConfigurationField::ReplicationSources,
+            "replication sources",
+        ),
+        (
+            |status| status.info.config.allow_message_ttl = true,
+            RegistryConfigurationField::MessageTtl,
+            "message TTL",
+        ),
+        (
+            |status| status.info.config.subject_delete_marker_ttl = Some(Duration::from_secs(60)),
+            RegistryConfigurationField::DeleteMarkerTtl,
+            "delete marker TTL",
+        ),
+    ];
+    let config = config();
+    for (change, expected, diagnostic) in cases {
+        let client = registry_status_client(&config, change);
+        let error = open_registry(&client, &config).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            RegistryOpenError::Configuration { field } if field == expected
+        ));
+        assert_eq!(
+            error.to_string(),
+            format!("webhook endpoint registry has incompatible {diagnostic}")
+        );
+        assert_registry_was_not_rewritten(&client, &config);
+    }
 }
 
 #[derive(Clone)]
@@ -247,8 +437,32 @@ async fn generic_webhooks_credential_backend_failure_is_unavailable_not_an_authe
 
     assert!(matches!(
         lookup.lookup_secret(&endpoint("project-one")).await,
-        Err(AuthenticationError::Unavailable)
+        Err(AuthenticationError::UnavailableWithSource(_))
     ));
+}
+
+#[tokio::test]
+async fn generic_webhooks_credential_backend_failure_preserves_the_resolver_source() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = provision_secret(&store).await;
+    let projections = InMemoryRuntimeProjectionRepository::default();
+    projections
+        .upsert(projection(credential, RuntimeIntegrationStatus::Active))
+        .await;
+    let lookup = RuntimeWebhookSecrets::new(RuntimeCredentialResolver::new(projections, UnavailableSecrets));
+
+    let error = lookup.lookup_secret(&endpoint("project-one")).await.unwrap_err();
+    let source = error
+        .source()
+        .expect("unavailable authentication must preserve its resolver error")
+        .downcast_ref::<RuntimeCredentialError>()
+        .expect("the authentication source must retain the typed resolver error");
+    assert!(matches!(
+        source,
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { message })
+            if message == "test backend unavailable"
+    ));
+    assert_eq!(error.to_string(), "webhook authentication is unavailable");
 }
 
 #[derive(Clone, Copy)]

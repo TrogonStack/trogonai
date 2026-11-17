@@ -1309,7 +1309,7 @@ async fn generic_webhooks_owner_mismatch_never_reads_the_store_or_returns_a_cach
     );
     let foreign_owner = CredentialOwnerId::new("foreign-project").unwrap();
 
-    assert!(
+    assert!(matches!(
         resolver
             .resolve_plaintext_for_owner(
                 &key(),
@@ -1317,9 +1317,12 @@ async fn generic_webhooks_owner_mismatch_never_reads_the_store_or_returns_a_cach
                 &foreign_owner,
                 &RuntimeReleaseRequest::new(),
             )
-            .await
-            .is_err()
-    );
+            .await,
+        Err(RuntimeCredentialError::OwnerMismatch {
+            key: actual_key,
+            kind: CredentialKind::BotToken,
+        }) if actual_key == key()
+    ));
     assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
     assert!(resolver.cache().get(&credential).await.is_none());
 
@@ -1328,7 +1331,7 @@ async fn generic_webhooks_owner_mismatch_never_reads_the_store_or_returns_a_cach
         .await
         .unwrap();
     assert!(resolver.cache().get(&credential).await.is_some());
-    assert!(
+    assert!(matches!(
         resolver
             .resolve_plaintext_for_owner(
                 &key(),
@@ -1336,9 +1339,12 @@ async fn generic_webhooks_owner_mismatch_never_reads_the_store_or_returns_a_cach
                 &foreign_owner,
                 &RuntimeReleaseRequest::new(),
             )
-            .await
-            .is_err()
-    );
+            .await,
+        Err(RuntimeCredentialError::OwnerMismatch {
+            key: actual_key,
+            kind: CredentialKind::BotToken,
+        }) if actual_key == key()
+    ));
     assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 

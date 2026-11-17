@@ -480,7 +480,9 @@ async fn generic_webhooks_serve_refuses_an_expiring_registry_before_starting_ing
 
     assert!(matches!(
         error.downcast_ref::<webhooks::RegistryOpenError>(),
-        Some(webhooks::RegistryOpenError::Configuration { field: "retention" })
+        Some(webhooks::RegistryOpenError::Configuration {
+            field: webhooks::RegistryConfigurationField::Retention,
+        })
     ));
     let registry = context.get_key_value("GATEWAY_WEBHOOK_ENDPOINTS").await.unwrap();
     assert_eq!(registry.status().await.unwrap().max_age(), Duration::from_secs(60));

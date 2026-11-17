@@ -11,6 +11,8 @@ pub enum AuthenticationError {
     Unauthorized,
     #[error("webhook authentication is unavailable")]
     Unavailable,
+    #[error("webhook authentication is unavailable")]
+    UnavailableWithSource(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 #[derive(Debug, thiserror::Error)]

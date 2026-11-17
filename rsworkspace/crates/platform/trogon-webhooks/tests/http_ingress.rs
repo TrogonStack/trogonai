@@ -472,6 +472,62 @@ async fn broker_deduplication_identity_is_stable_and_endpoint_scoped() {
 }
 
 #[tokio::test]
+async fn interrupted_request_bodies_are_retryable_and_never_published() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::Bearer,
+        EndpointStatus::Enabled,
+        4096,
+        1,
+    ));
+    let token = secret();
+    let publisher = MockJetStreamPublisher::new();
+    let router = app(registry, token.clone(), publisher.clone());
+    for error in [
+        std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+        std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+        std::io::Error::other("length limit exceeded"),
+    ] {
+        let mut input = request(ENDPOINT, &token, b"");
+        *input.body_mut() = Body::from_stream(futures_util::stream::iter([
+            Ok(bytes::Bytes::from_static(b"partial")),
+            Err(error),
+        ]));
+        assert_eq!(
+            router.clone().oneshot(input).await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn streamed_request_bodies_preserve_the_configured_size_limit() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::Bearer,
+        EndpointStatus::Enabled,
+        8,
+        1,
+    ));
+    let token = secret();
+    let publisher = MockJetStreamPublisher::new();
+    let router = app(registry, token.clone(), publisher.clone());
+    let mut input = request(ENDPOINT, &token, b"");
+    *input.body_mut() = Body::from_stream(futures_util::stream::iter([
+        Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"1234")),
+        Ok(bytes::Bytes::from_static(b"56789")),
+    ]));
+    assert_eq!(
+        router.oneshot(input).await.unwrap().status(),
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
 async fn broker_publication_failure_is_retryable_and_never_accepted() {
     let registry = Registry::default();
     registry.insert(endpoint(
@@ -585,6 +641,50 @@ impl WebhookSecretLookup for UnavailableSecrets {
     async fn lookup_secret(&self, _endpoint: &RegisteredEndpoint) -> Result<SecretString, AuthenticationError> {
         Err(AuthenticationError::Unavailable)
     }
+}
+
+#[derive(Clone)]
+struct UnavailableSecretsWithSource;
+
+impl WebhookSecretLookup for UnavailableSecretsWithSource {
+    async fn lookup_secret(&self, _endpoint: &RegisteredEndpoint) -> Result<SecretString, AuthenticationError> {
+        Err(AuthenticationError::UnavailableWithSource(Box::new(
+            std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "test credential backend failure"),
+        )))
+    }
+}
+
+#[tokio::test]
+async fn credential_service_source_errors_remain_private_retryable_and_never_publish() {
+    let registry = Registry::default();
+    registry.insert(endpoint(
+        ENDPOINT,
+        AuthenticationMode::Bearer,
+        EndpointStatus::Enabled,
+        4096,
+        1,
+    ));
+    let publisher = MockJetStreamPublisher::new();
+    let app = router(
+        registry,
+        SecretWebhookVerifier::new(UnavailableSecretsWithSource),
+        ClaimCheckPublisher::new(
+            publisher.clone(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+            MaxPayload::from_server_limit(usize::MAX),
+        ),
+        DottedNatsToken::new("webhooks").unwrap(),
+        NonZeroDuration::from_secs(5).unwrap(),
+    );
+    let response = app.oneshot(request(ENDPOINT, &secret(), b"{}")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(publisher.published_messages().is_empty());
 }
 
 #[tokio::test]

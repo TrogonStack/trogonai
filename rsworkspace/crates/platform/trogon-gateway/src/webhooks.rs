@@ -1,4 +1,4 @@
-mod config;
+pub(crate) mod config;
 mod registry_bucket;
 
 use async_nats::jetstream::{context, kv};
@@ -45,7 +45,34 @@ pub enum RegistryOpenError {
     #[error("failed to inspect webhook endpoint registry")]
     Status(#[source] kv::StatusError),
     #[error("webhook endpoint registry has incompatible {field}")]
-    Configuration { field: &'static str },
+    Configuration { field: RegistryConfigurationField },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RegistryConfigurationField {
+    BucketName,
+    Retention,
+    History,
+    Subjects,
+    Storage,
+    ReplicationSources,
+    MessageTtl,
+    DeleteMarkerTtl,
+}
+
+impl std::fmt::Display for RegistryConfigurationField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::BucketName => "bucket name",
+            Self::Retention => "retention",
+            Self::History => "history",
+            Self::Subjects => "subjects",
+            Self::Storage => "storage",
+            Self::ReplicationSources => "replication sources",
+            Self::MessageTtl => "message TTL",
+            Self::DeleteMarkerTtl => "delete marker TTL",
+        })
+    }
 }
 
 pub async fn open_registry<C>(
@@ -81,20 +108,29 @@ where
     let stream = &status.info.config;
     let expected_subject = format!("$KV.{}.>", config.registry_bucket);
     for (valid, field) in [
-        (status.bucket() == config.registry_bucket.as_str(), "bucket name"),
-        (status.max_age().is_zero(), "retention"),
-        (status.history() == 1, "history"),
-        (stream.subjects == [expected_subject], "subjects"),
+        (
+            status.bucket() == config.registry_bucket.as_str(),
+            RegistryConfigurationField::BucketName,
+        ),
+        (status.max_age().is_zero(), RegistryConfigurationField::Retention),
+        (status.history() == 1, RegistryConfigurationField::History),
+        (
+            stream.subjects == [expected_subject],
+            RegistryConfigurationField::Subjects,
+        ),
         (
             stream.storage == async_nats::jetstream::stream::StorageType::File,
-            "storage",
+            RegistryConfigurationField::Storage,
         ),
         (
             stream.mirror.is_none() && stream.sources.is_none(),
-            "replication sources",
+            RegistryConfigurationField::ReplicationSources,
         ),
-        (!stream.allow_message_ttl, "message TTL"),
-        (stream.subject_delete_marker_ttl.is_none(), "delete marker TTL"),
+        (!stream.allow_message_ttl, RegistryConfigurationField::MessageTtl),
+        (
+            stream.subject_delete_marker_ttl.is_none(),
+            RegistryConfigurationField::DeleteMarkerTtl,
+        ),
     ] {
         if !valid {
             return Err(RegistryOpenError::Configuration { field });
@@ -135,8 +171,8 @@ where
             )
             .await
             .map_err(|error| match error {
-                RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
-                    AuthenticationError::Unavailable
+                error @ RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+                    AuthenticationError::UnavailableWithSource(Box::new(error))
                 }
                 _ => AuthenticationError::Unauthorized,
             })

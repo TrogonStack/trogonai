@@ -36,8 +36,9 @@ Generic ingress uses the existing credential lifecycle and runtime resolver.
 Its current gateway assembly requires `OPENBAO_ADDR` and `OPENBAO_TOKEN`.
 Credential management additionally requires
 `TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN`. Configure these through the
-existing deployment secret mechanism. Secret material is absent from endpoint
-records and delivery events.
+existing deployment secret mechanism. Verifier credentials are not added to
+endpoint records or delivery events. Request bodies are retained unchanged in
+`WebhookReceived` and may contain sensitive data.
 
 ## Endpoint registry
 
@@ -158,7 +159,7 @@ before decoding the envelope. Claim retention follows stream retention.
 | `404` | No enabled endpoint is available at that path. |
 | `405` | The route does not accept that HTTP method. |
 | `413` | The body exceeds the endpoint or receiver ceiling. |
-| `503` | Registry, verification, or durable publication could not complete. |
+| `503` | Registry lookup, body reading, verification, or durable publication could not complete. |
 
 A `202` response acknowledges storage. It does not report downstream execution
 or completion.

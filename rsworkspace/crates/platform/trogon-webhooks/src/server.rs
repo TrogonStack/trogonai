@@ -1,3 +1,4 @@
+use std::error::Error as _;
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use axum::body::{Body, to_bytes};
@@ -135,12 +136,21 @@ where
     };
     let body = match to_bytes(body, registration.max_body_size().get()).await {
         Ok(body) => body,
-        Err(_) => return StatusCode::PAYLOAD_TOO_LARGE,
+        Err(error)
+            if error
+                .source()
+                .is_some_and(|source| source.is::<http_body_util::LengthLimitError>()) =>
+        {
+            return StatusCode::PAYLOAD_TOO_LARGE;
+        }
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
     };
     match ingress.verifier.verify(&endpoint, &parts.headers, &body).await {
         Ok(()) => {}
         Err(AuthenticationError::Unauthorized) => return StatusCode::UNAUTHORIZED,
-        Err(AuthenticationError::Unavailable) => return StatusCode::SERVICE_UNAVAILABLE,
+        Err(AuthenticationError::Unavailable | AuthenticationError::UnavailableWithSource(_)) => {
+            return StatusCode::SERVICE_UNAVAILABLE;
+        }
     }
     let subject = format!(
         "{}.{}.{}.received",

@@ -4078,6 +4078,20 @@ fn generic_webhooks_reject_zero_retention_and_report_the_setting() {
     let Err(ConfigError::Validation(errors)) = load(Some(file.path())) else {
         panic!("zero webhook retention must be a configuration error");
     };
+    assert!(matches!(
+        errors.as_ref(),
+        [ConfigValidationError::InvalidField {
+            source_name: "webhooks",
+            field: "configuration",
+            error,
+        }] if matches!(
+            error.downcast_ref::<crate::webhooks::config::WebhookConfigError>(),
+            Some(crate::webhooks::config::WebhookConfigError::ZeroDuration {
+                field: "stream_max_age_secs",
+                source: ZeroDurationError,
+            })
+        )
+    ));
     assert!(errors.iter().any(|error| error.contains("stream_max_age_secs")));
 }
 

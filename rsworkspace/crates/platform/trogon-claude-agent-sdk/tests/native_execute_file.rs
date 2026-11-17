@@ -48,9 +48,47 @@ fn timeout_kills_and_reaps_a_running_child_and_keeps_its_output() -> TestResult 
     assert_eq!(outcome.stderr, "stderr-before-timeout");
     assert_eq!(outcome.exit_code, None);
     assert_eq!(outcome.errno, None);
-    assert_eq!(outcome.signal.as_deref(), Some("SIGTERM"));
+    assert_eq!(outcome.signal.as_deref(), Some("SIGKILL"));
     assert!(outcome.duration_ms >= timeout.as_millis());
     assert!(outcome.duration_ms < 10_000);
+    Ok(())
+}
+
+#[test]
+fn a_signaled_child_reports_its_reaped_signal_and_keeps_its_output() -> TestResult {
+    for (script, signal) in [
+        (
+            r#"printf '%s' "$$" > "$1"; printf 'stdout-before-signal'; printf 'stderr-before-signal' >&2; kill -TERM "$$""#,
+            "SIGTERM".to_owned(),
+        ),
+        (
+            r#"printf '%s' "$$" > "$1"; printf 'stdout-before-signal'; printf 'stderr-before-signal' >&2; kill -USR1 "$$""#,
+            libc::SIGUSR1.to_string(),
+        ),
+    ] {
+        let directory = tempfile::tempdir()?;
+        let pid_file = directory.path().join("child.pid");
+        let outcome = NativeHost.execute_file(&ExecuteFileRequest {
+            program: OsStr::new("/bin/sh"),
+            args: &[
+                OsStr::new("-c"),
+                OsStr::new(script),
+                OsStr::new("native-execute-file"),
+                pid_file.as_os_str(),
+            ],
+            timeout: Duration::from_secs(10),
+            max_buffer: None,
+        });
+
+        assert_reaped(&pid_file)?;
+        assert_eq!(outcome.status, ExecuteFileStatus::Killed);
+        assert_eq!(outcome.signal, Some(signal));
+        assert_eq!(outcome.exit_code, None);
+        assert_eq!(outcome.errno, None);
+        assert_eq!(outcome.stdout, "stdout-before-signal");
+        assert_eq!(outcome.stderr, "stderr-before-signal");
+        assert!(outcome.duration_ms < 10_000);
+    }
     Ok(())
 }
 
