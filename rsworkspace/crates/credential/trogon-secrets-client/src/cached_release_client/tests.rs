@@ -1,6 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 use trogon_credential_domain::{CredentialId, CredentialKey};
 use trogon_semconv::metric::{
@@ -983,6 +984,167 @@ async fn counts_every_release_served_without_being_held_but_warns_once_per_inter
         warnings,
         [("1".to_owned(), "1".to_owned()), ("1".to_owned(), "3".to_owned())]
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn fails_every_waiter_with_the_call_they_shared_and_asks_again_at_the_next_miss() {
+    let fake = FakeSecretsService::new();
+    fake.script(FakeOutcome::invalid_argument("tenant unknown").after(REPLY_DELAY));
+    releasing(&fake, 1);
+    let client = started(&fake, &ScriptedInvalidations::default()).await.unwrap();
+    let asked = request(&tenant());
+
+    let mut waiting = Vec::new();
+    for _ in 0..3 {
+        waiting.push(releasing_in_background(&client, &asked).await);
+    }
+    reply().await;
+    for released in waiting {
+        let ReleaseError::InvalidArgument(fault) = released.await.unwrap().unwrap_err() else {
+            panic!("every waiter fails as the call they shared did");
+        };
+        assert_eq!(fault.message(), "tenant unknown");
+    }
+    assert_eq!(fake.received().len(), 1);
+
+    assert_eq!(client.release(&asked).await.unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn neither_holds_nor_returns_a_shared_call_invalidated_on_its_way() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, REVOKED);
+    releasing(&fake, 1);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+
+    let mut waiting = Vec::new();
+    for _ in 0..3 {
+        waiting.push(releasing_in_background(&client, &asked).await);
+    }
+    invalidations.notify(&notice_subject(asked.tenant(), CREDENTIAL_ID));
+    reply().await;
+    for released in waiting {
+        assert_eq!(released.await.unwrap().unwrap().value().as_str(), VALUE);
+    }
+    let held = client.release(&asked).await.unwrap();
+
+    assert_eq!(held.value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn does_not_wait_on_a_call_an_invalidation_already_overtook() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, REVOKED);
+    releasing(&fake, 1);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started(&fake, &invalidations).await.unwrap();
+    let asked = request(&tenant());
+
+    let overtaken = releasing_in_background(&client, &asked).await;
+    invalidations.notify(&notice_subject(asked.tenant(), CREDENTIAL_ID));
+    settle().await;
+    let asked_at = Instant::now();
+    let released = client.release(&asked).await.unwrap();
+
+    assert_eq!(asked_at.elapsed(), Duration::ZERO);
+    assert_eq!(released.value().as_str(), VALUE);
+    reply().await;
+    assert_eq!(overtaken.await.unwrap().unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn asks_the_service_once_for_concurrent_misses_of_one_key() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, VALUE);
+    let client = started(&fake, &ScriptedInvalidations::default()).await.unwrap();
+    let asked = request(&tenant());
+
+    let mut waiting = Vec::new();
+    for _ in 0..5 {
+        waiting.push(releasing_in_background(&client, &asked).await);
+    }
+    reply().await;
+
+    for released in waiting {
+        assert_eq!(released.await.unwrap().unwrap().value().as_str(), VALUE);
+    }
+    assert_eq!(client.release(&asked).await.unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn keeps_the_call_going_for_its_waiters_when_the_caller_that_started_it_leaves() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, VALUE);
+    let client = started(&fake, &ScriptedInvalidations::default()).await.unwrap();
+    let asked = request(&tenant());
+
+    let starter = releasing_in_background(&client, &asked).await;
+    let waiter = releasing_in_background(&client, &asked).await;
+    starter.abort();
+    reply().await;
+
+    assert!(starter.await.unwrap_err().is_cancelled());
+    assert_eq!(waiter.await.unwrap().unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn holds_what_a_call_released_after_every_caller_left_it() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, VALUE);
+    let client = started(&fake, &ScriptedInvalidations::default()).await.unwrap();
+    let asked = request(&tenant());
+
+    releasing_in_background(&client, &asked).await.abort();
+    reply().await;
+
+    assert_eq!(client.release(&asked).await.unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn lets_each_waiter_stop_at_its_own_deadline() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, VALUE);
+    let client = started(&fake, &ScriptedInvalidations::default()).await.unwrap();
+    let asked = request(&tenant());
+
+    let patient = releasing_in_background(&client, &asked).await;
+    let (impatient_client, impatient_asked) = (client.clone(), asked.clone());
+    let impatient =
+        tokio::spawn(
+            async move { tokio::time::timeout(REPLY_DELAY / 2, impatient_client.release(&impatient_asked)).await },
+        );
+
+    assert!(impatient.await.unwrap().is_err());
+    assert_eq!(patient.await.unwrap().unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn asks_for_distinct_keys_without_one_waiting_on_the_other() {
+    let fake = FakeSecretsService::new();
+    releasing_late(&fake, VALUE);
+    releasing(&fake, 1);
+    let client = started(&fake, &ScriptedInvalidations::default()).await.unwrap();
+    let asked = request(&tenant());
+    let other = of_credential(&asked, OTHER_CREDENTIAL_ID);
+
+    let late = releasing_in_background(&client, &asked).await;
+    let asked_at = Instant::now();
+    let released = client.release(&other).await.unwrap();
+
+    assert_eq!(asked_at.elapsed(), Duration::ZERO);
+    assert_eq!(released.value().as_str(), VALUE);
+    reply().await;
+    assert_eq!(late.await.unwrap().unwrap().value().as_str(), VALUE);
+    assert_eq!(fake.received().len(), 2);
 }
 
 /// Starts a client in the background, as one whose start has not returned.

@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::sync::Arc;
 use std::time::Duration;
 
 use grpc_nats_micro::client::RequestError;
@@ -13,7 +14,10 @@ use super::{InvalidReleaseResponseError, ReleaseSubjectError, UnsealError};
 /// could fall back to is implied. [`ReleaseError::Denied`] carries nothing,
 /// as the secrets service answers every refusal the same way, so a requester
 /// cannot tell an unknown credential from a refusing policy.
-#[derive(Debug, thiserror::Error)]
+///
+/// It clones, sharing its cause, so every caller waiting on one call to the
+/// secrets service fails as that call did.
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum ReleaseError {
     #[error("release denied")]
     Denied,
@@ -38,7 +42,7 @@ pub enum ReleaseError {
     #[error("release call timed out")]
     Timeout,
     #[error("release call failed before an answer arrived")]
-    Request(#[source] Box<dyn Error + Send + Sync>),
+    Request(#[source] Arc<dyn Error + Send + Sync>),
     #[error("release response is invalid")]
     InvalidResponse(#[from] InvalidReleaseResponseError),
     #[error("released value was already expired when it arrived")]
@@ -66,8 +70,8 @@ impl ReleaseError {
                 Self::InvalidArgument(fault)
             }
             RequestError::Reply(ReplyError::Service(fault)) => Self::ServiceFault(fault),
-            RequestError::Reply(reply) => InvalidReleaseResponseError::Reply(reply).into(),
-            other => Self::Request(Box::new(other)),
+            RequestError::Reply(reply) => InvalidReleaseResponseError::Reply(Arc::new(reply)).into(),
+            other => Self::Request(Arc::new(other)),
         }
     }
 

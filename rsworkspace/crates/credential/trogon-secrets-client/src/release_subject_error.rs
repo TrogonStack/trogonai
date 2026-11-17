@@ -1,7 +1,7 @@
 use grpc_nats_micro::{EndpointSubjectError, MethodNameError, ServiceNameError, SubjectPrefixError};
 
 /// Why the release subject could not be derived for a call.
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum ReleaseSubjectError {
     #[error("release subject prefix is invalid")]
     Prefix(#[source] SubjectPrefixError),

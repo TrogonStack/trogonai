@@ -130,10 +130,10 @@ async fn refuses_a_reply_that_does_not_decode() {
 
     let refused = against_mock(&mock).release(&request(&tenant)).await.unwrap_err();
 
-    assert!(matches!(
-        refused,
-        ReleaseError::InvalidResponse(InvalidReleaseResponseError::Reply(ReplyError::Decode(_)))
-    ));
+    let ReleaseError::InvalidResponse(InvalidReleaseResponseError::Reply(reply)) = refused else {
+        panic!("a reply that does not decode is an invalid response");
+    };
+    assert!(matches!(*reply, ReplyError::Decode(_)));
 }
 
 #[tokio::test]

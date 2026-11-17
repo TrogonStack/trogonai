@@ -1,12 +1,14 @@
+use std::sync::Arc;
+
 use buffa_types::{DurationError, TimestampError};
 use grpc_nats_micro::ReplyError;
 
 /// Why a reply from the secrets service is not a release response the
 /// contract allows. Each one is refused: no part of such a reply is trusted.
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum InvalidReleaseResponseError {
     #[error("release reply did not decode")]
-    Reply(#[source] ReplyError),
+    Reply(#[source] Arc<ReplyError>),
     #[error("release response carries neither an access nor a failure")]
     MissingResult,
     #[error("release failure category {0} is not one the contract defines")]

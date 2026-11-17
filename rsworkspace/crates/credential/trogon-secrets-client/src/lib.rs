@@ -43,8 +43,13 @@
 //! delivered but still not received at the next look loses it its place.
 //! While its reader has lost its place it holds
 //! nothing, and it reads again every [`INVALIDATION_RETRY_DELAY`] from
-//! [`INVALIDATION_LOOKBACK`] back. Concurrent misses for one key each ask the
-//! service; they are not merged into one call.
+//! [`INVALIDATION_LOOKBACK`] back.
+//!
+//! Concurrent misses for one key share one call to the secrets service. The
+//! call runs apart from the caller that started it, so it lands for the rest
+//! when that caller leaves; each caller waits up to its own deadline. A
+//! failure reaches every caller waiting on that call and is never held, and
+//! a call an invalidation overtook is neither joined, held, nor returned.
 //!
 //! # Telemetry
 //!
@@ -98,6 +103,9 @@ mod release_client;
 mod release_client_config;
 mod release_destination;
 mod release_error;
+mod release_flight;
+mod release_flight_landing;
+mod release_flights;
 mod release_hold;
 mod release_invalidation;
 mod release_request;
@@ -152,6 +160,9 @@ pub use release_client::ReleaseClient;
 pub use release_client_config::ReleaseClientConfig;
 pub use release_destination::ReleaseDestination;
 pub use release_error::ReleaseError;
+pub(crate) use release_flight::ReleaseFlight;
+pub(crate) use release_flight_landing::ReleaseFlightLanding;
+pub(crate) use release_flights::ReleaseFlights;
 pub(crate) use release_hold::ReleaseHold;
 pub(crate) use release_invalidation::ReleaseInvalidation;
 pub use release_request::ReleaseRequest;

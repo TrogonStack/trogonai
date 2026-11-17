@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::time::Duration;
 
 use buffa::{EnumValue, MessageField};
@@ -144,6 +145,22 @@ fn reads_a_transport_failure_as_a_request_failure() {
     });
 
     assert!(matches!(error, ReleaseError::Request(_)));
+}
+
+#[test]
+fn keeps_the_cause_of_a_request_failure_in_every_copy() {
+    let error = ReleaseError::from_request(RequestError::Transport {
+        subject: "fake.subject".to_owned(),
+        error: MockError("fake-unreachable".to_owned()),
+    });
+
+    let copy = error.clone();
+
+    assert!(copy.source().is_some());
+    assert_eq!(
+        copy.source().map(ToString::to_string),
+        error.source().map(ToString::to_string)
+    );
 }
 
 #[test]

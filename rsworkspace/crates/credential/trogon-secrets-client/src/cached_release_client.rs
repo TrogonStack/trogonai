@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use opentelemetry::global;
 use opentelemetry::metrics::Meter;
@@ -6,10 +6,12 @@ use trogon_nats::RequestClient;
 use trogon_std::time::{EpochClock, GetElapsed};
 
 use super::constants::{MAX_CACHED_RELEASES, METER_NAME};
+use super::release_flight::Landed;
 use super::telemetry::ReleaseCacheMetrics;
 use super::{
     InvalidationReader, InvalidationStartError, InvalidationStreamSource, ReleaseCache, ReleaseCacheKey,
-    ReleaseCacheMode, ReleaseClient, ReleaseError, ReleaseHold, ReleaseRequest, ReleasedValue,
+    ReleaseCacheMode, ReleaseClient, ReleaseError, ReleaseFlightLanding, ReleaseFlights, ReleaseHold, ReleaseRequest,
+    ReleasedValue,
 };
 
 /// A [`ReleaseClient`] that holds what it was released and drops it when the
@@ -29,8 +31,16 @@ use super::{
 /// neither held nor returned, and is asked for once more. While that reader
 /// has lost its place, or has not yet caught up with the notices its consumer
 /// replays on starting and on every return to reading, nothing is held and
-/// every release is asked for again. Clones share the cache and the reader,
-/// which stops when the last clone is dropped.
+/// every release is asked for again.
+///
+/// Misses for one key share one call to the secrets service while it is on
+/// its way. The call runs apart from whoever started it, so it lands for the
+/// rest when that caller leaves, and each caller still stops waiting at its
+/// own deadline. A failed call fails everyone waiting on it and is not held,
+/// so the next miss asks again. A miss never joins a call an invalidation
+/// already overtook. Clones share the cache, the calls on their way, and the
+/// reader, which stops once the last clone is dropped and every call on its
+/// way has landed.
 ///
 /// It counts, on the `trogon-secrets-client` meter, each time its reader
 /// loses its place and each release it serves without holding because the
@@ -40,6 +50,7 @@ use super::{
 pub struct CachedReleaseClient<N, C: GetElapsed> {
     client: ReleaseClient<N, C>,
     cache: Arc<Mutex<ReleaseCache<C>>>,
+    flights: Arc<Mutex<ReleaseFlights>>,
     metrics: ReleaseCacheMetrics,
     _reader: Arc<InvalidationReader>,
 }
@@ -87,13 +98,15 @@ where
         Ok(Self {
             client,
             cache,
+            flights: Arc::default(),
             metrics,
             _reader: Arc::new(reader),
         })
     }
 
     /// The copy held for `release`, or what the secrets service releases for
-    /// it now.
+    /// it now, through the call already on its way for the same key when
+    /// there is one.
     ///
     /// A release that was on its way when an invalidation covered its
     /// credential, or when the reader lost or regained its place, may carry
@@ -110,27 +123,56 @@ where
             .ok_or(ReleaseError::Invalidated)
     }
 
-    /// The copy held under `key`, or a release fetched now, or nothing when
-    /// that release was overtaken on its way.
+    /// The copy held under `key`, or what the call on its way for `key` lands
+    /// with, or nothing when that call was overtaken on its way.
     async fn held_or_fetched(
         &self,
         release: &ReleaseRequest,
         key: &ReleaseCacheKey,
     ) -> Result<Option<ReleasedValue>, ReleaseError> {
-        let ticket = {
+        let flight = {
             let mut cache = self.cache();
             if let Some(held) = cache.get(key, self.client.clock().system_time()) {
                 return Ok(Some(held));
             }
-            cache.ticket()
+            let mut flights = self.flights();
+            let joined = flights
+                .get(key)
+                .filter(|flight| cache.is_current(flight.ticket(), key))
+                .cloned();
+            match joined {
+                Some(flight) => flight,
+                None => {
+                    let ticket = cache.ticket();
+                    let fetching = self.clone();
+                    let release = release.clone();
+                    let landing_key = key.clone();
+                    flights.board(key.clone(), ticket, move |id| {
+                        fetching.fetch(release, landing_key, ticket, id)
+                    })
+                }
+            }
         };
-        let released = self.client.release(release).await?;
+        flight.landed().await
+    }
+
+    /// Asks the secrets service for `release` as call `id` for `key`, and
+    /// holds what it releases unless an invalidation since `ticket` overtook
+    /// it.
+    ///
+    /// The call leaves the board under the cache's lock, so a miss finds
+    /// either the call still on its way or what it left in the cache.
+    async fn fetch(self, release: ReleaseRequest, key: ReleaseCacheKey, ticket: u64, id: u64) -> Landed {
+        let landing = ReleaseFlightLanding::new(Arc::clone(&self.flights), key.clone(), id);
+        let fetched = self.client.release(&release).await;
         let mut cache = self.cache();
-        if !cache.is_current(ticket, key) {
+        drop(landing);
+        let released = fetched?;
+        if !cache.is_current(ticket, &key) {
             return Ok(None);
         }
         let now = self.client.clock().system_time();
-        if cache.put(ticket, key.clone(), released.clone(), now) == ReleaseHold::Full {
+        if cache.put(ticket, key, released.clone(), now) == ReleaseHold::Full {
             self.metrics.record_capacity_skip();
             if let Some(turned_away) = cache.capacity_warning() {
                 let capacity = cache.capacity();
@@ -150,8 +192,13 @@ where
         self.cache().mode()
     }
 
-    fn cache(&self) -> std::sync::MutexGuard<'_, ReleaseCache<C>> {
+    fn cache(&self) -> MutexGuard<'_, ReleaseCache<C>> {
         self.cache.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The calls on their way; taken only while the cache is, never alone.
+    fn flights(&self) -> MutexGuard<'_, ReleaseFlights> {
+        self.flights.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
