@@ -293,6 +293,7 @@ mod tool_use_id;
 mod tool_view;
 mod transcript_mirror;
 mod transport;
+mod transport_cause;
 mod ui_host;
 mod urlopen_retriever;
 mod urlopen_retriever_options;
