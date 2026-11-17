@@ -7,27 +7,36 @@ on:
 permissions:
   contents: read
 
+env:
+  FETCH_LIB: rsworkspace/crates/platform/trogon-claude-agent-sdk/.config/mise/lib/claude-sdk-freshness
+  NATIVE_LIB: oracle-recording/native
+  R3_NATIVE: "1"
+
 jobs:
-  record:
+  refit:
+    # Every fit unit natively: the host's own platform, real spawned programs (the real plutil on darwin, a real
+    # reg.exe at the WSL path on linux) and the real clock, once as the first call of a process and once as a call
+    # within the 30-minute window after it.
     strategy:
       fail-fast: false
       matrix:
         host:
-          # Unix: the handed-over managed settings passes, then the record of each entry the margin rounds moved,
-          # at its committed margin, every default-flag run giving the side's answer.
-          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|mg8x:)" }
-          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|mg8x:)" }
-        shard: [1]
+          - { runner: macos-latest, label: darwin-arm64 }
+          - { runner: ubuntu-latest, label: linux-x64 }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64 }
+        call: [first, second]
+        shard: [1, 2, 3, 4]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360
     defaults:
       run:
         shell: bash
     env:
-      LIB: rsworkspace/crates/platform/trogon-claude-agent-sdk/.config/mise/lib/claude-sdk-freshness
+      R3_CALL: ${{ matrix.call }}
+      R3_DISCOVERY: "1"
+      R3_ONLY: "^(?!(band8|band8c|band8x|mg8x|mg8):)"
       SHARD: ${{ matrix.shard }}
-      SHARDS: ${{ matrix.host.shards }}
-      R3_ONLY: ${{ matrix.host.only }}
+      SHARDS: "4"
       R3_BAND_RUNS: "50"
       R3_ROUND4_PASSES: "60"
       R5_TOPUP_RUNS: "50"
@@ -50,37 +59,116 @@ jobs:
           } >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/out"
 
+      - name: Install reg.exe at the WSL path
+        if: runner.os == 'Linux'
+        run: |
+          command -v rustc >/dev/null || { sudo apt-get update && sudo apt-get install -y rustc; }
+          rustc --edition 2021 -O -o "$RUNNER_TEMP/reg.exe" "$NATIVE_LIB/registry_stand_in.rs"
+          sudo install -D -m 0755 "$RUNNER_TEMP/reg.exe" /mnt/c/Windows/System32/reg.exe
+
       - name: Describe the host
         run: |
           {
-            node -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8})'
+            node -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8, now: Date.now()})'
             "$PY" --version
             uname -a || true
+            ls -l /mnt/c/Windows/System32/reg.exe /usr/bin/plutil 2>/dev/null || true
           } | tee "$OUT/host.txt"
 
       - name: Fetch the pinned package
         run: |
-          "$PY" -I "$LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
+          "$PY" -I "$FETCH_LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
 
-      - name: Build the Windows stand-ins
-        if: runner.os == 'Windows'
+      - name: Fit every unit natively
         run: |
-          rustc --edition 2021 -O -o "$RUNNER_TEMP/stand_in.exe" oracle-recording/stand_in.rs
-          rustc --edition 2021 -O -o "$RUNNER_TEMP/registry_stand_in.exe" "$LIB/registry_stand_in.rs"
-          {
-            echo "STUB=$RUNNER_TEMP/stand_in.exe"
-            echo "REGISTRY_STAND_IN=$RUNNER_TEMP/registry_stand_in.exe"
-          } >> "$GITHUB_ENV"
-
-      - name: Find the handed-over classes and record the managed goldens
-        run: |
-          "$PY" -I oracle-recording/r3.py "$LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/r3.json" "$SHARD" "$SHARDS" 2> >(tee "$OUT/r3.log" >&2)
+          "$PY" -I oracle-recording/r3.py "$NATIVE_LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/r3.json" "$SHARD" "$SHARDS" 2> >(tee "$OUT/r3.log" >&2)
 
       - name: Keep the oracle output
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mg8x-${{ matrix.host.label }}-${{ matrix.shard }}
+          name: native-refit-${{ matrix.host.label }}-${{ matrix.call }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 7
+
+  goldens:
+    # Every golden recorder natively, through record.py, starting from the committed golden of the host so each
+    # change shows as a diff.
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - { runner: macos-latest, label: darwin-arm64, suffix: "" }
+          - { runner: ubuntu-latest, label: linux-x64, suffix: _linux_x64 }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64, suffix: _linux_arm64 }
+        call: [first, second]
+    runs-on: ${{ matrix.host.runner }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      R3_CALL: ${{ matrix.call }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.13.1
+
+      - name: Locate tools
+        run: |
+          {
+            if command -v python3 >/dev/null; then echo "PY=python3"; else echo "PY=python"; fi
+            echo "NODE_BIN=$(node -p 'process.execPath')"
+            echo "OUT=$RUNNER_TEMP/out"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/out/goldens"
+
+      - name: Describe the host
+        run: |
+          {
+            node -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8, now: Date.now()})'
+            "$PY" --version
+            uname -a || true
+          } | tee "$OUT/host.txt"
+
+      - name: Fetch the pinned packages
+        run: |
+          "$PY" -I "$FETCH_LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
+          "$PY" -I "$FETCH_LIB/fetch_pinned_python.py" "$RUNNER_TEMP/python"
+          "$PY" -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/venv/bin/python" --version | tee -a "$OUT/host.txt"
+
+      - name: Record every golden natively
+        run: |
+          failed=0
+          record() {
+            local recorder="$1" golden="$2"
+            cp "$NATIVE_LIB/committed/$golden" "$OUT/goldens/$golden"
+            if ! "$RUNNER_TEMP/venv/bin/python" -I "$NATIVE_LIB/record.py" "$recorder" "$OUT/goldens/$golden.tally.json" \
+                "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/goldens/$golden" 2> >(tee "$OUT/goldens/$golden.log" >&2); then
+              echo "$recorder failed" | tee -a "$OUT/goldens/failures.txt"
+              failed=1
+            fi
+            diff -u "$NATIVE_LIB/committed/$golden" "$OUT/goldens/$golden" > "$OUT/goldens/$golden.diff" || true
+          }
+          record ts_settings_depth_goldens.py "ts_settings_depth${{ matrix.host.suffix }}.json"
+          record ts_managed_settings_goldens.py "ts_managed_settings${{ matrix.host.suffix }}.json"
+          record ts_settings_merge_goldens.py ts_settings_merge.json
+          record ts_settings_file_goldens.py ts_settings_files.json
+          record settings_stand_in_goldens.py settings_stand_ins.json
+          exit "$failed"
+
+      - name: Keep the recorded goldens
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-goldens-${{ matrix.host.label }}-${{ matrix.call }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 7

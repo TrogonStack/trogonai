@@ -50,6 +50,7 @@ try:
 finally:
     sys.argv = saved
 D, MANAGED = R2["D"], R2["MANAGED"]
+GATE = D["GATE"]
 HOST, WINDOWS, DARWIN = D["HOST"], D["WINDOWS"], sys.platform == "darwin"
 REF, CROSS = R2["REF"], R2["CROSS"]
 probe_flags, DEFAULT_FLAGS = D["probe_flags"], D["DEFAULT_FLAGS"]
@@ -713,7 +714,7 @@ def top_spec(name, files):
         os.makedirs(os.path.join(root, folder))
     for source, text in files:
         write(os.path.join(root, DEPTH["PLACES"][source]), text)
-    spec = {"root": root, "platform": "linux", "env": {"HOME": os.path.join(root, "home")}, "deep": True,
+    spec = {"root": root, "platform": sys.platform, "env": {"HOME": os.path.join(root, "home")}, "deep": True,
             "cases": [{"name": name, "options": {"cwd": os.path.join(root, "work")}}]}
     path = os.path.join(DEPTH["FOLDER"], name + ".spec.json")
     with open(path, "w", encoding="utf-8") as handle:
@@ -1639,7 +1640,7 @@ def r8_spec(label, document, root):
     for folder in ("home/.claude", "work"):
         os.makedirs(os.path.join(root, folder), exist_ok=True)
     write(os.path.join(root, "home/.claude/settings.json"), '{"u":[null]}')
-    spec = {"root": root, "platform": "linux", "env": {"HOME": os.path.join(root, "home")}, "deep": True,
+    spec = {"root": root, "platform": sys.platform, "env": {"HOME": os.path.join(root, "home")}, "deep": True,
             "cases": [{"name": "case", "options": {"cwd": os.path.join(root, "work"), R8_LABELS[label][0]: "@DOC@"}}]}
     text = json.dumps(spec)
     if text.count('"@DOC@"') != 1:
@@ -2772,8 +2773,51 @@ def round8_units():
 
 
 
+def plutil_depth_unit(shape):
+    """The deepest XML plist the real /usr/bin/plutil converts to JSON (the darwin read, sdk.mjs 0.3.323 line 136
+    col 804652: `plutil -convert json -o - --`), with `shape` `o` (objects) or `a` (arrays) closed by `true`."""
+    def converts(level, folder):
+        if shape == "o":
+            body = "<dict><key>x</key>" * (level - 1) + "<true/>" + "</dict>" * (level - 1)
+        else:
+            body = "<array>" * level + "<true/>" + "</array>" * level
+        location = os.path.join(folder, f"{level}.plist")
+        with open(location, "w", encoding="utf-8") as handle:
+            handle.write('<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">' + body + "</plist>\n")
+        try:
+            run = subprocess.run(["/usr/bin/plutil", "-convert", "json", "-o", "-", "--", location],
+                                 capture_output=True, timeout=60)
+        finally:
+            os.remove(location)
+        return run.returncode == 0, run.stderr.decode("utf-8", "replace")[-300:]
+
+    def go(pool, quiet):
+        folder = tempfile.mkdtemp(prefix="p")
+        try:
+            low, high = 1, 1
+            while converts(high, folder)[0]:
+                low, high = high, high * 2
+                if high > 1 << 20:
+                    return {"shape": shape, "max_converted": None, "note": "converts past 2^20 levels"}
+            while high - low > 1:
+                middle = (low + high) // 2
+                if converts(middle, folder)[0]:
+                    low = middle
+                else:
+                    high = middle
+            around = {level: converts(level, folder)[0] for level in range(max(1, low - 8), high + 9)}
+            return {"shape": shape, "max_converted": low, "first_rejected": high,
+                    "rejected_stderr": converts(high, folder)[1], "around": around,
+                    "monotone_around": all(ok == (level <= low) for level, ok in around.items())}
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+    return go
+
+
 def units():
     out = [(f"proto:{o}", proto_unit(o)) for o in "ESOM"]
+    if DARWIN and GATE["NATIVE"]:
+        out += [(f"plutil_depth:{shape}", plutil_depth_unit(shape)) for shape in "oa"]
     if not WINDOWS:
         out += [(f"leaf:{leaf}", leaf_unit(leaf)) for leaf in LEAVES]
         # held:fs:walk measures the walk with null_array, which the other leaves are measured against.
@@ -2806,7 +2850,8 @@ def units():
 
 def main():
     version = subprocess.run([NODE, "--version"], capture_output=True, check=True).stdout.decode().strip()
-    result = {"host": HOST, "node": version, "shard": SHARD, "shards": SHARDS, "machine": machine(), "units": {}}
+    result = {"host": HOST, "node": version, "shard": SHARD, "shards": SHARDS, "machine": machine(), "units": {},
+              "native": {"enabled": GATE["NATIVE"], "call": GATE["CALL"], "platform": sys.platform}}
     R8_STATE["units"] = result["units"]
     started = time.time()
     only = __import__("re").compile(os.environ["R3_ONLY"]) if os.environ.get("R3_ONLY") else None
@@ -2816,14 +2861,25 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as pool, \
             concurrent.futures.ThreadPoolExecutor(max_workers=QUIET) as quiet:
         for name, go in chosen:
+            tally = GATE["snapshot"]()
             try:
                 result["units"][name] = go(pool, quiet)
             except Exception as error:  # a unit that cannot finish reports why and the next one runs
                 result["units"][name] = {"error": repr(error)}
+            if GATE["NATIVE"]:
+                # What every oracle run of the unit reported; a unit whose runs broke a check failed with them.
+                assertion = GATE["delta"](tally, GATE["snapshot"]())
+                result["units"][name]["native_assertion"] = assertion
+                if (assertion["violations"] or assertion["refusals"]) and "error" not in result["units"][name]:
+                    result["units"][name]["error"] = f"native runs failed their checks: {assertion['refusals']} " \
+                                                     f"{assertion['violations'][:5]}"
             result["units"][name]["seconds"] = round(time.time() - started)
             with open(OUT, "w", encoding="utf-8") as handle:
                 json.dump(result, handle)
             brief = {k: v for k, v in result["units"][name].items() if k in ("class", "startup_max", "budget", "error", "changes", "edge_guess", "profile", "window", "room_at_class")}
+            if GATE["NATIVE"]:
+                native = result["units"][name]["native_assertion"]
+                brief["native"] = {key: native[key] for key in ("runs", "platforms", "spawns", "refusals")}
             sys.stderr.write(f"{name} {json.dumps(brief)[:600]}\n")
             sys.stderr.flush()
     shutil.rmtree(D["SCRATCH"], ignore_errors=True)

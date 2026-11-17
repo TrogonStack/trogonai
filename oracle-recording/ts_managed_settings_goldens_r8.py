@@ -111,11 +111,14 @@ REFERENCE_FLAGS = ["--no-opt", "--no-maglev", "--no-sparkplug"]
 CROSS_CHECK_FLAGS = ["--no-concurrent-recompilation", "--no-concurrent-osr", "--no-concurrent-sparkplug"]
 ENSURE_ASCII = True
 
+# Where upstream reads the machine-wide managed settings on this host (MYe, sdk.mjs 0.3.323 line 146 col 23907).
+MANAGED_FOLDER = {"darwin": "Library/Application Support/ClaudeCode", "win32": "Program Files/ClaudeCode"}.get(
+    sys.platform, "etc/claude-code")
 PLACES = {
     "user": "home/.claude/settings.json",
-    "managed": "etc/claude-code/managed-settings.json",
-    "drop_a": "etc/claude-code/managed-settings.d/a.json",
-    "drop_b": "etc/claude-code/managed-settings.d/b.json",
+    "managed": f"{MANAGED_FOLDER}/managed-settings.json",
+    "drop_a": f"{MANAGED_FOLDER}/managed-settings.d/a.json",
+    "drop_b": f"{MANAGED_FOLDER}/managed-settings.d/b.json",
     "hklm": "mnt/c/Windows/System32/hklm.txt",
 }
 USER = ["user", '{"u":[null]}']
@@ -155,7 +158,7 @@ ORG_STEPS = [
 ]
 # The steps of the organization cases that show which reading stays in force once the second resolve runs out: that
 # resolve also finds a drop-in the first did not.
-KEPT_DROP = "etc/claude-code/managed-settings.d/k.json"
+KEPT_DROP = f"{MANAGED_FOLDER}/managed-settings.d/k.json"
 KEPT_STEPS = [ORG_STEPS[0], {**ORG_STEPS[1], "files": {**ORG_STEPS[1]["files"], KEPT_DROP: '{"permissions":{"deny":["Bash(dd:*)"]}}'}}]
 HELD_REGISTRY = ["hklm", '{"permissions":{"deny":["Bash(curl:*)"]},"allowedMcpServers":[{"serverName":"h"}]}']
 ORG_LEVELS = (1300, 2300)
@@ -545,7 +548,7 @@ def prepare(name, files, folder=None):
             write(os.path.join(root, PLACES[file[0]]), registry_text(text) if file[0] == "hklm" else text)
     spec = {
         "root": root,
-        "platform": "linux",
+        "platform": sys.platform,
         "env": {"HOME": os.path.join(root, "home")},
         "deep": True,
         "cases": [{"name": name, "options": options}],

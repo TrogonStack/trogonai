@@ -103,6 +103,8 @@ def project(answered, root):
 # Sites: what the host holds beside the case files, which sets the last thing resolveSettings awaits before it
 # evaluates the settings. Each names the deliveries of a spawned program's end it is run with.
 def wsl(root, spec, hklm, hkcu=None, held=None):
+    # WSL is a linux path: another host refuses it natively instead of reading the case as its own platform.
+    spec["platform"] = "linux"
     spec["env"]["WSL_DISTRO_NAME"] = "Ubuntu"
     folder = os.path.join(root, SYSTEM32)
     tool(folder, "reg.exe", REG_SH)

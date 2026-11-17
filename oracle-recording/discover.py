@@ -41,6 +41,11 @@ if WINDOWS and not started({"PAD": "x"}):
 
 
 ORACLE_NAME = "resolve_settings_oracle.mjs"
+# The native run check (R3_NATIVE=1): the platform, real clock and spawned programs every oracle run reports.
+GATE = {"__name__": "gate"}
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "native", "gate.py"), encoding="utf-8") as handle:
+    exec(compile(handle.read(), "gate.py", "exec"), GATE)
+NATIVE = GATE["NATIVE"]
 # The startup budget the last `pad` on this thread sized PAD for, with the command it sized it for.
 PADDED = threading.local()
 
@@ -89,7 +94,10 @@ def spawn(command, env, unpadded=False, **kwargs):
                                f"PAD was sized for: {sorted(env)}")
     elif not unpadded:
         raise RuntimeError("a probe starts Node without PAD and does not say that it records Node's defaults")
-    return subprocess.run(command, env={**env, **EXTRA_ENV}, **kwargs)
+    native = GATE["before"](command)
+    process = subprocess.run(command, env={**env, **EXTRA_ENV}, **kwargs)
+    GATE["after"](native)
+    return process
 
 
 class Spawner:
@@ -236,8 +244,11 @@ def registry_spec(place, key, shape, n, root):
     if place == "plist":
         spec["platform"] = "darwin"
         tool(os.path.join(root, "usr/bin"), "plutil", PLUTIL_SH)
+        document = '{"permissions":{"deny":["Bash(rm:*)"]},"' + key + '":' + deep(shape, n) + "}"
+        # A managed preferences plist cannot hold null, so a native run closes the document with `true` leaves, the
+        # same length; the native oracle hands it to the real plutil as an XML plist.
         write(os.path.join(root, "Library/Managed Preferences/com.anthropic.claudecode.plist"),
-              '{"permissions":{"deny":["Bash(rm:*)"]},"' + key + '":' + deep(shape, n) + "}")
+              document.replace("null", "true") if NATIVE else document)
     else:
         tool(system32, "reg.exe", REG_SH)
         if place == "hklm":
