@@ -850,11 +850,13 @@ async fn persisted_command_snapshot_round_trips_and_survives_reopening() {
         .unwrap();
     let info = store.event_store.events_stream().get_info().await.unwrap();
     assert_eq!(info.state.last_sequence, result.stream_position.as_u64());
+    let expected_payload = result.state.as_ref().clone();
+    let snapshot_payload: state_v1::State = result.state.into();
     store
         .event_store
         .write_snapshot(WriteSnapshotRequest {
             snapshot_id: &id,
-            snapshot: Snapshot::new(result.stream_position, result.state.clone()),
+            snapshot: Snapshot::new(result.stream_position, snapshot_payload),
         })
         .await
         .unwrap();
@@ -873,7 +875,7 @@ async fn persisted_command_snapshot_round_trips_and_survives_reopening() {
         .unwrap();
     let snapshot = snapshot.snapshot.unwrap();
     assert_eq!(snapshot.position, result.stream_position);
-    assert_eq!(snapshot.payload, result.state);
+    assert_eq!(snapshot.payload, expected_payload);
 
     js.delete_key_value(trogon_scheduler::constants::COMMAND_SNAPSHOT_BUCKET)
         .await

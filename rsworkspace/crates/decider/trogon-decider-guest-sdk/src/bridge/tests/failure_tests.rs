@@ -40,10 +40,22 @@ struct AppendBatch {
     second: BatchEvent,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
 enum BatchState {
+    #[default]
     Empty,
     Applied,
+}
+
+impl Evolve<BatchEvent> for BatchState {
+    type Error = FixtureEvolveError;
+
+    fn evolve(self, event: &BatchEvent) -> Result<Self, Self::Error> {
+        match event {
+            BatchEvent::InvalidTransition => Err(FixtureEvolveError),
+            BatchEvent::Valid | BatchEvent::InvalidEncoding | BatchEvent::InvalidType => Ok(Self::Applied),
+        }
+    }
 }
 
 impl Decider for AppendBatch {
@@ -51,22 +63,10 @@ impl Decider for AppendBatch {
     type State = BatchState;
     type Event = BatchEvent;
     type DecideError = std::convert::Infallible;
-    type EvolveError = FixtureEvolveError;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &str {
         "batch"
-    }
-
-    fn initial_state() -> Self::State {
-        BatchState::Empty
-    }
-
-    fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        match event {
-            BatchEvent::InvalidTransition => Err(FixtureEvolveError),
-            BatchEvent::Valid | BatchEvent::InvalidEncoding | BatchEvent::InvalidType => Ok(BatchState::Applied),
-        }
     }
 
     fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
