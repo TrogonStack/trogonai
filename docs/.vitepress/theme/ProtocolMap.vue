@@ -11,32 +11,40 @@ const markerId = useId();
 const conversations = {
   All: {
     title: "Follow the work through its conversations",
+    sender: "Caller",
+    receiver: "Agent or server",
     request: "A client prompts an agent. The agent can delegate work or call a tool.",
     response: "Session updates, task results and tool output return through their own protocols.",
   },
   ACP: {
     title: "Work with an agent from your client",
+    sender: "Editor or client",
+    receiver: "Your agent",
     request: "The editor sends a prompt or manages an agent session.",
-    response: "The agent streams updates and can ask the client for permission, files or terminal operations.",
+    response: "The agent returns prompt results and streams session updates to the client.",
   },
   A2A: {
     title: "Hand work to another agent",
+    sender: "Your agent",
+    receiver: "Another agent",
     request: "Your agent sends a message or follows a task with another agent.",
     response: "The other agent reports task progress, results and artifacts.",
   },
   MCP: {
     title: "Bring tools and context into the work",
+    sender: "AI application",
+    receiver: "MCP server",
     request: "The AI application calls a tool, reads a resource or retrieves a prompt.",
     response: "The MCP server returns the requested tool result or context.",
   },
-} satisfies Record<Focus, { title: string; request: string; response: string }>;
+} satisfies Record<Focus, { title: string; sender: string; receiver: string; request: string; response: string }>;
 
 const conversation = computed(() => conversations[selected.value]);
 const isActive = (protocol: Protocol) => selected.value === "All" || selected.value === protocol;
-const connections: Array<{ protocol: Protocol; path: string }> = [
-  { protocol: "ACP", path: "M 240 200 H 380" },
-  { protocol: "A2A", path: "M 620 200 C 700 200 680 80 760 80" },
-  { protocol: "MCP", path: "M 620 200 C 700 200 680 320 760 320" },
+const connections: Array<{ protocol: Protocol; request: string; response: string }> = [
+  { protocol: "ACP", request: "M 240 188 H 380", response: "M 380 212 H 240" },
+  { protocol: "A2A", request: "M 620 176 C 690 176 690 68 760 68", response: "M 760 92 C 710 92 710 200 620 200" },
+  { protocol: "MCP", request: "M 620 224 C 710 224 690 308 760 308", response: "M 760 332 C 690 332 710 248 620 248" },
 ];
 </script>
 
@@ -58,10 +66,15 @@ const connections: Array<{ protocol: Protocol; path: string }> = [
       </div>
     </div>
 
+    <div class="protocol-map__legend" aria-label="Solid arrows show requests; dashed arrows show responses">
+      <span><i class="protocol-map__legend-line" aria-hidden="true" /> Request</span>
+      <span><i class="protocol-map__legend-line is-response" aria-hidden="true" /> Response</span>
+    </div>
+
     <div class="protocol-map__stage">
       <svg class="protocol-map__wires" viewBox="0 0 1000 400" preserveAspectRatio="none" aria-hidden="true">
         <defs>
-          <marker :id="markerId" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <marker :id="markerId" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5" markerHeight="5" orient="auto">
             <path d="M 1 1 L 6 4 L 1 7" fill="none" stroke="context-stroke" stroke-width="1.4" />
           </marker>
         </defs>
@@ -70,14 +83,11 @@ const connections: Array<{ protocol: Protocol; path: string }> = [
           :key="connection.protocol"
           :class="['protocol-map__connection', `is-${connection.protocol.toLowerCase()}`, { 'is-muted': !isActive(connection.protocol) }]"
         >
-          <path class="protocol-map__wire-glow" :d="connection.path" />
-          <path
-            class="protocol-map__wire"
-            :d="connection.path"
-            :marker-start="`url(#${markerId})`"
-            :marker-end="`url(#${markerId})`"
-          />
-          <path class="protocol-map__packets" :d="connection.path" />
+          <g v-for="direction in (['request', 'response'] as const)" :key="direction" :class="`is-${direction}`">
+            <path class="protocol-map__wire-glow" :d="connection[direction]" />
+            <path class="protocol-map__wire" :d="connection[direction]" :marker-end="`url(#${markerId})`" />
+            <path class="protocol-map__packets" :d="connection[direction]" />
+          </g>
         </g>
       </svg>
 
@@ -117,28 +127,48 @@ const connections: Array<{ protocol: Protocol; path: string }> = [
       >{{ protocol }}</span>
 
       <div :class="['protocol-map__mobile-acp', 'is-acp', { 'is-muted': !isActive('ACP') }]" aria-hidden="true">
-        <span>ACP <Icon name="reply" :size="12" /></span>
+        <i class="protocol-map__mobile-rail is-request" />
+        <i class="protocol-map__mobile-rail is-response" />
+        <span>ACP</span>
       </div>
       <div class="protocol-map__mobile-branch" aria-hidden="true">
         <div
           v-for="protocol in (['A2A', 'MCP'] as const)"
           :key="protocol"
           :class="['protocol-map__mobile-edge', `is-${protocol.toLowerCase()}`, { 'is-muted': !isActive(protocol) }]"
-        ><span>{{ protocol }} <Icon name="reply" :size="12" /></span></div>
+        >
+          <i class="protocol-map__mobile-rail is-request" />
+          <i class="protocol-map__mobile-rail is-response" />
+          <span>{{ protocol }}</span>
+        </div>
       </div>
     </div>
 
     <div :class="['protocol-map__detail', `is-${selected.toLowerCase()}`]" aria-live="polite" aria-atomic="true">
       <strong>{{ conversation.title }}</strong>
       <div class="protocol-map__exchange">
-        <p><span><Icon name="send" :size="14" /> Request</span>{{ conversation.request }}</p>
-        <p><span><Icon name="reply" :size="14" /> Return</span>{{ conversation.response }}</p>
+        <div v-for="direction in (['request', 'response'] as const)" :key="direction" :class="['protocol-map__lane', `is-${direction}`]">
+          <div
+            class="protocol-map__lane-route"
+            role="group"
+            :aria-label="direction === 'request' ? `Request from ${conversation.sender} to ${conversation.receiver}` : `Response from ${conversation.receiver} to ${conversation.sender}`"
+          >
+            <strong>{{ conversation.sender }}</strong>
+            <span class="protocol-map__lane-arrow">
+              <span>{{ direction === 'request' ? 'Request' : 'Response' }}</span>
+              <i aria-hidden="true" />
+            </span>
+            <strong>{{ conversation.receiver }}</strong>
+          </div>
+          <p>{{ conversation[direction] }}</p>
+        </div>
       </div>
     </div>
 
     <figcaption>
-      Each line is a separate conversation carried over NATS by its protocol
+      Each pair of arrows is a conversation carried over NATS by its protocol
       adapters. The agent application decides when to delegate work or use a tool.
+      Callbacks and notifications follow their protocol's lifecycle.
     </figcaption>
   </figure>
 </template>
@@ -214,6 +244,13 @@ const connections: Array<{ protocol: Protocol; path: string }> = [
   outline-offset: 3px;
 }
 
+.protocol-map__legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; padding: 18px 16px 0; color: var(--vp-c-text-2); font-size: 11px; }
+.protocol-map__legend > span { display: inline-flex; align-items: center; gap: 10px; }
+.protocol-map__legend-line { position: relative; width: 36px; border-top: 2px solid var(--vp-c-text-2); }
+.protocol-map__legend-line::after { position: absolute; top: -5px; right: 0; width: 7px; height: 7px; border-top: 2px solid; border-right: 2px solid; transform: rotate(45deg); content: ""; }
+.protocol-map__legend-line.is-response { border-top-style: dashed; }
+.protocol-map__legend-line.is-response::after { right: auto; left: 0; transform: rotate(-135deg); }
+
 .protocol-map__stage {
   position: relative;
   height: 430px;
@@ -227,6 +264,7 @@ const connections: Array<{ protocol: Protocol; path: string }> = [
 .protocol-map__connection path { fill: none; stroke: var(--connection); vector-effect: non-scaling-stroke; }
 .protocol-map__wire-glow { stroke-width: 9; opacity: 0.08; }
 .protocol-map__wire { stroke-width: 1.6; opacity: 0.6; }
+.is-response .protocol-map__wire { stroke-dasharray: 5 5; }
 .protocol-map__packets { stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 28; animation: protocol-packets 3s linear infinite; }
 .is-a2a .protocol-map__packets { animation-delay: -1s; }
 .is-mcp .protocol-map__packets { animation-delay: -2s; }
@@ -303,9 +341,17 @@ const connections: Array<{ protocol: Protocol; path: string }> = [
 
 .protocol-map__detail { display: flex; flex-direction: column; gap: 14px; padding: 22px 24px; border-top: 1px solid var(--vp-c-divider); background: var(--vp-c-bg-soft); }
 .protocol-map__detail > strong { color: var(--vp-c-text-1); font-size: 15px; line-height: 1.5; }
-.protocol-map__exchange { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-.protocol-map__exchange p { display: flex; flex-direction: column; gap: 6px; margin: 0; color: var(--vp-c-text-2); font-size: 13px; line-height: 1.6; }
-.protocol-map__exchange p > span { display: flex; align-items: center; gap: 6px; color: color-mix(in srgb, var(--connection) 85%, var(--vp-c-text-1)); font-size: 11px; font-weight: 700; }
+.protocol-map__exchange { display: grid; gap: 12px; }
+.protocol-map__lane { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--vp-c-divider); border-radius: 14px; background: var(--vp-c-bg); }
+.protocol-map__lane-route { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 1.3fr) minmax(0, 1fr); align-items: center; gap: 16px; }
+.protocol-map__lane-route > strong { color: var(--vp-c-text-1); font-size: 12px; font-weight: 600; line-height: 1.5; }
+.protocol-map__lane-route > strong:last-child { text-align: right; }
+.protocol-map__lane-arrow { display: flex; flex-direction: column; gap: 8px; color: color-mix(in srgb, var(--connection) 85%, var(--vp-c-text-1)); text-align: center; font-size: 11px; font-weight: 700; }
+.protocol-map__lane-arrow i { position: relative; width: 100%; border-top: 2px solid; }
+.protocol-map__lane-arrow i::after { position: absolute; top: -5px; right: 0; width: 7px; height: 7px; border-top: 2px solid; border-right: 2px solid; transform: rotate(45deg); content: ""; }
+.is-response .protocol-map__lane-arrow i { border-top-style: dashed; }
+.is-response .protocol-map__lane-arrow i::after { right: auto; left: 0; transform: rotate(-135deg); }
+.protocol-map__lane p { margin: 0; color: var(--vp-c-text-2); font-size: 13px; line-height: 1.6; }
 .protocol-map figcaption { padding: 16px 24px; border-top: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); font-size: 11px; line-height: 1.7; }
 
 @keyframes protocol-packets { to { stroke-dashoffset: -120; } }
@@ -322,19 +368,26 @@ const connections: Array<{ protocol: Protocol; path: string }> = [
   .protocol-map__node strong { font-size: 13px; }
   .protocol-map__agent strong { font-size: 20px; }
   .protocol-map__mobile-acp { position: relative; display: grid; grid-column: 1 / -1; grid-row: 2; place-items: center; }
-  .protocol-map__mobile-acp::before { position: absolute; inset: 0 auto 0 50%; width: 2px; background: var(--acp); content: ""; opacity: 0.6; }
+  .protocol-map__mobile-rail { position: absolute; top: 0; bottom: 0; left: calc(50% - 12px); width: 0; border-left: 2px solid var(--connection); opacity: 0.75; }
+  .protocol-map__mobile-rail::after { position: absolute; bottom: 0; left: -5px; width: 7px; height: 7px; border-right: 2px solid var(--connection); border-bottom: 2px solid var(--connection); transform: rotate(45deg); content: ""; }
+  .protocol-map__mobile-rail.is-response { left: calc(50% + 12px); border-left-style: dashed; }
+  .protocol-map__mobile-rail.is-response::after { top: 0; bottom: auto; transform: rotate(-135deg); }
   .protocol-map__mobile-acp > span, .protocol-map__mobile-edge > span { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid color-mix(in srgb, var(--connection) 30%, var(--vp-c-divider)); border-radius: 999px; background: var(--vp-c-bg); color: var(--connection); font-size: 11px; font-weight: 700; }
   .protocol-map__mobile-branch { position: relative; display: grid; grid-template-columns: 1fr 1fr; grid-column: 1 / -1; grid-row: 4; column-gap: 16px; }
-  .protocol-map__mobile-branch::before { position: absolute; top: 20px; left: calc(25% - 4px); width: calc(50% + 8px); height: 1px; background: var(--vp-c-divider); content: ""; }
-  .protocol-map__mobile-branch::after { position: absolute; top: 0; left: 50%; width: 1px; height: 20px; background: var(--vp-c-divider); content: ""; }
+  .protocol-map__mobile-branch::before { position: absolute; top: 18px; left: calc(25% - 16px); width: calc(50% + 8px); height: 1px; background: var(--vp-c-divider); content: ""; }
+  .protocol-map__mobile-branch::after { position: absolute; top: 26px; left: calc(25% + 8px); width: calc(50% + 8px); height: 1px; border-top: 1px dashed var(--vp-c-text-3); content: ""; }
   .protocol-map__mobile-edge { position: relative; display: grid; align-items: center; justify-items: center; padding-top: 20px; transition: opacity 0.25s; }
-  .protocol-map__mobile-edge::before { position: absolute; top: 20px; bottom: 0; left: 50%; width: 2px; background: var(--connection); content: ""; opacity: 0.6; }
+  .protocol-map__mobile-edge .protocol-map__mobile-rail.is-request { top: 18px; }
+  .protocol-map__mobile-edge .protocol-map__mobile-rail.is-response { top: 26px; }
+  .protocol-map__mobile-branch { background: linear-gradient(var(--vp-c-divider), var(--vp-c-divider)) calc(50% - 12px) 0 / 1px 18px no-repeat, linear-gradient(var(--vp-c-text-3), var(--vp-c-text-3)) calc(50% + 12px) 0 / 1px 26px no-repeat; }
 }
 
 @media (max-width: 480px) {
   .protocol-map__toolbar { padding: 18px 16px; }
   .protocol-map__filter { padding: 5px 12px; }
-  .protocol-map__exchange { grid-template-columns: 1fr; gap: 14px; }
+  .protocol-map__lane { padding: 14px 12px; }
+  .protocol-map__lane-route { grid-template-columns: minmax(0, 1fr) minmax(56px, 0.8fr) minmax(0, 1fr); gap: 8px; }
+  .protocol-map__lane-route > strong { font-size: 11px; }
   .protocol-map__detail { min-height: 240px; padding: 20px 16px; }
   .protocol-map figcaption { padding: 16px; }
 }
