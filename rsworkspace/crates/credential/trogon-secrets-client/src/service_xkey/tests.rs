@@ -1,3 +1,6 @@
+use std::error::Error as _;
+
+use nkeys::error::ErrorKind;
 use nkeys::{KeyPair, XKey};
 
 use super::ServiceXkey;
@@ -7,7 +10,8 @@ use crate::ServiceXkeyError;
 fn refuses_a_value_that_is_not_a_key() {
     let error = ServiceXkey::from_public_key("fake-service-xkey").unwrap_err();
 
-    assert_eq!(error, ServiceXkeyError::NotACurvePublicKey);
+    assert!(matches!(&error, ServiceXkeyError::NotACurvePublicKey(source) if source.kind() == ErrorKind::CodecFailure));
+    assert!(error.source().is_some());
     assert_eq!(error.to_string(), "service xkey is not a curve public key");
 }
 
@@ -15,7 +19,7 @@ fn refuses_a_value_that_is_not_a_key() {
 fn refuses_a_public_key_that_is_not_a_curve_key() {
     let error = ServiceXkey::from_public_key(&KeyPair::new_account().public_key()).unwrap_err();
 
-    assert_eq!(error, ServiceXkeyError::NotACurvePublicKey);
+    assert!(matches!(error, ServiceXkeyError::NotACurvePublicKey(source) if source.kind() == ErrorKind::InvalidPrefix));
 }
 
 #[test]
@@ -24,7 +28,7 @@ fn refuses_a_curve_seed() {
 
     let error = ServiceXkey::from_public_key(&seed).unwrap_err();
 
-    assert_eq!(error, ServiceXkeyError::NotACurvePublicKey);
+    assert!(matches!(error, ServiceXkeyError::NotACurvePublicKey(source) if source.kind() == ErrorKind::InvalidPrefix));
 }
 
 #[test]
