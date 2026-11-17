@@ -1,5 +1,17 @@
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_rust", version = "0.75.0")
+
+# Build scripts that the coverage instrumentation filter excludes still compile
+# their C code with coverage, which embeds timestamps and changes every
+# downstream Rust cache key. Not reported upstream yet; drop the patch once
+# rules_rust skips coverage for uninstrumented build scripts.
+single_version_override(
+    module_name = "rules_rust",
+    patch_strip = 1,
+    patches = ["//.config/bazel:patches/rules_rust-native-coverage-filter.patch"],
+)
+
 bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "gazelle", version = "0.54.0")
@@ -70,6 +82,21 @@ kubernetes_json_schema(
 )
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+
+# C code compiled by build scripts embeds the sandbox path, which differs per
+# run, so downstream Rust cache keys never matched. The runner expands ${pwd};
+# rules_rust appends these to the C toolchain flags. Drop this once rules_rust
+# ships the same remapping:
+# https://github.com/bazelbuild/rules_rust/issues/4407
+# https://github.com/bazelbuild/rules_rust/pull/4408
+crate.annotation(
+    build_script_env = {
+        "CFLAGS": "-ffile-prefix-map=$${pwd}=.",
+        "CXXFLAGS": "-ffile-prefix-map=$${pwd}=.",
+    },
+    crate = "*",
+    repositories = ["crates"],
+)
 
 # Resolve Rust dependencies from the Cargo workspace lockfile. crate_universe
 # discovers workspace members from the root manifest.
@@ -183,8 +210,8 @@ go_sdk.wrap(root_file = "@mise_go//:ROOT")
 
 # Runs the go vet analyzers on every compile of the repository's own Go code.
 go_sdk.nogo(
-    nogo = "//goworkspace:nogo",
     includes = ["//goworkspace:__subpackages__"],
+    nogo = "//goworkspace:nogo",
 )
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")

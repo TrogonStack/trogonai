@@ -1,12 +1,12 @@
 use hydro_lang::prelude::*;
-use trogon_decider::{Decider, Events};
+use trogon_decider::{Decider, Events, Evolve};
 use trogon_scheduler_domain::domain::{
     Delivery, MessageContent, Schedule, ScheduleEventStatus, ScheduleHeaders, ScheduleId,
     ScheduleMessage,
 };
 use trogon_scheduler_domain::{
     CreateSchedule, CreateScheduleDecideError, PauseSchedule, PauseScheduleError, RemoveSchedule,
-    RemoveScheduleError, ResumeSchedule, ResumeScheduleError, evolve, initial_state,
+    RemoveScheduleError, ResumeSchedule, ResumeScheduleError, ScheduleState,
 };
 use trogonai_hydro_verification::{Command, Scheduler, client_orders};
 use trogonai_proto::scheduler::schedules::{ScheduleEventCase, state_v1, v1};
@@ -37,14 +37,14 @@ fn status(state: &state_v1::State) -> state_v1::StateValue {
 }
 
 struct History {
-    state: state_v1::State,
+    state: ScheduleState,
     events: Vec<v1::ScheduleEvent>,
 }
 
 impl History {
     fn empty() -> Self {
         Self {
-            state: initial_state(),
+            state: ScheduleState::default(),
             events: Vec::new(),
         }
     }
@@ -61,7 +61,7 @@ impl History {
         reject: impl FnOnce(C::DecideError),
     ) -> Option<Events<v1::ScheduleEvent>>
     where
-        C: Decider<State = state_v1::State, Event = v1::ScheduleEvent>,
+        C: Decider<State = ScheduleState, Event = v1::ScheduleEvent>,
     {
         match C::decide(&self.state, &command) {
             Ok(decision) => {
@@ -160,7 +160,7 @@ impl History {
         let replayed = self
             .events
             .iter()
-            .try_fold(initial_state(), evolve)
+            .try_fold(ScheduleState::default(), ScheduleState::evolve)
             .unwrap();
         assert_eq!(self.state, replayed);
     }
@@ -256,7 +256,7 @@ fn missing_schedule_commands_return_typed_rejections() {
             history.apply(*command);
         }
         assert!(history.events.is_empty());
-        assert_eq!(history.state, initial_state());
+        assert_eq!(history.state, ScheduleState::default());
     });
     eprintln!("missing schedule: {executions} Hydro executions of production deciders");
     assert!(executions > 1);

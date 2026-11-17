@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Run every Bazel test with coverage using the GitHub Actions caches"
+#MISE description="Run every Bazel test with coverage using the runner's Bazel cache"
 set -euo pipefail
 
 mkdir -p "${RUNNER_TEMP:?}/bazel-profiles"
@@ -12,6 +12,4 @@ exec bazel coverage \
   --config=coverage \
   --keep_going \
   --profile="$RUNNER_TEMP/bazel-profiles/coverage.profile.gz" \
-  --disk_cache="${RUNNER_TEMP:?}/bazel-disk-cache" \
-  --repository_cache="${RUNNER_TEMP:?}/bazel-repository-cache" \
   //...
