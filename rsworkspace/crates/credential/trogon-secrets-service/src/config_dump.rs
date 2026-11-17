@@ -19,8 +19,9 @@ use super::{
 /// with the error startup refuses it with, but it reads only the configuration
 /// file and the environment variables of the settings: no secret, no file a
 /// setting names, and no connection to NATS or OpenBao. A secret is shown by
-/// the reference it is read from, a secret given inline is redacted, and the
-/// credentials a NATS server address carries are redacted.
+/// the reference it is read from, a secret given inline is redacted, key
+/// material given where a NATS credentials or TLS file path belongs is
+/// redacted, and the credentials a NATS server address carries are redacted.
 #[derive(Clone, Debug)]
 pub struct ConfigDump {
     settings: Vec<ResolvedSetting>,
@@ -110,7 +111,23 @@ fn shown(setting: ConfigSetting, raw: Option<String>, config: &ServiceConfig) ->
             raw.parse::<SecretReference>()
                 .map_or(SettingValue::Redacted, SettingValue::Reference)
         }),
+        // These name a file, but key material pasted in place of the path
+        // would otherwise be printed as it is.
+        ConfigSetting::NatsCreds
+        | ConfigSetting::NatsTlsCert
+        | ConfigSetting::NatsTlsKey
+        | ConfigSetting::NatsTlsCa => raw.map_or(SettingValue::Unset, path),
         _ => raw.map_or(SettingValue::Unset, SettingValue::Shown),
+    }
+}
+
+/// A setting that names a file, shown as it is unless it holds inline
+/// material, a line break or a PEM block, which is redacted.
+fn path(value: String) -> SettingValue {
+    if value.contains(['\n', '\r']) || value.contains("-----BEGIN") {
+        SettingValue::Redacted
+    } else {
+        SettingValue::Shown(value)
     }
 }
 

@@ -441,6 +441,108 @@ fn the_credentials_a_nats_url_carries_are_never_printed() {
 }
 
 #[test]
+fn pem_text_given_for_the_nats_client_key_is_never_printed() {
+    for key in [
+        "-----BEGIN PRIVATE KEY-----\nfake-nats-client-key\n-----END PRIVATE KEY-----\n",
+        "-----BEGIN PRIVATE KEY-----fake-nats-client-key-----END PRIVATE KEY-----",
+    ] {
+        let env = complete_env();
+        env.set(ConfigSetting::NatsTlsCert.env(), "/etc/trogon/nats-client.pem");
+        env.set(ConfigSetting::NatsTlsKey.env(), key);
+
+        let printed = format!("{}", dumped(&args(&[]), &env, &files(None)));
+
+        assert_eq!(
+            printed,
+            COMPLETE_DUMP
+                .replace(
+                    "nats.tls_cert (NATS_CERT) = <unset> (from default)",
+                    "nats.tls_cert (NATS_CERT) = /etc/trogon/nats-client.pem (from environment)",
+                )
+                .replace(
+                    "nats.tls_key (NATS_KEY) = <unset> (from default)",
+                    "nats.tls_key (NATS_KEY) = <redacted> (from environment)",
+                ),
+            "{key:?}"
+        );
+    }
+}
+
+#[test]
+fn a_credentials_file_body_given_for_the_nats_credentials_is_never_printed() {
+    let creds = "\
+-----BEGIN NATS USER JWT-----
+fake-nats-user-jwt
+------END NATS USER JWT------
+
+-----BEGIN USER NKEY SEED-----
+fake-nats-user-seed
+------END USER NKEY SEED------
+";
+    let contents = FULL_FILE.replace(
+        r#"creds = "/etc/trogon/fake.creds""#,
+        &format!("creds = '''\n{creds}'''"),
+    );
+
+    let printed = format!(
+        "{}",
+        dumped(
+            &args(&["--config", CONFIG_PATH]),
+            &InMemoryEnv::new(),
+            &files(Some(&contents))
+        )
+    );
+
+    assert_eq!(
+        printed,
+        FULL_FILE_DUMP.replace(
+            "nats.creds (NATS_CREDS) = /etc/trogon/fake.creds (from file)",
+            "nats.creds (NATS_CREDS) = <redacted> (from file)",
+        ),
+    );
+}
+
+#[test]
+fn a_value_on_more_than_one_line_given_for_the_nats_ca_is_never_printed() {
+    for ca in [
+        "fake-nats-ca-line-one\nfake-nats-ca-line-two",
+        "fake-nats-ca-line-one\rfake-nats-ca-line-two",
+    ] {
+        let printed = format!(
+            "{}",
+            dumped(&args(&["--nats-tls-ca", ca]), &complete_env(), &files(None))
+        );
+
+        assert_eq!(
+            printed,
+            COMPLETE_DUMP.replace(
+                "nats.tls_ca (NATS_CA) = <unset> (from default)",
+                "nats.tls_ca (NATS_CA) = <redacted> (from flag)",
+            ),
+            "{ca:?}"
+        );
+    }
+}
+
+#[test]
+fn a_path_given_for_the_nats_client_certificate_is_shown() {
+    let env = complete_env();
+    env.set(ConfigSetting::NatsTlsCert.env(), "/etc/trogon/nats-client.pem");
+    env.set(ConfigSetting::NatsTlsKey.env(), "/run/secrets/fake-nats-client-key.pem");
+
+    let dump = dumped(&args(&[]), &env, &files(None));
+
+    assert_eq!(
+        resolved_setting(&dump, ConfigSetting::NatsTlsCert),
+        &ResolvedSetting {
+            setting: ConfigSetting::NatsTlsCert,
+            value: shown("/etc/trogon/nats-client.pem"),
+            source: SettingSource::Environment,
+        },
+    );
+}
+
+#[test]
 fn the_dump_reads_the_configuration_file_and_nothing_it_points_at() {
     let env = RecordingEnv {
         env: complete_env(),
