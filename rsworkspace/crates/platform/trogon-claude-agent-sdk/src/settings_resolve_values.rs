@@ -1,29 +1,15 @@
+use std::cell::Cell;
+
 use serde_json::{Map, Value};
 
 use crate::settings_schema::{SettingsSchema, schema};
 
-use crate::{constants::POLICY_META_KEYS, settings_merge_spec::MergeSpec, settings_numbers::same_value_zero};
+use crate::{
+    node_merge::NodeMerge, node_merge_call::NodeMergeCall, node_merge_warmth::MergeWarmth, node_stack::NodeStack,
+    settings_merge_spec::MergeSpec, settings_numbers::same_value_zero,
+};
 
 pub(crate) type SettingsMap = Map<String, Value>;
-
-/// Whether a settings document holds any key beyond the policy meta keys (`zu` upstream).
-pub(crate) fn has_policy_content(settings: &SettingsMap) -> bool {
-    settings.keys().any(|key| !POLICY_META_KEYS.contains(&key.as_str()))
-}
-
-fn is_empty_tree(value: &Value) -> bool {
-    match value {
-        Value::Object(map) => map.values().all(is_empty_tree),
-        _ => false,
-    }
-}
-
-/// Whether a document holds a value that is not an empty object tree (`Bu` upstream).
-pub(crate) fn has_authored_value(settings: &SettingsMap) -> bool {
-    settings
-        .iter()
-        .any(|(key, value)| !POLICY_META_KEYS.contains(&key.as_str()) && !is_empty_tree(value))
-}
 
 pub(crate) fn pick(settings: &SettingsMap, keys: &[&str]) -> SettingsMap {
     settings
@@ -57,50 +43,35 @@ pub(crate) fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
     merged
 }
 
-fn merge_existing(rules: &MergeSpec, key: &str, destination: &mut Value, source: &Value) {
-    let listed = |keys: &[String]| keys.iter().any(|listed| listed == key);
-    if listed(&rules.replaced) {
-        *destination = source.clone();
-        return;
-    }
-    match (destination, source) {
-        (Value::Object(left), Value::Object(right)) if listed(&rules.shallow_objects) => {
-            for (name, value) in right {
-                left.insert(name.clone(), value.clone());
-            }
-        }
-        (Value::Array(left), Value::Array(right)) => {
-            if listed(&rules.replaced_arrays) {
-                *left = right.clone();
-            } else {
-                *left = union_arrays(left, right);
-            }
-        }
-        (Value::Object(left), Value::Object(right)) => merge_rules(rules, left, right),
-        (Value::Array(_), Value::Object(_)) => {}
-        (destination, source) => *destination = source.clone(),
-    }
+/// Lodash `mergeWith` of `source` into `destination` with the upstream customizer, on a stack no merge runs out of:
+/// arrays union, objects recurse, scalars replace, an existing key keeps its position while a new key appends, and an
+/// object merged into an array sets its members, `length` among them. The keys the customizer treats specially come
+/// from the extracted schema description.
+pub(crate) fn merge_unbounded(destination: &mut SettingsMap, source: &SettingsMap) -> NodeMerge {
+    let node = NodeStack::for_build_target();
+    with_merge_spec(|spec| node.merge_unbounded(spec, destination, source))
 }
 
-fn merge_rules(rules: &MergeSpec, destination: &mut SettingsMap, source: &SettingsMap) {
-    for (key, value) in source {
-        match destination.get_mut(key) {
-            Some(existing) => merge_existing(rules, key, existing, value),
-            None => {
-                destination.insert(key.clone(), value.clone());
-            }
-        }
-    }
+/// [`merge_unbounded`] of `source` into `destination` as lodash `mergeWith` runs it on the `node` stack in the
+/// merge `call`, after merges that left V8 as warm as `warmth` says, keeping what it wrote before it runs out.
+pub(crate) fn merge_within(
+    node: NodeStack,
+    call: NodeMergeCall,
+    warmth: &Cell<MergeWarmth>,
+    destination: &mut SettingsMap,
+    source: &SettingsMap,
+) -> NodeMerge {
+    with_merge_spec(|spec| node.merge_within(call, spec, destination, source, warmth))
 }
 
-/// Deep merge with the upstream customizer: arrays union, objects recurse, scalars replace, and an
-/// existing key keeps its position while a new key appends (lodash `mergeWith`). The keys the customizer
-/// treats specially come from the extracted schema description.
-pub(crate) fn merge_with_union(destination: &mut SettingsMap, source: &SettingsMap) {
-    match schema() {
-        Some(schema) => merge_rules(schema.merge_spec(), destination, source),
-        None => merge_rules(&MergeSpec::default(), destination, source),
-    }
+/// Runs `merge` with the keys the customizer treats specially, from the extracted schema description, or with none
+/// when the description failed to load.
+fn with_merge_spec(merge: impl FnOnce(&MergeSpec) -> NodeMerge) -> NodeMerge {
+    merge(
+        schema()
+            .map(SettingsSchema::merge_spec)
+            .unwrap_or(&MergeSpec::default()),
+    )
 }
 
 pub(crate) fn get_path<'a>(settings: &'a SettingsMap, path: &[&str]) -> Option<&'a Value> {
