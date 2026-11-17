@@ -256,7 +256,7 @@ after the last prompt when nothing needs it.
 [The feature-connect example](examples/feature_connect.rs) checks blocking-hook
 registration and MCP connection without a prompt. It refuses startup when the
 installed CLI does not advertise blocking-hook support. Verification with CLI
-`2.1.312` exercised that refusal; the pinned CLI `2.1.319` accepted registration
+`2.1.312` exercised that refusal; CLI `2.1.319` accepted registration
 and connected MCP. Pass an executable path as the example's first argument to
 check a separate CLI installation.
 
@@ -531,23 +531,23 @@ terminology, with Rust acronym casing. Its core optional fields default to `None
 
 | Rust field | Python field | TypeScript option |
 | --- | --- | --- |
-| `cli_path: Option<PathBuf>` | [`cli_path`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2467) | `pathToClaudeCodeExecutable` |
-| `cwd: Option<PathBuf>` | [`cwd`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2464) | `cwd` |
-| `model: Option<ModelName>` | [`model`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2438) | `model` |
-| `permission_mode: Option<PermissionMode>` | [`permission_mode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2393) | `permissionMode` |
-| `setting_sources: Option<Vec<SettingSource>>` | [`setting_sources`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L2666) | `settingSources` |
+| `cli_path: Option<PathBuf>` | [`cli_path`](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/types.py#L2469) | `pathToClaudeCodeExecutable` |
+| `cwd: Option<PathBuf>` | [`cwd`](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/types.py#L2466) | `cwd` |
+| `model: Option<ModelName>` | [`model`](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/types.py#L2440) | `model` |
+| `permission_mode: Option<PermissionMode>` | [`permission_mode`](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/types.py#L2395) | `permissionMode` |
+| `setting_sources: Option<Vec<SettingSource>>` | [`setting_sources`](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/types.py#L2670) | `settingSources` |
 
 `PermissionMode` mirrors Python's
-[`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py#L25)
+[`PermissionMode`](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/types.py#L25)
 and the exported type in
-[TypeScript `0.3.319`](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.319.tgz).
+[TypeScript `0.3.323`](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.323.tgz).
 Serde uses their literal names: `default`, `acceptEdits`, `plan`,
 `bypassPermissions`, `dontAsk`, and `auto`. `None` leaves the mode unset;
 `Some(PermissionMode::Default)` explicitly selects `default`. The runtime omits
 the flag for `None` and sends the explicit literal for `Some`.
 
 `SettingSource` uses the exact serde literals `user`, `project`, and `local`.
-Python's pinned `setting_sources` docs and TypeScript `0.3.319`'s `Options.settingSources`
+Python's pinned `setting_sources` docs and TypeScript `0.3.323`'s `Options.settingSources`
 docs both describe omission as loading all CLI sources and an empty list as
 disabling filesystem settings. Rust preserves `None`, `Some(vec![])`, and caller
 order when building CLI arguments.
@@ -769,7 +769,11 @@ upstream SDKs).
   returns an `SseHandle` with `suspend`, `resume`, `expect_control_response`,
   `drop_counts`, `last_sequence_num`, `ccr_event` and `mark_delivered`. Cancelling the token
   given to `with_abort` fails the read with `SseError::Aborted`.
-- Deferred to other tracks: flag settings and `updateSettings`.
+- `ClientHandle::apply_flag_settings` is TypeScript `applyFlagSettings`: the
+  settings object goes to the CLI as given, so a `null` value clears that flag
+  setting. `ClientHandle::update_settings` is TypeScript `updateSettings`, with
+  `SettingsUpdateSource::UserSettings` or `SettingsUpdateSource::LocalSettings`
+  naming the file the CLI writes. Python has neither control.
 
 Model strings and paths are stored without extra identifier restrictions.
 `env` values are `ConfigValue`s, which convert from strings as `Sensitive`;
@@ -781,8 +785,8 @@ every other setting without listing fields by hand.
 A Windows `.bat` or `.cmd` CLI path starts, as in TypeScript;
 `WindowsBatchCli::Refuse` selects Python's refusal at process start, which
 fires only on Windows, as in Python.
-Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L93)
-and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py#L607)
+Python exposes [`connect`](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/client.py#L93)
+and [`disconnect`](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/client.py#L607)
 on an existing client; Rust's `connect` is the async factory that returns the
 connected client, and `disconnect(self)` consumes it, so a second disconnect
 cannot be written rather than being a no-op. TypeScript's `Query.close()` is
@@ -1049,10 +1053,13 @@ necessary. Backend retention and cross-process coordination belong to the backen
 ## Compatibility and verification
 
 The references are Python SDK
-[`0.2.179`](https://github.com/anthropics/claude-agent-sdk-python/tree/2209f2c134fee914c0f75733b631a5fc238ca846)
-and published TypeScript SDK `0.3.319`, paired with CLI `2.1.319`.
-This independent Rust implementation does not provide TypeScript browser/bridge
-hosting, every upstream convenience option or the complete MCP server protocol.
+[`0.2.181`](https://github.com/anthropics/claude-agent-sdk-python/tree/22b8eb9c19adfa78759b79e22bd664a57843bb06)
+and published TypeScript SDK `0.3.323`, paired with CLI `2.1.323`.
+Every feature in [the freshness mapping](.config/mise/lib/claude-sdk-freshness/mapping.json)
+is supported, including the TypeScript `browser`, `bridge` and `extract`
+entrypoints (`browser_query`, `attach_bridge_session` and `extract_from_bunfs`).
+Embedded MCP servers answer `initialize`, `ping`, `tools/list` and `tools/call`;
+they are not general-purpose MCP servers.
 Windows batch scripts start as in TypeScript unless `WindowsBatchCli::Refuse`
 is selected.
 
