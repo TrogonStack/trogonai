@@ -46,6 +46,7 @@ impl TestTelemetry {
             .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOn)))
             .build();
         let logs = CapturedEvents::new();
+        trogon_std::log_capture::ask_every_dispatcher_for_interest();
         let subscriber = tracing::Dispatch::new(
             tracing_subscriber::registry()
                 .with(tracing_opentelemetry::layer().with_tracer(traces.tracer("gateway-http-test")))

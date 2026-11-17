@@ -10,6 +10,7 @@ filegroup(
     ],
     visibility = [
         "//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__",
+        "//tests/proto:__pkg__",
         "//tsworkspace/packages/proto:__pkg__",
     ],
 )
@@ -52,6 +53,7 @@ genrule(
     ],
     visibility = [
         "//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__",
+        "//tests/proto:__pkg__",
         "//tsworkspace/packages/proto:__pkg__",
     ],
 )

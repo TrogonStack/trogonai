@@ -3,6 +3,7 @@ load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 exports_files([
+    "patches/rules_rust-native-coverage-filter.patch",
     "compiler_failures.py",
     "compiler_failures_test.py",
 ])
