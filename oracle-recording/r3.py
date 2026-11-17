@@ -1605,6 +1605,13 @@ R8_FIRST_OUT = ["pm:miss", "clone", "walk", "schema"]
 # The stage the far shape must stop at: both the object-major (walk) and the array-major (clone) forms overflow
 # inside the j7e structuredClone, which runs before the walk; the copy overflows after the schema read.
 R8_ATTRIBUTION = {"walk": (None, "clone"), "clone": (None, "clone"), "copy": ("schema", "copy")}
+# A second call (PLAN Update 82 A): the oracle marks where the prime ends, so the records split into the prime's (P)
+# and the cases' (C). A warm second call passes the prime's own options object, which pm (165 col 30204) cached in its
+# WeakMap, so the case logs only the cached-copy hit; a fresh identity misses again and logs the first-call lists.
+R8_SECOND = GATE["CALL"] == "second"
+R8_FULL1 = R8_CACHED_OUT + ["copy-hit"]
+R8_WARM_CASE = (["pm:hit"], ["pm:hit", "copy-hit", "pm:hit"])
+R8_MARKER = {"marker": "cases"}
 
 
 def r8_traced():
@@ -1634,28 +1641,30 @@ def r8_text(which, shape):
     return '{"' + key + '":' + reg5_text(shape, wrap) + "}"
 
 
-def r8_spec(label, document, root):
+def r8_spec(label, document, root, prime=None):
     """A spec whose one case passes `document` (spliced as text: Python's json would recurse through it) as the
-    parent or remote managed settings."""
+    parent or remote managed settings; `prime` "fresh" primes a second call with an equal object of a new identity."""
     for folder in ("home/.claude", "work"):
         os.makedirs(os.path.join(root, folder), exist_ok=True)
     write(os.path.join(root, "home/.claude/settings.json"), '{"u":[null]}')
     spec = {"root": root, "platform": sys.platform, "env": {"HOME": os.path.join(root, "home")}, "deep": True,
             "cases": [{"name": "case", "options": {"cwd": os.path.join(root, "work"), R8_LABELS[label][0]: "@DOC@"}}]}
+    if prime is not None:
+        spec["prime"] = prime
     text = json.dumps(spec)
     if text.count('"@DOC@"') != 1:
         raise RuntimeError("the spec holds the document placeholder more than once")
     return text.replace('"@DOC@"', document)
 
 
-def r8_run(package, label, document, flags, startup, trace=None):
+def r8_run(package, label, document, flags, startup, trace=None, prime=None):
     """The collapsed answer of one run, the rejection it surfaces, or None when the run failed; with `trace`, the
     traced records too."""
     root = os.path.join(D["SCRATCH"], unique("m"))
     spec_path = root + ".json"
     try:
         with open(spec_path, "w", encoding="utf-8") as handle:
-            handle.write(r8_spec(label, document, root))
+            handle.write(r8_spec(label, document, root, prime))
         command = [NODE, *probe_flags(flags), MANAGED["ORACLE"], package, spec_path]
         # TRACE_LOG takes its share of the budget from PAD, so traced and pinned runs start with the same bytes.
         env = D["padded_env"](MANAGED["pad"], command, startup, {} if trace is None else {"TRACE_LOG": trace})
@@ -1686,16 +1695,29 @@ def r8_records(trace):
     return records
 
 
-def r8_control(label):
+def r8_split(records):
+    """The prime's records and the cases' records, split at the oracle's marker (a first call has no prime)."""
+    if not records:
+        return [], []
+    if R8_MARKER not in records:
+        raise RuntimeError("the trace holds no case marker")
+    at = records.index(R8_MARKER)
+    return records[:at], records[at + 1:]
+
+
+def r8_control(label, prime=None):
     """Whether the shallow document reaches the clone, walk, schema read and copy of `label` with `x` an own data
-    `__proto__` on a plain object, and the pinned and traced packages print the same."""
+    `__proto__` on a plain object, and the pinned and traced packages print the same. A warm second call reads every
+    record (the prime does the walk); a first call and a fresh second call read the cases' records."""
     traced = r8_traced()
     if "error" in traced:
         return False, traced
     trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
-    _, pinned = r8_run(PACKAGE, label, R8_SHALLOW, REF, STARTUP)
-    _, instrumented = r8_run(traced["package"], label, R8_SHALLOW, REF, STARTUP, trace)
-    records = r8_records(trace)
+    _, pinned = r8_run(PACKAGE, label, R8_SHALLOW, REF, STARTUP, prime=prime)
+    _, instrumented = r8_run(traced["package"], label, R8_SHALLOW, REF, STARTUP, trace, prime)
+    every = r8_records(trace)
+    primed, cases = r8_split(every)
+    records = [r for r in every if r != R8_MARKER] if R8_SECOND and prime is None else cases
     name = R8_LABELS[label][1]
     mine = [record for record in records if record.get("label") == name]
 
@@ -1710,13 +1732,14 @@ def r8_control(label):
     detail = {"identical": pinned[0] == 0 and pinned == instrumented, "pinned_exit": pinned[0],
               "instrumented_exit": instrumented[0], "stderr": instrumented[2] if instrumented[0] else "",
               "stages": stages, "walk": len(walked), "calls": calls, "records": records[:60],
-              "answer": pinned[1][:4000], **{k: v for k, v in traced.items() if k != "package"}}
+              "answer": pinned[1][:4000], "prime_records": len(primed), "case_records": len(cases),
+              "read": "all" if records is not cases else "cases", **{k: v for k, v in traced.items() if k != "package"}}
     passed = (detail["identical"] and all(stages[s] and all(stages[s]) for s in ("clone", "schema", "copy"))
               and all(stages["copy-hit"]) and len(walked) == 1 and calls[:1] == ["miss"])
     return passed, detail
 
 
-def r8_fits(label, which):
+def r8_fits(label, which, prime=None):
     references = {}
 
     def fits(shape, flags, startup):
@@ -1724,12 +1747,12 @@ def r8_fits(label, which):
         with REFERENCE_LOCK:
             reference = references.get(form)
         if reference is None:
-            reference = r8_run(PACKAGE, label, r8_text(which, form), REF, STARTUP)[0]
+            reference = r8_run(PACKAGE, label, r8_text(which, form), REF, STARTUP, prime=prime)[0]
             if reference is None or reference.startswith('{"error"'):
                 raise RuntimeError(f"the shallow form {form} has no answer: {reference}")
             with REFERENCE_LOCK:
                 references[form] = reference
-        got = r8_run(PACKAGE, label, r8_text(which, shape), flags or REF, startup)[0]
+        got = r8_run(PACKAGE, label, r8_text(which, shape), flags or REF, startup, prime=prime)[0]
         return None if got is None else got == reference
     return fits
 
@@ -1739,38 +1762,67 @@ def r8_stages(records, label):
     return [r.get("stage") or ("pm:" + r["pm"]) for r in records if r.get("label") == name]
 
 
-def r8_first_fits(label):
+def r8_phases(trace, label):
+    """The stages of `label` the prime logged and the ones the cases logged."""
+    primed, cases = r8_split(r8_records(trace))
+    return r8_stages(primed, label), r8_stages(cases, label)
+
+
+def r8_side_matches(side, primed, cases, prime):
+    """Whether a copy entry's stages match the registered lists of this call position, and which alternative."""
+    want = R8_CACHED_OUT if side == "near" else R8_FIRST_OUT
+    if not R8_SECOND or prime == "fresh":
+        return cases == want, None
+    alternative = R8_WARM_CASE.index(cases) if cases in R8_WARM_CASE else None
+    return primed == want and alternative is not None, alternative
+
+
+def r8_first_fits(label, prime=None):
     """Whether the first copy of `label` finishes at a shape: the traced run logs its copy stage. The pinned answer
-    cannot tell, since a first-copy near shape runs out in the second, cached copy with the same RangeError."""
+    cannot tell, since a first-copy near shape runs out in the second, cached copy with the same RangeError. A warm
+    second call's first copy is the prime's; otherwise it is the case's."""
     traced = r8_traced()
     if "error" in traced:
         raise RuntimeError(f"no traced package: {traced}")
 
     def fits(shape, flags, startup):
         trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
-        answer = r8_run(traced["package"], label, r8_text("copy", shape), flags or REF, startup, trace)[0]
-        stages = r8_stages(r8_records(trace), label)
+        answer = r8_run(traced["package"], label, r8_text("copy", shape), flags or REF, startup, trace, prime)[0]
+        primed, cases = r8_phases(trace, label)
+        stages = primed if R8_SECOND and prime is None else cases
         if "copy" in stages:
             return True
         return False if (answer or "").startswith('{"error":"RangeError') else None
     return fits
 
 
-def r8_attribution(label, which, shape):
-    """The stages the traced package reached for `label` at a shape past the edge, and whether they match the pass."""
+def r8_attribution(label, which, shape, prime=None):
+    """The stages the traced package reached for `label` at a shape past the edge, and whether they match the pass.
+    A first call and a fresh second call hold the cases' stages to the first-call lists; a warm second call's cached
+    copy holds the prime to one of its registered lists and the case to the cached hit."""
     traced = r8_traced()
     trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
-    answer, raw = r8_run(traced["package"], label, r8_text(which, shape), REF, STARTUP, trace)
-    stages = r8_stages(r8_records(trace), label)
-    if which == "cachedcopy":
+    answer, raw = r8_run(traced["package"], label, r8_text(which, shape), REF, STARTUP, trace, prime)
+    primed, stages = r8_phases(trace, label)
+    alternative = None
+    if which == "cachedcopy" and R8_SECOND and prime is None:
+        alternative = R8_WARM_CASE.index(stages) if stages in R8_WARM_CASE else None
+        prime_list = [R8_FIRST_OUT, R8_CACHED_OUT, R8_FULL1].index(primed) \
+            if primed in (R8_FIRST_OUT, R8_CACHED_OUT, R8_FULL1) else None
+        matches = alternative is not None and prime_list is not None and raw[0] == 1
+        alternative = {"case": alternative, "prime": prime_list}
+    elif which == "cachedcopy":
         matches = stages == R8_CACHED_OUT and raw[0] == 1
     else:
         present, missing = R8_ATTRIBUTION[which]
-        matches = (present is None or present in stages) and missing not in stages
-    return {"answer": answer, "stages": stages, "matches": matches, "exit": raw[0]}
+        # A warm second call's case starts from the cached copy, so the pass's stages are the prime's.
+        seen = primed if R8_SECOND and prime is None else stages
+        matches = (present is None or present in seen) and missing not in seen
+    return {"answer": answer, "stages": stages, "prime_stages": primed, "matches": matches, "exit": raw[0],
+            "alternative": alternative}
 
 
-def r8_copy_events(label, found):
+def r8_copy_events(label, found, prime=None):
     """The first copy's events file of `label` on this host: the pinned and the traced run of each profile pair
     entry, with the stages the trace logged. The near entry must run out in the cached copy, the far one in the
     first copy, and both packages must answer the same."""
@@ -1779,35 +1831,37 @@ def r8_copy_events(label, found):
     for side, entry in zip(("near", "far"), profile_pair(found)):
         shape, startup = tuple(entry[:3]), entry[3]
         text = r8_text("copy", shape)
-        pinned_answer, pinned_raw = r8_run(PACKAGE, label, text, REF, startup)
+        pinned_answer, pinned_raw = r8_run(PACKAGE, label, text, REF, startup, prime=prime)
         trace = os.path.join(D["SCRATCH"], unique("t") + ".trace")
-        traced_answer, traced_raw = r8_run(traced["package"], label, text, REF, startup, trace)
-        stages = r8_stages(r8_records(trace), label)
+        traced_answer, traced_raw = r8_run(traced["package"], label, text, REF, startup, trace, prime)
+        primed, stages = r8_phases(trace, label)
+        matches, alternative = r8_side_matches(side, primed, stages, prime)
         agree = pinned_answer is not None and pinned_answer == traced_answer and pinned_raw[0] == traced_raw[0]
         records.append({"host": HOST, "label": label, "side": side, "shape": list(shape), "startup": startup,
                         "pinned_sha256": traced["pinned_sha256"], "traced_sha256": traced["traced_sha256"],
-                        "stages": stages, "exit": traced_raw[0], "pinned_exit": pinned_raw[0], "answer": pinned_answer,
+                        "stages": stages, "prime_stages": primed, "alternative": alternative,
+                        "call": GATE["CALL"], "context": GATE["CONTEXT"], "prime": prime or "same",
+                        "exit": traced_raw[0], "pinned_exit": pinned_raw[0], "answer": pinned_answer,
                         "answers_agree": agree})
-        want = R8_CACHED_OUT if side == "near" else R8_FIRST_OUT
-        if stages != want:
-            failures.append(f"the {side} entry logs {stages}, not {want}")
+        if not matches:
+            failures.append(f"the {side} entry logs prime {primed} and cases {stages}, not its registered lists")
         if not agree:
             failures.append(f"the pinned and traced runs of the {side} entry answer otherwise")
     folder = os.path.join(os.path.dirname(OUT), "pm8_copy")
     os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, f"{label}.events.jsonl")
+    path = os.path.join(folder, f"{label}{'_fresh' if prime == 'fresh' else ''}.events.jsonl")
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write("".join(json.dumps(record, sort_keys=True) + "\n" for record in records))
     return {"path": path, "records": records, "failures": failures}
 
 
-def pm8_unit(label, which):
+def pm8_unit(label, which, prime=None):
     def go(pool, quiet):
-        visible, detail = r8_control(label)
+        visible, detail = r8_control(label, prime)
         if not visible:
             return {"error": "the control does not show the document reaching every stage", "control": detail}
         _, _, model_pass, major, above = R8_PASSES[which]
-        fits = r8_first_fits(label) if which == "copy" else r8_fits(label, which)
+        fits = r8_first_fits(label, prime) if which == "copy" else r8_fits(label, which, prime)
         found = Search(pool, fits, MODEL[HOST][model_pass], above, major, REG5_LEAVES[model_pass]).run()
         found["above"] = above
         found["control"] = detail
@@ -1815,8 +1869,8 @@ def pm8_unit(label, which):
             found["room_at_class"] = found["class"] - prefix(MODEL[HOST][model_pass], above)
         if found.get("far"):
             far = tuple(found["far"][0])
-            found["far_answer"] = r8_run(PACKAGE, label, r8_text(which, far), REF, STARTUP)[0]
-            found["attribution"] = r8_attribution(label, which, far)
+            found["far_answer"] = r8_run(PACKAGE, label, r8_text(which, far), REF, STARTUP, prime=prime)[0]
+            found["attribution"] = r8_attribution(label, which, far, prime)
             if not (found["far_answer"] or "").startswith('{"error":"RangeError'):
                 found["error"] = "the far answer is not the uncaught RangeError"
             elif not found["attribution"]["matches"]:
@@ -1824,11 +1878,12 @@ def pm8_unit(label, which):
         if "error" in found or "class" not in found:
             return found
         if which == "copy":
-            found["events"] = r8_copy_events(label, found)
+            found["events"] = r8_copy_events(label, found, prime)
             if found["events"]["failures"]:
                 found["error"] = "the first copy's events break the registered stage lists"
         elif which == "cachedcopy":
-            found["near_answer"] = r8_run(PACKAGE, label, r8_text(which, tuple(found["near"][0])), REF, STARTUP)[0]
+            found["near_answer"] = r8_run(PACKAGE, label, r8_text(which, tuple(found["near"][0])), REF, STARTUP,
+                                          prime=prime)[0]
             if found["near_answer"] is None or found["near_answer"].startswith('{"error"'):
                 found["error"] = "the near shape does not answer"
         return found
@@ -2760,6 +2815,9 @@ def round8_units():
     out += [(f"rec8:fixture:{name}", rec8_fixture(name)) for name in R8_FIXTURES]
     out += [(f"rec8:events:{R8_EVICTION}", rec8_fixture(R8_EVICTION, True))]
     out += [(f"pm8:{label}:{which}", pm8_unit(label, which)) for label in R8_LABELS for which in R8_PASSES]
+    if R8_SECOND:
+        # A fresh identity: the second call whose options object the pm WeakMap has not seen (PLAN Update 82 A).
+        out += [(f"pm8f:{label}:{which}", pm8_unit(label, which, "fresh")) for label in R8_LABELS for which in R8_PASSES]
     # Last: it fills the handed-over profile keys from the pm8 classes this job found.
     out += [("mg8:goldens", mg8_unit())]
     # After the pm8 units too: the default-flag margins of every pair the profile names.
@@ -2814,6 +2872,105 @@ def plutil_depth_unit(shape):
     return go
 
 
+# ---- Windows native discovery (rulings 35, 36.5b; PLAN Update 82 W) ----
+# The machine policy (HKLM) holds a policy; a user hive that answers; a machine hive the stand-in prints past the
+# 2097152-byte reg.exe buffer, which the execFile read cannot finish.
+W35_POLICY = '{"permissions":{"deny":["Bash(rm:*)"]}}'
+W35_UNREAD = '{"permissions":{"deny":["Bash(rm:*)"]},"pad":"' + "p" * 2100000 + '"}'
+# row: (hklm document, hkcu document, managed json document, the resume base the cited frames predict)
+W35_ROWS = {
+    "hklm_policy": (W35_POLICY, None, None, "Tool"),
+    "hkcu_absent": (None, None, None, "Tool"),
+    "hkcu_json": (None, W35_POLICY, W35_POLICY, "Tool"),
+    "hkcu_dir": (None, W35_POLICY, None, "Fs"),
+    "hklm_unread_dir": (W35_UNREAD, W35_POLICY, None, "Fs"),
+    "hklm_unread_absent": (W35_UNREAD, None, None, "Tool"),
+}
+# The startup axis: the env+argv size each proto band also runs at, past the default.
+W35_STARTUP_STEP = 4096
+# Keys no earlier Windows run measured, searched over a range around the Windows levels of the neighbouring keys
+# (main_merge 1272, main_read_arrays 1833, sources_copy 1833 in windows_profile_guess.json).
+W35_RANGES = {"origin_merge": [600, 2600], "origin_read_arrays": [900, 4000], "machine_read_arrays": [900, 4000],
+              "origin_copy": [900, 3600]}
+
+
+def base35_probe(row, n):
+    """Whether the user settings at the home folder, holding `x` with an own `__proto__` `n` levels of arrays deep,
+    reach the effective settings after the registry and managed reads of `row`."""
+    hklm, hkcu, managed, _ = W35_ROWS[row]
+    root = os.path.join(D["SCRATCH"], unique("b"))
+    spec_path = root + ".json"
+    try:
+        for folder in ("home/.claude", "work"):
+            os.makedirs(os.path.join(root, folder), exist_ok=True)
+        write(os.path.join(root, "home/.claude/settings.json"),
+              '{"x":{"__proto__":' + deep(0, n - 1, "null_array") + "}}")
+        system32 = os.path.join(root, "mnt", "c", "Windows", "System32")
+        D["tool"](system32, "reg.exe", D["REG_SH"])
+        for name, document in (("hklm", hklm), ("hkcu", hkcu)):
+            if document is not None:
+                write(os.path.join(system32, name + ".txt"), D["reg_text"](document))
+        if managed is not None:
+            write(os.path.join(root, "Program Files", "ClaudeCode", "managed-settings.json"), managed)
+        spec = {"root": root, "platform": "win32", "deep": True,
+                "env": {"HOME": os.path.join(root, "home"), "SYSTEMROOT": os.path.join(root, "mnt", "c", "Windows")},
+                "cases": [{"name": "case", "options": {"cwd": os.path.join(root, "work")}}]}
+        with open(spec_path, "w", encoding="utf-8") as handle:
+            json.dump(spec, handle)
+        answered = run_spec(spec_path, REF, STARTUP)
+        if isinstance(answered, dict):
+            return False
+        return "x" in answered[0]["result"]["effective"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        if os.path.exists(spec_path):
+            os.remove(spec_path)
+
+
+def base35_unit(row):
+    def go(pool, quiet):
+        found = windows_band(pool, lambda n: base35_probe(row, n), 50, 6000)
+        found["predicted_base"] = W35_ROWS[row][3]
+        return found
+    return go
+
+
+def startup35_unit(observable):
+    def go(pool, quiet):
+        startup = STARTUP + W35_STARTUP_STEP
+        found = windows_band(pool, lambda n: proto_probe((0, n - 1, "null_array"), None, startup)[observable], 50, 6000)
+        found["startup"] = startup
+        return found
+    return go
+
+
+def pm35_unit(label, which):
+    """The Windows band of the parent or remote managed settings pass `which`, each level the shallow form's
+    answer or not."""
+    def go(pool, quiet):
+        visible, detail = r8_control(label)
+        if not visible:
+            return {"error": "the control does not show the document reaching every stage", "control": detail}
+        major = R8_PASSES[which][3]
+        fits = r8_fits(label, which)
+
+        def shape(n):
+            return (n, 0, "null_array") if major == "o" else (0, n, "null_array")
+        found = windows_band(pool, lambda n: bool(fits(shape(n), None, STARTUP)), 50, 6000)
+        found["major"] = major
+        found["control"] = detail
+        return found
+    return go
+
+
+def windows35_units():
+    out = [(f"base35:{row}", base35_unit(row)) for row in W35_ROWS]
+    out += [(f"startup35:{o}", startup35_unit(o)) for o in "ESOM"]
+    out += [(f"pm35:{label}:{which}", pm35_unit(label, which)) for label in R8_LABELS for which in R8_GOLDEN_PASSES]
+    out += [(f"key:{key}", key_unit(key, guess, windows_guesses())) for key, guess in W35_RANGES.items()]
+    return out
+
+
 def units():
     out = [(f"proto:{o}", proto_unit(o)) for o in "ESOM"]
     if DARWIN and GATE["NATIVE"]:
@@ -2838,10 +2995,14 @@ def units():
         out += chain_units() + leaf_units() + windows_reg_units()
         out += round5_windows_units()
         out += round6_xp_units()
+        out += windows35_units()
     else:
         out += unix_round4_units() + round5_unix_units() + round6_held_units() + round6_xp_units() + round7_units() + round8_units()
         profile = MANAGED["PROFILES"].get(HOST, {})
-        out += [(f"key:{key}", key_unit(key, guess)) for key, guess in GUESSES.get(HOST, {}).items() if key not in profile]
+        # Under a WSL kernel org_copy is measured whatever the profile holds: Gc (136 col 4257) reads /proc/version only
+        # on linux, and only a real WSL kernel answers it (no /proc stand-in is fit data, PLAN Update 82 D).
+        out += [(f"key:{key}", key_unit(key, guess)) for key, guess in GUESSES.get(HOST, {}).items()
+                if key not in profile or (GATE["WSL"] and key == "org_copy")]
         out += [(f"key:{key}", key_unit(key, guess, profile)) for key, guess in PASS_KEYS.get(HOST, {}).items()]
         if os.environ.get("R3_DISCOVERY"):
             out += discovery_units()
@@ -2851,7 +3012,8 @@ def units():
 def main():
     version = subprocess.run([NODE, "--version"], capture_output=True, check=True).stdout.decode().strip()
     result = {"host": HOST, "node": version, "shard": SHARD, "shards": SHARDS, "machine": machine(), "units": {},
-              "native": {"enabled": GATE["NATIVE"], "call": GATE["CALL"], "platform": sys.platform}}
+              "native": {"enabled": GATE["NATIVE"], "call": GATE["CALL"], "context": GATE["CONTEXT"],
+                         "platform": sys.platform}}
     R8_STATE["units"] = result["units"]
     started = time.time()
     only = __import__("re").compile(os.environ["R3_ONLY"]) if os.environ.get("R3_ONLY") else None

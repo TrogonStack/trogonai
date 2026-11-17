@@ -314,6 +314,10 @@ PROFILES = {
         "origin_read_arrays": 3127, "machine_read_arrays": 3130, "origin_copy": 1784, "origin_merge": 1251,
         "machine_after_held_array": 1249, "machine_after_held_arrays": 1251, "partial_drop": 1300,
         "org_copy": 1744, "effective_copy": 1784, "effective_ask": 1784, "effective_ask_machine": 1788,
+        "proto_effective": [[1, 1782, "empty_array", 4384], [20, 1764, "null_array", 4384]],
+        "proto_sources": [[23, 1762, "null_array", 4384], [11, 1773, "null_array", 4384]],
+        "proto_origin": [[12, 1774, "null_array", 4384], [0, 1785, "null_array", 4384]],
+        "proto_machine": [[17, 1771, "null_array", 4384], [5, 1782, "null_array", 4384]],
     },
     "linux x86_64": {
         "main_merge": 1304, "main_merge_arrays": 1303, "main_read": 1644, "main_read_arrays": 3289,
@@ -322,6 +326,11 @@ PROFILES = {
         "origin_drop": 1305, "origin_read": 1646, "machine_drop": 1307, "machine_read": 1648,
         "origin_read_arrays": 3293, "machine_read_arrays": 3295, "origin_copy": 1561, "origin_merge": 1306,
         "machine_after_held_array": 1304, "machine_after_held_arrays": 1306, "partial_drop": 1360,
+        "org_copy": 1534, "effective_copy": 1561, "effective_ask": 1561, "effective_ask_machine": 1565,
+        "proto_effective": [[7, 1553, "null_array", 4384], [12, 1549, "empty_array", 4384]],
+        "proto_sources": [[19, 1543, "empty_array", 4384], [13, 1548, "null_array", 4384]],
+        "proto_origin": [[6, 1557, "empty_array", 4384], [0, 1562, "null_array", 4384]],
+        "proto_machine": [[13, 1551, "null_array", 4384], [18, 1547, "empty_array", 4384]],
     },
 }
 

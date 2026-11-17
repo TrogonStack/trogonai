@@ -22,7 +22,23 @@
 // form, so the real plutil reads it; a document holding `null` stays as written.
 //
 // `call: "second"` runs one resolve with the first case's options before the recorded cases, so they run as the
-// later calls of a long-lived process do.
+// later calls of a long-lived process do. The prime passes the first case's own options object (the same identity the
+// SDK's per-object cache keys on), or with `prime: "fresh"` an equal object parsed anew from the spec.
+//
+// `context` names the caller the measured resolves start from, since a resolve that does not wait on the clock or a
+// program finishes in the microtask checkpoint of whatever its caller runs in: `toplevel` (the default, a plain
+// `await` from the module), `timer`, `io`, `child_exit` and `immediate` (dispatched inside that kind of callback once
+// the process is quiet), and `nested` (from the innermost of 1000 synchronous frames).
+//
+// On a WSL kernel (linux whose /proc/version names Microsoft or WSL) the kernel's own /proc/version answers, so a
+// /proc/version stand-in that also names WSL is dropped and recorded; any other stand-in is refused. Reads of
+// /proc/version are counted.
+//
+// On Windows SYSTEMROOT defaults to `<root>\mnt\c\Windows` and must lie under the root; where its
+// System32\reg.exe is missing or is not a program, the stand-in REGISTRY_STAND_IN names is put there, so each query
+// is a real program's run. Spawns of reg.exe are counted per hive as well.
+//
+// With TRACE_LOG set, `{"marker":"cases"}` is appended to it before the recorded cases, after the prime.
 //
 // Beside the spec, `<spec.json>.native.json` reports the platform, the clock start, the programs spawned and ended by
 // name, what was ignored or refused, and those counts as each case settled.
@@ -46,6 +62,14 @@ const writeFile = fs.writeFileSync;
 const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
 const root = spec.root;
 const hostWindows = process.platform === 'win32';
+const CONTEXTS = ['toplevel', 'timer', 'io', 'child_exit', 'immediate', 'nested'];
+// The cowork entrypoints that make a session an organization session (pinned sdk.mjs line 136, `Cf`).
+const ORG_ENTRYPOINTS = ['remote_cowork', 'remote_cowork_trigger'];
+// `jl` (pinned sdk.mjs line 44): what upstream takes as a WSL kernel, on the lowercased /proc/version.
+const namesWsl = (text) => text.includes('microsoft') || text.includes('wsl');
+const realSystemRoot = process.env.SYSTEMROOT;
+const standIn = process.env.REGISTRY_STAND_IN;
+delete process.env.REGISTRY_STAND_IN;
 const report = {
   platform: process.platform,
   arch: process.arch,
@@ -53,6 +77,16 @@ const report = {
   proc_version: null,
   clock: { source: 'real', start: clockStart, offsets: [] },
   call: spec.call ?? 'first',
+  context: spec.context ?? 'toplevel',
+  prime: spec.prime ?? 'same',
+  wsl_kernel: false,
+  proc_reads: 0,
+  proc_wsl: false,
+  org_session: false,
+  systemroot: null,
+  stand_in_installed: false,
+  context_child: 0,
+  hives: {},
   spawns: {},
   exits: {},
   ignored: [],
@@ -65,6 +99,7 @@ if (process.platform === 'linux') {
   } catch {
     report.proc_version = null;
   }
+  report.wsl_kernel = typeof report.proc_version === 'string' && namesWsl(report.proc_version.toLowerCase());
 }
 process.on('exit', () => writeFile(`${specPath}.native.json`, JSON.stringify(report)));
 const refuse = (reason) => {
@@ -74,10 +109,26 @@ const refuse = (reason) => {
 };
 if (spec.platform && spec.platform !== process.platform) refuse(`platform ${spec.platform} on a ${process.platform} host`);
 if (spec.call !== undefined && spec.call !== 'first' && spec.call !== 'second') refuse(`call ${spec.call}`);
-if (fs.existsSync(path.join(root, 'proc'))) refuse('a /proc stand-in under the root');
+if (!CONTEXTS.includes(report.context)) refuse(`context ${report.context}`);
+if (spec.prime !== undefined && spec.prime !== 'fresh') refuse(`prime ${spec.prime}`);
+// A /proc stand-in the WSL kernel already answers the same way (it names WSL) is dropped; anything else is refused.
+const kernelAnswers = (text) => report.wsl_kernel && typeof text === 'string' && namesWsl(text.toLowerCase());
+const procRoot = path.join(root, 'proc');
+if (fs.existsSync(procRoot)) {
+  const names = fs.readdirSync(procRoot);
+  const version = path.join(procRoot, 'version');
+  if (names.length === 1 && names[0] === 'version' && kernelAnswers(fs.readFileSync(version, 'utf8'))) {
+    fs.rmSync(procRoot, { recursive: true, force: true });
+    report.ignored.push('proc_from_kernel:root');
+  } else refuse('a /proc stand-in under the root');
+}
 for (const entry of spec.cases) {
-  if (Object.keys(entry.files || {}).some((file) => file === 'proc' || file.startsWith('proc/'))) {
-    refuse(`case ${entry.name} writes a /proc stand-in`);
+  for (const file of Object.keys(entry.files || {})) {
+    if (file !== 'proc' && !file.startsWith('proc/')) continue;
+    if (file === 'proc/version' && kernelAnswers(entry.files[file])) {
+      delete entry.files[file];
+      report.ignored.push(`proc_from_kernel:${entry.name}`);
+    } else refuse(`case ${entry.name} writes a /proc stand-in`);
   }
   if (entry.at !== undefined && entry.at !== null && !(typeof entry.at === 'number' && entry.at >= 0)) {
     refuse(`case ${entry.name} sets at ${entry.at}`);
@@ -172,6 +223,16 @@ const functions = (object) => Object.keys(object).filter((key) => typeof object[
 patch(fs, functions(fs).filter((name) => /^[a-z]/.test(name) && name !== 'realpathSync'));
 if (fs.realpathSync.native) patch(fs.realpathSync, ['native']);
 patch(fsp, functions(fsp));
+// Counts the reads of /proc/version (upstream's WSL check reads it with readFileSync) and whether one named WSL.
+const readFileSync = fs.readFileSync;
+fs.readFileSync = function (file, ...rest) {
+  const asked = file === '/proc/version';
+  if (asked) report.proc_reads += 1;
+  const out = readFileSync.call(this, file, ...rest);
+  if (asked && namesWsl(String(out).toLowerCase())) report.proc_wsl = true;
+  return out;
+};
+for (const key of Object.keys(readFileSync)) fs.readFileSync[key] = readFileSync[key];
 const answers = spec.writable || {};
 const access = fs.accessSync;
 fs.accessSync = function (target, mode, ...rest) {
@@ -201,6 +262,7 @@ cp.execFile = function (file, args, options, callback) {
   const token = {};
   running.add(token);
   count(report.spawns, name);
+  if (name === 'reg.exe') count(report.hives, `reg.exe:${String((args || [])[1] ?? '').split('\\')[0]}`);
   try {
     return execFile.call(this, file, (args || []).map(remap), { ...options, cwd: root }, (...result) => {
       running.delete(token);
@@ -221,6 +283,29 @@ for (const [name, value] of Object.entries(spec.env || {})) {
   else process.env[name] = value;
 }
 if (hostWindows && typeof spec.env?.HOME === 'string') process.env.USERPROFILE = spec.env.HOME;
+report.org_session = ORG_ENTRYPOINTS.includes(process.env.CLAUDE_CODE_ENTRYPOINT);
+if (hostWindows) {
+  if (spec.env?.SYSTEMROOT === undefined) process.env.SYSTEMROOT = path.join(root, 'mnt', 'c', 'Windows');
+  const systemRoot = process.env.SYSTEMROOT ?? '';
+  const relative = path.relative(root, systemRoot);
+  if (!path.isAbsolute(systemRoot) || relative.startsWith('..') || path.isAbsolute(relative)) {
+    refuse(`SYSTEMROOT ${systemRoot} outside the root`);
+  }
+  report.systemroot = relative.replaceAll('\\', '/');
+  const registry = path.join(systemRoot, 'System32', 'reg.exe');
+  let program = false;
+  try {
+    program = fs.readFileSync(registry).subarray(0, 2).toString('latin1') === 'MZ';
+  } catch {
+    program = false;
+  }
+  if (!program) {
+    if (!standIn) refuse('no REGISTRY_STAND_IN to put at System32\\reg.exe');
+    fs.mkdirSync(path.dirname(registry), { recursive: true });
+    fs.copyFileSync(standIn, registry);
+    report.stand_in_installed = true;
+  }
+}
 if (spec.process) {
   const pinned = spec.process;
   const call = (value) => (value === undefined || value === null ? undefined : () => value);
@@ -288,16 +373,44 @@ const apply = (entry) => {
   }
 };
 const snapshot = (name) => ({ name, spawns: { ...report.spawns }, exits: { ...report.exits }, running: running.size });
+// The program whose end starts a `child_exit` resolve: a real Node that exits at once, outside the counted spawns.
+const childEnv = () => (hostWindows ? { ...process.env, SYSTEMROOT: realSystemRoot } : { ...process.env });
+const deepCall = (depth, options) => (depth === 0 ? sdk.resolveSettings(options) : deepCall(depth - 1, options));
+// One resolve from the caller `context` names.
+const resolveFrom = async (options) => {
+  if (report.context === 'toplevel') return await sdk.resolveSettings(options);
+  if (report.context === 'nested') return await deepCall(1000, options);
+  await quiet();
+  const started = await new Promise((resolve, reject) => {
+    const start = () => {
+      try {
+        resolve({ promise: sdk.resolveSettings(options) });
+      } catch (error) {
+        reject(error);
+      }
+    };
+    if (report.context === 'timer') realSetTimeout(start, 0);
+    else if (report.context === 'io') fs.stat(root, start);
+    else if (report.context === 'immediate') setImmediate(start);
+    else {
+      report.context_child += 1;
+      execFile.call(cp, process.execPath, ['-e', ''], { cwd: root, env: childEnv() }, start);
+    }
+  });
+  return settle(started.promise);
+};
 if (report.call === 'second' && spec.cases.length > 0) {
   const first = spec.cases[0];
+  const options = report.prime === 'fresh' ? JSON.parse(fs.readFileSync(specPath, 'utf8')).cases[0].options : first.options;
   apply(first);
   try {
-    await settle(sdk.resolveSettings(first.options));
+    await resolveFrom(options);
   } catch {
     // The prime call only moves the process past its first resolve; what it answers is not recorded.
   }
   report.cases.push(snapshot('prime'));
 }
+if (process.env.TRACE_LOG) fs.appendFileSync(process.env.TRACE_LOG, '{"marker":"cases"}\n');
 const out = [];
 for (const entry of spec.cases) {
   if (typeof entry.at === 'number') shift(entry.at);
@@ -305,7 +418,7 @@ for (const entry of spec.cases) {
   if (entry.resume === 'file') await fsp.stat(root);
   let result;
   try {
-    result = await settle(sdk.resolveSettings(entry.options));
+    result = await resolveFrom(entry.options);
   } catch (error) {
     report.cases.push(snapshot(entry.name));
     if (!spec.rejections || !(error instanceof RangeError)) throw error;

@@ -8,9 +8,11 @@ usage: python3 -I record.py RECORDER TALLY_FILE NODE PACKAGE_DIR OUT_FILE [RECOR
 The recorder runs as its own `__main__` with its own file name, so it finds `resolve_settings_oracle.mjs` beside it,
 and with every argument after TALLY_FILE as its command line. Its `subprocess` is the standard module except `run`,
 which checks each oracle run and counts the bytes the command line and environment take (`inherited` when the
-recorder passes no environment). The organization cases of `ts_managed_settings_goldens.py` write `proc/version`,
-which a native run cannot stand in for, so they are left out and listed under `diagnostic_only`. PYTHON_SDK, when set,
-names a folder holding the pinned `claude_agent_sdk` for `settings_stand_in_goldens.py`.
+recorder passes no environment). The organization cases of `ts_managed_settings_goldens.py` (every case named
+`org_*`, the org_copy group among them) need a WSL kernel to answer `/proc/version` (Gc, sdk.mjs 136 col 4257), which
+no stand-in may fake: off WSL they are left out and listed under `diagnostic_only`, and under a real WSL kernel
+(R3_WSL=1) only they are recorded. PYTHON_SDK, when set, names a folder holding the pinned `claude_agent_sdk` for
+`settings_stand_in_goldens.py`.
 """
 
 import json
@@ -63,10 +65,16 @@ def run(command, *positional, **named):
     return process
 
 
-def leave_out(cases):
-    """Lists the organization cases as diagnostic only and leaves them out of the native record."""
-    DIAGNOSTIC.extend(case[0] for case in cases)
-    return []
+def keep_native(cases):
+    """Off WSL, lists the organization cases as diagnostic only and leaves them out of the native record; under a
+    real WSL kernel, keeps only them and lists the others as recorded elsewhere."""
+    organization = [case for case in cases if case[0].startswith("org_")]
+    others = [case for case in cases if not case[0].startswith("org_")]
+    if GATE["WSL"]:
+        DIAGNOSTIC.extend(f"recorded off WSL: {case[0]}" for case in others)
+        return organization
+    DIAGNOSTIC.extend(case[0] for case in organization)
+    return others
 
 
 shim = types.ModuleType("subprocess")
@@ -80,15 +88,20 @@ if source.count("\nimport subprocess\n") != 1:
     sys.exit(2)
 source = source.replace("\nimport subprocess\n", "\n", 1)
 if os.path.basename(recorder) == "ts_managed_settings_goldens.py":
-    if source.count(" + FIXED + org_cases()\n") != 1:
-        sys.stderr.write(f"{recorder}: expected one `+ FIXED + org_cases()`\n")
+    line = "CASES = [case for keys, make in GROUPS for case in make(*(PROFILES[TARGET][key] for key in keys.split()))]" \
+        " + FIXED + org_cases()\n"
+    if source.count(line) != 1:
+        sys.stderr.write(f"{recorder}: expected one CASES line\n")
         sys.exit(2)
-    source = source.replace(" + FIXED + org_cases()\n", " + FIXED + LEAVE_OUT(org_cases())\n", 1)
+    source = source.replace(line, "CASES = KEEP_NATIVE(" + line[len("CASES = "):-1] + ")\n", 1)
+elif GATE["WSL"]:
+    sys.stderr.write(f"{recorder}: under WSL only the managed organization cases are recorded\n")
+    sys.exit(2)
 if os.environ.get("PYTHON_SDK"):
     sys.path.insert(0, os.environ["PYTHON_SDK"])
 
 sys.argv = [recorder, *args[2:]]
-scope = {"__name__": "__main__", "__file__": recorder, "subprocess": shim, "LEAVE_OUT": leave_out}
+scope = {"__name__": "__main__", "__file__": recorder, "subprocess": shim, "KEEP_NATIVE": keep_native}
 outcome = {"exit": 0, "error": None}
 try:
     exec(compile(source, recorder, "exec"), scope)
@@ -104,6 +117,8 @@ report = {
     "arguments": args[2:],
     "platform": sys.platform,
     "call": GATE["CALL"],
+    "context": GATE["CONTEXT"],
+    "wsl": GATE["WSL"],
     **outcome,
     "diagnostic_only": DIAGNOSTIC,
     "startup_bytes": STARTUP,

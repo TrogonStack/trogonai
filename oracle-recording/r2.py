@@ -117,7 +117,8 @@ def wsl(root, spec, hklm, hkcu=None, held=None):
 
 def win32(root, spec, hkcu=None):
     spec["platform"] = "win32"
-    spec["env"]["SYSTEMROOT"] = "/mnt/c/Windows"
+    # Natively the SYSTEMROOT a run reads the registry through is its own, under the root.
+    spec["env"]["SYSTEMROOT"] = os.path.join(root, "mnt", "c", "Windows") if WINDOWS else "/mnt/c/Windows"
     if WINDOWS:
         folder, name = os.path.join(root, SYSTEM32), "reg.exe"
     else:

@@ -38,6 +38,10 @@ def started(env):
 EXTRA_ENV = {}
 if WINDOWS and not started({"PAD": "x"}):
     EXTRA_ENV = {"SYSTEMROOT": os.environ["SYSTEMROOT"]}
+# The native oracle on Windows puts this program at the run's own System32\reg.exe where none is there, so every
+# registry query is a real program's run; it takes the variable out of the environment before the SDK loads.
+if WINDOWS and STUB:
+    EXTRA_ENV = {**EXTRA_ENV, "REGISTRY_STAND_IN": STUB}
 
 
 ORACLE_NAME = "resolve_settings_oracle.mjs"
@@ -249,6 +253,13 @@ def registry_spec(place, key, shape, n, root):
         # same length; the native oracle hands it to the real plutil as an XML plist.
         write(os.path.join(root, "Library/Managed Preferences/com.anthropic.claudecode.plist"),
               document.replace("null", "true") if NATIVE else document)
+    elif WINDOWS and place in ("hklm", "hkcu"):
+        # Natively on Windows: the registry is read through the run's own SYSTEMROOT, and the user hive applies when
+        # the machine hive holds no policy (its query fails, so HKLM is absent).
+        spec["platform"] = "win32"
+        env["SYSTEMROOT"] = os.path.join(root, "mnt", "c", "Windows")
+        tool(system32, "reg.exe", REG_SH)
+        write(os.path.join(system32, place + ".txt"), reg_text(body))
     else:
         tool(system32, "reg.exe", REG_SH)
         if place == "hklm":
