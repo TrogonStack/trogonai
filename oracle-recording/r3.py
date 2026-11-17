@@ -2536,6 +2536,108 @@ def band8_unit():
     return go
 
 
+# ---- band8x: the sides whose margin entry flipped in the margin record, stepped on (PLAN Update 74) ----
+BAND8X_RUNS = 50
+BAND8X_POOLED = os.path.join(HERE, "band8_pooled.json")
+
+
+def band8x_side(runs, pool, pair, pooled, answers, write_event, hashes):
+    """The new margin of a side whose pooled level is in band: from the level past it, outward inside the reference
+    region through L8, the outer of the first two consecutive levels with no opposite answer in 50 default-flag
+    runs."""
+    side = pooled["side"]
+    write_event({"pooled": {"host": HOST, "pair": pair["id"], **pooled}})
+    region, width = band8_region(runs, pair, side, answers, write_event)
+    if pooled["level"] not in region:
+        raise Band8Stop(f"{pair['id']} {side}: the pooled level {pooled['level']} is outside the reference region "
+                        f"{region}")
+    others = {case[0] for other in runs.pairs if other["id"] != pair["id"] for case in (other["near"], other["far"])}
+    streak, measured = 0, []
+    for level in region[region.index(pooled["level"]) + 1:BAND8_STEPS + 1]:
+        named = [case[0] for case, _own, _other, _which in band8_cases(pair, side, level, answers)]
+        shared = sorted(others.intersection(named))
+        if shared:
+            raise Band8Stop(f"{pair['id']} {side}: level {level} is another pair's edge case {shared}")
+        clean = band8_level(runs, pool, pair, side, level, answers, write_event, hashes, BAND8X_RUNS)
+        measured.append([level, clean])
+        streak = streak + 1 if clean else 0
+        if streak == BAND8_CLEAN_IN_A_ROW:
+            return {"margin": level, "measured": measured, "width": width, "from": pooled["level"]}
+    raise Band8Stop(f"{pair['id']} {side}: no two clean levels in a row past the pooled level {pooled['level']} "
+                    f"inside the region of {width} levels, by L{BAND8_STEPS}")
+
+
+def band8x_unit():
+    def go(pool, quiet):
+        port = mg8_port()
+        out = {"located": {}, "pm": {}}
+        failed = mg8_profile(pool, port, out)
+        if failed:
+            return {"error": failed, **out}
+        traced = r8_traced()
+        hashes = {"pinned_sha256": r7_sha256(os.path.join(PACKAGE, "sdk.mjs")),
+                  "traced_sha256": traced.get("traced_sha256")}
+        out["hashes"] = hashes
+        with open(BAND8X_POOLED, encoding="utf-8") as handle:
+            wanted = json.load(handle).get(HOST, {})
+        with open(MG8_MARGINS, encoding="utf-8") as handle:
+            margins = json.load(handle)[HOST]
+        runs = Band8Runs(port)
+        try:
+            runs.pairs = band8_pairs(port, out["profile"])
+            pairs = [pair for pair in runs.pairs if pair["id"] in wanted]
+            if {pair["id"] for pair in pairs} != set(wanted):
+                raise Band8Stop(f"no pair for {sorted(set(wanted) - {pair['id'] for pair in pairs})}")
+            for pair in pairs:
+                committed, pooled = margins[pair["id"]], wanted[pair["id"]]
+                edge = [pair["axis"], pair["near_level"], pair["far_level"]]
+                if edge != [committed["axis"], committed["near_level"], committed["far_level"]]:
+                    raise Band8Stop(f"the edge moved: {pair['id']} {edge}")
+                if pooled["level"] != committed[f"{pooled['side']}_margin"] or pooled["axis"] != pair["axis"]:
+                    raise Band8Stop(f"{pair['id']}: the pooled level is not the committed margin")
+                if pair[f"{pooled['side']}_at"](pooled["level"])[0] != pooled["case"]:
+                    raise Band8Stop(f"{pair['id']}: the pooled level does not make the pooled case")
+        except Band8Stop as stop:
+            return {"error": str(stop), **out}
+        folder = os.path.join(os.path.dirname(OUT), "band8x")
+        os.makedirs(folder, exist_ok=True)
+        out["pairs"], stopped = {}, []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2 * (os.cpu_count() or 1)) as band_pool:
+            for pair in pairs:
+                events = os.path.join(folder, f"{pair['id']}.events.jsonl")
+                lock = __import__("threading").Lock()
+
+                def write_event(event, events=events, lock=lock):
+                    with lock, open(events, "a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(event) + "\n")
+
+                pooled = wanted[pair["id"]]
+                summary = {"host": HOST, "pair": pair["id"], "axis": pair["axis"], "side": pooled["side"],
+                           "near_level": pair["near_level"], "far_level": pair["far_level"],
+                           "flags": list(DEFAULT_FLAGS), **hashes}
+                try:
+                    answers = {"near": band8_answer(runs, pair["near"]), "far": band8_answer(runs, pair["far"])}
+                    if answers["near"] == answers["far"]:
+                        raise Band8Stop(f"{pair['id']}: the pair answers the same")
+                    summary[pooled["side"]] = band8x_side(runs, band_pool, pair, pooled, answers, write_event, hashes)
+                except Band8Stop as stop:
+                    summary["stop"] = str(stop)
+                    stopped.append(pair["id"])
+                summary["folder_assertion"] = runs.tally()
+                write_event({"summary": summary})
+                out["pairs"][pair["id"]] = summary
+        out["folder_assertion"] = runs.tally()
+        out["stopped"] = stopped
+        assertion = out["folder_assertion"]
+        if (assertion["refusals"] or assertion["failed_probe_checks"] or assertion["running_after"]
+                or assertion["distinct_folders"] != assertion["runs"]):
+            out["error"] = f"the folder check did not hold: {assertion}"
+        elif stopped:
+            out["error"] = f"pairs stopped: {stopped}"
+        return out
+    return go
+
+
 def round8_units():
     out = [("rec8:instrument", r8_instrument_unit())]
     out += [(f"rec8:fixture:{name}", rec8_fixture(name)) for name in R8_FIXTURES]
@@ -2545,6 +2647,8 @@ def round8_units():
     out += [("mg8:goldens", mg8_unit())]
     # After the pm8 units too: the default-flag margins of every pair the profile names.
     out += [("band8:goldens", band8_unit())]
+    # The sides whose margin entry flipped in the margin record, from their pooled level outward.
+    out += [("band8x:goldens", band8x_unit())]
     return out
 
 

@@ -13,11 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         host:
-          # Unix: the handed-over managed settings passes, then the managed goldens of each host with every boundary
-          # entry at its committed default-flag margin.
-          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|mg8:)" }
-          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 1, only: "^(pm8:|mg8:)" }
-          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|mg8:)" }
+          # Unix: the handed-over managed settings passes, then the two sides whose margin entry flipped in the
+          # margin record, stepped on from their pooled level.
+          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|band8x:)" }
+          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|band8x:)" }
         shard: [1]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360
@@ -81,7 +80,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mg8e-${{ matrix.host.label }}-${{ matrix.shard }}
+          name: band8x-${{ matrix.host.label }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 7

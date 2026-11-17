@@ -1,0 +1,32 @@
+{
+  "darwin arm64": {
+    "pm_parent_cachedcopy": {
+      "side": "near",
+      "axis": "startup",
+      "level": 4393,
+      "case": "pm_parent_cachedcopy_3_1939_null_array_4393",
+      "pooled": [
+        {"run": "43983618044", "kind": "band8", "runs": 25, "clean": 25, "opposite": 0, "unexpected": 0},
+        {"run": "43989822128", "kind": "mg8 margin record", "runs": 25, "clean": 24, "opposite": 1, "unexpected": 0}
+      ],
+      "runs": 50,
+      "opposite": 1,
+      "in_band": true
+    }
+  },
+  "linux x86_64": {
+    "pm_remote_walk": {
+      "side": "near",
+      "axis": "class",
+      "level": 1001088,
+      "case": "pm_remote_walk_1633_27_null_array_4384",
+      "pooled": [
+        {"run": "43983618044", "kind": "band8", "runs": 25, "clean": 25, "opposite": 0, "unexpected": 0},
+        {"run": "43989822128", "kind": "mg8 margin record", "runs": 25, "clean": 23, "opposite": 2, "unexpected": 0}
+      ],
+      "runs": 50,
+      "opposite": 2,
+      "in_band": true
+    }
+  }
+}
