@@ -6,6 +6,7 @@ use trogon_nats::jetstream::{
 
 use super::streams;
 use crate::acp_prefix::AcpPrefix;
+use crate::nats::AcpSubjectNamespace;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProvisionError<Source> {
@@ -40,7 +41,7 @@ where
     <J as JetStreamGetStream>::Stream: JetStreamGetStreamInfo,
 {
     let configs = streams::all_configs(prefix);
-    let namespace = format!("{}.v1.", prefix.as_str());
+    let namespace = AcpSubjectNamespace::new(prefix);
     // Stream names normalize distinct prefixes, so check every owner before any write.
     for config in &configs {
         let current = match js.get_stream(&config.name).await {
@@ -57,13 +58,7 @@ where
             stream: config.name.clone(),
             source,
         })?;
-        if info.config.subjects.is_empty()
-            || !info
-                .config
-                .subjects
-                .iter()
-                .all(|subject| subject.starts_with(&namespace))
-        {
+        if info.config.subjects.is_empty() || !info.config.subjects.iter().all(|subject| namespace.contains(subject)) {
             return Err(ProvisionError::OwnershipMismatch {
                 stream: config.name.clone(),
                 prefix: prefix.clone(),
