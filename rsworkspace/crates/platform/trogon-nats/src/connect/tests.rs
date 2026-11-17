@@ -946,9 +946,22 @@ fn a_server_address_shows_without_the_credentials_it_carries() {
         ("tls://nats.internal:4222", "tls://nats.internal:4222"),
         ("nats.internal:4222", "nats.internal:4222"),
         (
-            "ws://nats.internal:443/path@mirror",
-            "ws://nats.internal:443/path@mirror",
+            "nats://fake-user:fake/password@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
         ),
+        (
+            "nats://fake-user:fake?password@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
+        ),
+        (
+            "nats://fake-user:fake#password@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
+        ),
+        (
+            "nats://fake/token@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
+        ),
+        ("ws://nats.internal:443/path@mirror", "ws://<redacted>@mirror"),
     ] {
         assert_eq!(redact_server_userinfo(server), shown, "{server}");
     }
