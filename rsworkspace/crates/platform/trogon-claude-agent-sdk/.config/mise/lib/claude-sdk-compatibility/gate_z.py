@@ -13,6 +13,11 @@ ACCEPTED_DECISIONS = ("upstream", "follow-typescript", "follow-python")
 RUST_ADAPTATION = "rust-adaptation"
 TLS_ROWS = re.compile(r"m(?:19|2[0-5])-[a-z0-9]+(?:-[a-z0-9]+)*|m26-python-tls-trust-directory-lookup")
 TLS_REASON = "The owner chose rustls under ADR 0015 on 2026-11-14 over OpenSSL, so the difference is accepted."
+DEFECT_ROWS = frozenset(("m18-python-system-proxy-undefined-reads",))
+DEFECT_REASON = (
+    "Upstream here is a defect, not a contract: CPython _scproxy aborts the interpreter with an NSException on macOS and "
+    "winreg Reg2Py reads uninitialized memory on Windows, so Rust reads the values safely instead."
+)
 OPENSSL_CRATES = frozenset(("openssl", "openssl-sys", "openssl-src", "native-tls"))
 SDK_PACKAGE = "trogon-claude-agent-sdk"
 
@@ -23,12 +28,21 @@ def unsupported_features(mapping):
     return [f"{feature['id']}.status" for feature in mapping["features"] if feature["status"] != "supported"]
 
 
+def _accepted_adaptation(row_id, reason):
+    # Only the TLS rows the owner accepted under ADR 0015 may differ, plus the rows whose upstream behavior is a crash or
+    # an undefined read, which Rust does not copy. Each must give the owner's reason for it.
+    if TLS_ROWS.fullmatch(row_id) is not None:
+        return reason.endswith(TLS_REASON)
+    if row_id in DEFECT_ROWS:
+        return reason.endswith(DEFECT_REASON)
+    return False
+
+
 def _decision_gap(row):
     decision = row["decision"]
     kind = decision["kind"]
     if kind == RUST_ADAPTATION:
-        # Only the TLS rows the owner accepted under ADR 0015 may differ, and they must say so.
-        return TLS_ROWS.fullmatch(row["id"]) is None or not decision["reason"].endswith(TLS_REASON)
+        return not _accepted_adaptation(row["id"], decision["reason"])
     if kind == "follow-python":
         # Python is followed only where TypeScript has no counterpart; following it over a TypeScript form is a choice
         # between the SDKs, which parity does not allow.

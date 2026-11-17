@@ -68,6 +68,23 @@ class BehaviorTests(unittest.TestCase):
                          row("m20-tls-case", gate_z.RUST_ADAPTATION, "Rust verifies with rustls."))
         self.assertEqual(gate_z.behavior_gaps(rows), ["m19-tls-case.decision", "m20-tls-case.decision"])
 
+    def test_a_row_adapting_an_upstream_defect_passes_with_the_owner_reason(self):
+        reason = "Rust zeroes the buffer. " + gate_z.DEFECT_REASON
+        rows = behaviors(row("m18-python-system-proxy-undefined-reads", gate_z.RUST_ADAPTATION, reason))
+        self.assertEqual(gate_z.behavior_gaps(rows), [])
+
+    def test_a_row_adapting_an_upstream_defect_without_the_owner_reason_is_a_gap(self):
+        row_id = "m18-python-system-proxy-undefined-reads"
+        rows = behaviors(row(row_id, gate_z.RUST_ADAPTATION, "Rust zeroes the buffer."),
+                         row(row_id, gate_z.RUST_ADAPTATION, gate_z.TLS_REASON),
+                         row(row_id, gate_z.RUST_ADAPTATION, gate_z.DEFECT_REASON + " More text."))
+        self.assertEqual(gate_z.behavior_gaps(rows), [f"{row_id}.decision"] * 3)
+
+    def test_the_defect_reason_does_not_admit_any_other_row(self):
+        ids = ("m18-python-system-proxy", "m17-python-system-proxy-undefined-reads", "m19-python-tls-hello-retry-groups")
+        rows = behaviors(*(row(row_id, gate_z.RUST_ADAPTATION, gate_z.DEFECT_REASON) for row_id in ids))
+        self.assertEqual(gate_z.behavior_gaps(rows), [f"{row_id}.decision" for row_id in ids])
+
     def test_adapting_any_other_row_is_a_gap(self):
         ids = ("c24-launch-directory", "m18-tls-case", "m26-python-tls-other", "m19", "xm19-tls-case", "m190-tls-case")
         rows = behaviors(*(row(row_id, gate_z.RUST_ADAPTATION, gate_z.TLS_REASON) for row_id in ids))

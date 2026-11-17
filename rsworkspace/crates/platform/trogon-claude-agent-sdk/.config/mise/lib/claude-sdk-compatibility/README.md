@@ -110,7 +110,10 @@ mapping alone does not establish runtime parity.
   is followed only for a form TypeScript lacks, which review keeps opt-in.
 - A behavior row is a `rust-adaptation` outside the TLS rows m19 to m25 and
   `m26-python-tls-trust-directory-lookup`, or one of those rows gives a reason
-  that does not end with the owner's rustls decision under ADR 0015.
+  that does not end with the owner's rustls decision under ADR 0015. The one
+  other accepted adaptation is `m18-python-system-proxy-undefined-reads`,
+  whose upstream behavior is a crash or an uninitialized read. Rust does not
+  copy a defect, and that row's reason must end with `DEFECT_REASON`.
 - A behavior row has no contracts.
 - `openssl`, `openssl-sys`, `openssl-src` or `native-tls` is reachable from the
   SDK in the workspace `Cargo.lock`.
