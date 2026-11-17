@@ -5,22 +5,27 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use trogon_credential_aggregate::proto::{activated_to_proto, revoked_to_proto, write_requested_to_proto};
 use trogon_credential_domain::{CredentialIdentity, CredentialRef, CredentialScope};
+use trogon_decider_runtime::{Evolve, StreamPosition};
 use trogon_nats::jetstream::{
     JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueUpdate,
     MockJetStreamKvClient, MockJetStreamKvStore,
 };
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_secret_store::{
-    MockOpenBaoSecretStore, SecretMaterial, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+    MockOpenBaoSecretStore, SecretMaterial, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
 };
 use trogon_webhooks::{
     AuthenticationMode, ConfigurationRevision, EndpointId, EndpointRegistration, EndpointStatus, ProjectId,
     TimestampTolerance, WebhookBodySize,
 };
+use trogonai_proto::gateway::credentials::v1;
 
+use crate::credential::commands::state::CredentialState;
 use crate::credential_runtime_projection::{
-    InMemoryRuntimeProjectionRepository, RuntimeIntegrationProjection, RuntimeIntegrationStatus,
+    InMemoryRuntimeProjectionRepository, RuntimeCredentialRegistry, RuntimeIntegrationProjection,
+    RuntimeIntegrationStatus,
 };
 
 use super::*;
@@ -165,6 +170,77 @@ async fn generic_webhooks_disabled_and_revoked_credentials_fail_closed() {
         lookup.lookup_secret(&endpoint("project-one")).await,
         Err(AuthenticationError::Unauthorized)
     ));
+}
+
+#[tokio::test]
+async fn generic_webhooks_revocation_refresh_rejects_and_evicts_a_warmed_secret() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = provision_secret(&store).await;
+    let metadata = store.metadata(&credential).await.unwrap();
+    let active_state = CredentialState::default()
+        .evolve(&v1::CredentialEvent {
+            event: Some(write_requested_to_proto(credential.identity()).into()),
+        })
+        .unwrap()
+        .evolve(&v1::CredentialEvent {
+            event: Some(activated_to_proto(&metadata).into()),
+        })
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .apply_state(&active_state, StreamPosition::try_new(2).unwrap())
+        .await
+        .unwrap();
+    let lagging_registry = RuntimeCredentialRegistry::default();
+    lagging_registry
+        .apply_state(&active_state, StreamPosition::try_new(2).unwrap())
+        .await
+        .unwrap();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let secrets = CountingSecrets {
+        store: store.clone(),
+        reads: reads.clone(),
+    };
+    let lookup = RuntimeWebhookSecrets::new(registry.resolver(secrets.clone()));
+    // A lagging projection distinguishes cache eviction from rejection by the refreshed projection.
+    let lagging_lookup = RuntimeWebhookSecrets::new(RuntimeCredentialResolver::with_cache(
+        lagging_registry.projections().clone(),
+        registry.cache().clone(),
+        secrets,
+    ));
+    let registered = endpoint("project-one");
+
+    assert_eq!(
+        lookup.lookup_secret(&registered).await.unwrap().as_str(),
+        "test-initial-value"
+    );
+    assert_eq!(
+        lagging_lookup.lookup_secret(&registered).await.unwrap().as_str(),
+        "test-initial-value"
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+    store.revoke(&credential).await.unwrap();
+    let revoked_state = active_state
+        .evolve(&v1::CredentialEvent {
+            event: Some(revoked_to_proto(&credential).into()),
+        })
+        .unwrap();
+    registry
+        .apply_state(&revoked_state, StreamPosition::try_new(3).unwrap())
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        lookup.lookup_secret(&registered).await,
+        Err(AuthenticationError::Unauthorized)
+    ));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        lagging_lookup.lookup_secret(&registered).await,
+        Err(AuthenticationError::Unauthorized)
+    ));
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
 
 fn config() -> WebhookConfig {
