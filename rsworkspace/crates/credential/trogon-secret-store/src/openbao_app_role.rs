@@ -9,46 +9,55 @@ use trogon_std::{ReadFile, SecretString};
 ///
 /// The secret id comes from a file the deployment platform provisions, never
 /// from a config value or an environment variable, per ADR#0023 Decision 3 and
-/// ADR#0007. It is held only as a [`SecretString`] and never shown by `Debug`.
+/// ADR#0007. The file is checked when the identity is built and read again for
+/// every login, so the platform can rotate the secret id in place without a
+/// restart. The secret id is never kept between logins, and `Debug` shows only
+/// the file path.
 #[derive(Clone)]
 pub struct OpenBaoAppRole {
     role_id: Arc<str>,
-    secret_id: SecretString,
+    secret_id_file: Arc<Path>,
+    fs: Arc<dyn ReadFile + Send + Sync>,
 }
 
 impl OpenBaoAppRole {
-    /// Reads the secret id from `secret_id_file`, ignoring surrounding
-    /// whitespace such as the trailing newline most provisioners write.
+    /// Checks that `secret_id_file` holds a secret id, so a missing or blank
+    /// file refuses to start instead of failing the first login.
     pub fn from_secret_id_file(
         role_id: impl AsRef<str>,
         secret_id_file: &Path,
-        fs: &impl ReadFile,
+        fs: Arc<dyn ReadFile + Send + Sync>,
     ) -> Result<Self, OpenBaoAppRoleError> {
         let role_id = role_id.as_ref();
         if role_id.is_empty() {
             return Err(OpenBaoAppRoleError::EmptyRoleId);
         }
-        let contents = fs
-            .read_to_string(secret_id_file)
-            .map_err(|source| OpenBaoAppRoleError::SecretIdUnreadable {
-                path: secret_id_file.to_path_buf(),
-                source,
-            })?;
-        let secret_id = SecretString::new(contents.trim()).map_err(|_| OpenBaoAppRoleError::EmptySecretId {
-            path: secret_id_file.to_path_buf(),
-        })?;
-        Ok(Self {
+        let approle = Self {
             role_id: Arc::from(role_id),
-            secret_id,
-        })
+            secret_id_file: Arc::from(secret_id_file),
+            fs,
+        };
+        approle.read_secret_id()?;
+        Ok(approle)
     }
 
     pub fn role_id(&self) -> &str {
         &self.role_id
     }
 
-    pub(crate) fn secret_id(&self) -> &SecretString {
-        &self.secret_id
+    /// Reads the secret id the file holds now, ignoring surrounding whitespace
+    /// such as the trailing newline most provisioners write.
+    pub(crate) fn read_secret_id(&self) -> Result<SecretString, OpenBaoAppRoleError> {
+        let contents =
+            self.fs
+                .read_to_string(&self.secret_id_file)
+                .map_err(|source| OpenBaoAppRoleError::SecretIdUnreadable {
+                    path: self.secret_id_file.to_path_buf(),
+                    source,
+                })?;
+        SecretString::new(contents.trim()).map_err(|_| OpenBaoAppRoleError::EmptySecretId {
+            path: self.secret_id_file.to_path_buf(),
+        })
     }
 }
 
@@ -56,7 +65,7 @@ impl fmt::Debug for OpenBaoAppRole {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpenBaoAppRole")
             .field("role_id", &self.role_id)
-            .field("secret_id", &"***")
+            .field("secret_id_file", &self.secret_id_file)
             .finish()
     }
 }

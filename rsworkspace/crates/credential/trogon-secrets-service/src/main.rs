@@ -4,6 +4,7 @@
 
 use std::error::Error;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::Parser;
 use tokio_util::sync::CancellationToken;
@@ -40,7 +41,7 @@ async fn main() -> ExitCode {
 async fn serve() -> Result<(), Box<dyn Error>> {
     let args = ServiceArgs::parse();
     let config = ServiceConfig::resolve(&args, &SystemEnv, &SystemFs)?;
-    let sources = ReleaseSources::load(&config, &SystemEnv, &SystemFs)?;
+    let sources = ReleaseSources::load(&config, &SystemEnv, &Arc::new(SystemFs))?;
 
     let shutdown = CancellationToken::new();
     let on_signal = shutdown.clone();

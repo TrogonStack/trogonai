@@ -6,6 +6,7 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::num::NonZeroUsize;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +16,7 @@ use async_nats::{HeaderMap, RequestErrorKind};
 use axum::Router;
 use axum::http::StatusCode;
 use axum::http::header::CONTENT_TYPE;
+use axum::response::IntoResponse;
 use axum::routing::post;
 use buffa::Message as _;
 use bytes::Bytes;
@@ -48,6 +50,11 @@ use uuid::Uuid;
 const TENANT_OWNERS_FILE: &str = "/etc/trogon/tenant-owners.toml";
 const RELEASE_POLICIES_FILE: &str = "/etc/trogon/release-policies.toml";
 const SECRET_ID_FILE: &str = "/run/secrets/fake-secret-id";
+const SECRET_ID: &str = "fake-secret-id";
+const ROTATED_SECRET_ID: &str = "fake-rotated-secret-id";
+/// What OpenBao answers a login whose secret id it does not know.
+const INVALID_SECRET_ID: &str = "fake-invalid-secret-id";
+const SECRET_ID_RETRYING: &str = "could not read the OpenBao AppRole secret id; retrying";
 /// The credential owner every test tenant holds.
 const OWNER: &str = "project-1";
 const SEED_VARIABLE: &str = "FAKE_SERVICE_XKEY_SEED";
@@ -86,6 +93,22 @@ async fn fake_openbao() -> (String, JoinHandle<()>) {
     serve_openbao(Router::new().route(
         APPROLE_LOGIN,
         post(|| async { ([(CONTENT_TYPE, "application/json")], LOGIN_ANSWER) }),
+    ))
+    .await
+}
+
+/// Accepts an AppRole login only with `secret_id`, refusing any other the way
+/// OpenBao refuses a destroyed one.
+async fn openbao_accepting(secret_id: &'static str) -> (String, JoinHandle<()>) {
+    serve_openbao(Router::new().route(
+        APPROLE_LOGIN,
+        post(move |login: axum::Json<serde_json::Value>| async move {
+            if login["secret_id"] == secret_id {
+                ([(CONTENT_TYPE, "application/json")], LOGIN_ANSWER).into_response()
+            } else {
+                (StatusCode::BAD_REQUEST, INVALID_SECRET_ID).into_response()
+            }
+        }),
     ))
     .await
 }
@@ -160,11 +183,11 @@ fn environment(nats: &str, openbao: &str) -> InMemoryEnv {
     env
 }
 
-fn files(tenant: &str) -> MemFs {
-    let fs = MemFs::new();
+fn files(tenant: &str) -> Arc<MemFs> {
+    let fs = Arc::new(MemFs::new());
     fs.insert(TENANT_OWNERS_FILE, format!("[tenants]\n\"{tenant}\" = [\"{OWNER}\"]\n"));
     fs.insert(RELEASE_POLICIES_FILE, RELEASE_POLICIES);
-    fs.insert(SECRET_ID_FILE, "fake-secret-id\n");
+    fs.insert(SECRET_ID_FILE, format!("{SECRET_ID}\n"));
     fs
 }
 
@@ -186,10 +209,34 @@ fn service_in(env: &InMemoryEnv) -> SecretsService {
 
 /// The service deployed with `tenant` holding [`OWNER`].
 fn service_for(env: &InMemoryEnv, tenant: &str) -> SecretsService {
-    let fs = files(tenant);
-    let config = ServiceConfig::resolve(&ServiceArgs::default(), env, &fs).unwrap();
-    let sources = ReleaseSources::load(&config, env, &fs).unwrap();
+    service_reading(env, &files(tenant))
+}
+
+/// The service started on `fs`, which the test keeps so it can change the
+/// files the service reads after it started.
+fn service_reading(env: &InMemoryEnv, fs: &Arc<MemFs>) -> SecretsService {
+    let config = ServiceConfig::resolve(&ServiceArgs::default(), env, fs.as_ref()).unwrap();
+    let sources = ReleaseSources::load(&config, env, fs).unwrap();
     SecretsService::new(config, sources)
+}
+
+/// Waits until a release request reaches the service, failing the test if it
+/// does not serve within [`SERVING_WITHIN`].
+async fn until_serving(caller: &async_nats::Client) {
+    let subject = release_subject();
+    tokio::time::timeout(SERVING_WITHIN, async {
+        loop {
+            match caller.request(subject.clone(), Bytes::new()).await {
+                Ok(_) => return,
+                Err(error) if error.kind() == RequestErrorKind::NoResponders => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("the release endpoint did not answer: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("the service did not start serving releases");
 }
 
 /// Runs the service until it returns, failing the test if it is still running
@@ -350,6 +397,68 @@ async fn an_openbao_that_refuses_the_login_keeps_the_service_out_of_the_queue_gr
 }
 
 #[tokio::test]
+async fn a_secret_id_file_removed_after_startup_keeps_the_service_out_of_the_queue_group_until_it_is_provisioned() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let server = JetStreamTestServer::start().await;
+    create_streams(&server).await;
+    let (openbao, _openbao) = openbao_accepting(ROTATED_SECRET_ID).await;
+    let fs = files(&KeyPair::new_account().public_key());
+    let service = service_reading(&environment(server.address(), &openbao), &fs);
+    fs.remove(Path::new(SECRET_ID_FILE));
+    let shutdown = CancellationToken::new();
+    let running = tokio::spawn(service.run(shutdown.clone()));
+    let caller = server.client().await;
+
+    tokio::time::timeout(SERVING_WITHIN, async {
+        while !events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some(SECRET_ID_RETRYING))
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the service never tried to read the secret id file again");
+    let unanswered = caller
+        .request(release_subject(), Bytes::new())
+        .await
+        .expect_err("the service joined the queue group without a login");
+    assert_eq!(unanswered.kind(), RequestErrorKind::NoResponders);
+    fs.insert(SECRET_ID_FILE, format!("{ROTATED_SECRET_ID}\n"));
+    until_serving(&caller).await;
+    shutdown.cancel();
+
+    tokio::time::timeout(STOPPED_WITHIN, running)
+        .await
+        .expect("the service did not stop when told to")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_service_logs_in_with_the_secret_id_its_file_holds_when_it_logs_in() {
+    let server = JetStreamTestServer::start().await;
+    create_streams(&server).await;
+    let (openbao, _openbao) = openbao_accepting(ROTATED_SECRET_ID).await;
+    let fs = files(&KeyPair::new_account().public_key());
+    let service = service_reading(&environment(server.address(), &openbao), &fs);
+    fs.insert(SECRET_ID_FILE, format!("{ROTATED_SECRET_ID}\n"));
+    let shutdown = CancellationToken::new();
+    let running = tokio::spawn(service.run(shutdown.clone()));
+
+    until_serving(&server.client().await).await;
+    shutdown.cancel();
+
+    tokio::time::timeout(STOPPED_WITHIN, running)
+        .await
+        .expect("the service did not stop when told to")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn the_service_serves_releases_until_it_is_told_to_stop() {
     let events = CapturedEvents::new();
     let _capture = events.install(LevelFilter::INFO);
@@ -358,22 +467,8 @@ async fn the_service_serves_releases_until_it_is_told_to_stop() {
     let (openbao, _openbao) = fake_openbao().await;
     let shutdown = CancellationToken::new();
     let running = tokio::spawn(service(server.address(), &openbao).run(shutdown.clone()));
-    let caller = server.client().await;
-    let subject = release_subject();
 
-    tokio::time::timeout(SERVING_WITHIN, async {
-        loop {
-            match caller.request(subject.clone(), Bytes::new()).await {
-                Ok(_) => return,
-                Err(error) if error.kind() == RequestErrorKind::NoResponders => {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                Err(error) => panic!("the release endpoint did not answer: {error}"),
-            }
-        }
-    })
-    .await
-    .expect("the service did not start serving releases");
+    until_serving(&server.client().await).await;
     shutdown.cancel();
 
     tokio::time::timeout(STOPPED_WITHIN, running)
