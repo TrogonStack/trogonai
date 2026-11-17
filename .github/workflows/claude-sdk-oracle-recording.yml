@@ -84,6 +84,10 @@ jobs:
           rustc --edition 2021 -O -o "$RUNNER_TEMP/reg.exe" "$NATIVE_LIB/registry_stand_in.rs"
           sudo install -D -m 0755 "$RUNNER_TEMP/reg.exe" /mnt/c/Windows/System32/reg.exe
 
+      - name: Check the fixture bytes
+        run: |
+          bash oracle-recording/check_fixture_bytes.sh "$GITHUB_WORKSPACE" "$OUT"
+
       - name: Describe the host
         run: |
           {
@@ -135,6 +139,10 @@ jobs:
       R5_TOPUP_RUNS: "50"
       R5_CHAIN_PASSES: "100"
     steps:
+      # Fixtures and goldens are read as committed, never with CRLF.
+      - name: Keep line endings
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -168,6 +176,10 @@ jobs:
           rustc --edition 2021 -O -o "$RUNNER_TEMP/reg.exe" "$NATIVE_LIB/registry_stand_in.rs"
           echo "STUB=$RUNNER_TEMP/reg.exe" >> "$GITHUB_ENV"
 
+      - name: Check the fixture bytes
+        run: |
+          bash oracle-recording/check_fixture_bytes.sh "$GITHUB_WORKSPACE" "$OUT"
+
       - name: Describe the host
         run: |
           {
@@ -195,8 +207,8 @@ jobs:
 
   wsl:
     # The organization and held units under a real WSL 2 kernel: Node runs natively inside the distribution and the
-    # SDK's own /proc/version read sees the kernel, which every org run asserts. /mnt/c is moved off the Windows drive
-    # so the reg.exe at the WSL path is the stand-in, never the real one.
+    # SDK's own /proc/version read sees the kernel, which every org run asserts. The distribution is imported from a
+    # pinned Ubuntu rootfs; oracle-recording/wsl_job.sh runs inside it.
     if: contains(github.event.head_commit.message, '[refit]')
     strategy:
       fail-fast: false
@@ -205,54 +217,38 @@ jobs:
         context: [toplevel, timer, io, child_exit, immediate, nested]
     runs-on: windows-latest
     timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
     steps:
+      # The checkout is copied into the distribution, so it keeps the committed line endings.
+      - name: Keep line endings
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
-        with:
-          distribution: Ubuntu-24.04
-          wsl-version: 2
-          wsl-conf: |
-            [automount]
-            root = /winmnt/
-          additional-packages: rustc curl ca-certificates xz-utils
+      - name: Provision WSL 2 with Ubuntu 24.04
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rootfs = Join-Path $env:RUNNER_TEMP 'rootfs.tar.gz'
+          Invoke-WebRequest -Uri 'https://cloud-images.ubuntu.com/wsl/releases/noble/20240423/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz' -OutFile $rootfs
+          $hash = (Get-FileHash $rootfs -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '8251e27ffff381a4af5f41dcb94d867de3e0d9774a9241908ab34555d99315ea') { throw "rootfs checksum $hash" }
+          wsl --import oracle (Join-Path $env:RUNNER_TEMP 'wsl-oracle') $rootfs --version 2
+          if ($LASTEXITCODE -ne 0) { throw "wsl --import exited $LASTEXITCODE" }
+          wsl -d oracle -u root -e sh -c "printf '[automount]\nroot = /winmnt/\n[interop]\nappendWindowsPath = false\n' > /etc/wsl.conf"
+          if ($LASTEXITCODE -ne 0) { throw "wsl.conf exited $LASTEXITCODE" }
+          wsl --terminate oracle
+          wsl --list --verbose
 
       - name: Fit the organization units under WSL
-        shell: wsl-bash {0}
         run: |
-          set -euo pipefail
-          out="$(wslpath -u '${{ runner.temp }}')/wsl-out"
-          mkdir -p "$out"
-          rm -rf ~/repo && cp -r "$(wslpath -u '${{ github.workspace }}')" ~/repo
-          cd ~/repo
-          {
-            cat /proc/version
-            uname -a
-            grep -qi microsoft /proc/version
-            test -z "$(ls -A /mnt/c 2>/dev/null | grep -v '^Windows$' || true)"
-          } | tee "$out/host.txt"
-          rustc --edition 2021 -O -o ~/reg.exe oracle-recording/native/registry_stand_in.rs
-          sudo install -D -m 0755 ~/reg.exe /mnt/c/Windows/System32/reg.exe
-          curl -fsSLo ~/node.tar.xz https://nodejs.org/dist/v24.13.1/node-v24.13.1-linux-x64.tar.xz
-          echo "30215f90ea3cd04dfbc06e762c021393fa173a1d392974298bbc871a8e461089  $HOME/node.tar.xz" | sha256sum -c -
-          tar -xJf ~/node.tar.xz -C ~
-          node_bin="$HOME/node-v24.13.1-linux-x64/bin/node"
-          curl -fsSLo ~/mise.tar.gz https://github.com/jdx/mise/releases/download/v2026.10.25/mise-v2026.10.25-linux-x64.tar.gz
-          echo "199966edaad1b208eb4c72955f1722dafb8fa799f575db720dea05aaa8216546  $HOME/mise.tar.gz" | sha256sum -c -
-          tar -xzf ~/mise.tar.gz -C ~
-          (cd ~ && ~/mise/bin/mise install python@3.12.16)
-          py="$(cd ~ && ~/mise/bin/mise exec python@3.12.16 -- python3 -c 'import sys; print(sys.executable)')"
-          {
-            "$node_bin" -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8, now: Date.now()})'
-            "$py" --version
-          } | tee -a "$out/host.txt"
-          "$py" -I rsworkspace/crates/platform/trogon-claude-agent-sdk/.config/mise/lib/claude-sdk-freshness/fetch_pinned_typescript.py ~/package
-          export R3_NATIVE=1 R3_PYTHON=3.12.16 R3_WSL=1 R3_CALL='${{ matrix.call }}' R3_CONTEXT='${{ matrix.context }}'
-          export R3_ROUND4_PASSES=60 R5_TOPUP_RUNS=50 R5_CHAIN_PASSES=100 R3_BAND_RUNS=50
-          export R3_ONLY='^(reg3c:|reg5:H|reg6:|reg7:|rec7:fixture:org_held|rec8:events:org_held|key:org_copy|key:origin_merge)'
-          "$py" -I oracle-recording/r3.py oracle-recording/native "$node_bin" ~/package "$out/r3.json" 1 1 2> >(tee "$out/r3.log" >&2)
+          $checkout = (wsl -d oracle -u root -e wslpath -u "$env:GITHUB_WORKSPACE").Trim()
+          $out = (wsl -d oracle -u root -e wslpath -u "$env:RUNNER_TEMP").Trim() + '/wsl-out'
+          wsl -d oracle -u root -e bash -euo pipefail "$checkout/oracle-recording/wsl_job.sh" refit $checkout $out '${{ matrix.call }}' '${{ matrix.context }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Keep the oracle output
         if: always()
@@ -318,6 +314,10 @@ jobs:
           rustc --edition 2021 -O -o "$RUNNER_TEMP/reg.exe" "$NATIVE_LIB/registry_stand_in.rs"
           sudo install -D -m 0755 "$RUNNER_TEMP/reg.exe" /mnt/c/Windows/System32/reg.exe
 
+      - name: Check the fixture bytes
+        run: |
+          bash oracle-recording/check_fixture_bytes.sh "$GITHUB_WORKSPACE" "$OUT"
+
       - name: Describe the host
         run: |
           {
@@ -375,57 +375,38 @@ jobs:
         context: [toplevel, timer, io, child_exit, immediate, nested]
     runs-on: windows-latest
     timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
     steps:
+      # The checkout is copied into the distribution, so it keeps the committed line endings.
+      - name: Keep line endings
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
-        with:
-          distribution: Ubuntu-24.04
-          wsl-version: 2
-          wsl-conf: |
-            [automount]
-            root = /winmnt/
-          additional-packages: rustc curl ca-certificates xz-utils
+      - name: Provision WSL 2 with Ubuntu 24.04
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rootfs = Join-Path $env:RUNNER_TEMP 'rootfs.tar.gz'
+          Invoke-WebRequest -Uri 'https://cloud-images.ubuntu.com/wsl/releases/noble/20240423/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz' -OutFile $rootfs
+          $hash = (Get-FileHash $rootfs -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '8251e27ffff381a4af5f41dcb94d867de3e0d9774a9241908ab34555d99315ea') { throw "rootfs checksum $hash" }
+          wsl --import oracle (Join-Path $env:RUNNER_TEMP 'wsl-oracle') $rootfs --version 2
+          if ($LASTEXITCODE -ne 0) { throw "wsl --import exited $LASTEXITCODE" }
+          wsl -d oracle -u root -e sh -c "printf '[automount]\nroot = /winmnt/\n[interop]\nappendWindowsPath = false\n' > /etc/wsl.conf"
+          if ($LASTEXITCODE -ne 0) { throw "wsl.conf exited $LASTEXITCODE" }
+          wsl --terminate oracle
+          wsl --list --verbose
 
       - name: Record the organization goldens under WSL
-        shell: wsl-bash {0}
         run: |
-          set -euo pipefail
-          out="$(wslpath -u '${{ runner.temp }}')/wsl-out"
-          mkdir -p "$out/goldens"
-          rm -rf ~/repo && cp -r "$(wslpath -u '${{ github.workspace }}')" ~/repo
-          cd ~/repo
-          {
-            cat /proc/version
-            uname -a
-            grep -qi microsoft /proc/version
-          } | tee "$out/host.txt"
-          rustc --edition 2021 -O -o ~/reg.exe oracle-recording/native/registry_stand_in.rs
-          sudo install -D -m 0755 ~/reg.exe /mnt/c/Windows/System32/reg.exe
-          curl -fsSLo ~/node.tar.xz https://nodejs.org/dist/v24.13.1/node-v24.13.1-linux-x64.tar.xz
-          echo "30215f90ea3cd04dfbc06e762c021393fa173a1d392974298bbc871a8e461089  $HOME/node.tar.xz" | sha256sum -c -
-          tar -xJf ~/node.tar.xz -C ~
-          node_bin="$HOME/node-v24.13.1-linux-x64/bin/node"
-          curl -fsSLo ~/mise.tar.gz https://github.com/jdx/mise/releases/download/v2026.10.25/mise-v2026.10.25-linux-x64.tar.gz
-          echo "199966edaad1b208eb4c72955f1722dafb8fa799f575db720dea05aaa8216546  $HOME/mise.tar.gz" | sha256sum -c -
-          tar -xzf ~/mise.tar.gz -C ~
-          (cd ~ && ~/mise/bin/mise install python@3.12.16)
-          py="$(cd ~ && ~/mise/bin/mise exec python@3.12.16 -- python3 -c 'import sys; print(sys.executable)')"
-          {
-            "$node_bin" -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8, now: Date.now()})'
-            "$py" --version
-          } | tee -a "$out/host.txt"
-          "$py" -I rsworkspace/crates/platform/trogon-claude-agent-sdk/.config/mise/lib/claude-sdk-freshness/fetch_pinned_typescript.py ~/package
-          export R3_NATIVE=1 R3_PYTHON=3.12.16 R3_WSL=1 R3_CALL='${{ matrix.call }}' R3_CONTEXT='${{ matrix.context }}'
-          golden=ts_managed_settings_linux_x64.json
-          cp "oracle-recording/native/committed/$golden" "$out/goldens/$golden"
-          status=0
-          "$py" -I oracle-recording/native/record.py ts_managed_settings_goldens.py "$out/goldens/$golden.tally.json" \
-            "$node_bin" ~/package "$out/goldens/$golden" 2> >(tee "$out/goldens/$golden.log" >&2) || status=$?
-          diff -u "oracle-recording/native/committed/$golden" "$out/goldens/$golden" > "$out/goldens/$golden.diff" || true
-          exit "$status"
+          $checkout = (wsl -d oracle -u root -e wslpath -u "$env:GITHUB_WORKSPACE").Trim()
+          $out = (wsl -d oracle -u root -e wslpath -u "$env:RUNNER_TEMP").Trim() + '/wsl-out'
+          wsl -d oracle -u root -e bash -euo pipefail "$checkout/oracle-recording/wsl_job.sh" goldens $checkout $out '${{ matrix.call }}' '${{ matrix.context }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Keep the recorded goldens
         if: always()
