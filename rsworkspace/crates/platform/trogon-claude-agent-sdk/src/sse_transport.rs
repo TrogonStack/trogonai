@@ -763,6 +763,11 @@ impl Transport for SseTransport {
         self.shared.state().ready && !self.shared.is_closed()
     }
 
+    /// A line waits for the first readiness and then joins the upload queue whole, or is given up whole.
+    fn writes_whole_documents(&self) -> bool {
+        true
+    }
+
     /// TypeScript `write` awaits the first readiness instead of failing, and the browser query never checks
     /// `isReady()`, so a document written before the stream opens waits for it.
     fn accepts_writes(&self) -> bool {

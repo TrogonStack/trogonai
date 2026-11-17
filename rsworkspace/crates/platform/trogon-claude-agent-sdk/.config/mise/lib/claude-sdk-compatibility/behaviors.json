@@ -1643,14 +1643,23 @@
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "_build_settings_value runs json.loads on the settings text, or on the file it names, when a sandbox is set, and catches only OSError, ValueError and TypeError as \"Failed to load settings: ...\", so the RecursionError of a deeply nested document reaches the caller bare. CPython 3.12's json C scanner makes one C recursion check per array or object it enters against the fixed Py_C_RECURSION_LIMIT of 10000, which sys.setrecursionlimit does not move, and the checks already open where json.loads runs count against it: a plain function holds 3, ClaudeSDKClient.connect under asyncio.run holds 7, and query() holds 13, so json.loads reads 9997, 9993 and 9987 nested objects there and raises \"maximum recursion depth exceeded while decoding a JSON object from a unicode string\" one level deeper. python_settings_goldens.py records each boundary from CPython 3.12.16 and the pinned claude_agent_sdk, searched with a fresh event loop and checked again after a first call, so caches a first call fills do not move it, together with the --settings value at each boundary and the values for settings text holding lone surrogate escapes, which json.loads keeps in the str and json.dumps writes back as escapes. PythonCStack in src/python_c_stack.rs holds those counts: ClaudeSdkClient::connect and connect_with_adapters build the command with CLIENT_CONNECT, the query functions with QUERY, and python_settings_value loads the text with that depth instead of a fixed cap, keeps the RecursionError message without the \"Failed to load settings\" prefix, and dumps without recursing. The settings engine of src/settings_read.rs, which reads settings the way the CLI does, is not this path and keeps its own bound."
+        "behavior": "_build_settings_value runs json.loads on the settings text, or on the file it names, when a sandbox is set, and catches only OSError, ValueError and TypeError as \"Failed to load settings: ...\", so the RecursionError of a deeply nested document reaches the caller bare. CPython 3.12's json C scanner makes one C recursion check per array or object it enters against the fixed Py_C_RECURSION_LIMIT of 10000, which sys.setrecursionlimit does not move, and the checks already open where json.loads runs count against it: a plain function holds 3, ClaudeSDKClient.connect under asyncio.run holds 7, and query() holds 13, so json.loads reads 9997, 9993 and 9987 nested objects there and raises \"maximum recursion depth exceeded while decoding a JSON object from a unicode string\" one level deeper. python_settings_goldens.py records each boundary from CPython 3.12.16 and the pinned claude_agent_sdk, searched with a fresh event loop and checked again after a first call, so caches a first call fills do not move it, together with the --settings value at each boundary and the values for settings text holding lone surrogate escapes, which json.loads keeps in the str and json.dumps writes back as escapes. PythonCStack in src/python_c_stack.rs holds those counts: ClaudeSdkClient::connect and connect_with_adapters build the command with CLIENT_CONNECT, the query functions with QUERY, and python_settings_value loads the text with that depth instead of a fixed cap, keeps the RecursionError message without the \"Failed to load settings\" prefix, and dumps without recursing. The Python dialect of the settings engine reads a settings file with the same json.loads, so it reads as deeply: ResolverState::with_python_c_stack picks the caller, PythonCStack::MODULE by default, read_document loads the text with that depth, and resolve_python_settings_with_state and resolve_settings_in_dialect_with_state run the Python dialect on a thread with SETTINGS_ENGINE_STACK_BYTES of stack, since the engine walks the document recursively. python_settings_file_goldens.py records the depth of a settings file each caller reads, with json.dumps of the deepest value it keeps, and settings files holding lone surrogate escapes, which the Python dialect keeps as json.loads does: each string or key with a lone surrogate stands in the engine's values as the string with each surrogate moved to a private-use code point of the same UTF-16 length (src/settings_strings.rs), and resolve_python_settings_with_state turns it back into the exact str. Before it reads any document, a Python-dialect resolve reserves every private-use code point its inputs hold, the settings texts with their escapes, the managed settings, the settings paths and the working directory, and picks each stand-in among the rest, so a private-use code point read anywhere in the resolve never turns into a lone surrogate; python_settings_file_goldens.py records groups of such files, each read on its own by the pinned SDK. _build_settings_value reads a settings file with Path.read_text(encoding=\"utf-8-sig\"), which drops one leading byte order mark, decodes a file that is only a prefix of one to nothing, raises UnicodeDecodeError on bytes that are not UTF-8 with positions counted after the mark, and turns each \\r\\n and lone \\r into \\n before json.loads counts lines; a missing file's OSError quotes repr of the path, whose bytes that are not UTF-8 os.fsdecode holds as lone surrogates U+DC80 to U+DCFF. python_settings_goldens.py records settings files of such bytes and missing paths under such working directories, and python_settings_value matches each message byte for byte through read_text_utf8_sig (src/python_text_file.rs) and python_text::repr (src/python_text.rs). The Python dialect of the settings engine reads every settings file the same way and skips one that read raises on, as it skips a file json.loads rejects, since the Python SDK has no resolveSettings and resolveSettings drops every file it cannot read or parse. The exception _build_settings_value raises is a CLIConnectionError, a ClaudeSDKError, raised from the UnicodeDecodeError, OSError, JSONDecodeError, integer ValueError or TypeError it caught; ClaudeSDKClient.connect and query() raise it as is while they build the command, after the CLI is found and before it starts. python_settings_goldens.py records, for settings files the utf-8-sig codec cannot decode, the class, message and __cause__ each caller raises, with the cause's encoding, object (the bytes after any byte order mark), start, end and reason. python_settings_value returns Error::SettingsLoad with a SettingsLoadError (src/settings_load_error.rs) whose cause is a SettingsLoadCauseError, the decode case carrying a PythonUnicodeDecodeError (src/python_unicode_decode_error.rs) with those fields, and connect and query start no command."
       },
       "decision": {
         "kind": "upstream"
       },
       "contracts": [
         "python_settings_value::client_connect_reads_settings_as_deep_as_claude_sdk_client_connect",
-        "python_settings_value::query_reads_settings_as_deep_as_python_query"
+        "python_settings_value::query_reads_settings_as_deep_as_python_query",
+        "settings_resolve_python_depth::a_settings_file_reads_as_deep_as_json_loads_in_a_plain_function",
+        "settings_resolve_python_depth::a_settings_file_reads_as_deep_as_json_loads_under_claude_sdk_client_connect",
+        "settings_resolve_python_depth::a_settings_file_reads_as_deep_as_json_loads_under_query",
+        "settings_resolve_python_depth::the_python_dialect_reads_as_deep_as_a_plain_function_by_default",
+        "settings_resolve_python_surrogates::a_settings_file_keeps_its_lone_surrogates_as_json_loads_does",
+        "settings_resolve_python_surrogates::a_private_use_code_point_in_another_input_never_turns_into_a_lone_surrogate",
+        "settings_resolve_python_surrogates::a_private_use_code_point_in_a_settings_path_stays_in_the_sources",
+        "settings_resolve_python_surrogates::the_python_dialect_reads_a_settings_file_as_read_text_with_utf_8_sig_does",
+        "python_settings_value::an_undecodable_settings_file_raises_what_connect_and_query_raise"
       ],
       "rust": [
         "src/argv.rs",
@@ -1659,7 +1668,16 @@
         "src/process_transport.rs",
         "src/python_c_stack.rs",
         "src/python_json_value.rs",
-        "src/settings_option.rs"
+        "src/settings_option.rs",
+        "src/settings_read.rs",
+        "src/settings_resolve.rs",
+        "src/settings_resolve_sources.rs",
+        "src/python_text_file.rs",
+        "src/python_unicode_decode_error.rs",
+        "src/settings_load_error.rs",
+        "src/error.rs",
+        "src/settings_resolve_state.rs",
+        "src/settings_strings.rs"
       ]
     },
     {
@@ -2893,6 +2911,200 @@
       ]
     },
     {
+      "id": "r31-typed-settings-lone-surrogates",
+      "concept": "Lone surrogates in resolved settings strings",
+      "python": {
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 461,
+        "line_end": 474,
+        "sha256": "568cc3ccd95c88400876e953f14c99cd4b54427b3442deee5236092731016178"
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "async function c8(e={}){await o8();",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 994,
+        "sha256": "59eb04013d525329a2a8c653703461050d2bfb6996ec8f85259da8a929d8b04b"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "Both SDKs keep a lone surrogate of a settings file, escaped or decoded from UTF-16LE, in the strings they return. resolveSettings (c8) returns the effective settings, provenance and sources as JavaScript values whose strings and keys hold each lone UTF-16 unit, and JSON.stringify prints each one as its \\udxxx escape. _build_settings_value reads a settings file with json.loads, whose str keeps each lone surrogate, and json.dumps writes it back as its \\udxxx escape. resolve_settings_exact_with_state returns the TypeScript object as a PythonJsonValue whose strings and keys keep every lone surrogate and whose numbers hold the doubles JSON.stringify prints, and js_stringify_exact in src/settings_exact.rs prints it as JSON.stringify does; resolve_python_settings_with_state returns the Python value, which python_json_dumps prints as json.dumps does. resolve_settings_exact_in_dialect_with_state picks either by dialect. The typed ResolvedSettings, which neither SDK has, holds U+FFFD for each lone surrogate because a Rust String cannot hold one; the exact results above sit beside it."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_ts_surrogates::the_typescript_dialect_returns_the_strings_resolve_settings_returns_with_their_lone_surrogates",
+        "settings_resolve_ts_surrogates::the_exact_resolve_in_the_typescript_dialect_is_the_typescript_result",
+        "settings_resolve_ts_surrogates::the_typescript_dialect_prints_the_resolved_object_with_its_lone_surrogates_as_json_stringify_does",
+        "settings_resolve_python_surrogates::a_settings_file_keeps_its_lone_surrogates_as_json_loads_does",
+        "settings_resolve_python_surrogates::the_exact_resolve_in_the_python_dialect_keeps_lone_surrogates_as_json_loads_does",
+        "src/settings_exact_tests.rs::a_stand_in_turns_back_into_its_lone_surrogate_in_strings_and_keys",
+        "src/settings_exact_tests.rs::strings_escape_what_json_stringify_escapes"
+      ],
+      "rust": [
+        "src/settings_exact.rs",
+        "src/settings_resolve.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
+      "id": "r32-typescript-settings-file-text",
+      "concept": "Text of a settings file the TypeScript resolver reads",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK reads a settings file with Path.read_text(encoding=\"utf-8-sig\"); row m16 covers that reading."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function kx(e){if(e.byteLength===0)return\"utf8\";",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 143,
+        "sha256": "376d1b92ee822f5344928d697754c696be27000ea1bd8f57c77c75039dfa0b90"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "resolveSettings reads a settings file with readFileSync in the encoding kx picks: UTF-16LE when the bytes start FF FE, else UTF-8, which Node decodes with U+FFFD for each maximal invalid subpart; UTF-16LE decoding drops a trailing odd byte and keeps every lone UTF-16 unit. The reader turns each \\r\\n into \\n, skips text that trims to nothing, strips one leading U+FEFF and hands the rest to JSON.parse, which keeps a lone surrogate escape in the string it returns and pairs an escaped or raw high surrogate with the low one after it. read_node_text in src/node_text_file.rs gives the same text, with each lone unit spelled as its \\uXXXX escape, or as U+FFFD after an odd run of backslashes, so JSON.parse and serde_json accept and reject the same documents, and stand_in_escapes in src/settings_strings.rs moves each lone surrogate escape to a private-use stand-in chosen apart from every private-use code point the resolve reads, as the Python dialect does. ts_settings_file_goldens.py records resolveSettings of the pinned package on Node over escaped, raw UTF-8, UTF-16LE and byte order mark cases, union merges and stand-in collisions. resolve_settings_json_with_state prints the whole resolved object as JSON.stringify prints it, with escape_stand_ins in src/settings_strings.rs spelling each stand-in as the escape of its lone surrogate, and the goldens record that text with the sandbox root taken off every path. The settings schema builds the document, schema objects and records by assignment, so assigns_a_member in src/settings_schema.rs drops a __proto__ member there and a value passed through whole keeps it."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_ts_surrogates::the_typescript_dialect_reads_settings_files_as_resolve_settings_does_on_node",
+        "settings_resolve_ts_surrogates::the_typescript_dialect_prints_the_resolved_object_with_its_lone_surrogates_as_json_stringify_does"
+      ],
+      "rust": [
+        "src/node_text_file.rs",
+        "src/settings_read.rs",
+        "src/settings_resolve.rs",
+        "src/settings_resolve_sources.rs",
+        "src/settings_schema.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
+      "id": "r33-typescript-settings-file-depth",
+      "concept": "Nesting depth of a settings file the TypeScript resolver reads, skips and rejects",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK reads a settings file with json.loads, whose depth CPython's C recursion limit bounds; row m16 covers that reading."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function Fu(e,t,n,r){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 460,
+        "sha256": "40c0a7ad04c3e9051580587172cb40d19cdd439f517c79bd5d21f243bab4ccc1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "resolveSettings reads each settings file through Fu: the reader parses it with JSON.parse, which nests as deeply as the heap allows, then copies it with structuredClone and walks it with the settings schema inside a try, so a document either walk runs out of stack on is skipped like one that does not parse. Fu then copies the document it caches once more with structuredClone outside the try, and the effective merge recurses through lodash mergeWith with the settings customizer, so running out of stack in either rejects resolveSettings with RangeError \"Maximum call stack size exceeded\". Policy settings take another path and skip the cache copy: the managed reader parses each document and walks it inside the try that turns an overflow into an unreadable document, the managed file merges into its folder outside that try and rejects, each drop-in is copied and merges inside it, so an overflow there keeps what the merge wrote, leaves the file tier unloaded and gives up on the rest of the folder, and the admin settings merge onto a fresh object outside it. resolveSettings evaluates the managed settings three times, for the settings, their origin and whether the machine policy loaded, each on a stack of its own, while the reader caches each document from the first evaluation that reads it, so a later evaluation reads the drop-ins an earlier one gave up before. ManagedReader in src/settings_managed_reader.rs reads and merges managed documents that way, with PolicyBudgets in src/node_stack.rs holding the budgets of each evaluation, and ts_managed_settings_goldens.py records the boundaries, a partly merged drop-in, the reads of the later evaluations and lone surrogates in managed documents. How deep each pass goes depends on the Node release, the platform and, on macOS, how much of the stack the command line and environment fill at startup: on Node 24.13.1 each pass costs a fixed number of stack bytes per object and per array it enters, against a budget that the startup bytes come off on darwin arm64 and that V8 sets below them on Linux. NodeStack in src/node_stack.rs holds those costs as NodeStack::NODE_24_DARWIN_ARM64, with a default startup of 4384 bytes, NodeStack::NODE_24_LINUX_ARM64 and NodeStack::NODE_24_LINUX_X64; NodeStack::for_build_target, the default, picks the profile of the platform the crate is built for, NodeStack::with_startup_bytes moves the startup and ResolverState::with_node_stack picks the profile. Each recorder holds the boundaries of every platform and records the goldens of the one it runs on, one golden file per platform, and the depth and managed contracts check every profile against its own. The TypeScript dialect parses a settings file past serde_json's nesting limit (src/settings_parse_deep.rs), skips it when NodeStack::reads says a read walk runs out, and rejects with ResolveSettingsError::MaximumCallStack when the cache copy or a merge does. ts_settings_depth_goldens.py records resolveSettings of the pinned package on Node at each boundary, with Node started on exactly the default startup bytes. The settings customizer joins two arrays without walking into them, so a result nests deeper than the merge can; the oracle prints such a result without recursing, past the depth where JSON.stringify runs out. lodash reads each member through safeGet, which answers undefined for __proto__, so an array or object under that key merges nothing while a scalar there is written, and it walks members in for...in order, array indices first; merge_within in src/node_merge.rs merges every TypeScript settings file that way, and the proto_merge case of ts_settings_file_goldens.py records it. Each read pass also spends a fixed number of bytes at the array or object that ends a path, by whether it is empty or holds scalars, and the merge spends more where V8 compiles part of lodash the first time the process runs it (the first member assigned, the first arrays finished) and on an array holding members while lodash isIndex has tested fewer than two keys in the process, since V8 compiles the regular expression isIndex tests with to bytecode on its first test and to machine code on its second, wherever the array sits. The merges of one resolve, the later managed evaluations included, share MergeWarmth (src/node_merge_warmth.rs) in the order upstream runs them, with MergeCost (src/node_merge_cost.rs) holding those costs. lodash still enters an array or object up to MergeCost::descent_reach bytes past the stack its level needs, merges its members and runs out as it returns from it, when lodash Stack.delete runs; a compile of the isIndex pattern that runs out of stack, the bytecode one where the level and MergeCost::first_array fit and the machine code one anywhere in that reach, rejects resolveSettings with SyntaxError \"Invalid regular expression: /^(?:0|[1-9]\\d*)$/: Stack overflow\", which merge_within returns as ResolveSettingsError::InvalidRegularExpression. MergeCost::later_compile is what the machine code compile spends more in a merge after the one that compiled the pattern to bytecode when a background compile lands while the merge runs; every profile sets it to 0, since each assumes no background compile lands. The goldens record what Node answers with every function kept in the interpreter, after Node with its concurrent compile tiers off answered the same, and list under observed the cases Node answers more than one way with its default flags on each host, which the engine answers as one of. The leaf_, copy_, merge_ and merge_index_compile_ cases of ts_settings_depth_goldens.py and the machine_after_held_ cases of ts_managed_settings_goldens.py record each boundary. A merge whose path assigns a scalar at most levels gets optimized by V8 while it runs, after a number of calls that varies between runs of the same process, and then reaches deeper than the profile says; NodeStack follows the unoptimized merge, which every run reaches."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_ts_depth::the_typescript_dialect_reads_deep_settings_files_as_resolve_settings_does_on_node",
+        "settings_resolve_ts_managed::the_typescript_dialect_reads_managed_settings_as_resolve_settings_does_on_node",
+        "settings_resolve_ts_surrogates::the_typescript_dialect_reads_settings_files_as_resolve_settings_does_on_node"
+      ],
+      "rust": [
+        "src/node_managed_pass.rs",
+        "src/node_merge.rs",
+        "src/node_merge_call.rs",
+        "src/node_merge_cost.rs",
+        "src/node_merge_room.rs",
+        "src/node_merge_warmth.rs",
+        "src/node_stack.rs",
+        "src/settings_managed_reader.rs",
+        "src/settings_parse_deep.rs",
+        "src/settings_policy_parse.rs",
+        "src/settings_read.rs",
+        "src/settings_resolve.rs",
+        "src/settings_resolve_error.rs",
+        "src/settings_resolve_policy.rs",
+        "src/settings_resolve_values.rs"
+      ]
+    },
+    {
+      "id": "r34-typescript-settings-array-merge",
+      "concept": "Arrays the TypeScript resolver merges into array-like objects and objects it merges into arrays",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK merges settings with its own merge of dicts and lists, which turns no object into an array and leaves no hole or named property in a list."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function y4e(e,t,n,r,o,s,i){var a=Uf(e,n),",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 382,
+        "sha256": "8f1864176838fe9e2cb0b0a0bf030fab9beff871adda7143c3edfe820ba97d93"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "lodash mergeWith merges the settings files through baseMergeDeep (y4e): an array merged into an array-like object, one whose length is a number that is a whole number from 0 to 2^53 - 1, copies it with copyArray first, Array(length) throwing RangeError \"Invalid array length\" past 2^32 - 1, so the copy holds the index members below the length and holes elsewhere. An object merged into an array it holds merges into it as into any object: each index member sets an element, leaving holes past the end, length converts its value with ToNumber and truncates or extends the array, throwing RangeError \"Invalid array length\" when that is not a whole number from 0 to 2^32 - 1, and every other member sets a named property JSON.stringify never prints. An array merged from walks every index below its length, so a hole merges as undefined, the settings customizer joins two arrays through a Set, keeping one undefined, and JSON.stringify prints each hole or undefined element as null; a merge that leaves more holes than a V8 string can print rejects resolveSettings with RangeError \"Invalid string length\". A drop-in whose merge throws gives up on the rest of the managed folder, as an overflow does, and a fresh array or object merged from a source leaves out each array or object under __proto__, which safeGet hides, while the source keeps it. merge_within in src/node_merge.rs merges that way, keeping holes as runs and named properties after the elements with the ArrayMark of the resolve (src/js_array.rs, src/js_array_mark.rs), which settle turns into what JSON.stringify prints once the resolve is done, and ts_settings_merge_goldens.py records the cases."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_ts_merge::the_typescript_dialect_merges_arrays_and_array_like_objects_as_resolve_settings_does_on_node",
+        "settings_resolve_ts_merge::the_typed_result_holds_the_effective_settings_the_merge_of_arrays_gives"
+      ],
+      "rust": [
+        "src/js_array.rs",
+        "src/js_array_mark.rs",
+        "src/node_merge.rs",
+        "src/settings_resolve.rs",
+        "src/settings_resolve_policy.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
+      "id": "r35-settings-string-length-units",
+      "concept": "Lengths the settings schema checks on strings holding lone surrogates and characters past the Basic Multilingual Plane",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK passes the settings file to the CLI without checking it against a schema, so no length of a settings string is checked."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function Bg(e){let t=e.length;",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 142,
+        "sha256": "a57e4b289503674295d79be83cd4f580290ac264d6a7c7eec4ff410dc507ab96"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "A zod length check reads the length of a string in UTF-16 units and, once that passes its bound (past the maximum, from the minimum to twice it, or from the exact length to twice it), counts its code points with Bg instead, a surrogate pair counting once and a lone surrogate once, so policyHelpers.linux.path keeps 1024 code points however many units they take. A refine that reads e.length, as authServerMetadataUrl does, counts UTF-16 units, a character past the Basic Multilingual Plane counting twice. The settings engine stands each lone surrogate as a private-use code point no input holds, from plane 15 or 16 once every one of the Basic Multilingual Plane is taken, and js_length in src/settings_strings.rs counts each such stand-in as the one unit of its surrogate, so neither kind of check moves a boundary and no depth changes: settings_stand_in_goldens.py records both kinds of check at their bounds and the read, merge and Python depth boundaries with stand-ins in the leaf."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "settings_resolve_stand_ins::a_stand_in_past_the_basic_multilingual_plane_resolves_as_resolve_settings_does_on_node",
+        "settings_resolve_stand_ins::the_typed_result_counts_a_stand_in_as_one_unit_in_both_dialects",
+        "settings_resolve_stand_ins::a_stand_in_past_the_basic_multilingual_plane_moves_no_typescript_depth_boundary",
+        "settings_resolve_stand_ins::a_stand_in_past_the_basic_multilingual_plane_moves_no_python_depth_boundary"
+      ],
+      "rust": [
+        "src/js_array.rs",
+        "src/settings_schema.rs",
+        "src/settings_schema_builtins.rs",
+        "src/settings_strings.rs"
+      ]
+    },
+    {
       "id": "s29-hook-matcher-omitted",
       "concept": "Hook registration without a matcher",
       "python": {
@@ -3422,7 +3634,7 @@
       },
       "decision": {
         "kind": "rust-adaptation",
-        "reason": "src/python_urlopen_sysconf.rs leaves a value of the wrong type out, as if it were absent, because a crashed process has no answer to match. src/python_urlopen_registry.rs zeroes the buffer, so a short integer and the rest of a shorter answer read as zero bytes. Reg2Py and the Windows error classes are checked against expectations worked by hand from Python/winreg.c, PC/errmap.h and Objects/exceptions.c, because the recording host has no winreg; getproxies_registry and proxy_bypass_registry are recorded from CPython over a fake winreg."
+        "reason": "src/python_urlopen_sysconf.rs leaves a value of the wrong type out, as if it were absent, because a crashed process has no answer to match. src/python_urlopen_registry.rs zeroes the buffer, so a short integer and the rest of a shorter answer read as zero bytes. Reg2Py and the Windows error classes are checked against expectations worked by hand from Python/winreg.c, PC/errmap.h and Objects/exceptions.c, because the recording host has no winreg; getproxies_registry and proxy_bypass_registry are recorded from CPython over a fake winreg. Upstream here is a defect, not a contract: CPython _scproxy aborts the interpreter with an NSException on macOS and winreg Reg2Py reads uninitialized memory on Windows, so Rust reads the values safely instead."
       },
       "contracts": [
         "src/python_urlopen_sysconf_tests.rs::reads_the_system_configuration_as_scproxy_and_urllib_read_it",
@@ -5879,7 +6091,8 @@
         "behavior": "Neither SDK fails for a missing HOME. TypeScript calls Node os.homedir(): HOME as set (even empty), else the passwd entry of the effective user, and it throws a system error only when there is no entry; the result is joined with path.join, which normalizes dot segments, repeated separators and empty bases. Python calls Path.home() (expanduser): HOME as set (even empty, which becomes the root directory), else the passwd entry of the real user, else it raises RuntimeError; a home that still starts with a tilde also raises, and dot-dot segments are kept. Both read the process environment, not options.env. Rust ports the exact algorithms: Node path.win32.join and normalize over UTF-16 code units, CPython ntpath.expanduser, splitroot and join with the pathlib PureWindowsPath normalization, byte-exact POSIX homes that are not UTF-8 (lossy UTF-8 for Node, surrogate escapes for Python), and the Windows process-token profile directory that libuv asks. Python has no Windows passwd fallback. The Python dialect reports a missing home as the RuntimeError text through SessionFiles::from_environment and the session helpers instead of an empty result."
       },
       "decision": {
-        "kind": "upstream"
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect and resolves the home with Node os.homedir() (the effective user's passwd entry) joined by path.join. SummaryDialect::Python on the session store options selects Path.home(): the real user's passwd entry, the RuntimeError text when there is none or the home starts with a tilde, and dot-dot segments kept. SessionFiles::from_environment and the CLI discovery port Python-only entry points, so they always follow Python."
       },
       "contracts": [
         "home_directory::an_unset_home_resolves_to_the_passwd_home_in_both_dialects",
@@ -6808,6 +7021,461 @@
       ],
       "rust": [
         "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "r36-policy-marketplace-lists",
+      "concept": "Managed strictKnownMarketplaces and blockedMarketplaces read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"strictKnownMarketplaces\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 456,
+        "sha256": "291b0d4baaf97b66178e207c59ce84b51e4765512171659abc24021009aeafbf"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through B3: null reads as unset, a source that can never match is dropped from strictKnownMarketplaces and kept in blockedMarketplaces, an entry that cannot be read is dropped alone, and any other value that is not an array becomes an empty allowlist for strictKnownMarketplaces and is dropped for blockedMarketplaces."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_policy_marketplace_tests.rs::flags_the_sources_that_can_never_match",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs",
+        "src/settings_policy_marketplace.rs"
+      ]
+    },
+    {
+      "id": "r37-policy-mcp-server-lists",
+      "concept": "Managed allowedMcpServers and deniedMcpServers read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedMcpServers\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 435,
+        "sha256": "fd980e204ac358e1ed1e20c660f83dc8a9b50562983a081e452fa87370b3f32d"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through j3, dropping each entry that fails its server schema; a list that cannot be read at all becomes an empty allowlist for allowedMcpServers and is dropped for deniedMcpServers."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r38-policy-enabled-plugins",
+      "concept": "Managed enabledPlugins read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"enabledPlugins\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 844,
+        "sha256": "c9352db0c5588aa9eceddd1838dfeb0ba9087b55584ed8da445cfbe8beb73f14"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps each enabledPlugins entry whose value is true, false or a list of version constraints and drops every other entry alone; a record whose every entry was dropped, and a value that is not a record, are dropped."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r39-policy-model-lists",
+      "concept": "Managed availableModels and deniedModels read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"availableModels\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 630,
+        "sha256": "032ba3e0f6ca89184f64a7b4bcf2d828054c4c02f2e8a920512297951b5f61ec"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps the string entries of availableModels and passes deniedModels through nk; a value that is not an array becomes an empty allowlist for availableModels and is dropped for deniedModels."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r40-policy-hook-allowlists",
+      "concept": "Managed allowedHttpHookUrls and httpHookAllowedEnvVars read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedHttpHookUrls\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 197,
+        "sha256": "8a385f51dff8168d66f16c1549feba213c30d6c3ed0367e0a84fbeae07df0d81"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through NS: string entries are kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r41-policy-channel-plugins",
+      "concept": "Managed allowedChannelPlugins read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedChannelPlugins\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 253,
+        "sha256": "111325d2b499ecfb962f99ab208a1202b32d23ab5a8432ceb09b0bf6948fb5b1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads allowedChannelPlugins through NS with the b5e entry schema: a plugin@marketplace string or a plugin and marketplace object is kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r42-policy-gateway-networks",
+      "concept": "Managed gatewayInternalNetworks read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"gatewayInternalNetworks\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 207,
+        "sha256": "8521af513dd006c90e1a66f43cb5f3c71c4ca64662f91ef1c73f5183e5282c8c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps gatewayInternalNetworks only as an array of strings; any other value becomes the single unreadable marker, which refuses gateway sign-in for that source."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema.rs"
+      ]
+    },
+    {
+      "id": "r43-policy-forced-login-orgs",
+      "concept": "Managed forceLoginOrgUUID read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"forceLoginOrgUUID\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 186,
+        "sha256": "ca46417f50f588efba69b7d47032ec903ad5006daa502f5a0df2f4771bc6b6f9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps forceLoginOrgUUID when it is a string or an array of strings; any other value becomes an empty array, so no organization may log in."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs"
+      ]
+    },
+    {
+      "id": "r44-policy-allowed-providers",
+      "concept": "Managed allowedProviders read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedProviders\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 207,
+        "sha256": "0a0dce4ebd7a2347e46a8725b2881ec31a17d84572b57885bbb3d2efb76d44dd"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads allowedProviders through NS with the hk provider names: known names are kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs",
+        "src/constants.rs"
+      ]
+    },
+    {
+      "id": "r45-policy-helper",
+      "concept": "Managed policyHelper read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"policyHelper\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 2599,
+        "sha256": "099bd8af0b25149bd15d4d3decad5b3ba94412f1f31c9cd86b9f5036064e798c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The singular policyHelper reader only records notes for the fields that belong elsewhere and reads null as unset; its value is whatever the helper schema keeps, so unknown fields are stripped and a value the schema rejects is dropped."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema.rs"
+      ]
+    },
+    {
+      "id": "r46-policy-sandbox-credentials",
+      "concept": "Managed sandbox.credentials read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"sandbox\",()=>{let R=O({files:M(\"files\",yS(),",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 4253,
+        "sha256": "68620293cf5050489a6bf835ed246d2bb82fe9c660b3e7882e8f64fa31cb23f9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads sandbox.credentials so that an entry that cannot be read never unprotects what it names: a file or variable entry keeps blocking it, an AWS pair keeps suppressing the implicit pairing, and a SigV4 shape stays denied; a block that is not an object reads as the fail-closed skeleton."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_schema_policy_credentials_tests.rs::file_prefix_hashes_the_file_name_like_upstream",
+        "src/settings_schema_policy_credentials_tests.rs::a_schema_without_the_credential_lists_reads_nothing",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_credentials.rs"
+      ]
+    },
+    {
+      "id": "r47-policy-document-closing",
+      "concept": "The checks the policy parser runs after every key is read",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": ".check((R)=>{R.issues.push(...r.wrongDocumentIssues(R.value,F))})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 269,
+        "span_after": 502,
+        "sha256": "6c52185cd2fb1e9be0b6adde9cce63498f476075c7182e78c60ba6397c9870c2"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP deletes every key whose reader yielded undefined and notes a source whose only policy content is stand-ins as onlySubstitutes. The wrongDocumentIssues check flags only a key the document holds that the document cP was built from did not, and j7e and lE parse the very document they built cP from, so it never adds an issue."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_resolve_policy_tests.rs::a_tier_of_only_stand_ins_does_not_shut_the_parent_out",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_read.rs",
+        "src/settings_policy_content.rs"
+      ]
+    },
+    {
+      "id": "r48-managed-object-reads",
+      "concept": "Managed documents handed over as objects (pm)",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function j7e(e,t){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 402,
+        "span_after": 598,
+        "sha256": "feb10e464760aae75365160a925de7a24c346f824fd2c6227cc28fb8c3af7cc0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "pm reads a managed document handed over as an object, such as the registry, plist, remote or parent settings, through j7e: the same cP parser a managed file goes through, under the name of the source it came from."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_resolve_policy_tests.rs::a_document_handed_over_reads_through_the_policy_schema",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_resolve_tier.rs",
+        "src/settings_resolve.rs",
+        "src/settings_read.rs"
+      ]
+    },
+    {
+      "id": "r49-managed-only-substitutes-tier",
+      "concept": "A managed tier made only of stand-ins",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function rX(e,t,n,r,o){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 235,
+        "sha256": "aa5323c6076fb26f9b80ac233dea53a33133001c846ef549f556239874ab004f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "rX marks a merged managed tier that holds only stand-ins and none of its own authored values as onlySubstitutes, and Nu then keeps that tier from shutting out the lower managed source."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_resolve_policy_tests.rs::a_tier_of_only_stand_ins_does_not_shut_the_parent_out",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_resolve_policy.rs",
+        "src/settings_resolve_tier.rs"
       ]
     }
   ]

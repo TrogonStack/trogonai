@@ -1,6 +1,6 @@
 //! The JavaScript string, number and key-order semantics the zod port in `sdk_mcp_zod` depends on.
 
-use crate::{JsonObject, settings_json::js_stringify};
+use crate::{JsonObject, js_object_order::array_index, settings_json::js_stringify};
 use serde_json::Value;
 
 /// `ECMAScript WhiteSpace` and `LineTerminator`, the characters `String.prototype.trim` removes.
@@ -29,15 +29,6 @@ pub(crate) fn trim(text: &str) -> &str {
 /// `text.length`: the number of UTF-16 code units.
 pub(crate) fn utf16_length(text: &str) -> usize {
     text.encode_utf16().count()
-}
-
-/// The array index a canonical numeric string names; the keys `Object.keys` lists first.
-fn array_index(key: &str) -> Option<u32> {
-    if key.is_empty() || (key.len() > 1 && key.starts_with('0')) || !key.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let index: u64 = key.parse().ok()?;
-    u32::try_from(index).ok().filter(|index| *index != u32::MAX)
 }
 
 /// `Object.keys(object)`: integer keys in ascending order, then the others in insertion order.

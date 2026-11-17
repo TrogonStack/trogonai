@@ -379,7 +379,7 @@ pub struct AgentInput {
     /// Isolation mode. "worktree" creates a temporary git worktree so the agent works on an isolated copy of the repo. "remote" launches the agent in a remote cloud environment (always runs in background; availability is gated).
     pub isolation: Option<AgentInputIsolation>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -405,8 +405,8 @@ struct AgentInputWire {
     pub mode: Option<AgentInputMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation: Option<AgentInputIsolation>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -423,7 +423,7 @@ impl AgentInput {
 
 impl Serialize for AgentInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(AgentInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(AgentInputWire::serialize(self, serde_json::value::Serializer), |text| AgentInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -461,7 +461,7 @@ pub struct BashInput {
     /// Set this to true to dangerously override sandbox mode and run commands without sandboxing.
     pub dangerously_disable_sandbox: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -478,8 +478,8 @@ struct BashInputWire {
     pub run_in_background: Option<bool>,
     #[serde(rename = "dangerouslyDisableSandbox", default, skip_serializing_if = "Option::is_none")]
     pub dangerously_disable_sandbox: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -496,7 +496,7 @@ impl BashInput {
 
 impl Serialize for BashInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(BashInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(BashInputWire::serialize(self, serde_json::value::Serializer), |text| BashInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -549,7 +549,7 @@ pub struct ExitPlanModeInputAllowedPromptsItem {
     /// Semantic description of the action, e.g. "run tests", "install dependencies"
     pub prompt: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -559,8 +559,8 @@ pub struct ExitPlanModeInputAllowedPromptsItem {
 struct ExitPlanModeInputAllowedPromptsItemWire {
     pub tool: ExitPlanModeInputAllowedPromptsItemTool,
     pub prompt: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -577,7 +577,7 @@ impl ExitPlanModeInputAllowedPromptsItem {
 
 impl Serialize for ExitPlanModeInputAllowedPromptsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ExitPlanModeInputAllowedPromptsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ExitPlanModeInputAllowedPromptsItemWire::serialize(self, serde_json::value::Serializer), |text| ExitPlanModeInputAllowedPromptsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -595,7 +595,7 @@ pub struct ExitPlanModeInput {
     /// Deprecated: no longer used.
     pub allowed_prompts: Option<Vec<ExitPlanModeInputAllowedPromptsItem>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -605,8 +605,8 @@ pub struct ExitPlanModeInput {
 struct ExitPlanModeInputWire {
     #[serde(rename = "allowedPrompts", default, skip_serializing_if = "Option::is_none")]
     pub allowed_prompts: Option<Vec<ExitPlanModeInputAllowedPromptsItem>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -623,7 +623,7 @@ impl ExitPlanModeInput {
 
 impl Serialize for ExitPlanModeInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ExitPlanModeInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ExitPlanModeInputWire::serialize(self, serde_json::value::Serializer), |text| ExitPlanModeInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -647,7 +647,7 @@ pub struct FileEditInput {
     /// Replace all occurrences of old_string (default false)
     pub replace_all: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -660,8 +660,8 @@ struct FileEditInputWire {
     pub new_string: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replace_all: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -678,7 +678,7 @@ impl FileEditInput {
 
 impl Serialize for FileEditInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(FileEditInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(FileEditInputWire::serialize(self, serde_json::value::Serializer), |text| FileEditInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -704,7 +704,7 @@ pub struct FileReadInput {
     /// Set to true to read a text file, or a line range of one, that is over the usual size limits, up to what still fits in your context. Only use this when you genuinely need all of it or the user asked for the whole file; otherwise read it in parts with offset and limit, or search it.
     pub allow_large: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -721,8 +721,8 @@ struct FileReadInputWire {
     pub pages: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_large: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -739,7 +739,7 @@ impl FileReadInput {
 
 impl Serialize for FileReadInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(FileReadInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(FileReadInputWire::serialize(self, serde_json::value::Serializer), |text| FileReadInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -759,7 +759,7 @@ pub struct FileWriteInput {
     /// The content to write to the file
     pub content: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -769,8 +769,8 @@ pub struct FileWriteInput {
 struct FileWriteInputWire {
     pub file_path: String,
     pub content: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -787,7 +787,7 @@ impl FileWriteInput {
 
 impl Serialize for FileWriteInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(FileWriteInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(FileWriteInputWire::serialize(self, serde_json::value::Serializer), |text| FileWriteInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -807,7 +807,7 @@ pub struct GlobInput {
     /// The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter "undefined" or "null" - simply omit it for the default behavior. Must be a valid directory path if provided.
     pub path: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -818,8 +818,8 @@ struct GlobInputWire {
     pub pattern: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -836,7 +836,7 @@ impl GlobInput {
 
 impl Serialize for GlobInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(GlobInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(GlobInputWire::serialize(self, serde_json::value::Serializer), |text| GlobInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -923,7 +923,7 @@ pub struct GrepInput {
     /// Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false.
     pub multiline: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -960,8 +960,8 @@ struct GrepInputWire {
     pub offset: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multiline: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -978,7 +978,7 @@ impl GrepInput {
 
 impl Serialize for GrepInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(GrepInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(GrepInputWire::serialize(self, serde_json::value::Serializer), |text| GrepInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -998,7 +998,7 @@ pub struct TaskStopInput {
     /// Deprecated: use task_id instead
     pub shell_id: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1010,8 +1010,8 @@ struct TaskStopInputWire {
     pub task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell_id: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1028,7 +1028,7 @@ impl TaskStopInput {
 
 impl Serialize for TaskStopInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TaskStopInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TaskStopInputWire::serialize(self, serde_json::value::Serializer), |text| TaskStopInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1046,7 +1046,7 @@ pub struct ListMcpResourcesInput {
     /// Optional server name to filter resources by
     pub server: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1056,8 +1056,8 @@ pub struct ListMcpResourcesInput {
 struct ListMcpResourcesInputWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1074,7 +1074,7 @@ impl ListMcpResourcesInput {
 
 impl Serialize for ListMcpResourcesInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ListMcpResourcesInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ListMcpResourcesInputWire::serialize(self, serde_json::value::Serializer), |text| ListMcpResourcesInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1092,7 +1092,7 @@ pub struct RefreshMcpToolsInput {
     /// Optional server name: refresh only this server. Omit to refresh all connected servers.
     pub server: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1102,8 +1102,8 @@ pub struct RefreshMcpToolsInput {
 struct RefreshMcpToolsInputWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1120,7 +1120,7 @@ impl RefreshMcpToolsInput {
 
 impl Serialize for RefreshMcpToolsInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(RefreshMcpToolsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(RefreshMcpToolsInputWire::serialize(self, serde_json::value::Serializer), |text| RefreshMcpToolsInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1226,7 +1226,7 @@ pub struct NotebookEditInput {
     /// The type of edit to make (replace, insert, delete). Defaults to replace.
     pub edit_mode: Option<NotebookEditInputEditMode>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1242,8 +1242,8 @@ struct NotebookEditInputWire {
     pub cell_type: Option<NotebookEditInputCellType>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_mode: Option<NotebookEditInputEditMode>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1260,7 +1260,7 @@ impl NotebookEditInput {
 
 impl Serialize for NotebookEditInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(NotebookEditInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(NotebookEditInputWire::serialize(self, serde_json::value::Serializer), |text| NotebookEditInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1280,7 +1280,7 @@ pub struct ReadMcpResourceDirInput {
     /// The directory resource URI to list
     pub uri: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1290,8 +1290,8 @@ pub struct ReadMcpResourceDirInput {
 struct ReadMcpResourceDirInputWire {
     pub server: String,
     pub uri: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1308,7 +1308,7 @@ impl ReadMcpResourceDirInput {
 
 impl Serialize for ReadMcpResourceDirInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ReadMcpResourceDirInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ReadMcpResourceDirInputWire::serialize(self, serde_json::value::Serializer), |text| ReadMcpResourceDirInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1328,7 +1328,7 @@ pub struct ReadMcpResourceInput {
     /// The resource URI to read
     pub uri: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1338,8 +1338,8 @@ pub struct ReadMcpResourceInput {
 struct ReadMcpResourceInputWire {
     pub server: String,
     pub uri: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1356,7 +1356,7 @@ impl ReadMcpResourceInput {
 
 impl Serialize for ReadMcpResourceInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ReadMcpResourceInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ReadMcpResourceInputWire::serialize(self, serde_json::value::Serializer), |text| ReadMcpResourceInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1515,7 +1515,7 @@ pub struct ReportFindingsInputFindingsItem {
     /// Set ONLY when re-reporting after applying fixes: what happened to this finding
     pub outcome: Option<ReportFindingsInputFindingsItemOutcome>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1536,8 +1536,8 @@ struct ReportFindingsInputFindingsItemWire {
     pub verdict: Option<ReportFindingsInputFindingsItemVerdict>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<ReportFindingsInputFindingsItemOutcome>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1554,7 +1554,7 @@ impl ReportFindingsInputFindingsItem {
 
 impl Serialize for ReportFindingsInputFindingsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ReportFindingsInputFindingsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ReportFindingsInputFindingsItemWire::serialize(self, serde_json::value::Serializer), |text| ReportFindingsInputFindingsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1574,7 +1574,7 @@ pub struct ReportFindingsInput {
     /// Verified findings, most-severe first; empty if none survived
     pub findings: Vec<ReportFindingsInputFindingsItem>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1585,8 +1585,8 @@ struct ReportFindingsInputWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<ReportFindingsInputLevel>,
     pub findings: Vec<ReportFindingsInputFindingsItem>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1603,7 +1603,7 @@ impl ReportFindingsInput {
 
 impl Serialize for ReportFindingsInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ReportFindingsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ReportFindingsInputWire::serialize(self, serde_json::value::Serializer), |text| ReportFindingsInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1663,7 +1663,7 @@ pub struct TodoWriteInputTodosItem {
     pub status: TodoWriteInputTodosItemStatus,
     pub active_form: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1675,8 +1675,8 @@ struct TodoWriteInputTodosItemWire {
     pub status: TodoWriteInputTodosItemStatus,
     #[serde(rename = "activeForm")]
     pub active_form: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1693,7 +1693,7 @@ impl TodoWriteInputTodosItem {
 
 impl Serialize for TodoWriteInputTodosItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TodoWriteInputTodosItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TodoWriteInputTodosItemWire::serialize(self, serde_json::value::Serializer), |text| TodoWriteInputTodosItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1711,7 +1711,7 @@ pub struct TodoWriteInput {
     /// The updated todo list
     pub todos: Vec<TodoWriteInputTodosItem>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1720,8 +1720,8 @@ pub struct TodoWriteInput {
 #[serde(remote = "TodoWriteInput")]
 struct TodoWriteInputWire {
     pub todos: Vec<TodoWriteInputTodosItem>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1738,7 +1738,7 @@ impl TodoWriteInput {
 
 impl Serialize for TodoWriteInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TodoWriteInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TodoWriteInputWire::serialize(self, serde_json::value::Serializer), |text| TodoWriteInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1760,7 +1760,7 @@ pub struct WebFetchInput {
     /// Character position in the page text to start reading from. Use it to read on through a page too long for one call, with the value the previous result gave.
     pub offset: Option<serde_json::Number>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1772,8 +1772,8 @@ struct WebFetchInputWire {
     pub prompt: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<serde_json::Number>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1790,7 +1790,7 @@ impl WebFetchInput {
 
 impl Serialize for WebFetchInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(WebFetchInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(WebFetchInputWire::serialize(self, serde_json::value::Serializer), |text| WebFetchInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1812,7 +1812,7 @@ pub struct WebSearchInput {
     /// Never include search results from these domains
     pub blocked_domains: Option<Vec<String>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1825,8 +1825,8 @@ struct WebSearchInputWire {
     pub allowed_domains: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked_domains: Option<Vec<String>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1843,7 +1843,7 @@ impl WebSearchInput {
 
 impl Serialize for WebSearchInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(WebSearchInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(WebSearchInputWire::serialize(self, serde_json::value::Serializer), |text| WebSearchInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1865,7 +1865,7 @@ pub struct AskUserQuestionInputQuestionsItemOptionsItem {
     /// Optional preview content rendered when this option is focused. Use for mockups, code snippets, or visual comparisons that help users compare options. See the tool description for the expected content format.
     pub preview: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1877,8 +1877,8 @@ struct AskUserQuestionInputQuestionsItemOptionsItemWire {
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1895,7 +1895,7 @@ impl AskUserQuestionInputQuestionsItemOptionsItem {
 
 impl Serialize for AskUserQuestionInputQuestionsItemOptionsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(AskUserQuestionInputQuestionsItemOptionsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(AskUserQuestionInputQuestionsItemOptionsItemWire::serialize(self, serde_json::value::Serializer), |text| AskUserQuestionInputQuestionsItemOptionsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1919,7 +1919,7 @@ pub struct AskUserQuestionInputQuestionsItem {
     /// Set to true to allow the user to select multiple options instead of just one. Use when choices are not mutually exclusive.
     pub multi_select: bool,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1932,8 +1932,8 @@ struct AskUserQuestionInputQuestionsItemWire {
     pub options: Vec<AskUserQuestionInputQuestionsItemOptionsItem>,
     #[serde(rename = "multiSelect")]
     pub multi_select: bool,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -1950,7 +1950,7 @@ impl AskUserQuestionInputQuestionsItem {
 
 impl Serialize for AskUserQuestionInputQuestionsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(AskUserQuestionInputQuestionsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(AskUserQuestionInputQuestionsItemWire::serialize(self, serde_json::value::Serializer), |text| AskUserQuestionInputQuestionsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -1970,7 +1970,7 @@ pub struct AskUserQuestionInputAnnotationsValue {
     /// Free-text notes the user added to their selection.
     pub notes: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -1982,8 +1982,8 @@ struct AskUserQuestionInputAnnotationsValueWire {
     pub preview: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2000,7 +2000,7 @@ impl AskUserQuestionInputAnnotationsValue {
 
 impl Serialize for AskUserQuestionInputAnnotationsValue {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(AskUserQuestionInputAnnotationsValueWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(AskUserQuestionInputAnnotationsValueWire::serialize(self, serde_json::value::Serializer), |text| AskUserQuestionInputAnnotationsValueWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2018,7 +2018,7 @@ pub struct AskUserQuestionInputMetadata {
     /// Optional identifier for the source of this question (e.g., "remember" for /remember command). Used for analytics tracking.
     pub source: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2028,8 +2028,8 @@ pub struct AskUserQuestionInputMetadata {
 struct AskUserQuestionInputMetadataWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2046,7 +2046,7 @@ impl AskUserQuestionInputMetadata {
 
 impl Serialize for AskUserQuestionInputMetadata {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(AskUserQuestionInputMetadataWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(AskUserQuestionInputMetadataWire::serialize(self, serde_json::value::Serializer), |text| AskUserQuestionInputMetadataWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2070,7 +2070,7 @@ pub struct AskUserQuestionInput {
     /// Optional metadata for tracking and analytics purposes. Not displayed to user.
     pub metadata: Option<AskUserQuestionInputMetadata>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2085,8 +2085,8 @@ struct AskUserQuestionInputWire {
     pub annotations: Option<indexmap::IndexMap<String, AskUserQuestionInputAnnotationsValue>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<AskUserQuestionInputMetadata>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2103,7 +2103,7 @@ impl AskUserQuestionInput {
 
 impl Serialize for AskUserQuestionInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(AskUserQuestionInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(AskUserQuestionInputWire::serialize(self, serde_json::value::Serializer), |text| AskUserQuestionInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2326,7 +2326,7 @@ pub struct SendFeedbackInput {
     /// What kind of task the session was doing when the issue occurred, or `other` when it is a clear task that fits no listed value. Omit only if genuinely unclear.
     pub task_category: Option<SendFeedbackInputTaskCategory>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2343,8 +2343,8 @@ struct SendFeedbackInputWire {
     pub failure_mode: Option<SendFeedbackInputFailureMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_category: Option<SendFeedbackInputTaskCategory>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2361,7 +2361,7 @@ impl SendFeedbackInput {
 
 impl Serialize for SendFeedbackInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SendFeedbackInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SendFeedbackInputWire::serialize(self, serde_json::value::Serializer), |text| SendFeedbackInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2381,7 +2381,7 @@ pub struct ClaudeDesignInput {
     /// Action input object (server-validated). Pass {} for operations that take no input.
     pub arguments: serde_json::Map<String, serde_json::Value>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2391,8 +2391,8 @@ pub struct ClaudeDesignInput {
 struct ClaudeDesignInputWire {
     pub operation: String,
     pub arguments: serde_json::Map<String, serde_json::Value>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2409,7 +2409,7 @@ impl ClaudeDesignInput {
 
 impl Serialize for ClaudeDesignInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ClaudeDesignInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ClaudeDesignInputWire::serialize(self, serde_json::value::Serializer), |text| ClaudeDesignInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2495,7 +2495,7 @@ pub struct ProjectsInput {
     /// project_search: number of hits (default 5)
     pub n: Option<serde_json::Number>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2516,8 +2516,8 @@ struct ProjectsInputWire {
     pub query: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub n: Option<serde_json::Number>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2534,7 +2534,7 @@ impl ProjectsInput {
 
 impl Serialize for ProjectsInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ProjectsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ProjectsInputWire::serialize(self, serde_json::value::Serializer), |text| ProjectsInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2550,7 +2550,7 @@ impl<'de> Deserialize<'de> for ProjectsInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnterPlanModeInput {
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2558,8 +2558,8 @@ pub struct EnterPlanModeInput {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "EnterPlanModeInput")]
 struct EnterPlanModeInputWire {
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2576,7 +2576,7 @@ impl EnterPlanModeInput {
 
 impl Serialize for EnterPlanModeInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(EnterPlanModeInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(EnterPlanModeInputWire::serialize(self, serde_json::value::Serializer), |text| EnterPlanModeInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2600,7 +2600,7 @@ pub struct TaskCreateInput {
     /// Arbitrary metadata to attach to the task
     pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2614,8 +2614,8 @@ struct TaskCreateInputWire {
     pub active_form: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2632,7 +2632,7 @@ impl TaskCreateInput {
 
 impl Serialize for TaskCreateInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TaskCreateInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TaskCreateInputWire::serialize(self, serde_json::value::Serializer), |text| TaskCreateInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2650,7 +2650,7 @@ pub struct TaskGetInput {
     /// The ID of the task to retrieve
     pub task_id: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2660,8 +2660,8 @@ pub struct TaskGetInput {
 struct TaskGetInputWire {
     #[serde(rename = "taskId")]
     pub task_id: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2678,7 +2678,7 @@ impl TaskGetInput {
 
 impl Serialize for TaskGetInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TaskGetInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TaskGetInputWire::serialize(self, serde_json::value::Serializer), |text| TaskGetInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2757,7 +2757,7 @@ pub struct TaskUpdateInput {
     /// Metadata keys to merge into the task. Set a key to null to delete it.
     pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2783,8 +2783,8 @@ struct TaskUpdateInputWire {
     pub owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2801,7 +2801,7 @@ impl TaskUpdateInput {
 
 impl Serialize for TaskUpdateInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TaskUpdateInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TaskUpdateInputWire::serialize(self, serde_json::value::Serializer), |text| TaskUpdateInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2817,7 +2817,7 @@ impl<'de> Deserialize<'de> for TaskUpdateInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskListInput {
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2825,8 +2825,8 @@ pub struct TaskListInput {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "TaskListInput")]
 struct TaskListInputWire {
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2843,7 +2843,7 @@ impl TaskListInput {
 
 impl Serialize for TaskListInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(TaskListInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(TaskListInputWire::serialize(self, serde_json::value::Serializer), |text| TaskListInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2873,7 +2873,7 @@ pub struct WorkflowInput {
     /// Run ID of a prior Workflow invocation to resume from. Completed agent() calls with unchanged (prompt, opts) return their cached results instantly; only edited or new calls re-run. Same-session only. Stop the prior run first (TaskStop) before resuming.
     pub resume_from_run_id: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2895,8 +2895,8 @@ struct WorkflowInputWire {
     pub script_path: Option<String>,
     #[serde(rename = "resumeFromRunId", default, skip_serializing_if = "Option::is_none")]
     pub resume_from_run_id: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2913,7 +2913,7 @@ impl WorkflowInput {
 
 impl Serialize for WorkflowInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(WorkflowInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(WorkflowInputWire::serialize(self, serde_json::value::Serializer), |text| WorkflowInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2937,7 +2937,7 @@ pub struct CronCreateInput {
     /// true = persist to .claude/scheduled_tasks.json and survive restarts. false (default) = in-memory only, dies when this Claude session ends. Use true only when the user asks the task to survive across sessions.
     pub durable: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2951,8 +2951,8 @@ struct CronCreateInputWire {
     pub recurring: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -2969,7 +2969,7 @@ impl CronCreateInput {
 
 impl Serialize for CronCreateInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(CronCreateInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(CronCreateInputWire::serialize(self, serde_json::value::Serializer), |text| CronCreateInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -2987,7 +2987,7 @@ pub struct CronDeleteInput {
     /// Job ID returned by CronCreate.
     pub id: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -2996,8 +2996,8 @@ pub struct CronDeleteInput {
 #[serde(remote = "CronDeleteInput")]
 struct CronDeleteInputWire {
     pub id: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3014,7 +3014,7 @@ impl CronDeleteInput {
 
 impl Serialize for CronDeleteInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(CronDeleteInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(CronDeleteInputWire::serialize(self, serde_json::value::Serializer), |text| CronDeleteInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3030,7 +3030,7 @@ impl<'de> Deserialize<'de> for CronDeleteInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CronListInput {
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3038,8 +3038,8 @@ pub struct CronListInput {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "CronListInput")]
 struct CronListInputWire {
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3056,7 +3056,7 @@ impl CronListInput {
 
 impl Serialize for CronListInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(CronListInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(CronListInputWire::serialize(self, serde_json::value::Serializer), |text| CronListInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3082,7 +3082,7 @@ pub struct ScheduleWakeupInput {
     /// true = nothing changed (you checked and there is nothing to report). false = something happened worth keeping (edited a file, posted a message, advanced state, surfaced a finding). Consecutive noop:true ticks are collapsed in the user's terminal view and tracked as a streak. Required unless `stop` is true.
     pub noop: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3100,8 +3100,8 @@ struct ScheduleWakeupInputWire {
     pub stop: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noop: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3118,7 +3118,7 @@ impl ScheduleWakeupInput {
 
 impl Serialize for ScheduleWakeupInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ScheduleWakeupInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ScheduleWakeupInputWire::serialize(self, serde_json::value::Serializer), |text| ScheduleWakeupInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3204,7 +3204,7 @@ pub struct RemoteTriggerInput {
     /// Required for create and update; optional for run
     pub body: Option<serde_json::Map<String, serde_json::Value>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3221,8 +3221,8 @@ struct RemoteTriggerInputWire {
     pub cursor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Map<String, serde_json::Value>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3239,7 +3239,7 @@ impl RemoteTriggerInput {
 
 impl Serialize for RemoteTriggerInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(RemoteTriggerInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(RemoteTriggerInputWire::serialize(self, serde_json::value::Serializer), |text| RemoteTriggerInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3255,7 +3255,7 @@ impl<'de> Deserialize<'de> for RemoteTriggerInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShowOnboardingRolePickerInput {
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3263,8 +3263,8 @@ pub struct ShowOnboardingRolePickerInput {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "ShowOnboardingRolePickerInput")]
 struct ShowOnboardingRolePickerInputWire {
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3281,7 +3281,7 @@ impl ShowOnboardingRolePickerInput {
 
 impl Serialize for ShowOnboardingRolePickerInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ShowOnboardingRolePickerInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ShowOnboardingRolePickerInputWire::serialize(self, serde_json::value::Serializer), |text| ShowOnboardingRolePickerInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3299,7 +3299,7 @@ pub struct OfferChromeSetupInput {
     /// A short phrase naming what the task needs the user's own browser for.
     pub reason: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3309,8 +3309,8 @@ pub struct OfferChromeSetupInput {
 struct OfferChromeSetupInputWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3327,7 +3327,7 @@ impl OfferChromeSetupInput {
 
 impl Serialize for OfferChromeSetupInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(OfferChromeSetupInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(OfferChromeSetupInputWire::serialize(self, serde_json::value::Serializer), |text| OfferChromeSetupInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3343,7 +3343,7 @@ impl<'de> Deserialize<'de> for OfferChromeSetupInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReadNotificationsInput {
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3351,8 +3351,8 @@ pub struct ReadNotificationsInput {
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "ReadNotificationsInput")]
 struct ReadNotificationsInputWire {
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3369,7 +3369,7 @@ impl ReadNotificationsInput {
 
 impl Serialize for ReadNotificationsInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ReadNotificationsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ReadNotificationsInputWire::serialize(self, serde_json::value::Serializer), |text| ReadNotificationsInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3387,7 +3387,7 @@ pub struct MonitorInputWs {
     pub url: String,
     pub protocols: Option<Vec<String>>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3398,8 +3398,8 @@ struct MonitorInputWsWire {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocols: Option<Vec<String>>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3416,7 +3416,7 @@ impl MonitorInputWs {
 
 impl Serialize for MonitorInputWs {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(MonitorInputWsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(MonitorInputWsWire::serialize(self, serde_json::value::Serializer), |text| MonitorInputWsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3440,7 +3440,7 @@ pub struct MonitorInput {
     /// WebSocket to open. Each text frame is an event; binary frames are reported as a placeholder line. Socket close ends the watch. Cannot be combined with command.
     pub ws: Option<MonitorInputWs>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3454,8 +3454,8 @@ struct MonitorInputWire {
     pub command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ws: Option<MonitorInputWs>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3472,7 +3472,7 @@ impl MonitorInput {
 
 impl Serialize for MonitorInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(MonitorInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(MonitorInputWire::serialize(self, serde_json::value::Serializer), |text| MonitorInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3536,7 +3536,7 @@ pub struct ProposeSkillsInputProposalsItem {
     /// The complete SKILL.md exactly as it should be saved: frontmatter plus the full body. When the user saves, the body below the frontmatter becomes the skill's entire instructions and the name and description come from the fields above; other frontmatter keys are not kept. For an improvement this replaces the existing skill's SKILL.md entirely, so read that skill's current SKILL.md first and include everything worth keeping, not only the changes.
     pub skill_md: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3553,8 +3553,8 @@ struct ProposeSkillsInputProposalsItemWire {
     pub evidence: Option<Vec<String>>,
     #[serde(rename = "skillMd")]
     pub skill_md: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3571,7 +3571,7 @@ impl ProposeSkillsInputProposalsItem {
 
 impl Serialize for ProposeSkillsInputProposalsItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ProposeSkillsInputProposalsItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ProposeSkillsInputProposalsItemWire::serialize(self, serde_json::value::Serializer), |text| ProposeSkillsInputProposalsItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3588,7 +3588,7 @@ impl<'de> Deserialize<'de> for ProposeSkillsInputProposalsItem {
 pub struct ProposeSkillsInput {
     pub proposals: Vec<ProposeSkillsInputProposalsItem>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3597,8 +3597,8 @@ pub struct ProposeSkillsInput {
 #[serde(remote = "ProposeSkillsInput")]
 struct ProposeSkillsInputWire {
     pub proposals: Vec<ProposeSkillsInputProposalsItem>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3615,7 +3615,7 @@ impl ProposeSkillsInput {
 
 impl Serialize for ProposeSkillsInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ProposeSkillsInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ProposeSkillsInputWire::serialize(self, serde_json::value::Serializer), |text| ProposeSkillsInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3635,7 +3635,7 @@ pub struct ProposeGoalInput {
     /// Whether to ask the user for approval before the goal is set. Defaults to true - an approval dialog is shown. Set false ONLY when the user's own words in this conversation stated this outcome as what they want; the goal is then set directly, with a visible notice in the transcript, and the user can clear it with /goal clear.
     pub ask_user: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3646,8 +3646,8 @@ struct ProposeGoalInputWire {
     pub condition: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask_user: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3664,7 +3664,7 @@ impl ProposeGoalInput {
 
 impl Serialize for ProposeGoalInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ProposeGoalInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ProposeGoalInputWire::serialize(self, serde_json::value::Serializer), |text| ProposeGoalInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3842,7 +3842,7 @@ pub struct ArtifactInput {
     /// The artifact's runtime version. Omit to keep its current version (the default); 'latest' to upgrade; a specific version to pin or roll back. Changing it changes how the published page behaves - pass only when the author explicitly intends the change, never as a side effect of editing.
     pub contract: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3890,8 +3890,8 @@ struct ArtifactInputWire {
     pub capabilities: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3908,7 +3908,7 @@ impl ArtifactInput {
 
 impl Serialize for ArtifactInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ArtifactInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ArtifactInputWire::serialize(self, serde_json::value::Serializer), |text| ArtifactInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -3960,7 +3960,7 @@ pub struct PushNotificationInput {
     pub message: String,
     pub status: Option<PushNotificationInputStatus>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -3971,8 +3971,8 @@ struct PushNotificationInputWire {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<PushNotificationInputStatus>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -3989,7 +3989,7 @@ impl PushNotificationInput {
 
 impl Serialize for PushNotificationInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(PushNotificationInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(PushNotificationInputWire::serialize(self, serde_json::value::Serializer), |text| PushNotificationInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4009,7 +4009,7 @@ pub struct EnterWorktreeInput {
     /// Path to an existing worktree to switch into instead of creating a new one. Must appear in `git worktree list` for the current repo - or, on first entry from the launch directory, for a repo nested inside it (multi-repo workspace). Mutually exclusive with `name`.
     pub path: Option<String>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4021,8 +4021,8 @@ struct EnterWorktreeInputWire {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4039,7 +4039,7 @@ impl EnterWorktreeInput {
 
 impl Serialize for EnterWorktreeInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(EnterWorktreeInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(EnterWorktreeInputWire::serialize(self, serde_json::value::Serializer), |text| EnterWorktreeInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -4096,7 +4096,7 @@ pub struct ExitWorktreeInput {
     /// Required true when action is "remove" and the worktree has uncommitted files or unmerged commits. The tool will refuse and list them otherwise.
     pub discard_changes: Option<bool>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -4107,8 +4107,8 @@ struct ExitWorktreeInputWire {
     pub action: ExitWorktreeInputAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discard_changes: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -4125,7 +4125,7 @@ impl ExitWorktreeInput {
 
 impl Serialize for ExitWorktreeInput {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ExitWorktreeInputWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ExitWorktreeInputWire::serialize(self, serde_json::value::Serializer), |text| ExitWorktreeInputWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 

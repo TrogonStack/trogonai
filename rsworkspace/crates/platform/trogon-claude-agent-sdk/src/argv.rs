@@ -9,6 +9,7 @@ use crate::{
     ClaudeAgentOptions, Customizations, DangerousPermissionSkip, DebugOutput, Error, ExtraArgument, HookEvents,
     OptionError, PartialMessages, ProtocolError, SessionPersistence, ThinkingConfig, ToolSet,
     adapters::{NativeHost, ReadFile},
+    js_object_order::array_index,
     process_options::ArgvStyle,
     python_c_stack::PythonCStack,
     python_json::python_repr,
@@ -210,12 +211,6 @@ fn push_spaced(arguments: &mut Vec<OsString>, flag: &str, value: impl Into<OsStr
         arguments.push(flag.into());
         arguments.push(value);
     }
-}
-
-/// A JavaScript canonical array index: the keys an object lists first, in ascending order.
-fn array_index(key: &str) -> Option<u32> {
-    let index = key.parse::<u32>().ok().filter(|index| *index != u32::MAX)?;
-    (index.to_string() == key).then_some(index)
 }
 
 /// Python's `extra_args` is a dictionary: a repeated key keeps its first position and its last value. The

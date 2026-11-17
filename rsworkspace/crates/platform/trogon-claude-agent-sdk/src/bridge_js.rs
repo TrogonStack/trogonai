@@ -7,7 +7,8 @@ use regex::Regex;
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::bridge_unicode::{is_forbidden, is_mark, is_punctuation, is_space};
+use crate::bridge_unicode::{is_forbidden, is_mark, is_punctuation};
+use crate::session_prompt::{js_space, js_trim};
 
 mod constants;
 
@@ -24,16 +25,6 @@ static WHOLE_STRING_ESCAPE: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^\x1b[\]PX^_][^\x1b\x07]*(?:\x07|\x1b\\)").ok());
 static DECIMAL: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$").ok());
-
-/// A character the JavaScript `\s` class and `trim` treat as white space.
-pub(crate) fn is_js_space(c: char) -> bool {
-    is_space(c)
-}
-
-/// `text.trim()`.
-pub(crate) fn js_trim(text: &str) -> &str {
-    text.trim_matches(is_js_space)
-}
 
 /// `Number(text)`: `NaN` for text that is not a number.
 pub(crate) fn js_number(text: &str) -> f64 {
@@ -70,7 +61,7 @@ fn radix_number(digits: &str, radix: u32) -> f64 {
 
 /// `parseInt(text, 10)`: the leading run of decimal digits after white space and an optional sign, `None` for `NaN`.
 pub(crate) fn js_parse_int(text: &str) -> Option<f64> {
-    let text = text.trim_start_matches(is_js_space);
+    let text = text.trim_start_matches(js_space);
     let (negative, digits) = match text.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, text.strip_prefix('+').unwrap_or(text)),
@@ -264,7 +255,7 @@ fn strip_leading_marks(text: &str) -> String {
     let mut previous: Option<char> = None;
     let mut removing = false;
     for c in text.chars() {
-        if is_mark(c) && (removing || previous.is_none_or(|before| is_js_space(before) || is_punctuation(before))) {
+        if is_mark(c) && (removing || previous.is_none_or(|before| js_space(before) || is_punctuation(before))) {
             removing = true;
         } else {
             removing = false;

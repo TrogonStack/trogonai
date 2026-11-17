@@ -18,14 +18,21 @@ use super::ServiceCommand;
         it is set, and the AppRole secret id is read from the file that holds it. Only \
         NATS_TLS_DISABLED and OPENBAO_TLS_DISABLED, read from the environment alone, disable TLS.\n\n\
         At startup the service reads the tenant owners file and the release policies file once, \
-        reads its sealing key, connects to NATS, and logs in to OpenBao before it joins the \
-        release queue group. It does not start when a setting or a file is missing or invalid.\n\n\
+        reads its sealing key, connects to NATS, checks that the SECRETS_INVALIDATION stream \
+        exists with the configured replicas, and logs in to OpenBao before it joins the release \
+        queue group and starts publishing invalidation notices. It never creates that stream. It \
+        does not start when a setting, a file, or the stream is missing or invalid.\n\n\
         `config dump --resolved` prints every setting with its effective value and its source, \
         without reading a secret or connecting to anything."
 )]
 pub struct ServiceArgs {
     #[command(flatten)]
     pub runtime: RuntimeConfigArgs,
+    /// The replicas the SECRETS_INVALIDATION stream must keep
+    /// (release.invalidation_stream_replicas, TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS;
+    /// default 3).
+    #[arg(long)]
+    pub invalidation_stream_replicas: Option<usize>,
 
     #[command(subcommand)]
     pub command: Option<ServiceCommand>,

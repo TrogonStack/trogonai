@@ -119,3 +119,22 @@ fn a_snapshot_split_across_chunks_is_moved_to_the_end() {
         "{\"a\":1}\n{\"type\":\"attribution-snapshot\",\"n\":1}\n"
     );
 }
+
+fn precompact_environment(value: &str) -> crate::test_support::FixedEnvironment {
+    crate::test_support::FixedEnvironment {
+        directory: std::path::PathBuf::from("/work"),
+        variables: [("CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP".into(), value.into())]
+            .into_iter()
+            .collect(),
+    }
+}
+
+#[test]
+fn the_disable_variable_trims_like_javascript() {
+    for value in ["1", " TRUE ", "\u{feff}1\u{feff}", "\u{feff}on"] {
+        assert!(skip_disabled(&precompact_environment(value)), "{value:?}");
+    }
+    for value in ["", "0", "\u{85}1\u{85}", "\u{85}yes"] {
+        assert!(!skip_disabled(&precompact_environment(value)), "{value:?}");
+    }
+}
