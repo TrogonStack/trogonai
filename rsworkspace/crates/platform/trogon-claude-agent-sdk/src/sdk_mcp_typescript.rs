@@ -3,7 +3,7 @@
 
 use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error};
 use crate::{
-    CallbackError, CancellationToken, JsonObject, McpToolRequest, SdkTool, SdkTools,
+    CallbackError, CancellationToken, JsonObject, McpToolArgumentsError, McpToolRequest, SdkTool, SdkTools,
     constants::{self, SUPPORTED_PROTOCOL_VERSIONS},
     sdk_mcp_js::stringify_primitive,
     sdk_mcp_regexp, sdk_mcp_zod,
@@ -398,10 +398,7 @@ async fn call_tool(
         issues.push(custom(Vec::new()));
     }
     if !issues.is_empty() {
-        return Ok(Ok(tool_error(format!(
-            "MCP error -32602: Input validation error: Invalid arguments for tool {name}: {}",
-            pretty(&issues)
-        ))));
+        return Ok(Ok(tool_error(invalid_arguments(name, &pretty(&issues)))));
     }
     let arguments = match parsed.value {
         Some(Value::Object(arguments)) => arguments,
@@ -421,8 +418,16 @@ async fn call_tool(
             }
         }
         Err(CallbackError::Cancelled) => Err(CallbackError::Cancelled.into()),
-        Err(CallbackError::Failed(error)) => Ok(Ok(tool_error(error.to_string()))),
+        Err(CallbackError::Failed(error)) => Ok(Ok(tool_error(match error.downcast_ref::<McpToolArgumentsError>() {
+            Some(invalid) => invalid_arguments(name, invalid.message()),
+            None => error.to_string(),
+        }))),
     }
+}
+
+/// The message of the `-32602` `McpError` that `validateToolInput` throws, which `createToolError` answers with.
+fn invalid_arguments(name: &str, detail: &str) -> String {
+    format!("MCP error -32602: Input validation error: Invalid arguments for tool {name}: {detail}")
 }
 
 /// The zod issues of `CallToolRequestSchema.params`.

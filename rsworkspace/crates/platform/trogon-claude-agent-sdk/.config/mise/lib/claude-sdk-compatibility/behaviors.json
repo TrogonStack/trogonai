@@ -2912,28 +2912,40 @@
     },
     {
       "id": "r31-typed-settings-lone-surrogates",
-      "concept": "Lone surrogates in typed resolved settings",
+      "concept": "Lone surrogates in resolved settings strings",
       "python": {
-        "status": "absent",
-        "reason": "The pinned Python SDK returns no typed settings: json.loads keeps a lone surrogate in a str, which resolve_python_settings returns exactly."
+        "file": "src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+        "line_start": 461,
+        "line_end": 474,
+        "sha256": "568cc3ccd95c88400876e953f14c99cd4b54427b3442deee5236092731016178"
       },
       "typescript": {
-        "status": "absent",
-        "reason": "sdk.mjs returns resolved settings as JavaScript values, whose strings hold lone surrogates; it has no typed settings. Row r32 covers how the TypeScript dialect reads them."
+        "file": "package/sdk.mjs",
+        "anchor": "async function c8(e={}){await o8();",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 994,
+        "sha256": "59eb04013d525329a2a8c653703461050d2bfb6996ec8f85259da8a929d8b04b"
       },
       "upstream": {
         "verdict": "agree",
-        "behavior": "Both SDKs keep a lone surrogate of a settings file, escaped or decoded from UTF-16LE, in the strings they return."
+        "behavior": "Both SDKs keep a lone surrogate of a settings file, escaped or decoded from UTF-16LE, in the strings they return. resolveSettings (c8) returns the effective settings, provenance and sources as JavaScript values whose strings and keys hold each lone UTF-16 unit, and JSON.stringify prints each one as its \\udxxx escape. _build_settings_value reads a settings file with json.loads, whose str keeps each lone surrogate, and json.dumps writes it back as its \\udxxx escape. resolve_settings_exact_with_state returns the TypeScript object as a PythonJsonValue whose strings and keys keep every lone surrogate and whose numbers hold the doubles JSON.stringify prints, and js_stringify_exact in src/settings_exact.rs prints it as JSON.stringify does; resolve_python_settings_with_state returns the Python value, which python_json_dumps prints as json.dumps does. resolve_settings_exact_in_dialect_with_state picks either by dialect. The typed ResolvedSettings, which neither SDK has, holds U+FFFD for each lone surrogate because a Rust String cannot hold one; the exact results above sit beside it."
       },
       "decision": {
-        "kind": "rust-adaptation",
-        "reason": "A Rust String cannot hold a lone surrogate, so the typed ResolvedSettings holds U+FFFD for each one in either dialect; of keys that become equal, the last entry stays in the place of the first. The untyped resolve_python_settings result keeps the exact str. The TypeScript dialect has no untyped result yet, so its lone surrogates reach callers only as U+FFFD."
+        "kind": "upstream"
       },
       "contracts": [
-        "settings_resolve_python_surrogates::the_typed_python_dialect_keeps_a_file_with_lone_surrogates_as_u_fffd",
-        "settings_resolve_ts_surrogates::the_typescript_dialect_reads_settings_files_as_resolve_settings_does_on_node"
+        "settings_resolve_ts_surrogates::the_typescript_dialect_returns_the_strings_resolve_settings_returns_with_their_lone_surrogates",
+        "settings_resolve_ts_surrogates::the_exact_resolve_in_the_typescript_dialect_is_the_typescript_result",
+        "settings_resolve_ts_surrogates::the_typescript_dialect_prints_the_resolved_object_with_its_lone_surrogates_as_json_stringify_does",
+        "settings_resolve_python_surrogates::a_settings_file_keeps_its_lone_surrogates_as_json_loads_does",
+        "settings_resolve_python_surrogates::the_exact_resolve_in_the_python_dialect_keeps_lone_surrogates_as_json_loads_does",
+        "src/settings_exact_tests.rs::a_stand_in_turns_back_into_its_lone_surrogate_in_strings_and_keys",
+        "src/settings_exact_tests.rs::strings_escape_what_json_stringify_escapes"
       ],
       "rust": [
+        "src/settings_exact.rs",
         "src/settings_resolve.rs",
         "src/settings_strings.rs"
       ]
@@ -3622,7 +3634,7 @@
       },
       "decision": {
         "kind": "rust-adaptation",
-        "reason": "src/python_urlopen_sysconf.rs leaves a value of the wrong type out, as if it were absent, because a crashed process has no answer to match. src/python_urlopen_registry.rs zeroes the buffer, so a short integer and the rest of a shorter answer read as zero bytes. Reg2Py and the Windows error classes are checked against expectations worked by hand from Python/winreg.c, PC/errmap.h and Objects/exceptions.c, because the recording host has no winreg; getproxies_registry and proxy_bypass_registry are recorded from CPython over a fake winreg."
+        "reason": "src/python_urlopen_sysconf.rs leaves a value of the wrong type out, as if it were absent, because a crashed process has no answer to match. src/python_urlopen_registry.rs zeroes the buffer, so a short integer and the rest of a shorter answer read as zero bytes. Reg2Py and the Windows error classes are checked against expectations worked by hand from Python/winreg.c, PC/errmap.h and Objects/exceptions.c, because the recording host has no winreg; getproxies_registry and proxy_bypass_registry are recorded from CPython over a fake winreg. Upstream here is a defect, not a contract: CPython _scproxy aborts the interpreter with an NSException on macOS and winreg Reg2Py reads uninitialized memory on Windows, so Rust reads the values safely instead."
       },
       "contracts": [
         "src/python_urlopen_sysconf_tests.rs::reads_the_system_configuration_as_scproxy_and_urllib_read_it",

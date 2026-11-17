@@ -111,22 +111,6 @@ crate.from_cargo(
     ],
 )
 
-# crate_universe resolves only the features some workspace member enables, and
-# none enables a2a's spicedb feature, which Bazel builds. These pin its optional
-# dependencies to the workspace Cargo.toml versions so they exist in @crates,
-# where the cargo_workspace extension below lists them for a2a explicitly.
-crate.spec(
-    package = "spicedb-grpc-tonic",
-    repositories = ["crates"],
-    version = "=1.0.0",
-)
-crate.spec(
-    features = ["future"],
-    package = "moka",
-    repositories = ["crates"],
-    version = "=0.12.16",
-)
-
 # The decider components under rsworkspace/wasm-components build for wasm32,
 # where the workspace resolution above does not fit: it unifies features across
 # every member, which pulls host-only dependencies into the guest. This one

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use trogon_claude_agent_sdk::JsonObject;
 
 #[derive(Serialize)]
@@ -31,4 +31,10 @@ pub fn echo_schema(additional_properties: Option<bool>) -> Result<JsonObject, se
         required: ["text"],
         additional_properties,
     })?)
+}
+
+/// The arguments of the echo tool, read from the call after its input is validated against [`echo_schema`].
+#[derive(Deserialize)]
+pub struct EchoArguments {
+    pub text: String,
 }
