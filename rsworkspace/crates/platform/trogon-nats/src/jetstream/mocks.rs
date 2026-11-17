@@ -273,6 +273,32 @@ impl Default for MockJetStreamContext {
     }
 }
 
+impl JetStreamGetStream for MockJetStreamContext {
+    type Error = GetStreamError;
+    type Stream = MockJetStreamStream;
+
+    async fn get_stream<T: AsRef<str> + Send>(&self, stream_name: T) -> Result<Self::Stream, GetStreamError> {
+        let config = self
+            .created_streams()
+            .into_iter()
+            .find(|config| config.name == stream_name.as_ref());
+        let Some(config) = config else {
+            let error = serde_json::from_value(serde_json::json!({
+                "code": 404,
+                "err_code": 10059,
+                "description": "stream not found",
+            }))
+            .unwrap();
+            return Err(GetStreamError::new(GetStreamErrorKind::JetStream(error)));
+        };
+        let mut info = mock_stream_info(0, 0);
+        info.config = config;
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.set_info(info);
+        factory.get_stream(stream_name).await
+    }
+}
+
 impl JetStreamContext for MockJetStreamContext {
     type Error = MockStreamProvisionError;
     type Stream = ();

@@ -53,9 +53,20 @@ configuration does not update streams.
 
 Before changing any stream, the command inspects every existing stream for the
 prefix and refuses sealed or mirrored streams, which cannot accept the bridge's
-direct command publications. Only an explicit stream-not-found response permits
-creation; lookup and permission failures stop provisioning. Connection setup
-makes one pass over the configured servers instead of retrying indefinitely.
+direct command publications. It also rejects empty subject lists or filters
+outside the exact ACP prefix's protocol namespace, including a stream name
+occupied by a different prefix with the same normalized name. During preflight,
+only an explicit stream-not-found response is treated as absence; other
+inspection or configuration-read failures stop provisioning before any mutation.
+
+Reconciliation then reads each stream again through the shared JetStream client.
+If that later lookup fails, the client attempts CREATE; an existing stream name
+normally makes that request fail. A later reconciliation failure can leave
+earlier streams updated. Provisioning is not an atomic transaction across
+streams and does not protect against concurrent configuration changes.
+
+Connection setup makes one pass over the configured servers instead of retrying
+indefinitely.
 The command applies `ACP_OPERATION_TIMEOUT_SECS` to its JetStream API reply
 waits, using the existing ACP operation timeout when no override is supplied.
 

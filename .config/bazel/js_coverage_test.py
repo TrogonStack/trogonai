@@ -57,6 +57,8 @@ class JavaScriptCoverageTest(unittest.TestCase):
 
     def assert_covered(self, report, source):
         self.assertIsNotNone(report)
+        sources = [line for line in report.splitlines() if line.startswith("SF:")]
+        self.assertEqual(sources, [f"SF:fixtures/{source}"])
         records = [record for record in report.split("end_of_record") if f"SF:fixtures/{source}\n" in record]
         self.assertEqual(len(records), 1, f"missing selected source {source}")
         hits = [int(line.split(",")[1]) for line in records[0].splitlines() if line.startswith("DA:")]
