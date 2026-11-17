@@ -278,6 +278,8 @@ export default async () => {
                 items: [
                   { text: "Portable Workload Identity", link: "/research/workload-identity/README" },
                   { text: "Workload Federation", link: "/research/workload-identity/federation" },
+                  { text: "Federation Inventory", link: "/research/workload-identity/federation-inventory" },
+                  { text: "JWT-SVID Issuer Spike", link: "/research/workload-identity/jwt-svid-issuer-spike" },
                   { text: "Identity & KMS Adapter Roadmap", link: "/research/workload-identity/adapter-roadmap" },
                 ],
               },

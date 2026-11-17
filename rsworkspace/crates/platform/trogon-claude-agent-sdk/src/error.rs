@@ -185,6 +185,10 @@ pub enum Error {
     /// An option the upstream SDK rejects before it starts the CLI.
     #[error(transparent)]
     Option(#[from] crate::OptionError),
+    /// Python `CLIConnectionError("Failed to load settings: ...")`, raised while the command is built when the
+    /// settings a sandbox is merged into cannot be loaded.
+    #[error(transparent)]
+    SettingsLoad(#[from] crate::SettingsLoadError),
     /// Python `MessageParseError`.
     #[error(transparent)]
     MessageParse(#[from] MessageParseError),

@@ -9,9 +9,9 @@ use crate::{
     adapters::{CurrentDirectory, EnvironmentVariable, ReadFile},
     constants::{LOCAL_SETTINGS_FILE, PROJECT_SETTINGS_FILE, USER_SETTINGS_FILE},
     home_directory::{HomeDirectoryError, Platform, node_homedir, node_join},
+    node_text_file::read_node_text,
+    python_text_file::read_text_utf8_sig,
     settings_dialect::SettingsDialect,
-    settings_read::read_document,
-    settings_resolve_values::SettingsMap,
 };
 
 /// `path.resolve` for one segment: absolute as is, relative against `base`, then lexically normalized.
@@ -79,12 +79,20 @@ pub(crate) fn resolve_cwd<H: CurrentDirectory<Error = io::Error>>(
     })
 }
 
-/// Reads one settings file; a missing, unreadable, non-object or invalid file yields nothing.
-pub(crate) fn read_settings_file<H: ReadFile<Error = io::Error>>(
+/// The text of one settings file, `None` when it is missing, unreadable or cannot be decoded. The TypeScript dialect
+/// decodes the bytes as Node hands them to the TypeScript settings reader ([`read_node_text`]). The Python dialect
+/// reads them as the Python SDK reads its one settings file, with `Path.read_text(encoding="utf-8-sig")`, and a file
+/// that read raises on yields nothing, as a file `json.loads` rejects does: the Python SDK has no `resolveSettings`,
+/// and `resolveSettings` drops every settings file it cannot read or parse. Only the `--settings` value the Python
+/// dialect builds raises on such a file, with the [`SettingsLoadError`](crate::SettingsLoadError) Python raises.
+pub(crate) fn read_settings_text<H: ReadFile<Error = io::Error>>(
     host: &H,
     path: &Path,
     dialect: SettingsDialect,
-) -> Option<SettingsMap> {
+) -> Option<String> {
     let bytes = host.read_file(path).ok()?;
-    read_document(&String::from_utf8_lossy(&bytes), dialect)
+    match dialect {
+        SettingsDialect::TypeScript => Some(read_node_text(&bytes)),
+        SettingsDialect::Python => read_text_utf8_sig(&bytes).ok(),
+    }
 }

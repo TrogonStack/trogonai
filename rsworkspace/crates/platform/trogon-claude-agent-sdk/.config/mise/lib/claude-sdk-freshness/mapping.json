@@ -168,7 +168,11 @@
         "Error",
         "AbortError",
         "ResultError",
-        "ClaudeAgentOptions.abort_controller"
+        "ClaudeAgentOptions.abort_controller",
+        "SettingsLoadError",
+        "SettingsLoadCauseError",
+        "PythonUnicodeDecodeError",
+        "UnicodeDecodeReason"
       ],
       "tests": [
         {
@@ -342,10 +346,14 @@
         {
           "path": "tests/shutdown_errors.rs",
           "name": "abort_cancels_the_supplied_controller"
+        },
+        {
+          "path": "tests/python_settings_value.rs",
+          "name": "an_undecodable_settings_file_raises_what_connect_and_query_raise"
         }
       ],
       "status": "supported",
-      "rationale": "TypeScript error text that comes from stderr or a failed spawn is redacted with the bundle's eighteen secret patterns, run on a matcher with JavaScript semantics because the patterns need lookahead and lookbehind (goldens from the real sdk.mjs 0.3.323 in tests/fixtures/stderr_redaction); Python redacts nothing. Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data. Each stdout line is read as the SDK reader reads it, replayed from goldens of both packages: Python decodes strict UTF-8 (UnicodeDecodeError), strips the str.strip whitespace before the brace check and raises ValueError for an integer past 4,300 digits; TypeScript splits lines as readline does (lone carriage return, U+2028, U+2029), decodes with replacement characters, orders keys as Object.keys does, reads every number as a double and raises TypeError for a null line. NaN, infinities, lone surrogate escapes and integers beyond 64 bits cannot be held by the public types: README lists what the crate does for each. abort_controller is TypeScript's abortController: cancelling it stops the process and ends the run with Claude Code process aborted by user, a controller cancelled before connect fails the connection, later writes fail with Operation aborted, and abort() cancels the supplied controller; without one a fresh token is used. Python has no abort controller."
+      "rationale": "TypeScript error text that comes from stderr or a failed spawn is redacted with the bundle's eighteen secret patterns, run on a matcher with JavaScript semantics because the patterns need lookahead and lookbehind (goldens from the real sdk.mjs 0.3.323 in tests/fixtures/stderr_redaction); Python redacts nothing. Process errors carry Python's message, the exit code and the TypeScript text; an exit after an error result becomes ResultError (Python text, or the TypeScript text when non-empty); spawn failures split into missing executable, missing cwd and other; AbortError ends an aborted run. Close escalates stdin close, SIGTERM, SIGKILL. Writes follow upstream order: after an exit Python reports the terminated process with its exit code and TypeScript reports not ready; the exited-with-error branch is unreachable in both SDKs. Writes fail with distinct variants (not ready, terminated process, write failure, aborted) instead of DriverStopped. JSON decode errors carry the line and the original error (Python style; TypeScript style skips undecodable lines) and message parse errors carry the raw data. Each stdout line is read as the SDK reader reads it, replayed from goldens of both packages: Python decodes strict UTF-8 (UnicodeDecodeError), strips the str.strip whitespace before the brace check and raises ValueError for an integer past 4,300 digits; TypeScript splits lines as readline does (lone carriage return, U+2028, U+2029), decodes with replacement characters, orders keys as Object.keys does, reads every number as a double and raises TypeError for a null line. NaN, infinities, lone surrogate escapes and integers beyond 64 bits cannot be held by the public types: README lists what the crate does for each. abort_controller is TypeScript's abortController: cancelling it stops the process and ends the run with Claude Code process aborted by user, a controller cancelled before connect fails the connection, later writes fail with Operation aborted, and abort() cancels the supplied controller; without one a fresh token is used. Python has no abort controller. Python's CLIConnectionError(\"Failed to load settings: ...\") is Error::SettingsLoad, a SettingsLoadError whose SettingsLoadCauseError is the exception Python caught, an undecodable file's carrying the PythonUnicodeDecodeError fields (checked against CPython at connect and query())."
     },
     {
       "id": "permission-modes",
@@ -5350,6 +5358,7 @@
       "rust_api": [
         "Settings",
         "SettingsInput",
+        "DeepJsonValue",
         "upstream::settings"
       ],
       "tests": [
@@ -5392,10 +5401,42 @@
         {
           "path": "tests/upstream_settings_unions.rs",
           "name": "status_line_ssh_configs_and_plugin_configs_round_trip_with_unknown_members"
+        },
+        {
+          "path": "tests/deep_json.rs",
+          "name": "a_value_nested_9997_levels_drops_clones_compares_prints_and_writes_on_a_2_mib_stack"
+        },
+        {
+          "path": "tests/deep_json.rs",
+          "name": "values_that_differ_only_at_the_leaf_compare_unequal_on_a_2_mib_stack"
+        },
+        {
+          "path": "tests/deep_json.rs",
+          "name": "settings_holding_a_member_nested_9997_levels_encode_it_byte_for_byte_on_a_2_mib_stack"
+        },
+        {
+          "path": "src/deep_json_tests.rs",
+          "name": "compact_writes_what_serde_json_writes"
+        },
+        {
+          "path": "src/deep_json_tests.rs",
+          "name": "equal_matches_value_equality_and_ignores_key_order"
+        },
+        {
+          "path": "src/deep_json_tests.rs",
+          "name": "nests_within_counts_the_enclosing_containers"
+        },
+        {
+          "path": "src/deep_json_tests.rs",
+          "name": "a_deep_json_value_prints_as_serde_json_value_prints"
+        },
+        {
+          "path": "src/deep_json_tests.rs",
+          "name": "undeclared_members_write_as_serde_json_value_while_shallow_and_as_their_text_beyond"
         }
       ],
       "status": "supported",
-      "rationale": "Settings is generated from the pinned declarations: all 182 declared top-level keys, every nested object, string-literal union and object union, the $schema key and the open index signature. Unknown keys and key order survive a decode then encode byte for byte, and a string-literal value upstream does not list is kept. Nothing is validated. Python has no Settings type; its settings option is a path or JSON string, which SettingsInput distinguishes explicitly. Wiring Settings into Options.settings is mapped separately. Hook handler kinds, marketplace and plugin sources, statusLine, sshConfigs, enabledPlugins and pluginConfigs are generated unions: a union picks the member that re-encodes to the same JSON with the fewest undeclared keys and unlisted string-literal values, so a discriminant selects its own member, and anything else is kept as raw JSON."
+      "rationale": "Settings is generated from the pinned declarations: all 182 declared top-level keys, every nested object, string-literal union and object union, the $schema key and the open index signature. Unknown keys and key order survive a decode then encode byte for byte, and a string-literal value upstream does not list is kept. Each value under an undeclared key is a DeepJsonValue, which drops, clones, compares and prints with loops, and the generated types write it past 64 levels as JSON text, so a member nested 9997 levels deep needs no more than a 2 MiB thread stack. Nothing is validated. Python has no Settings type; its settings option is a path or JSON string, which SettingsInput distinguishes explicitly. Wiring Settings into Options.settings is mapped separately. Hook handler kinds, marketplace and plugin sources, statusLine, sshConfigs, enabledPlugins and pluginConfigs are generated unions: a union picks the member that re-encodes to the same JSON with the fewest undeclared keys and unlisted string-literal values, so a discriminant selects its own member, and anything else is kept as raw JSON."
     },
     {
       "id": "settings-sandbox",
@@ -5511,12 +5552,26 @@
         "adapters::NativeHost",
         "adapters::ExecuteFile",
         "js_stringify",
+        "resolve_settings_json_with",
+        "resolve_settings_json_with_state",
         "resolve_python_settings",
         "resolve_python_settings_with",
+        "resolve_settings_exact",
+        "resolve_settings_exact_with",
+        "resolve_settings_exact_with_state",
+        "resolve_settings_exact_in_dialect",
+        "resolve_settings_exact_in_dialect_with",
+        "resolve_settings_exact_in_dialect_with_state",
+        "js_stringify_exact",
         "python_json_loads",
         "python_json_dumps",
         "PythonJsonValue",
-        "ExactInteger"
+        "ExactInteger",
+        "ResolverState::with_python_c_stack",
+        "PythonCStack",
+        "ResolverState::with_node_stack",
+        "NodeStack",
+        "NodeStack::for_build_target"
       ],
       "tests": [
         {
@@ -5600,6 +5655,22 @@
           "name": "rust_matches_the_pinned_typescript_resolver_byte_for_byte"
         },
         {
+          "path": "tests/resolve_settings_differential.rs",
+          "name": "rust_matches_the_recorded_typescript_output"
+        },
+        {
+          "path": "src/settings_resolve_policy_tests.rs",
+          "name": "a_managed_document_reads_through_the_policy_schema"
+        },
+        {
+          "path": "src/settings_resolve_policy_tests.rs",
+          "name": "a_document_handed_over_reads_through_the_policy_schema"
+        },
+        {
+          "path": "src/settings_resolve_policy_tests.rs",
+          "name": "a_tier_of_only_stand_ins_does_not_shut_the_parent_out"
+        },
+        {
           "path": "tests/settings_resolve.rs",
           "name": "js_stringify_prints_resolved_numbers_as_the_typescript_resolver_does"
         },
@@ -5622,10 +5693,246 @@
         {
           "path": "tests/python_json_goldens.rs",
           "name": "every_document_prints_like_json_dumps_after_json_loads"
+        },
+        {
+          "path": "tests/settings_resolve_python_depth.rs",
+          "name": "a_settings_file_reads_as_deep_as_json_loads_in_a_plain_function"
+        },
+        {
+          "path": "tests/settings_resolve_python_depth.rs",
+          "name": "a_settings_file_reads_as_deep_as_json_loads_under_claude_sdk_client_connect"
+        },
+        {
+          "path": "tests/settings_resolve_python_depth.rs",
+          "name": "a_settings_file_reads_as_deep_as_json_loads_under_query"
+        },
+        {
+          "path": "tests/settings_resolve_python_depth.rs",
+          "name": "the_python_dialect_reads_as_deep_as_a_plain_function_by_default"
+        },
+        {
+          "path": "tests/settings_resolve_python_surrogates.rs",
+          "name": "a_settings_file_keeps_its_lone_surrogates_as_json_loads_does"
+        },
+        {
+          "path": "tests/settings_resolve_python_surrogates.rs",
+          "name": "the_typed_python_dialect_keeps_a_file_with_lone_surrogates_as_u_fffd"
+        },
+        {
+          "path": "src/settings_strings_tests.rs",
+          "name": "a_lone_surrogate_stands_as_one_private_use_code_point_and_turns_back"
+        },
+        {
+          "path": "src/settings_strings_tests.rs",
+          "name": "a_stand_in_moves_past_a_range_the_document_already_holds"
+        },
+        {
+          "path": "tests/settings_resolve_python_surrogates.rs",
+          "name": "a_private_use_code_point_in_another_input_never_turns_into_a_lone_surrogate"
+        },
+        {
+          "path": "tests/settings_resolve_python_surrogates.rs",
+          "name": "a_private_use_code_point_in_a_settings_path_stays_in_the_sources"
+        },
+        {
+          "path": "tests/settings_resolve_ts_surrogates.rs",
+          "name": "the_typescript_dialect_reads_settings_files_as_resolve_settings_does_on_node"
+        },
+        {
+          "path": "tests/settings_resolve_ts_surrogates.rs",
+          "name": "the_typescript_dialect_prints_the_resolved_object_with_its_lone_surrogates_as_json_stringify_does"
+        },
+        {
+          "path": "src/node_text_file_tests.rs",
+          "name": "utf_8_keeps_its_byte_order_mark_and_replaces_each_maximal_invalid_subpart"
+        },
+        {
+          "path": "src/node_text_file_tests.rs",
+          "name": "utf_16le_spells_each_lone_unit_as_its_escape_and_drops_a_trailing_odd_byte"
+        },
+        {
+          "path": "src/node_text_file_tests.rs",
+          "name": "a_lone_unit_after_an_odd_run_of_backslashes_is_u_fffd"
+        },
+        {
+          "path": "tests/settings_resolve_python_surrogates.rs",
+          "name": "the_python_dialect_reads_a_settings_file_as_read_text_with_utf_8_sig_does"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "python_reads_a_settings_file_as_read_text_with_utf_8_sig_does"
+        },
+        {
+          "path": "src/settings_option/tests.rs",
+          "name": "python_quotes_a_missing_settings_file_with_the_repr_of_its_fsdecoded_path"
+        },
+        {
+          "path": "tests/settings_resolve_ts_depth.rs",
+          "name": "the_typescript_dialect_reads_deep_settings_files_as_resolve_settings_does_on_node"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "a_settings_file_reads_while_every_path_fits_both_walks_of_the_node_stack"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "a_merge_overflows_past_the_nested_calls_the_node_stack_holds"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "the_file_cache_copy_overflows_past_the_arrays_and_objects_the_node_stack_holds"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "a_larger_startup_takes_levels_off_every_pass"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "the_command_line_and_environment_take_nothing_from_a_linux_profile"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "the_default_profile_is_the_one_for_the_platform_the_crate_is_built_for"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "a_merge_does_not_enter_what_the_settings_customizer_answers"
+        },
+        {
+          "path": "src/settings_parse_deep_tests.rs",
+          "name": "a_deep_parse_reads_what_the_shallow_parse_reads"
+        },
+        {
+          "path": "src/settings_parse_deep_tests.rs",
+          "name": "a_deep_parse_reads_past_serde_json_up_to_its_limit"
+        },
+        {
+          "path": "src/settings_parse_deep_tests.rs",
+          "name": "an_object_check_reads_any_depth_and_rejects_what_json_parse_rejects"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "a_merge_that_runs_out_keeps_what_it_wrote_and_none_of_the_fresh_value_it_was_filling"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "a_merge_that_fits_writes_every_member_as_the_settings_customizer_says"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "a_merge_on_a_stack_with_no_room_writes_nothing"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "a_merge_spends_more_where_v8_runs_part_of_lodash_for_the_first_time_or_unoptimized"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "a_member_assigned_or_an_array_finished_before_warms_the_rest_of_the_merge"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "only_the_first_two_index_tests_of_the_process_compile_wherever_their_array_sits"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "an_array_that_runs_out_of_stack_counts_as_not_entered"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "an_array_that_compiles_the_index_pattern_without_the_stack_for_it_rejects_with_a_syntax_error"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "lodash_enters_levels_past_the_stack_within_its_descent_reach_and_runs_out_as_it_returns"
+        },
+        {
+          "path": "src/node_merge_tests.rs",
+          "name": "the_machine_code_compile_of_the_index_pattern_spends_more_in_a_merge_after_the_one_that_compiled_it_to_bytecode"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "the_merges_of_a_resolve_share_how_many_keys_lodash_tested_as_indexes"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "the_reader_and_copy_spend_what_the_array_or_object_ending_a_path_holds"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "a_merge_spends_more_at_the_first_member_it_assigns_and_the_first_arrays_it_enters"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "a_managed_settings_document_reads_and_copies_within_the_budgets_of_each_evaluation"
+        },
+        {
+          "path": "src/node_stack_tests.rs",
+          "name": "the_folder_and_admin_merges_start_on_their_own_stacks"
+        },
+        {
+          "path": "tests/settings_resolve_ts_managed.rs",
+          "name": "the_typescript_dialect_reads_managed_settings_as_resolve_settings_does_on_node"
+        },
+        {
+          "path": "src/js_array_tests.rs",
+          "name": "an_index_past_the_end_leaves_a_run_of_holes_that_later_writes_split"
+        },
+        {
+          "path": "src/js_array_tests.rs",
+          "name": "a_length_extends_with_holes_and_truncates_through_a_run"
+        },
+        {
+          "path": "src/js_array_tests.rs",
+          "name": "named_properties_sit_after_the_elements_and_never_print"
+        },
+        {
+          "path": "src/js_array_tests.rs",
+          "name": "an_array_like_object_copies_its_indexes_below_its_length"
+        },
+        {
+          "path": "src/js_array_tests.rs",
+          "name": "a_length_converts_its_value_as_javascript_does"
+        },
+        {
+          "path": "src/js_array_tests.rs",
+          "name": "a_union_keeps_one_undefined_and_drops_named_properties"
+        },
+        {
+          "path": "src/js_array_tests.rs",
+          "name": "a_fresh_copy_hides_proto_containers_outside_kept_keys"
+        },
+        {
+          "path": "src/js_array_tests.rs",
+          "name": "settling_fails_before_holes_print_longer_than_v8_holds"
+        },
+        {
+          "path": "tests/settings_resolve_ts_merge.rs",
+          "name": "the_typescript_dialect_merges_arrays_and_array_like_objects_as_resolve_settings_does_on_node"
+        },
+        {
+          "path": "tests/settings_resolve_ts_merge.rs",
+          "name": "the_typed_result_holds_the_effective_settings_the_merge_of_arrays_gives"
+        },
+        {
+          "path": "tests/settings_resolve_stand_ins.rs",
+          "name": "a_stand_in_past_the_basic_multilingual_plane_resolves_as_resolve_settings_does_on_node"
+        },
+        {
+          "path": "tests/settings_resolve_stand_ins.rs",
+          "name": "the_typed_result_counts_a_stand_in_as_one_unit_in_both_dialects"
+        },
+        {
+          "path": "tests/settings_resolve_stand_ins.rs",
+          "name": "a_stand_in_past_the_basic_multilingual_plane_moves_no_typescript_depth_boundary"
+        },
+        {
+          "path": "tests/settings_resolve_stand_ins.rs",
+          "name": "a_stand_in_past_the_basic_multilingual_plane_moves_no_python_depth_boundary"
         }
       ],
-      "status": "partial",
-      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 54 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Partial until the listed gap closes: the policy-tolerant schema for managed settings (catch substitutions and entry salvage). The MDM re-read throttle follows the pinned state machine against the host clock, with a re-read its caller does not wait for running on a thread of its own (fixtures replay it, slow reads included, with a fake clock). Numbers read as JSON.parse reads them: integers above 2^53 round, and a token past the double range reads as Infinity, which typed settings refuse, env values spell with String() as z.coerce.string() does, and the resolver prints as null. js_stringify prints resolved settings exactly as JSON.stringify does (checked against Node over a corpus of doubles and documents). The Python dialect reads files as json.loads reads them, and resolve_python_settings returns integers of any size exactly and floats with their type, so python_json_dumps prints them as json.dumps does (checked against CPython over a corpus of doubles, documents and refused text). Python has no equivalent."
+      "status": "supported",
+      "rationale": "resolve_settings runs the platform readers (plutil, reg query, WSL reg.exe, /etc/claude-code) behind the SettingsHost adapter traits and matches the pinned TypeScript resolver byte for byte on 111 fixture trees (mise run claude-sdk:resolve-diff), including the read path of normal settings files (pre-parse sanitizers, managed-only key removal, document key order). Every managed source reads through the policy-tolerant schema as upstream reads it (catch substitutions, entry salvage and stand-in tracking): managed files and drop-ins (lE), registry and plist documents (hm), and the server-managed and host-passed managed settings (pm), each under the file name upstream hashes into the sandbox credential prefixes, and a source made only of stand-in values never outranks an authored one (Nu). The keys a policy read drops are listed upstream but nothing reads them. The Python dialect resolves the same way because claude-agent-sdk 0.2.181 launches the bundled CLI 2.1.323, which reads managed settings with the same code as sdk.mjs (_internal/transport/subprocess_cli.py lines 330 to 337). The MDM re-read throttle follows the pinned state machine against the host clock, with a re-read its caller does not wait for running on a thread of its own (fixtures replay it, slow reads included, with a fake clock). Numbers read as JSON.parse reads them: integers above 2^53 round, and a token past the double range reads as Infinity, which typed settings refuse, env values spell with String() as z.coerce.string() does, and the resolver prints as null. js_stringify prints resolved settings exactly as JSON.stringify does (checked against Node over a corpus of doubles and documents). Settings files decode as readFileSync decodes them for the pinned resolver, UTF-16LE after FF FE and UTF-8 otherwise, and keep the lone surrogates JSON.parse keeps, escaped or decoded (checked against resolveSettings on Node over escapes, invalid UTF-8, UTF-16LE, byte order marks, union merges and stand-in collisions; ResolvedSettings holds U+FFFD for each, and resolve_settings_exact returns the object with every lone surrogate kept, which js_stringify_exact prints as JSON.stringify does). The Python dialect reads files as json.loads reads them, as deeply as json.loads does where the Python SDK runs (ResolverState::with_python_c_stack, checked against CPython at each caller's boundary), keeps the lone surrogates json.loads keeps (checked against CPython over settings files holding them, with stand-ins chosen apart from every private-use code point the resolve reads; ResolvedSettings holds U+FFFD for each), decodes each file as Path.read_text(encoding=\"utf-8-sig\") does and skips one it cannot decode (checked against CPython over invalid UTF-8, byte order marks and carriage returns), and resolve_python_settings returns integers of any size exactly and floats with their type, so python_json_dumps prints them as json.dumps does (checked against CPython over a corpus of doubles, documents and refused text). The TypeScript dialect reads, skips and rejects deeply nested settings files as resolveSettings does on the Node profile ResolverState::with_node_stack names (by default NodeStack::for_build_target, the darwin arm64, linux arm64 or linux x64 profile of the platform the crate is built for, each checked against its own goldens), with the startup NodeStack::with_startup_bytes sets on darwin (checked against resolveSettings on Node at each boundary of the read walks, the file cache copy and the merge, for paths ending in null, booleans, empty and filled arrays and objects, and for merges after a member or an array merged before, the SyntaxError a merge rejects with where V8 runs out of stack compiling the lodash isIndex pattern included), and merges arrays into array-like objects and objects into arrays as lodash does, holes, lengths and named properties included (checked against resolveSettings on Node over array-like copies, index, length and named members merged into arrays, unions of holes, managed drop-ins that throw, and lengths and holes past what V8 holds)."
     },
     {
       "id": "initialize-options",

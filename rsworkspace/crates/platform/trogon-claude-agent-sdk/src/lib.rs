@@ -78,6 +78,8 @@ mod home_directory;
 mod hooks;
 #[cfg(unix)]
 mod inherited_descriptors;
+mod js_array;
+mod js_array_mark;
 mod js_json;
 mod js_object_order;
 mod js_regex;
@@ -104,6 +106,12 @@ mod message_decode;
 mod message_id;
 mod message_origin;
 mod model_name;
+mod node_managed_pass;
+mod node_merge;
+mod node_merge_call;
+mod node_merge_cost;
+mod node_merge_room;
+mod node_merge_warmth;
 #[cfg_attr(
     not(test),
     allow(
@@ -113,6 +121,8 @@ mod model_name;
 )]
 mod node_path;
 mod node_path_join;
+mod node_stack;
+mod node_text_file;
 mod option_error;
 mod options;
 mod output_schema;
@@ -149,6 +159,8 @@ mod python_set;
 mod python_sort;
 mod python_string;
 mod python_text;
+mod python_text_file;
+mod python_unicode_decode_error;
 mod python_urllib;
 mod python_urlopen;
 mod python_urlopen_proxy;
@@ -207,12 +219,19 @@ mod session_summary;
 mod session_transcript;
 mod setting_source;
 mod settings_dialect;
+mod settings_exact;
 mod settings_input;
 mod settings_json;
+mod settings_load_error;
+mod settings_managed_reader;
 mod settings_merge_spec;
 mod settings_numbers;
 mod settings_option;
 mod settings_parse;
+mod settings_parse_deep;
+mod settings_policy_content;
+mod settings_policy_marketplace;
+mod settings_policy_parse;
 mod settings_read;
 mod settings_read_hooks;
 mod settings_read_spec;
@@ -220,6 +239,7 @@ mod settings_resolve;
 mod settings_resolve_admin;
 mod settings_resolve_connector;
 mod settings_resolve_env;
+mod settings_resolve_error;
 mod settings_resolve_parent;
 mod settings_resolve_platform;
 mod settings_resolve_platform_kind;
@@ -241,6 +261,7 @@ mod settings_schema_paths;
 mod settings_schema_permission_rule;
 mod settings_schema_ports;
 mod settings_schema_regexp;
+mod settings_strings;
 mod shadow_warning;
 mod skills;
 mod sse_ccr_event;
@@ -274,6 +295,7 @@ mod tool_use_id;
 mod tool_view;
 mod transcript_mirror;
 mod transport;
+mod transport_cause;
 mod ui_host;
 mod urlopen_retriever;
 mod urlopen_retriever_options;
@@ -425,6 +447,7 @@ pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
 pub use node_path::NodePathDialect;
+pub use node_stack::NodeStack;
 pub use option_error::OptionError;
 pub use options::{
     ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, EndWithoutResult,
@@ -459,6 +482,7 @@ pub use python_json_error::{
 pub use python_json_load::python_json_loads;
 pub use python_json_value::{ExactInteger, PythonJsonObject, PythonJsonValue, PythonNumber, python_json_dumps};
 pub use python_string::{CodePoints, PythonString};
+pub use python_unicode_decode_error::{PythonUnicodeDecodeError, UnicodeDecodeReason};
 pub use queue_capacity::{QueueCapacity, QueueCapacityError};
 pub use raw_json_id::{RawJsonId, RawJsonIdError};
 pub use remote_control::{RemoteControlOptions, WorkSecretFuture, WorkSecretRefreshRequest, WorkSecretRefresher};
@@ -514,14 +538,19 @@ pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_ent
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
 pub use settings_dialect::SettingsDialect;
+pub use settings_exact::js_stringify_exact;
 pub use settings_input::SettingsInput;
 pub use settings_json::js_stringify;
+pub use settings_load_error::{SettingsLoadCauseError, SettingsLoadError};
 pub use settings_resolve::{
-    ResolveSettingsError, filter_escalating_default_mode, resolve_python_settings, resolve_python_settings_with,
-    resolve_python_settings_with_state, resolve_settings, resolve_settings_in_dialect,
-    resolve_settings_in_dialect_with, resolve_settings_in_dialect_with_state, resolve_settings_with,
-    resolve_settings_with_state,
+    filter_escalating_default_mode, resolve_python_settings, resolve_python_settings_with,
+    resolve_python_settings_with_state, resolve_settings, resolve_settings_exact, resolve_settings_exact_in_dialect,
+    resolve_settings_exact_in_dialect_with, resolve_settings_exact_in_dialect_with_state, resolve_settings_exact_with,
+    resolve_settings_exact_with_state, resolve_settings_in_dialect, resolve_settings_in_dialect_with,
+    resolve_settings_in_dialect_with_state, resolve_settings_json_with, resolve_settings_json_with_state,
+    resolve_settings_with, resolve_settings_with_state,
 };
+pub use settings_resolve_error::ResolveSettingsError;
 pub use settings_resolve_reread::PolicyRereads;
 pub use settings_resolve_state::ResolverState;
 pub use settings_sandbox::{

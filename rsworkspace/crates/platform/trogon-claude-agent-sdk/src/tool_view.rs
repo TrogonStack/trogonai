@@ -133,7 +133,7 @@ impl ToolOutputSchemas {
 /// `value` decoded as `T`, only when encoding the result reproduces `value`.
 pub(crate) fn exact<T: serde::Serialize + serde::de::DeserializeOwned>(value: &Value) -> Option<T> {
     let typed: T = serde_json::from_value(value.clone()).ok()?;
-    serde_json::to_value(&typed)
+    crate::deep_json::encode(&typed)
         .is_ok_and(|round| round == *value)
         .then_some(typed)
 }
