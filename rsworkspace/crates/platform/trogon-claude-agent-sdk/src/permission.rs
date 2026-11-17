@@ -153,7 +153,7 @@ impl PermissionDecision {
     /// Allows the call with `input` as `updatedInput`, encoded exactly as the typed value encodes. `None` when
     /// `input` does not encode to a JSON object, which is all `updatedInput` carries.
     pub fn allow_with_input(input: &ToolInputSchemas) -> Option<Self> {
-        let serde_json::Value::Object(updated_input) = serde_json::to_value(input).ok()? else {
+        let serde_json::Value::Object(updated_input) = crate::deep_json::encode(input).ok()? else {
             return None;
         };
         Some(Self::Allow {
