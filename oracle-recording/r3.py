@@ -1534,7 +1534,7 @@ def r7_record(name):
         code, stdout, stderr = r7_oracle(PACKAGE, spec_path, dict(os.environ))
         if code != 0:
             return {"error": "the oracle failed", "stderr": stderr}
-        expected = stdout.replace(root, "$ROOT").rstrip()
+        expected = unroot(stdout, root, "$ROOT").rstrip()
         return {"expected": expected, "sha256": __import__("hashlib").sha256(expected.encode()).hexdigest()}
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -1663,6 +1663,12 @@ def r8_spec(label, document, root, prime=None):
     return text.replace('"@DOC@"', document)
 
 
+def unroot(text, root, mark):
+    """`text` with the run's root as `mark`, both as written and as JSON writes it: on Windows the oracle's JSON doubles
+    the root's backslashes, so a plain replace leaves the per-run directory name in and two runs never compare equal."""
+    return text.replace(root, mark).replace(json.dumps(root)[1:-1], mark)
+
+
 def r8_run(package, label, document, flags, startup, trace=None, prime=None):
     """The collapsed answer of one run, the rejection it surfaces, or None when the run failed; with `trace`, the
     traced records too."""
@@ -1684,7 +1690,7 @@ def r8_run(package, label, document, flags, startup, trace=None, prime=None):
         else:
             answer, failure = project(json.loads(stdout), root)
             answer = None if failure is not None else answer
-        raw = (process.returncode, stdout.replace(root, "R"), stderr.replace(root, "R")[-600:])
+        raw = (process.returncode, unroot(stdout, root, "R"), unroot(stderr, root, "R")[-600:])
         return answer, raw
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -1939,8 +1945,8 @@ def r8_record(name, package, trace=None):
             env["TRACE_LOG"] = trace
         code, stdout, stderr = r7_oracle(package, spec_path, env)
         if code != 0:
-            return {"error": "the oracle failed", "stderr": stderr.replace(root, "$ROOT")}
-        expected = stdout.replace(root, "$ROOT").rstrip()
+            return {"error": "the oracle failed", "stderr": unroot(stderr, root, "$ROOT")}
+        expected = unroot(stdout, root, "$ROOT").rstrip()
         return {"expected": expected, "sha256": __import__("hashlib").sha256(expected.encode()).hexdigest()}
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -2456,11 +2462,11 @@ def band8_cases(pair, side, level, answers):
     return [(case, own, other, side)]
 
 
-def band8_region(runs, pair, side, answers, write_event):
-    """The levels from L0 outward through L8 whose reference answer is the side's own, from one REF run each, and
-    the bound line the events keep for them."""
+def band8_region(runs, pair, side, answers, write_event, steps=BAND8_STEPS):
+    """The levels from L0 outward through L`steps` (L8 unless a round registers another cap) whose reference answer
+    is the side's own, from one REF run each, and the bound line the events keep for them."""
     level, region, crossing, visited = pair[f"{side}_level"], [], None, []
-    for _ in range(BAND8_STEPS + 1):
+    for _ in range(steps + 1):
         visited.append(level)
         for case, own, _other, which in band8_cases(pair, side, level, answers):
             answered = runs.once(case, probe_flags(REF))
@@ -2473,9 +2479,9 @@ def band8_region(runs, pair, side, answers, write_event):
             break
         region.append(level)
         level = band8_next(pair, level, side)
-    width = min(len(region), BAND8_STEPS)
+    width = min(len(region), steps)
     bound = (f"bounded by reference crossing at level {crossing['level']}" if crossing
-             else f"no reference crossing through L{BAND8_STEPS}")
+             else f"no reference crossing through L{steps}")
     # The size of each step this side took, in the axis's own unit: bytes on the class axis, where it is the host's
     # class granularity for this pass.
     steps = [abs(after - before) for before, after in zip(visited, visited[1:])]
@@ -2712,6 +2718,225 @@ def band8x_unit():
     return go
 
 
+# ---- band37: each pair side's band as the union over the caller contexts (ruling 37 B, PLAN Update 93) ----
+BAND37_RUNS = 50
+# Ruling 38 item 5: the union band may span the 30 to 60 levels the child_exit context moves the base by.
+BAND37_STEPS = 60
+# The default context (PLAN Update 82 B1) gives the pairs, the answers and the reference region.
+BAND37_DEFAULT = "toplevel"
+# Every context the gate knows, child_exit (the widest jitter, PLAN Update 92 item 4c) first after the default, so a
+# level that is not clean ends early; the order changes only which contexts a level skips, not whether it is clean.
+BAND37_CONTEXTS = ("toplevel", "child_exit", "nested", "immediate", "timer", "io")
+assert sorted(BAND37_CONTEXTS) == sorted(GATE["CONTEXTS"])
+
+
+class Band37Runs(Band8Runs):
+    """Band8Runs whose runs start from a caller context, and where a failed native check stops the pair."""
+
+    def __init__(self, port):
+        super().__init__(port)
+        self.gate_failures = 0
+
+    def once(self, case, flags, context=BAND37_DEFAULT):
+        folder = tempfile.mkdtemp()
+        with self.lock:
+            self.runs += 1
+            self.folders.add(folder)
+        GATE["in_context"](context)
+        try:
+            answered = self.port["run"](self.port["prepare"](case[0], case[1], folder), flags,
+                                        self.port["case_startup"](case))
+            return mg8_collapse(answered) if isinstance(answered, dict) else None
+        except (GATE["NativeRefusal"], GATE["NativeViolation"]) as error:
+            with self.lock:
+                self.gate_failures += 1
+            raise Band8Stop(f"{case[0]} ({context}): {error}") from error
+        except RuntimeError as error:
+            if "share the working folder" in str(error):
+                with self.lock:
+                    self.refusals += 1
+                raise Band8Stop(f"{case[0]}: {error}") from error
+            if str(error).startswith(("a probe", "a padded probe")):
+                with self.lock:
+                    self.assertions += 1
+                raise Band8Stop(f"{case[0]}: {error}") from error
+            return None
+        except (Exception, SystemExit):
+            return None
+        finally:
+            GATE["in_context"](None)
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def tally(self):
+        return {**super().tally(), "gate_failures": self.gate_failures}
+
+
+def band37_default(runs, pool, case, own, other, level, which):
+    """The default context at one level: REF and CROSS must give the side's answer and the default flags must give
+    it in most of BAND37_RUNS runs, as in band8; an answer that is neither, or none, stops the pair. The counts."""
+    for flags in (REF, CROSS):
+        if runs.once(case, probe_flags(flags)) != own:
+            raise Band8Stop(f"{case[0]}: the {'reference' if flags == REF else 'cross-check'} flags do not give "
+                            f"the {which} answer at level {level}")
+    answered = list(pool.map(lambda _: runs.once(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS)), range(BAND37_RUNS)))
+    same = sum(1 for one in answered if one == own)
+    opposite = sum(1 for one in answered if one == other)
+    unexpected = len(answered) - same - opposite
+    if unexpected:
+        raise Band8Stop(f"{case[0]}: {unexpected} of {len(answered)} default-flag runs gave neither answer or none")
+    if 2 * same <= len(answered):
+        raise Band8Stop(f"{case[0]}: the default flags do not give the reference answer in most runs at level "
+                        f"{level} ({same} of {len(answered)})")
+    return {"ref": "own", "cross": "own", "runs": len(answered), "clean": same, "opposite": opposite, "no_answer": 0}
+
+
+def band37_other(runs, pool, case, own, other, context):
+    """Another context at one level: REF, CROSS, then default-flag runs in batches of the pool's size, ending at the
+    first batch with a run that does not give the side's answer. The opposite answer and no answer are band data
+    (ruling 38 item 5); any other answer stops the pair. The counts, and whether all BAND37_RUNS ran clean."""
+    def kind(answered):
+        if answered == own:
+            return "own"
+        if answered == other:
+            return "opposite"
+        if answered is None:
+            return "no_answer"
+        raise Band8Stop(f"{case[0]} ({context}): an answer that is neither side's: {str(answered)[:300]}")
+    counts = {"ref": kind(runs.once(case, probe_flags(REF), context)),
+              "cross": kind(runs.once(case, probe_flags(CROSS), context)),
+              "runs": 0, "clean": 0, "opposite": 0, "no_answer": 0}
+    if counts["ref"] != "own" or counts["cross"] != "own":
+        return counts, False
+    batch = pool._max_workers
+    while counts["runs"] < BAND37_RUNS:
+        size = min(batch, BAND37_RUNS - counts["runs"])
+        kinds = [kind(one) for one in pool.map(
+            lambda _: runs.once(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), context), range(size))]
+        counts["runs"] += size
+        counts["clean"] += kinds.count("own")
+        counts["opposite"] += kinds.count("opposite")
+        counts["no_answer"] += kinds.count("no_answer")
+        if counts["clean"] != counts["runs"]:
+            return counts, False
+    return counts, True
+
+
+def band37_level(runs, pool, pair, side, level, answers, write_event, hashes):
+    """One level of a side in every caller context, the default context first; the level is clean when every case
+    gives its own answer in every run of every context. A context after a context that was not clean is not run."""
+    clean = True
+    for case, own, other, which in band8_cases(pair, side, level, answers):
+        for context in BAND37_CONTEXTS:
+            event = {"host": HOST, "pair": pair["id"], "side": which, "axis": pair["axis"], "level": level,
+                     "case": case[0], "context": context, "startup": runs.port["case_startup"](case),
+                     "flags": list(DEFAULT_FLAGS), **hashes}
+            if not clean:
+                write_event({**event, "skipped": True})
+                continue
+            if context == BAND37_DEFAULT:
+                counts = band37_default(runs, pool, case, own, other, level, which)
+                complete = counts["opposite"] == 0
+            else:
+                counts, complete = band37_other(runs, pool, case, own, other, context)
+            write_event({**event, **counts, "complete": complete})
+            clean = clean and complete
+    return clean
+
+
+def band37_side(runs, pool, pair, side, answers, write_event, hashes, others):
+    """The union margin of one side: inside the default context's reference region, from L0 outward through
+    L`BAND37_STEPS`, the outer of the first two consecutive levels clean in every context. A region of one level
+    is a stop (PLAN Update 75), and so is a margin that is another pair's edge case."""
+    region, width = band8_region(runs, pair, side, answers, write_event, BAND37_STEPS)
+    if width == 0:
+        raise Band8Stop(f"{pair['id']} {side}: the reference answer already differs at L0")
+    if width == 1:
+        raise Band8Stop(f"{pair['id']} {side}: the region holds one level, so no two levels can be clean")
+    streak, measured = 0, []
+    for level in region[:BAND37_STEPS + 1]:
+        clean = band37_level(runs, pool, pair, side, level, answers, write_event, hashes)
+        measured.append([level, clean])
+        streak = streak + 1 if clean else 0
+        if streak == BAND8_CLEAN_IN_A_ROW:
+            named = [case[0] for case, _own, _other, _which in band8_cases(pair, side, level, answers)]
+            shared = sorted(others.intersection(named))
+            if shared:
+                raise Band8Stop(f"{pair['id']} {side}: the margin level {level} is another pair's edge case {shared}")
+            return {"margin": level, "measured": measured, "width": width}
+    raise Band8Stop(f"{pair['id']} {side}: no two levels in a row clean in every context inside the region of "
+                    f"{width} levels, by L{BAND37_STEPS}")
+
+
+def band37_unit():
+    """The band round of ruling 37 B for this host and call position: every pair of the default context's profile,
+    its organization pairs under a WSL kernel only and its other pairs off it, dealt round robin to the shards."""
+    def go(pool, quiet):
+        if not GATE["NATIVE"] or GATE["CONTEXT"] != BAND37_DEFAULT:
+            return {"error": f"band37 runs natively from the {BAND37_DEFAULT} context, not {GATE['CONTEXT']!r}"}
+        port = mg8_port()
+        out = {"located": {}, "pm": {}, "call": GATE["CALL"], "contexts": list(BAND37_CONTEXTS),
+               "runs_per_level": BAND37_RUNS, "steps": BAND37_STEPS}
+        failed = mg8_profile(pool, port, out)
+        if failed:
+            return {"error": failed, **out}
+        traced = r8_traced()
+        hashes = {"pinned_sha256": r7_sha256(os.path.join(PACKAGE, "sdk.mjs")),
+                  "traced_sha256": traced.get("traced_sha256")}
+        out["hashes"] = hashes
+        runs = Band37Runs(port)
+        try:
+            runs.pairs = band8_pairs(port, out["profile"])
+        except Band8Stop as stop:
+            return {"error": str(stop), **out}
+        # Organization cases need a WSL kernel (Gc, sdk.mjs 136 col 4257); no stand-in may fake it.
+        mine = [pair for pair in runs.pairs if pair["id"].startswith("org_") == bool(GATE["WSL"])]
+        pairs = mine[SHARD - 1::SHARDS]
+        out["shard_pairs"] = [pair["id"] for pair in pairs]
+        folder = os.path.join(os.path.dirname(OUT), "band37")
+        os.makedirs(folder, exist_ok=True)
+        out["pairs"], stopped = {}, []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2 * (os.cpu_count() or 1)) as band_pool:
+            for pair in pairs:
+                events = os.path.join(folder, f"{pair['id']}.events.jsonl")
+                lock = __import__("threading").Lock()
+
+                def write_event(event, events=events, lock=lock):
+                    with lock, open(events, "a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(event) + "\n")
+
+                others = {case[0] for other in runs.pairs if other["id"] != pair["id"]
+                          for case in (other["near"], other["far"])}
+                summary = {"host": HOST, "pair": pair["id"], "axis": pair["axis"], "near": pair["near"][0],
+                           "far": pair["far"][0], "near_level": pair["near_level"], "far_level": pair["far_level"],
+                           "call": GATE["CALL"], "flags": list(DEFAULT_FLAGS), **hashes}
+                try:
+                    if pair["near_level"] >= pair["far_level"] and not pair.get("limit"):
+                        raise Band8Stop(f"{pair['id']}: the near level is not below the far level")
+                    answers = {"near": band8_answer(runs, pair["near"]), "far": band8_answer(runs, pair["far"])}
+                    if answers["near"] == answers["far"]:
+                        raise Band8Stop(f"{pair['id']}: the pair answers the same")
+                    for side in ["far"] if pair.get("limit") else ["near", "far"]:
+                        summary[side] = band37_side(runs, band_pool, pair, side, answers, write_event, hashes, others)
+                except Band8Stop as stop:
+                    summary["stop"] = str(stop)
+                    stopped.append(pair["id"])
+                summary["folder_assertion"] = runs.tally()
+                write_event({"summary": summary})
+                out["pairs"][pair["id"]] = summary
+        out["folder_assertion"] = runs.tally()
+        out["stopped"] = stopped
+        assertion = out["folder_assertion"]
+        if (assertion["refusals"] or assertion["failed_probe_checks"] or assertion["running_after"]
+                or assertion["gate_failures"] or assertion["distinct_folders"] != assertion["runs"]):
+            out["error"] = f"the folder check did not hold: {assertion}"
+        elif stopped:
+            out["error"] = f"pairs stopped: {stopped}"
+        elif not pairs:
+            out["error"] = "no pair for this shard"
+        return out
+    return go
+
+
 # ---- mg8x: the record of the entries the band8x and band8c rounds moved (PLAN Updates 74 and 75) ----
 # mg8x_moved.json: host -> pair -> list of {side, axis, level, case}; a pair moved on both sides lists both.
 MG8X_RUNS = MG8_OBSERVE_RUNS
@@ -2833,6 +3058,8 @@ def round8_units():
     out += [("band8c:goldens", band8_unit(True))]
     # The entries moved by band8x and band8c, recorded at their new margins under the strict rule.
     out += [("mg8x:goldens", mg8x_unit())]
+    # The union over the caller contexts, from the default context's profile (ruling 37 B, PLAN Update 93).
+    out += [("band37:goldens", band37_unit())]
     return out
 
 

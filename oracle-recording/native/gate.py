@@ -1,7 +1,8 @@
 """The per-run check of the native oracle, as the flag and PAD checks run on every probe.
 
 With R3_NATIVE=1 every run of resolve_settings_oracle.mjs gets the call position R3_CALL names (`first` or `second`)
-and the caller context R3_CONTEXT names (`toplevel` by default) written into its spec, and after the run its
+and the caller context R3_CONTEXT names (`toplevel` by default, or the one `in_context` sets for the runs a thread starts)
+written into its spec, and after the run its
 `.native.json` report must show this host's platform, a real clock that started inside the run, the call and context
 asked for, every spawned program ended, the Python R3_PYTHON names running the recorder, and no refusal. On Windows
 every run also spawns reg.exe for HKLM and HKCU alike, as many times as `windows_pairs` predicts from the spec: the
@@ -25,6 +26,20 @@ PYTHON = os.environ.get("R3_PYTHON")
 WSL = os.environ.get("R3_WSL") == "1"
 ORACLE_NAME = "resolve_settings_oracle.mjs"
 LOCK = threading.Lock()
+# The caller context of the runs a thread starts, when a unit measures several contexts in one job (PLAN Update 93).
+RUN = threading.local()
+CONTEXTS = ("toplevel", "timer", "io", "child_exit", "immediate", "nested")
+
+
+def in_context(context):
+    """Sets the caller context of the runs this thread starts from now on; None goes back to R3_CONTEXT."""
+    if context is not None and context not in CONTEXTS:
+        raise NativeViolation(f"no caller context {context!r}")
+    RUN.context = context
+
+
+def run_context():
+    return getattr(RUN, "context", None) or CONTEXT
 
 
 class NativeRefusal(RuntimeError):
@@ -67,7 +82,8 @@ def before(command):
         return None
     with open(spec, encoding="utf-8") as handle:
         text = handle.read()
-    head = '{"call":' + json.dumps(CALL) + ',"context":' + json.dumps(CONTEXT)
+    context = run_context()
+    head = '{"call":' + json.dumps(CALL) + ',"context":' + json.dumps(context)
     if not text.startswith(head):
         if not text.startswith("{"):
             raise NativeViolation(f"{spec}: a spec that is not a JSON object")
@@ -80,7 +96,7 @@ def before(command):
     # A spec for another platform is refused before the load, so it predicts no reg.exe run.
     parsed = json.loads(text)
     pairs = windows_pairs(parsed) if sys.platform == "win32" and parsed.get("platform") in (None, "win32") else None
-    return {"spec": spec, "report": report, "started": int(time.time() * 1000), "pairs": pairs}
+    return {"spec": spec, "report": report, "started": int(time.time() * 1000), "pairs": pairs, "context": context}
 
 
 # The reg.exe stdout limit (Sy, sdk.mjs line 136, passed to every query by Aq): a longer answer fails the query, which
@@ -175,8 +191,8 @@ def after(context):
         problems.append(f"clock start {start!r} outside the run [{context['started']}, {ended}]")
     if report.get("call") != CALL:
         problems.append(f"call {report.get('call')!r}, not {CALL!r}")
-    if report.get("context") != CONTEXT:
-        problems.append(f"context {report.get('context')!r}, not {CONTEXT!r}")
+    if report.get("context") != context["context"]:
+        problems.append(f"context {report.get('context')!r}, not {context['context']!r}")
     if report.get("spawns") != report.get("exits"):
         problems.append(f"spawned {report.get('spawns')} but ended {report.get('exits')}")
     if PYTHON is None or platform.python_version() != PYTHON:
