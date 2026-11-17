@@ -16,6 +16,7 @@ use crate::fixtures::{OWNER, identity, tenant};
 use crate::{InvalidationNotice, InvalidationSourceError, StaticTenantOwners, TenantAccount};
 
 const SEQUENCE: u64 = 42;
+const STREAM: &str = "CREDENTIAL_EVENTS";
 const APPENDED_SECONDS: i64 = 1_700_000_000;
 
 /// `message` as the credential stream stores it, at [`SEQUENCE`].
@@ -41,7 +42,7 @@ fn other_identity() -> CredentialIdentity {
 }
 
 fn outcome(message: StreamMessage) -> Result<InvalidationOutcome, InvalidationSourceError> {
-    InvalidationOutcome::of(message, &holding(&tenant(), OWNER))
+    InvalidationOutcome::of(STREAM, message, &holding(&tenant(), OWNER))
 }
 
 #[test]
@@ -135,7 +136,7 @@ fn an_invalidating_event_appended_at_the_unix_epoch_is_reported() {
 fn an_invalidating_event_whose_owner_no_tenant_holds_has_no_notice() {
     let message = stored(message(&identity(), &revoked(&identity())));
 
-    let outcome = InvalidationOutcome::of(message, &holding(&tenant(), "project-2")).unwrap();
+    let outcome = InvalidationOutcome::of(STREAM, message, &holding(&tenant(), "project-2")).unwrap();
 
     assert_eq!(
         outcome,
@@ -158,7 +159,7 @@ fn an_event_that_leaves_the_release_as_it_was_publishes_nothing() {
 fn an_event_that_leaves_the_release_as_it_was_publishes_nothing_even_when_no_tenant_holds_its_owner() {
     let message = stored(message(&identity(), &activated(&identity())));
 
-    let outcome = InvalidationOutcome::of(message, &StaticTenantOwners::new()).unwrap();
+    let outcome = InvalidationOutcome::of(STREAM, message, &StaticTenantOwners::new()).unwrap();
 
     assert_eq!(outcome, InvalidationOutcome::NothingToPublish);
 }
@@ -176,12 +177,13 @@ fn each_invalidating_event_publishes_its_reason_to_the_tenant_holding_the_owner(
     for (event, reason) in cases {
         let message = stored(message(&identity(), &event));
 
-        let outcome = InvalidationOutcome::of(message, &holding(&tenant, OWNER)).unwrap();
+        let outcome = InvalidationOutcome::of(STREAM, message, &holding(&tenant, OWNER)).unwrap();
 
         let expected = InvalidationNotice::new(
             &tenant,
             &identity().key(),
             reason,
+            STREAM,
             SystemTime::UNIX_EPOCH + Duration::from_secs(u64::try_from(APPENDED_SECONDS).unwrap()),
             StreamPosition::try_new(SEQUENCE).unwrap(),
         )

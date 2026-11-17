@@ -107,3 +107,27 @@ pub(crate) const INVALIDATION_DUPLICATE_WINDOW: Duration = Duration::from_secs(1
 /// notice, a 128 character owner and the longest sequence, fits with its
 /// headers several times over, and anything larger is not a notice.
 pub(crate) const INVALIDATION_MAX_MESSAGE_SIZE: i32 = 1024;
+
+/// The replicas the invalidation stream must keep when the operator sets no
+/// count: the three of a production cluster, which survives losing one node.
+/// A single node deployment sets one.
+pub(crate) const DEFAULT_INVALIDATION_STREAM_REPLICAS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(2);
+
+/// The durable consumer the invalidation publisher reads the credential stream
+/// through. Every member of the queue group shares it, so each credential
+/// event is published by one of them, and a member that restarts resumes
+/// where the group left off.
+pub const INVALIDATION_PUBLISHER_DURABLE: &str = "secrets-invalidation-publisher";
+
+/// How long the credential stream waits for the publisher to settle an event
+/// before it delivers the event again. The delivery that follows republishes
+/// the same `Nats-Msg-Id`, so it must arrive well inside the invalidation
+/// stream's two minute duplicate window to be stored once.
+pub(crate) const INVALIDATION_PUBLISHER_ACK_WAIT: Duration = Duration::from_secs(30);
+
+/// How long the credential stream holds back an event the publisher could not
+/// publish yet before it delivers the event again. It keeps a retried notice
+/// inside the ADR#0049 target of five seconds and far inside the duplicate
+/// window, while a stream that refuses every notice is asked once a second
+/// per event rather than in a tight loop.
+pub(crate) const INVALIDATION_RETRY_DELAY: Duration = Duration::from_secs(1);

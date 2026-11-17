@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use buffa::{Message as _, MessageField};
 use buffa_types::google::protobuf::Timestamp;
-use trogon_credential_aggregate::{CREDENTIAL_STREAM, InvalidationReason, credential_project_token};
+use trogon_credential_aggregate::{InvalidationReason, credential_project_token};
 use trogon_credential_domain::CredentialKey;
 use trogon_decider_runtime::StreamPosition;
 use trogonai_proto::secrets::exchange::v1alpha1::{CredentialAddress, ReleaseInvalidated, ReleaseInvalidationReason};
@@ -15,8 +15,10 @@ use super::{InvalidationSourceError, TenantAccount};
 ///
 /// The subject starts with the account of the tenant holding the credential's
 /// owner, so only that account can import the notice (ADR#0081 Decision 3).
-/// The `Nats-Msg-Id` names the credential event behind the notice, so the
-/// stream keeps one notice however often that event is delivered. The payload
+/// The `Nats-Msg-Id` names the credential event behind the notice by the
+/// stream it was read from and its sequence there, so the stream keeps one
+/// notice however often that event is delivered, and services reading
+/// differently named credential streams never collide. The payload
 /// is an encoded `ReleaseInvalidated`, which has no field that could hold a
 /// value (ADR#0023 Decision 3).
 ///
@@ -30,8 +32,8 @@ pub struct InvalidationNotice {
 
 impl InvalidationNotice {
     /// The notice that `tenant`'s holders of `credential` drop it for
-    /// `reason`, from the credential event the credential stream appended at
-    /// `occurred_at` and `source_sequence`.
+    /// `reason`, from the credential event the stream named `source_stream`
+    /// appended at `occurred_at` and `source_sequence`.
     ///
     /// # Errors
     ///
@@ -43,6 +45,7 @@ impl InvalidationNotice {
         tenant: &TenantAccount,
         credential: &CredentialKey,
         reason: InvalidationReason,
+        source_stream: &str,
         occurred_at: SystemTime,
         source_sequence: StreamPosition,
     ) -> Result<Self, InvalidationSourceError> {
@@ -67,7 +70,7 @@ impl InvalidationNotice {
                 token.as_str(),
                 credential.credential_id()
             ),
-            message_id: format!("{CREDENTIAL_STREAM}:{sequence}"),
+            message_id: format!("{source_stream}:{sequence}"),
             payload: payload.encode_to_vec(),
         })
     }
@@ -78,7 +81,8 @@ impl InvalidationNotice {
         &self.subject
     }
 
-    /// The `Nats-Msg-Id` to publish with, `CREDENTIAL_EVENTS:{source_sequence}`.
+    /// The `Nats-Msg-Id` to publish with, `{source_stream}:{source_sequence}`,
+    /// `CREDENTIAL_EVENTS:{source_sequence}` on the default credential stream.
     pub fn message_id(&self) -> &str {
         &self.message_id
     }
