@@ -4,6 +4,7 @@ use buffa::MessageField;
 use buffa_types::TimestampError;
 use buffa_types::google::protobuf::Timestamp;
 use nkeys::XKey;
+use nkeys::error::ErrorKind;
 
 use super::ReleasedValue;
 use crate::fixtures::{BUNDLE_GENERATION, VALUE, now, pinned, sealed_access};
@@ -110,7 +111,9 @@ fn refuses_a_value_sealed_by_a_key_other_than_the_pinned_one() {
 
     let refused = ReleasedValue::open(access, &requester, &pinned(&XKey::new()), now()).unwrap_err();
 
-    assert!(matches!(refused, ReleaseError::Unseal(UnsealError::NotOpened)));
+    assert!(
+        matches!(refused, ReleaseError::Unseal(UnsealError::NotOpened(source)) if source.kind() == ErrorKind::InvalidPayload)
+    );
 }
 
 #[test]
@@ -120,7 +123,9 @@ fn refuses_a_value_sealed_to_another_requester() {
 
     let refused = ReleasedValue::open(access, &XKey::new(), &pinned(&service), now()).unwrap_err();
 
-    assert!(matches!(refused, ReleaseError::Unseal(UnsealError::NotOpened)));
+    assert!(
+        matches!(refused, ReleaseError::Unseal(UnsealError::NotOpened(source)) if source.kind() == ErrorKind::InvalidPayload)
+    );
 }
 
 #[test]

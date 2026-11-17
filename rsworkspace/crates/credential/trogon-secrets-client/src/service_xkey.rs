@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use nkeys::XKey;
 
@@ -17,7 +18,7 @@ impl ServiceXkey {
     pub fn from_public_key(raw: &str) -> Result<Self, ServiceXkeyError> {
         XKey::from_public_key(raw)
             .map(Self)
-            .map_err(|_| ServiceXkeyError::NotACurvePublicKey)
+            .map_err(|error| ServiceXkeyError::NotACurvePublicKey(Arc::new(error)))
     }
 
     pub fn public_key(&self) -> String {
