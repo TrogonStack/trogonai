@@ -2135,12 +2135,13 @@ def mg8_old_gate(entries, moves, startup):
             "old_observed": previous.get("observed", [])}
 
 
-def mg8_margin_cases(port, profile):
+def mg8_margin_cases(port, profile, margins=MG8_MARGINS, keep=lambda pair: True):
     """The pairs at this host's committed margins: the cases in pair order, the pairs by name, the move of each
-    pair-level case, and the reason when an edge no longer sits where the margins were measured."""
-    with open(MG8_MARGINS, encoding="utf-8") as handle:
-        committed = json.load(handle)[HOST]
-    pairs = band8_pairs(port, profile)
+    pair-level case, and the reason when an edge no longer sits where the margins were measured. `keep` chooses the
+    pairs this kernel records, from both the profile and the margins file."""
+    with open(margins, encoding="utf-8") as handle:
+        committed = {pid: entry for pid, entry in json.load(handle)[HOST].items() if keep({"id": pid})}
+    pairs = [pair for pair in band8_pairs(port, profile) if keep(pair)]
     built = {pair["id"]: pair for pair in pairs}
     if set(built) != set(committed):
         return None, None, None, f"the pairs {sorted(set(built) ^ set(committed))} are not on both sides"
@@ -2944,6 +2945,705 @@ def band37_unit():
     return go
 
 
+# ---- band39: ruling 39 (PLAN Update 99): pairs located per call position, the five-context placement union, and
+# child_exit as a verification context whose third answers carry catch-site evidence ----
+# The placement union; child_exit runs every measured level in full but never decides whether a level is clean.
+BAND39_UNION = ("toplevel", "nested", "immediate", "timer", "io")
+BAND39_VERIFY = "child_exit"
+assert sorted(BAND39_UNION + (BAND39_VERIFY,)) == sorted(GATE["CONTEXTS"]) and BAND39_UNION[0] == BAND37_DEFAULT
+# How far a pair may shift from the profile's edge, in axis steps. Finding B (pre-job-52) moves the second call's
+# classes by at most 512 bytes, and a level step costs at least one 16-byte class, so 64 steps cover twice that.
+LOCATE39_REACH = 64
+# Traced child_exit runs per case that gave a third answer untraced.
+BAND39_TRACED_RUNS = 100
+# The one pair whose one-level region may fall back to the class axis it is built on (ruling 39 item 5).
+BAND39_FALLBACK = "origin_copy"
+BAND39_FALLBACK_CLEAN = 3
+
+
+# The catch-site log, one function appended to the bundle (a hoisted module-scope declaration), so the hooks below
+# add a call and nothing else. It never throws.
+BAND39_LOGGER = ('\nfunction __b39(kind,file,e){try{const f=process.env.TRACE_LOG;if(f)process.getBuiltinModule("fs")'
+                 '.appendFileSync(f,JSON.stringify({catch:kind,file:file==null?null:String(file),error:e&&e.name,'
+                 'message:String(e&&e.message).slice(0,200)})+"\\n")}catch(q){}}\n')
+# The two places the pinned bundle turns a thrown error into didNotLoad (ruling 39 F2). Q7e runs from q7e's catch, after
+# the stack unwound, with the error and the file. um's catch around the managed-settings.d walk first calls ae(p), so the
+# hook sits in ae and logs only when ae's caller is um: um, whose frame is on the stack when the walk overflows, keeps
+# its bytecode unchanged.
+BAND39_CATCH = [
+    ("function Q7e(e,t){if(uL(e))throw e;", 'function Q7e(e,t){__b39("q7e",t,e);if(uL(e))throw e;'),
+    ('function ae(e){if(e&&typeof e==="object"&&"code"in e',
+     'function ae(e){if(e instanceof RangeError&&/^\\s*at um /.test(String(new Error().stack).split("\\n")[2]))'
+     '__b39("um",null,e);if(e&&typeof e==="object"&&"code"in e'),
+]
+BAND39_OVERFLOW = "Maximum call stack size exceeded"
+
+
+def band39_traced():
+    """The pinned package with the catch-site log and its two hooks, and nothing else."""
+    with R8_LOCK:
+        if "traced39" not in R8_STATE:
+            target = os.path.join(os.path.dirname(OUT), "package-traced39")
+            shutil.rmtree(target, ignore_errors=True)
+            shutil.copytree(PACKAGE, target)
+            bundle = os.path.join(target, "sdk.mjs")
+            with open(bundle, encoding="utf-8") as handle:
+                text = handle.read()
+            counts = {anchor: text.count(anchor) for anchor, _ in BAND39_CATCH}
+            counts["__b39"] = text.count("__b39")
+            if any(count != 1 for anchor, count in counts.items() if anchor != "__b39") or counts["__b39"]:
+                R8_STATE["traced39"] = {"error": "a catch anchor does not occur exactly once", "counts": counts}
+            else:
+                for anchor, replacement in BAND39_CATCH:
+                    text = text.replace(anchor, replacement)
+                with open(bundle, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(text + BAND39_LOGGER)
+                R8_STATE["traced39"] = {"package": target, "traced39_sha256": r7_sha256(bundle)}
+        return R8_STATE["traced39"]
+
+
+def band39_kind(answered, own, other):
+    """The outcome class of one run (PLAN Update 99 taxonomy)."""
+    if answered == own:
+        return "own"
+    if answered == other:
+        return "opposite"
+    if answered is None:
+        return "no_answer"
+    return "third"
+
+
+def band39_files_sha256(case, startup):
+    return __import__("hashlib").sha256(mg8_case_key(case[1], startup).encode()).hexdigest()
+
+
+class Band39Runs(Band37Runs):
+    """Band37Runs that also keep the uncollapsed answer, and can run the catch-traced package."""
+
+    def once(self, case, flags, context=BAND37_DEFAULT):
+        return self.once_full(case, flags, context)[0]
+
+    def once_full(self, case, flags, context=BAND37_DEFAULT, package=None):
+        """The collapsed answer, the answer as the recorder gives it, and with `package` the catch records."""
+        folder = tempfile.mkdtemp()
+        trace = folder + ".trace.jsonl" if package else None
+        with self.lock:
+            self.runs += 1
+            self.folders.add(folder)
+        GATE["in_context"](context)
+        try:
+            spec_path = self.port["prepare"](case[0], case[1], folder)
+            startup = self.port["case_startup"](case)
+            answered = (self.port["run"](spec_path, flags, startup) if package is None
+                        else band39_run(self.port, spec_path, flags, startup, package, trace))
+            records = []
+            if trace and os.path.exists(trace):
+                with open(trace, encoding="utf-8") as handle:
+                    records = [json.loads(line) for line in handle if line.strip()]
+            if not isinstance(answered, dict):
+                return None, None, records
+            return mg8_collapse(answered), answered, records
+        except (GATE["NativeRefusal"], GATE["NativeViolation"]) as error:
+            with self.lock:
+                self.gate_failures += 1
+            raise Band8Stop(f"{case[0]} ({context}): {error}") from error
+        except RuntimeError as error:
+            if "share the working folder" in str(error):
+                with self.lock:
+                    self.refusals += 1
+                raise Band8Stop(f"{case[0]}: {error}") from error
+            if str(error).startswith(("a probe", "a padded probe")):
+                with self.lock:
+                    self.assertions += 1
+                raise Band8Stop(f"{case[0]}: {error}") from error
+            return None, None, []
+        except (Exception, SystemExit):
+            return None, None, []
+        finally:
+            GATE["in_context"](None)
+            shutil.rmtree(folder, ignore_errors=True)
+            if trace and os.path.exists(trace):
+                os.remove(trace)
+
+
+def band39_run(port, spec_path, node_flags, startup, package, trace):
+    """The recorder's `run` on `package` with TRACE_LOG set: TRACE_LOG takes its share of the startup budget from PAD
+    (padded_env), so the traced run starts with the bytes the pinned run starts with. None when the run fails without
+    an error line."""
+    command = [port["node"], *node_flags, port["ORACLE"], package, spec_path]
+    with open(spec_path, encoding="utf-8") as handle:
+        spec = json.load(handle)
+    with port["RUNNING_LOCK"]:
+        if spec["root"] in port["RUNNING"]:
+            raise RuntimeError(f"two runs at once would share the working folder {spec['root']}")
+        port["RUNNING"].add(spec["root"])
+    try:
+        for case in spec["cases"]:
+            for step_file in case.get("files", {}):
+                if os.path.exists(os.path.join(spec["root"], step_file)):
+                    os.remove(os.path.join(spec["root"], step_file))
+        with tempfile.TemporaryFile() as errors:
+            env = D["padded_env"](port["pad"], command, startup, {"TRACE_LOG": trace})
+            process = D["Spawner"].run(command, stdout=subprocess.PIPE, stderr=errors, env=env)
+            errors.seek(0)
+            stderr = errors.read().decode("utf-8", "replace")
+    finally:
+        with port["RUNNING_LOCK"]:
+            port["RUNNING"].discard(spec["root"])
+    if process.returncode == 0:
+        return port["answer"](json.loads(process.stdout.decode("utf-8")))
+    found = re.search(r"^(\w*Error): (.*)$", stderr, re.M)
+    if not found:
+        return None
+    return port["rejection"]({"name": found.group(1), "message": found.group(2)})
+
+
+def band39_shifted(pair, shift):
+    """The pair moved `shift` axis steps (both cases together): its near and far level and cases, or None when the
+    class axis has no shape at one of the two costs."""
+    if shift == 0:
+        return pair["near_level"], pair["far_level"], pair["near"], pair["far"]
+    step = 16 if pair["axis"] == "class" else 1
+    near_level, far_level = pair["near_level"] + step * shift, pair["far_level"] + step * shift
+    if pair["axis"] == "level" and near_level < 0:
+        return None
+    if pair["axis"] == "class":
+        table, above, major, leaves = pair["pass"]
+        if not shapes_at(table, above, near_level, major, leaves) or not shapes_at(table, above, far_level, major,
+                                                                                    leaves):
+            return None
+    return near_level, far_level, pair["near_at"](near_level), pair["far_at"](far_level)
+
+
+def band39_locate(runs, pair, memo):
+    """The pair this call position straddles (PLAN Update 99): from the profile's pair, the shift of least size whose
+    two cases answer otherwise with the reference flags, both checked with the cross-check flags. The limit pair
+    stays at its split level."""
+    if pair.get("limit"):
+        return {**pair, "shift": 0}
+
+    def reference(case):
+        key = mg8_case_key(case[1], runs.port["case_startup"](case))
+        if key not in memo:
+            memo[key] = runs.once(case, probe_flags(REF))
+        if memo[key] is None:
+            raise Band8Stop(f"{pair['id']}: the reference run of {case[0]} crashed or gave no answer while locating")
+        return memo[key]
+
+    for distance in range(LOCATE39_REACH + 1):
+        straddles = []
+        for shift in [0] if distance == 0 else [distance, -distance]:
+            moved = band39_shifted(pair, shift)
+            if moved is not None and reference(moved[2]) != reference(moved[3]):
+                straddles.append((shift, moved))
+        if len(straddles) > 1:
+            raise Band8Stop(f"{pair['id']}: the pair straddles at shifts {straddles[0][0]} and {straddles[1][0]}, "
+                            f"an ambiguous edge")
+        if straddles:
+            shift, (near_level, far_level, near, far) = straddles[0]
+            for case in (near, far):
+                if runs.once(case, probe_flags(CROSS)) != reference(case):
+                    raise Band8Stop(f"{pair['id']}: the cross-check flags answer otherwise at the located {case[0]}")
+            return {**pair, "near": near, "far": far, "near_level": near_level, "far_level": far_level,
+                    "shift": shift, "_answers": {"near": reference(near), "far": reference(far)}}
+    raise Band8Stop(f"{pair['id']}: no shift within {LOCATE39_REACH} steps straddles the edge")
+
+
+def band39_edge(runs, pair, hashes):
+    """What every leg of a call position must agree on for a located pair (PLAN Update 99, margins37)."""
+    sha = lambda text: __import__("hashlib").sha256(str(text).encode()).hexdigest()
+    startups = [runs.port["case_startup"](pair[side]) for side in ("near", "far")]
+    return {"axis": pair["axis"], "near_level": pair["near_level"], "far_level": pair["far_level"],
+            "shift": pair.get("shift"), "near": pair["near"][0], "far": pair["far"][0],
+            "factory": f"{pair['id']}:{pair['axis']}", "startup": startups,
+            "files_sha256": [band39_files_sha256(pair[side], startup)
+                             for side, startup in zip(("near", "far"), startups)],
+            "limit": bool(pair.get("limit")), **hashes,
+            **({"pass": [list(pair["pass"][0][:2]) + [pair["pass"][0][2]], *pair["pass"][1:]]}
+               if pair["axis"] == "class" else {}),
+            "answers_sha256": None if pair.get("limit") else [sha(pair.get("_answers", {}).get(side))
+                                                             for side in ("near", "far")]}
+
+
+def band39_union_context(runs, pool, case, own, other, context, level, which):
+    """One union context at one level: REF, CROSS, then default-flag runs. In the default context the side's answer
+    must win most runs and no run may give no answer (unchanged); in the others the batches end at the first run that
+    does not give the side's answer. A third answer in any union context is falsifier F39-1."""
+    def kind(answered):
+        found = band39_kind(answered, own, other)
+        if found == "third":
+            raise Band8Stop(f"F39-1: {case[0]} ({context}) gave a third answer: {str(answered)[:300]}")
+        return found
+    if context == BAND37_DEFAULT:
+        for flags in (REF, CROSS):
+            if kind(runs.once(case, probe_flags(flags))) != "own":
+                raise Band8Stop(f"{case[0]}: the {'reference' if flags == REF else 'cross-check'} flags do not give "
+                                f"the {which} answer at level {level}")
+        kinds = [kind(one) for one in pool.map(
+            lambda _: runs.once(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS)), range(BAND37_RUNS))]
+        counts = {"ref": "own", "cross": "own", "runs": len(kinds), "clean": kinds.count("own"),
+                  "opposite": kinds.count("opposite"), "no_answer": kinds.count("no_answer")}
+        if counts["no_answer"]:
+            raise Band8Stop(f"{case[0]}: {counts['no_answer']} of {len(kinds)} default-flag runs gave no answer")
+        if 2 * counts["clean"] <= len(kinds):
+            raise Band8Stop(f"{case[0]}: the default flags do not give the reference answer in most runs at level "
+                            f"{level} ({counts['clean']} of {len(kinds)})")
+        return counts, counts["opposite"] == 0
+    counts = {"ref": kind(runs.once(case, probe_flags(REF), context)),
+              "cross": kind(runs.once(case, probe_flags(CROSS), context)),
+              "runs": 0, "clean": 0, "opposite": 0, "no_answer": 0}
+    if counts["ref"] != "own" or counts["cross"] != "own":
+        return counts, False
+    batch = pool._max_workers
+    while counts["runs"] < BAND37_RUNS:
+        size = min(batch, BAND37_RUNS - counts["runs"])
+        kinds = [kind(one) for one in pool.map(
+            lambda _: runs.once(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), context), range(size))]
+        counts["runs"] += size
+        counts["clean"] += kinds.count("own")
+        counts["opposite"] += kinds.count("opposite")
+        counts["no_answer"] += kinds.count("no_answer")
+        if counts["clean"] != counts["runs"]:
+            return counts, False
+    return counts, True
+
+
+def band39_verify(runs, pool, case, own, other, thirds):
+    """child_exit at one level: REF, CROSS and all BAND37_RUNS default-flag runs, never cut short. Each run's class;
+    every third answer goes into `thirds` (collapsed answer -> the uncollapsed answers seen)."""
+    results = [runs.once_full(case, probe_flags(REF), BAND39_VERIFY),
+               runs.once_full(case, probe_flags(CROSS), BAND39_VERIFY)]
+    results += list(pool.map(lambda _: runs.once_full(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), BAND39_VERIFY),
+                             range(BAND37_RUNS)))
+    kinds = [band39_kind(collapsed, own, other) for collapsed, _raw, _records in results]
+    for (collapsed, raw, _records), found in zip(results, kinds):
+        if found == "third":
+            thirds.setdefault(collapsed, []).append(raw)
+    rest = kinds[2:]
+    return {"ref": kinds[0], "cross": kinds[1], "runs": len(rest), "own": rest.count("own"),
+            "opposite": rest.count("opposite"), "no_answer": rest.count("no_answer"), "third": rest.count("third")}
+
+
+def band39_level(runs, pool, pair, side, level, answers, write_event, hashes, seen):
+    """One level of a side: the union contexts in order, a context after one that was not clean skipped, then
+    child_exit in full. Clean when every case is clean in every union context. The child_exit counts by case."""
+    clean, verified = True, {}
+    for case, own, other, which in band8_cases(pair, side, level, answers):
+        startup = runs.port["case_startup"](case)
+        event = {"host": HOST, "call": GATE["CALL"], "pair": pair["id"], "side": which, "axis": pair["axis"],
+                 "level": level, "case": case[0], "startup": startup,
+                 "files_sha256": band39_files_sha256(case, startup), "flags": list(DEFAULT_FLAGS), **hashes}
+        for context in BAND39_UNION:
+            if not clean:
+                write_event({**event, "context": context, "skipped": True})
+                continue
+            counts, complete = band39_union_context(runs, pool, case, own, other, context, level, which)
+            write_event({**event, "context": context, **counts, "complete": complete})
+            clean = clean and complete
+        thirds = {}
+        counts = band39_verify(runs, pool, case, own, other, thirds)
+        write_event({**event, "context": BAND39_VERIFY, "verify": True, **counts,
+                     "thirds": [{"collapsed": collapsed, "answers": raws} for collapsed, raws in thirds.items()]})
+        verified[case[0]] = {**counts, "which": which}
+        if thirds:
+            entry = seen.setdefault(case[0], {"case": case, "own": own, "other": other, "which": which,
+                                              "level": level, "thirds": {}})
+            for collapsed, raws in thirds.items():
+                entry["thirds"].setdefault(collapsed, []).extend(raws)
+        # Ruling 39 item 2: a child_exit run gives the own, the opposite or a model-explained third answer; a run with
+        # no answer is an unexpected outcome class.
+        if counts["no_answer"] or "no_answer" in (counts["ref"], counts["cross"]):
+            raise Band8Stop(f"F39-5: {case[0]} ({BAND39_VERIFY}) level {level}: a run gave no answer: {counts}")
+    return clean, verified
+
+
+def band39_far_check(pair, side, level, verified):
+    """F39-3: child_exit gives the near answer on a far case at the far margin."""
+    for name, counts in verified.items():
+        if counts["which"] == "far" and side == "far" and (
+                counts["opposite"] or "opposite" in (counts["ref"], counts["cross"])):
+            raise Band8Stop(f"F39-3: {pair['id']} far margin {level}: child_exit gave the near answer on {name}: "
+                            f"{counts}")
+
+
+def band39_walk(runs, pool, pair, side, region, answers, write_event, hashes, others, seen, fallback=False):
+    """The margin inside `region`: the outer of the first two consecutive clean levels; on the class fallback also at
+    least BAND39_FALLBACK_CLEAN clean steps in all."""
+    streak, measured, margin, clean_steps = 0, [], None, 0
+    for level in region[:BAND37_STEPS + 1]:
+        clean, verified = band39_level(runs, pool, pair, side, level, answers, write_event, hashes, seen)
+        measured.append([level, clean, verified])
+        if margin is not None:
+            # A class fallback level past the margin is beyond it (F39-3 holds at or beyond the far margin).
+            band39_far_check(pair, side, level, verified)
+        clean_steps += clean
+        streak = streak + 1 if clean else 0
+        if margin is None and streak == BAND8_CLEAN_IN_A_ROW:
+            named = [case[0] for case, _own, _other, _which in band8_cases(pair, side, level, answers)]
+            shared = sorted(others.intersection(named))
+            if shared:
+                raise Band8Stop(f"{pair['id']} {side}: the margin level {level} is another pair's edge case {shared}")
+            band39_far_check(pair, side, level, verified)
+            margin = level
+        if margin is not None and (not fallback or clean_steps >= BAND39_FALLBACK_CLEAN):
+            return {"margin": margin, "measured": measured, "region": region, "clean_steps": clean_steps}
+    if margin is not None:
+        raise Band8Stop(f"OWNER: {pair['id']} {side}: the class fallback found {clean_steps} clean steps, fewer than "
+                        f"{BAND39_FALLBACK_CLEAN}")
+    raise Band8Stop(f"{pair['id']} {side}: no two levels in a row clean in every union context inside the region of "
+                    f"{len(region)} levels, by L{BAND37_STEPS}")
+
+
+def band39_class_pair(port, pair):
+    """origin_copy on the class axis it is built on: proto(0, n, null_array) drop-ins measured by the proto_origin copy
+    pass, at the recorder's startup, one 16-byte class apart; cases from the recorder's proto_cases factory."""
+    table, above, major, leaves = band8_shape_pass("proto_origin")
+    make, startup = port["proto_cases"](BAND39_FALLBACK), port["STARTUP_BYTES"]
+
+    def at(target):
+        shapes = shapes_at(table, above, target, major, leaves)
+        if not shapes:
+            raise Band8Stop(f"OWNER: {pair['id']}: no class shape at {target}")
+        return make([*shapes[0], startup], [*shapes[0], startup])[0]
+    near_level = cost(table, above, (0, pair["near_level"], "null_array"))
+    stepped = {"id": pair["id"], "axis": "class", "pass": [table, above, major, leaves], "near_at": at, "far_at": at}
+    far_level = band8_next(stepped, near_level, "far")
+    return {**stepped, "near": at(near_level), "far": at(far_level), "near_level": near_level,
+            "far_level": far_level}
+
+
+def band39_side(runs, pool, pair, side, answers, write_event, hashes, others, seen, memo):
+    """One side's margin under ruling 39: the reference region in the default context through L60; a region of one
+    level is a stop, except origin_copy, which re-locates on its class axis and needs BAND39_FALLBACK_CLEAN clean
+    class steps there."""
+    region, width = band8_region(runs, pair, side, answers, write_event, BAND37_STEPS)
+    if width == 0:
+        raise Band8Stop(f"{pair['id']} {side}: the reference answer already differs at L0")
+    if width > 1:
+        return {"axis": pair["axis"], "width": width,
+                **band39_walk(runs, pool, pair, side, region, answers, write_event, hashes, others, seen)}
+    if pair["id"] != BAND39_FALLBACK:
+        raise Band8Stop(f"{pair['id']} {side}: the region holds one level, so no two levels can be clean")
+    stepped = band39_locate(runs, band39_class_pair(runs.port, pair), memo)
+    stepped_answers = {"near": band8_answer(runs, stepped["near"]), "far": band8_answer(runs, stepped["far"])}
+    if stepped_answers != answers:
+        raise Band8Stop(f"OWNER: {pair['id']} {side}: the class-axis pair answers otherwise than the level pair")
+    write_event({"fallback": {"host": HOST, "call": GATE["CALL"], "pair": pair["id"], "side": side,
+                              "edge": band39_edge(runs, stepped, hashes)}})
+    region, width = band8_region(runs, stepped, side, stepped_answers, write_event, BAND37_STEPS)
+    if width < BAND39_FALLBACK_CLEAN:
+        raise Band8Stop(f"OWNER: {pair['id']} {side}: the class-axis region holds {width} steps, fewer than "
+                        f"{BAND39_FALLBACK_CLEAN}")
+    found = band39_walk(runs, pool, stepped, side, region, stepped_answers, write_event, hashes, others, seen, True)
+    return {"axis": "class", "width": width, "fallback": band39_edge(runs, stepped, hashes), **found}
+
+
+def band39_evidence(runs, pool, traced, entry, hashes, write_event):
+    """The catch-site evidence of one case with untraced third answers (PLAN Update 99): BAND39_TRACED_RUNS
+    child_exit runs of the catch-traced package with the default flags. Every untraced third answer must recur, and
+    every traced third answer must have logged a RangeError at q7e or um; else falsifier F39-2. The traced third
+    answers, for the model fixture."""
+    case, own, other = entry["case"], entry["own"], entry["other"]
+    results = list(pool.map(lambda _: runs.once_full(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), BAND39_VERIFY,
+                                                     traced["package"]), range(BAND39_TRACED_RUNS)))
+    traced_thirds, uncaught, kinds = {}, 0, []
+    for collapsed, raw, records in results:
+        found = band39_kind(collapsed, own, other)
+        kinds.append(found)
+        if found != "third":
+            continue
+        traced_thirds.setdefault(collapsed, []).append(raw)
+        if not any(record.get("catch") in ("q7e", "um") and record.get("error") == "RangeError"
+                   and str(record.get("message", "")).startswith(BAND39_OVERFLOW) for record in records):
+            uncaught += 1
+    catches = sorted({(record.get("catch"), record.get("error")) for _c, _r, records in results for record in records
+                      if record.get("catch")}, key=str)
+    unreproduced = [collapsed for collapsed in entry["thirds"] if collapsed not in traced_thirds]
+    startup = runs.port["case_startup"](case)
+    event = {"evidence": {"host": HOST, "call": GATE["CALL"], "case": case[0], "which": entry["which"],
+                          "level": entry["level"], "startup": startup,
+                          "files_sha256": band39_files_sha256(case, startup), "runs": len(results),
+                          "own": kinds.count("own"), "opposite": kinds.count("opposite"),
+                          "no_answer": kinds.count("no_answer"), "third": kinds.count("third"),
+                          "untraced_thirds": len(entry["thirds"]), "unreproduced": len(unreproduced),
+                          "uncaught": uncaught, "catches": catches, "traced39_sha256": traced["traced39_sha256"],
+                          **hashes}}
+    write_event(event)
+    if unreproduced or uncaught:
+        raise Band8Stop(f"F39-2: {case[0]}: {len(unreproduced)} untraced third answers did not recur in "
+                        f"{len(results)} traced runs, {uncaught} traced third answers logged no RangeError at q7e "
+                        f"or um")
+    return traced_thirds
+
+
+def band39_fixture(pair_id, entry, thirds, traced, port):
+    """The model fixture rows of one case's third answers (the Rust sweep test reads them)."""
+    case = entry["case"]
+    startup = port["case_startup"](case)
+    return [{"host": HOST, "call": GATE["CALL"], "pair": pair_id, "side": entry["which"], "level": entry["level"],
+             "case": case[0], "files": [list(file) for file in case[1]], "startup": startup, "traced": traced,
+             "answer": {key: raw.get(key) for key in MG8_ANSWERS}}
+            for raws in thirds.values() for raw in {json.dumps(raw, sort_keys=True): raw for raw in raws}.values()]
+
+
+def band39_unit():
+    """The band round of ruling 39 for this host and call position: every pair of this kernel located for this call
+    position, then this shard's pairs measured in the union contexts with child_exit verified."""
+    def go(pool, quiet):
+        if not GATE["NATIVE"] or GATE["CONTEXT"] != BAND37_DEFAULT:
+            return {"error": f"band39 runs natively from the {BAND37_DEFAULT} context, not {GATE['CONTEXT']!r}"}
+        port = mg8_port()
+        out = {"located": {}, "pm": {}, "call": GATE["CALL"], "union": list(BAND39_UNION), "verify": BAND39_VERIFY,
+               "runs_per_level": BAND37_RUNS, "steps": BAND37_STEPS, "reach": LOCATE39_REACH,
+               "traced_runs": BAND39_TRACED_RUNS}
+        failed = mg8_profile(pool, port, out)
+        if failed:
+            return {"error": failed, **out}
+        traced8, traced39 = r8_traced(), band39_traced()
+        if "error" in traced39:
+            return {"error": traced39["error"], **out}
+        hashes = {"pinned_sha256": r7_sha256(os.path.join(PACKAGE, "sdk.mjs")),
+                  "traced_sha256": traced8.get("traced_sha256"), "traced39_sha256": traced39["traced39_sha256"]}
+        out["hashes"] = hashes
+        runs = Band39Runs(port)
+        folder = os.path.join(os.path.dirname(OUT), "band39")
+        os.makedirs(folder, exist_ok=True)
+        try:
+            profile_pairs = band8_pairs(port, out["profile"])
+        except Band8Stop as stop:
+            return {"error": str(stop), **out}
+        # Organization cases need a WSL kernel (Gc, sdk.mjs 136 col 4257); no stand-in may fake it.
+        mine = [pair for pair in profile_pairs if pair["id"].startswith("org_") == bool(GATE["WSL"])]
+        memo, located, out["edges"], locate_stops = {}, [], {}, {}
+        for pair in mine:
+            try:
+                moved = band39_locate(runs, pair, memo)
+                located.append(moved)
+                out["edges"][pair["id"]] = band39_edge(runs, moved, hashes)
+            except Band8Stop as stop:
+                locate_stops[pair["id"]] = str(stop)
+                out["edges"][pair["id"]] = {"stop": str(stop)}
+        with open(os.path.join(folder, "edges.json"), "w", encoding="utf-8") as handle:
+            json.dump({"host": HOST, "call": GATE["CALL"], "shard": SHARD, "edges": out["edges"]}, handle)
+        runs.pairs = located
+        pairs = mine[SHARD - 1::SHARDS]
+        out["shard_pairs"] = [pair["id"] for pair in pairs]
+        by_id = {pair["id"]: pair for pair in located}
+        out["pairs"], stopped, falsified, fixture = {}, [], [], []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2 * (os.cpu_count() or 1)) as band_pool:
+            for profile_pair in pairs:
+                events = os.path.join(folder, f"{profile_pair['id']}.events.jsonl")
+                lock = __import__("threading").Lock()
+
+                def write_event(event, events=events, lock=lock):
+                    with lock, open(events, "a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(event) + "\n")
+
+                pair = by_id.get(profile_pair["id"])
+                summary = {"host": HOST, "pair": profile_pair["id"], "call": GATE["CALL"],
+                           "flags": list(DEFAULT_FLAGS), **hashes, "stops": []}
+                if pair is None:
+                    summary["stops"].append(locate_stops[profile_pair["id"]])
+                else:
+                    summary.update({"axis": pair["axis"], "near": pair["near"][0], "far": pair["far"][0],
+                                    "near_level": pair["near_level"], "far_level": pair["far_level"],
+                                    "shift": pair["shift"], "edge": out["edges"][pair["id"]]})
+                    others = {case[0] for other in located if other["id"] != pair["id"]
+                              for case in (other["near"], other["far"])}
+                    seen = {}
+                    try:
+                        if pair["near_level"] >= pair["far_level"] and not pair.get("limit"):
+                            raise Band8Stop(f"{pair['id']}: the near level is not below the far level")
+                        answers = {"near": band8_answer(runs, pair["near"]), "far": band8_answer(runs, pair["far"])}
+                        if answers["near"] == answers["far"]:
+                            raise Band8Stop(f"{pair['id']}: the pair answers the same")
+                        for side in ["far"] if pair.get("limit") else ["near", "far"]:
+                            try:
+                                summary[side] = band39_side(runs, band_pool, pair, side, answers, write_event, hashes,
+                                                            others, seen, memo)
+                            except Band8Stop as stop:
+                                summary["stops"].append(str(stop))
+                    except Band8Stop as stop:
+                        summary["stops"].append(str(stop))
+                    # Every case that gave a third answer in child_exit, whatever became of the sides.
+                    summary["evidence"] = {}
+                    for name, entry in seen.items():
+                        fixture += band39_fixture(pair["id"], entry, entry["thirds"], False, port)
+                        try:
+                            traced_thirds = band39_evidence(runs, band_pool, traced39, entry, hashes, write_event)
+                            fixture += band39_fixture(pair["id"], entry, traced_thirds, True, port)
+                            summary["evidence"][name] = "held"
+                        except Band8Stop as stop:
+                            summary["evidence"][name] = str(stop)
+                            summary["stops"].append(str(stop))
+                for stop in summary["stops"]:
+                    if stop.startswith("F39-"):
+                        falsified.append(stop)
+                if summary["stops"]:
+                    stopped.append(profile_pair["id"])
+                summary["folder_assertion"] = runs.tally()
+                write_event({"summary": summary})
+                out["pairs"][profile_pair["id"]] = summary
+        with open(os.path.join(folder, "third.jsonl"), "a", encoding="utf-8") as handle:
+            for row in fixture:
+                handle.write(json.dumps(row) + "\n")
+        out["third_rows"] = len(fixture)
+        out["locate_stops"] = locate_stops
+        out["folder_assertion"] = runs.tally()
+        out["stopped"] = stopped
+        out["falsified"] = falsified
+        assertion = out["folder_assertion"]
+        if (assertion["refusals"] or assertion["failed_probe_checks"] or assertion["running_after"]
+                or assertion["gate_failures"] or assertion["distinct_folders"] != assertion["runs"]):
+            out["error"] = f"the folder check did not hold: {assertion}"
+        elif falsified:
+            out["error"] = f"falsifiers fired: {falsified[:5]}"
+        elif stopped:
+            out["error"] = f"pairs stopped: {stopped}"
+        elif not pairs:
+            out["error"] = "no pair for this shard"
+        return out
+    return go
+
+
+# ---- mg37: the strict re-record at the union margins of every caller context (ruling 37 B, PLAN Update 96) ----
+# margins37.json: host -> pair -> the band37 union margins, the outer of the two call positions.
+MG37_MARGINS = os.path.join(HERE, "margins37.json")
+MG37_RUNS = MG8_OBSERVE_RUNS
+# Under a WSL kernel the host is the same linux x86_64, so its observed runs name the kernel too.
+MG37_WSL_HOST = "linux x86_64, WSL 2 Ubuntu-24.04 on a GitHub Actions windows-latest runner, native"
+
+
+def mg37_organization(pair):
+    """The pairs and cases this kernel records: organization ones under a WSL kernel only (Gc, sdk.mjs 136 col 4257),
+    every other one off it."""
+    return pair["id"].startswith("org_") == bool(GATE["WSL"])
+
+
+def mg37_unit():
+    """Every golden of this host and kernel at its band37 union margin, recorded with the reference flags in the
+    default context, then observed MG37_RUNS times with the default flags from each caller context: one answer in
+    every run of every context, or the unit fails."""
+    def go(pool, quiet):
+        if not GATE["NATIVE"] or GATE["CONTEXT"] != BAND37_DEFAULT:
+            return {"error": f"mg37 runs natively from the {BAND37_DEFAULT} context, not {GATE['CONTEXT']!r}"}
+        port = mg8_port()
+        out = {"located": {}, "pm": {}, "call": GATE["CALL"], "wsl": bool(GATE["WSL"]),
+               "contexts": list(BAND37_CONTEXTS), "runs_per_context": MG37_RUNS}
+        failed = mg8_profile(pool, port, out)
+        if failed:
+            return {"error": failed, **out}
+        profile = out["profile"]
+        traced = r8_traced()
+        out["hashes"] = {"pinned_sha256": r7_sha256(os.path.join(PACKAGE, "sdk.mjs")),
+                         "traced_sha256": traced.get("traced_sha256")}
+        try:
+            cases, pairs, moves, drifted = mg8_margin_cases(port, profile, MG37_MARGINS, mg37_organization)
+        except Band8Stop as error:
+            return {"error": str(error), **out}
+        if drifted:
+            return {"error": drifted, **out}
+        partial = next(make for keys, make in port["GROUPS"] if keys == "partial_drop")
+        cases += [case for case in partial(profile["partial_drop"]) + port["FIXED"] + port["org_cases"]()
+                  if mg37_organization({"id": case[0]})]
+        if len({case[0] for case in cases}) != len(cases):
+            return {"error": "two cases share a name", **out}
+        port["CASES"] = cases
+        version = subprocess.run([NODE, "--version"], capture_output=True, check=True, env={}).stdout.decode().strip()
+        port["LABEL"] = f"{version} {HOST}"
+        plain_run, current = port["run"], {"context": None}
+
+        def run_in_context(spec_path, node_flags, startup=port["STARTUP_BYTES"]):
+            GATE["in_context"](current["context"])
+            try:
+                return plain_run(spec_path, node_flags, startup)
+            finally:
+                GATE["in_context"](None)
+        port["run"] = run_in_context
+
+        def record(case):
+            try:
+                return port["reference"](*case)
+            except SystemExit:
+                return {"name": case[0], "failed": True}
+
+        entries = list(pool.map(record, cases))
+        failed = [entry["name"] for entry in entries if entry.get("failed")]
+        if failed:
+            return {"error": "the reference and cross-check flags answer otherwise", "failed": failed, **out}
+        unexpected = [entry["name"] for entry in entries
+                      if entry.get("error") is not None and entry["error"].get("name") != "RangeError"]
+        if unexpected:
+            return {"error": "a case rejects with something other than a RangeError", "unexpected": unexpected, **out}
+        by_name = {entry["name"]: {key: entry[key] for key in MG8_ANSWERS} for entry in entries}
+        # On a real WSL kernel the held branch is never taken (PLAN Update 92 item 4a: GP returns false for Mi), so the
+        # 8192-unit and 8193-unit texts of the limit pair answer the same there (Update 97); every other pair differs.
+        limit_names = [names for names in pairs if names[0].startswith("org_cache_limit_")]
+        same = [pair for pair in pairs if pair not in limit_names and by_name[pair[0]] == by_name[pair[1]]]
+        limit_consistent = True
+        if GATE["WSL"]:
+            # The limit pair sits at one level; the split far case at that level holds the same 8193-unit text.
+            limit_at = limit_names[0]
+            level = int(limit_at[1].split("_")[3])
+            split_far = next(names for names in pairs if names[0].startswith("org_cache_split_"))[1]
+            limit_consistent = (split_far == f"org_cache_split_{level}" and by_name[limit_at[1]] == by_name[split_far]
+                                and by_name[limit_at[0]] == by_name[limit_at[1]])
+            out["old"] = {"skipped": "no committed golden holds an organization case recorded under a WSL kernel"}
+        else:
+            out["old"] = mg8_old_gate(entries, moves, port["STARTUP_BYTES"])
+        host = MG37_WSL_HOST if GATE["WSL"] else MG8_HOSTS[HOST]
+        seen_all, missed_all, bands_all = [], {}, {}
+        events = os.path.join(os.path.dirname(OUT), "mg37", "observed.events.jsonl")
+        os.makedirs(os.path.dirname(events), exist_ok=True)
+        for context in BAND37_CONTEXTS:
+            # The recorder observes in a run of its own, so the cases it prepares again need a folder without them.
+            shutil.rmtree(port["FOLDER"], ignore_errors=True)
+            port["FOLDER"] = tempfile.mkdtemp()
+            current["context"] = context
+            seen, missed = port["observe"](entries, MG37_RUNS, f"{host}, {GATE['CALL']} call, {context} context")
+            current["context"] = None
+            shutil.rmtree(port["FOLDER"], ignore_errors=True)
+            seen_all.append(seen)
+            if missed:
+                missed_all[context] = missed
+            if seen["bands"]:
+                bands_all[context] = [band["name"] for band in seen["bands"]]
+            with open(events, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"host": HOST, "kernel": "wsl" if GATE["WSL"] else "native",
+                                         "call": GATE["CALL"], "context": context, "runs": MG37_RUNS,
+                                         "cases": len(entries), "missed": missed, "bands": seen["bands"],
+                                         **out["hashes"]}) + "\n")
+        if GATE["WSL"]:
+            # PLAN Update 92 item 6: whether the six contexts collapse to one answer per organization case here.
+            with open(events, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"wsl_collapse": {"call": GATE["CALL"], "contexts": list(BAND37_CONTEXTS),
+                                                          "cases": len(entries),
+                                                          "one_answer_in_every_context": not missed_all
+                                                          and not bands_all}}) + "\n")
+        out["observed"] = seen_all
+        out["body"] = port["body"](entries, seen_all)
+        out["body_sha256"] = __import__("hashlib").sha256(out["body"].encode()).hexdigest()
+        out["cases_sha256"] = __import__("hashlib").sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest()
+        out["cases"] = len(entries)
+        if same:
+            out["error"] = f"a pair answers the same: {same}"
+        elif not limit_consistent:
+            out["error"] = ("the 8192-unit and 8193-unit limit cases and the split case at the same level do not "
+                            "answer alike")
+        elif "missing" in out["old"] and out["old"]["missing"]:
+            out["error"] = f"committed goldens are missing: {out['old']['missing']}"
+        elif "missing" in out["old"] and [len(out["old"]["moved"]), len(out["old"]["matched"])] \
+                != [MG8_OLD_MOVED, MG8_OLD_KEPT]:
+            out["error"] = (f"{len(out['old']['moved'])} old entries moved and {len(out['old']['matched'])} stayed, "
+                            f"not {MG8_OLD_MOVED} and {MG8_OLD_KEPT}")
+        elif missed_all:
+            out["error"] = f"no default-flag run gave the recorded answer of {missed_all}"
+        elif bands_all:
+            out["error"] = f"entries answer more than one way: {bands_all}"
+        return out
+    return go
+
+
 # ---- mg8x: the record of the entries the band8x and band8c rounds moved (PLAN Updates 74 and 75) ----
 # mg8x_moved.json: host -> pair -> list of {side, axis, level, case}; a pair moved on both sides lists both.
 MG8X_RUNS = MG8_OBSERVE_RUNS
@@ -3067,6 +3767,11 @@ def round8_units():
     out += [("mg8x:goldens", mg8x_unit())]
     # The union over the caller contexts, from the default context's profile (ruling 37 B, PLAN Update 93).
     out += [("band37:goldens", band37_unit())]
+    # Each pair located per call position and its margins in the five-context union, child_exit verified (ruling 39,
+    # PLAN Update 99).
+    out += [("band39:goldens", band39_unit())]
+    # Every golden at its band37 union margin, observed from every caller context (ruling 37 B, PLAN Update 96).
+    out += [("mg37:goldens", mg37_unit())]
     return out
 
 

@@ -3,7 +3,7 @@
 # SDK's own /proc/version read sees the WSL kernel, and /mnt/c is moved off the Windows drive so the reg.exe at the
 # WSL path is the stand-in, never the real one.
 #
-# Usage: wsl_job.sh <refit|goldens|band37> <checkout> <output folder> <call> <context> [<shard> <shards>]
+# Usage: wsl_job.sh <refit|goldens|band37|band39|mg37> <checkout> <output folder> <call> <context> [<shard> <shards>]
 set -euo pipefail
 
 mode="$1" checkout="$2" out="$3" call="$4" context="$5" shard="${6:-1}" shards="${7:-1}"
@@ -67,6 +67,19 @@ case "$mode" in
     # The organization pairs' union band over the caller contexts (PLAN Update 93); band37 sets each run's context.
     export R3_ONLY='^(pm8:|band37:)' R3_EVERY_SHARD=1
     "$py" -I oracle-recording/r3.py oracle-recording/native "$node_bin" ~/package "$out/r3.json" "$shard" "$shards" \
+      2> >(tee "$out/r3.log" >&2)
+    ;;
+  band39)
+    # The organization pairs located for this call position and their union band (PLAN Update 99); band39 sets each
+    # run's context.
+    export R3_ONLY='^(pm8:|band39:)' R3_EVERY_SHARD=1
+    "$py" -I oracle-recording/r3.py oracle-recording/native "$node_bin" ~/package "$out/r3.json" "$shard" "$shards" \
+      2> >(tee "$out/r3.log" >&2)
+    ;;
+  mg37)
+    # The organization goldens at their band37 union margins, observed from every caller context (PLAN Update 96).
+    export R3_ONLY='^(pm8:|mg37:)'
+    "$py" -I oracle-recording/r3.py oracle-recording/native "$node_bin" ~/package "$out/r3.json" 1 1 \
       2> >(tee "$out/r3.log" >&2)
     ;;
   goldens)
