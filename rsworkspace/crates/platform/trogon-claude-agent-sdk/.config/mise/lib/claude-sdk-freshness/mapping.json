@@ -2227,9 +2227,20 @@
         "RemoteSchemaRetriever",
         "RemoteSchemaError",
         "UrlopenRetriever",
-        "UrlopenRetrieverOptions"
+        "UrlopenRetrieverOptions",
+        "TypedMcpToolHandler",
+        "TypedMcpToolRequest",
+        "McpToolArgumentsError"
       ],
       "tests": [
+        {
+          "path": "tests/typed_mcp_tool_handler.rs",
+          "name": "a_typed_handler_receives_its_arguments_as_the_declared_type"
+        },
+        {
+          "path": "tests/typed_mcp_tool_handler.rs",
+          "name": "arguments_that_pass_the_schema_but_not_the_type_are_answered_as_invalid_arguments"
+        },
         {
           "path": "src/raw_json_id_tests.rs",
           "name": "every_recorded_token_is_written_back_as_python_wrote_it"

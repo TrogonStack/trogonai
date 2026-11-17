@@ -276,6 +276,48 @@ a call to a tool whose schema does not compile returns that error as the tool
 result. `McpToolInputSchema::validated` opts in to requiring a compiling object
 schema without external references. `SdkTool::from` then assembles its inputs
 without returning an error.
+
+A handler reads the validated arguments as a `JsonObject` through
+`McpToolRequest`, or as its own type through `TypedMcpToolHandler`, like the
+typed handler of the TypeScript `tool()` and the Python `SdkMcpTool[T]`. The
+typed handler reads the arguments with `serde` after the server validates them
+against the input schema. Arguments that pass the schema but do not fit the type
+never reach the handler; the call answers with the dialect's invalid arguments
+result, `MCP error -32602: Input validation error: Invalid arguments for tool
+<name>: <message>` under TypeScript and `Input validation error: <message>`
+under Python, carrying the `serde` message. A handler may fail with
+`McpToolArgumentsError` itself to report invalid arguments the same way:
+
+```rust,no_run
+use std::sync::Arc;
+
+use serde::Deserialize;
+use trogon_claude_agent_sdk::{
+    McpToolInputSchema, McpToolName, McpToolOutput, SdkTool, SdkToolOptions, TypedMcpToolHandler, TypedMcpToolRequest,
+};
+
+#[derive(Deserialize)]
+struct Repeat {
+    text: String,
+    times: usize,
+}
+
+fn repeat_tool(input_schema: McpToolInputSchema) -> SdkTool {
+    SdkTool::from(SdkToolOptions {
+        name: McpToolName::from("repeat"),
+        description: "Repeat the supplied text".into(),
+        input_schema,
+        handler: Arc::new(TypedMcpToolHandler::new(|request: TypedMcpToolRequest<Repeat>| async move {
+            let Repeat { text, times } = request.arguments;
+            Ok(McpToolOutput::text(text.repeat(times)))
+        })),
+        annotations: None,
+        search_hint: None,
+        always_load: false,
+    })
+}
+```
+
 `LocalMcpServerOptions.tools` requires an immutable `SdkTools` collection.
 Use `tool.into()` for one tool, `SdkTools::default()` for none, or
 `SdkTools::new([first, second])?` to reject duplicate names when assembling
