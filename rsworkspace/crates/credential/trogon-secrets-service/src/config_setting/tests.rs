@@ -103,9 +103,10 @@ fn every_setting_is_listed_once_in_the_order_it_is_declared() {
         ConfigSetting::XkeySeed => 21,
         ConfigSetting::CredentialStream => 22,
         ConfigSetting::AdmissionLimit => 23,
-        ConfigSetting::AuditTenant => 24,
-        ConfigSetting::AuditProject => 25,
-        ConfigSetting::AuditInstance => 26,
+        ConfigSetting::InvalidationStreamReplicas => 24,
+        ConfigSetting::AuditTenant => 25,
+        ConfigSetting::AuditProject => 26,
+        ConfigSetting::AuditInstance => 27,
     };
 
     for (position, setting) in ConfigSetting::ALL.into_iter().enumerate() {

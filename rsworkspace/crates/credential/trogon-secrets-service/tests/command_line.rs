@@ -193,6 +193,7 @@ release.policies_file (TROGON_SECRETS_RELEASE_POLICIES_FILE) = {files}/release-p
 release.xkey_seed (TROGON_SECRETS_XKEY_SEED) = env://FAKE_XKEY_SEED (from environment)
 release.credential_stream (TROGON_SECRETS_CREDENTIAL_STREAM) = CREDENTIAL_EVENTS (from default)
 release.admission_limit (TROGON_SECRETS_ADMISSION_LIMIT) = 64 (from default)
+release.invalidation_stream_replicas (TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS) = 3 (from default)
 audit.tenant (TROGON_SECRETS_AUDIT_TENANT) = acme (from environment)
 audit.project (TROGON_SECRETS_AUDIT_PROJECT) = platform (from environment)
 audit.instance (TROGON_SECRETS_AUDIT_INSTANCE) = secrets-0 (from environment)

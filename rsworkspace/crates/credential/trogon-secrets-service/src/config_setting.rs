@@ -39,7 +39,7 @@ pub enum ConfigSetting {
 
 impl ConfigSetting {
     /// Every setting, in the order they are declared.
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::NatsUrl,
         Self::NatsCreds,
         Self::NatsNkey,
@@ -64,6 +64,7 @@ impl ConfigSetting {
         Self::XkeySeed,
         Self::CredentialStream,
         Self::AdmissionLimit,
+        Self::InvalidationStreamReplicas,
         Self::AuditTenant,
         Self::AuditProject,
         Self::AuditInstance,
