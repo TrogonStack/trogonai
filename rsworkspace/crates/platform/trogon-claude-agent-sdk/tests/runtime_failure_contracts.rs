@@ -1835,8 +1835,12 @@ async fn mirror_fence_does_not_make_the_deferred_message_queue_unbounded() -> Te
     Ok(())
 }
 
+/// TypeScript `[Symbol.asyncDispose]()` runs the same cleanup as `close()`: the prompt is already on the stdin stream,
+/// and `end()` closes the stream behind it. Python's `__aexit__` disconnects, and its close waits on the write lock
+/// for the write in progress. Dropping the client is that disposal, so the frame reaches the CLI whole, the send
+/// resolves, and input ends behind it.
 #[tokio::test]
-async fn owner_disposal_interrupts_a_backpressured_write() -> TestResult {
+async fn owner_disposal_finishes_a_backpressured_write_before_ending_input() -> TestResult {
     let mut configured = options()?;
     configured.limits.max_buffer_size = Some(16 * 1024 * 1024);
     let (client, cli) = connect(configured).await?;
@@ -1848,17 +1852,22 @@ async fn owner_disposal_interrupts_a_backpressured_write() -> TestResult {
     } = cli;
     let mut input = lines.into_inner();
     let handle = client.handle();
-    let prompt = Prompt::from("x".repeat(8 * 1024 * 1024));
+    let text = "x".repeat(8 * 1024 * 1024);
+    let prompt = Prompt::from(text.clone());
     let sending = tokio::spawn(async move { handle.send_prompt(prompt).await });
     let mut first = [0_u8; 1];
     timeout(Duration::from_secs(2), input.read_exact(&mut first)).await??;
     drop(client);
-    let mut remainder = Vec::new();
-    timeout(Duration::from_secs(2), input.read_to_end(&mut remainder)).await??;
+    let mut written = first.to_vec();
+    timeout(Duration::from_secs(2), input.read_to_end(&mut written)).await??;
+    assert_eq!(written.iter().filter(|byte| **byte == b'\n').count(), 1);
+    let frame: Value = serde_json::from_slice(written.strip_suffix(b"\n").ok_or("the frame ends without a newline")?)?;
+    assert_eq!(frame["type"], "user");
+    assert_eq!(frame["message"]["content"], text.as_str());
     observer.complete(0);
     drop(stdout);
     drop(stderr);
-    assert!(matches!(sending.await?, Err(Error::DriverStopped)));
+    sending.await??;
     observer.wait_for(ScriptedProcessEvent::StdinClosed).await?;
     Ok(())
 }
