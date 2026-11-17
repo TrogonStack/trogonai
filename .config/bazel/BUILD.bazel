@@ -69,6 +69,7 @@ py_test(
 )
 
 exports_files([
+    "patches/rules_rust-native-coverage-filter.patch",
     "compiler_failures.py",
     "compiler_failures_test.py",
 ])
