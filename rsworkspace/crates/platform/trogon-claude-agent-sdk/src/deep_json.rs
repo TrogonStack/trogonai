@@ -4,6 +4,7 @@
 
 use crate::JsonObject;
 use crate::constants::{PARSE_STACK, PYTHON_INT_MAX_STR_DIGITS, PYTHON_READER_DEPTH, SHALLOW};
+use crate::js_object_order::array_index;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -454,12 +455,6 @@ fn javascript_members<'a>(object: &'a mut JsonObject, pending: &mut Vec<&'a mut 
         object.extend(indexed.into_iter().chain(named));
     }
     pending.extend(object.values_mut());
-}
-
-/// The array index `key` names: the canonical decimal of an integer below 2^32 - 1.
-fn array_index(key: &str) -> Option<u32> {
-    let canonical = key == "0" || !key.starts_with('0') && key.bytes().all(|byte| byte.is_ascii_digit());
-    key.parse::<u32>().ok().filter(|index| canonical && *index < u32::MAX)
 }
 
 /// `number` as the double JavaScript reads from its text.

@@ -142,3 +142,24 @@ fn the_first_successful_call_decides_for_the_process() -> TestResult {
     assert_eq!(process_debug_file(&environment, &inherited(&[])), Ok(Some(first)));
     Ok(())
 }
+
+#[test]
+fn the_debug_variable_trims_like_javascript() {
+    let id = uuid::Uuid::nil();
+    let environment = environment(Some("/h"), None);
+    let expected = PathBuf::from(format!("/h/.claude/debug/sdk-{id}.txt"));
+    for value in ["\u{feff}1\u{feff}", "\u{feff}true"] {
+        assert_eq!(
+            path_for(&environment, &inherited(&[("DEBUG_CLAUDE_AGENT_SDK", value)]), id),
+            Ok(Some(expected.clone())),
+            "{value:?}"
+        );
+    }
+    for value in ["\u{85}1\u{85}", "\u{85}true"] {
+        assert_eq!(
+            path_for(&environment, &inherited(&[("DEBUG_CLAUDE_AGENT_SDK", value)]), id),
+            Ok(None),
+            "{value:?}"
+        );
+    }
+}

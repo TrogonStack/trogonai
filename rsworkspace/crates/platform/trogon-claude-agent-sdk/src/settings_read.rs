@@ -5,6 +5,7 @@
 use serde_json::{Map, Value};
 
 use crate::{
+    js_object_order::array_index,
     node_stack::NodeStack,
     python_c_stack::PythonCStack,
     python_json_load::loads_text,
@@ -329,15 +330,6 @@ fn filter_mcp_lists(document: &mut Map<String, Value>, schema: &SettingsSchema, 
     }
 }
 
-/// Whether a property name is an array index, which JavaScript lists before every other name.
-fn is_array_index(name: &str) -> Option<u32> {
-    let canonical = name == "0" || (!name.starts_with('0') && name.bytes().all(|byte| byte.is_ascii_digit()));
-    if !canonical || name.is_empty() {
-        return None;
-    }
-    name.parse::<u32>().ok().filter(|index| *index != u32::MAX)
-}
-
 /// JavaScript objects enumerate array-index names first in ascending order, then the rest in insertion order.
 pub(crate) fn js_property_order(value: Value) -> Value {
     match value {
@@ -353,7 +345,7 @@ fn js_property_order_map(entries: SettingsMap) -> SettingsMap {
     let mut named = Vec::new();
     for (name, entry) in entries {
         let entry = js_property_order(entry);
-        match is_array_index(&name) {
+        match array_index(&name) {
             Some(index) => indexed.push((index, name, entry)),
             None => named.push((name, entry)),
         }
