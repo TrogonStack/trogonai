@@ -6,8 +6,8 @@ use std::{sync::Arc, time::Duration};
 use trogon_claude_agent_sdk::{
     ClaudeAgentOptions, ClaudeSdkClient, Customizations, HookEvent, HookFailureMode, HookOutput, HookRegistration,
     HookRequest, LocalMcpServer, LocalMcpServerOptions, McpServerDialect, McpServerName, McpToolInputSchema,
-    McpToolName, McpToolOutput, McpToolRequest, SdkMcpServer, SdkMcpServers, SdkTool, SdkToolOptions,
-    SessionPersistence, ToolSet, upstream::control::McpServerStatusStatus,
+    McpToolName, McpToolOutput, SdkMcpServer, SdkMcpServers, SdkTool, SdkToolOptions, SessionPersistence, ToolSet,
+    TypedMcpToolHandler, TypedMcpToolRequest, upstream::control::McpServerStatusStatus,
 };
 
 #[cfg_attr(
@@ -26,11 +26,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         name: McpToolName::from("echo"),
         description: "Return the supplied text".into(),
         input_schema: McpToolInputSchema::new(schema::echo_schema(None)?),
-        handler: Arc::new(|request: McpToolRequest| async move {
-            Ok(McpToolOutput::text(
-                request.arguments["text"].as_str().unwrap_or_default(),
-            ))
-        }),
+        handler: Arc::new(TypedMcpToolHandler::new(
+            |request: TypedMcpToolRequest<schema::EchoArguments>| async move {
+                Ok(McpToolOutput::text(request.arguments.text))
+            },
+        )),
         annotations: None,
         search_hint: None,
         always_load: false,
