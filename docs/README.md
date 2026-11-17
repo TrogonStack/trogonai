@@ -4,6 +4,13 @@ Browse the [documentation home](./index.md) for the full project navigation.
 Documents distinguish proposed architecture, normative contract reference and
 runtime acceptance evidence.
 
+## Protocols
+
+- Understand [how A2A, ACP and MCP fit together](./architecture/agent-protocols.md).
+- Look up [protocol support, transports and known gaps](./reference/agent-protocols.md).
+- Check the detailed [ACP conformance matrix](./architecture/acp-conformance.md).
+- Browse the [protocols product showcase](./product/protocols.md).
+
 ## Development verification
 
 [Verify scheduler decisions with Hydro](./how-to/verify-scheduler-with-hydro.md)
