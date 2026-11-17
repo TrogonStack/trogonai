@@ -26,6 +26,8 @@ struct ScriptedTransport {
     split: bool,
     /// Each kill, end of input and close, in order.
     steps: Option<mpsc::UnboundedSender<&'static str>>,
+    /// Takes each document whole or not at all, as the SSE upload queue does.
+    whole: bool,
 }
 
 impl ScriptedTransport {
@@ -66,6 +68,10 @@ impl Transport for ScriptedTransport {
 
     fn is_ready(&self) -> bool {
         self.ready
+    }
+
+    fn writes_whole_documents(&self) -> bool {
+        self.whole
     }
 
     async fn end_input(&mut self) -> Result<(), Error> {
@@ -114,6 +120,7 @@ impl DriverFixture {
                 write_delay: None,
                 split: false,
                 steps: None,
+                whole: false,
             },
             input_ended: false,
             commands: command_rx,
@@ -359,6 +366,24 @@ async fn a_write_that_has_to_wait_gives_way_to_the_close_at_the_grace() -> Resul
     assert_eq!(started.elapsed(), constants::TYPESCRIPT_CLOSE_GRACE);
     assert!(fixture.driver.shutdown_seen);
     assert!(fixture.driver.frame_cut);
+    fixture.finish().await
+}
+
+/// A transport that takes a frame whole or not at all has nothing of the frame on the wire while it waits, so the
+/// close wins at once, as a JavaScript close does over a write still awaiting its transport.
+#[tokio::test(start_paused = true)]
+async fn a_write_to_a_whole_document_transport_gives_way_to_the_close_at_once() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
+    fixture.driver.transport.whole = true;
+    let (command, _receiver) = prompt_command("never sent");
+    let started = Instant::now();
+    let outcome = fixture.driver.command(command).await;
+    assert!(matches!(outcome, Err(Error::ShutdownRequested)), "{outcome:?}");
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(fixture.driver.shutdown_seen);
+    assert!(!fixture.driver.frame_cut);
+    assert!(fixture.driver.close_deadline.is_none());
     fixture.finish().await
 }
 

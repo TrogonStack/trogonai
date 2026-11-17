@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::{Mutex, mpsc, oneshot},
+    sync::{Mutex, mpsc, oneshot, watch},
     time::timeout,
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message as Frame};
@@ -357,11 +357,14 @@ fn client_event(sequence_num: u64, event_id: &str, payload: &Value) -> String {
 }
 
 /// What the fake server pushes: the control response (numbered `first`) and `after_control` once the initialize
-/// request arrives, and `after_user` once a user message does.
+/// request arrives, and `after_user` once a user message does. With a `gate` the stream response waits until it
+/// turns true, and `posted` reports the payload of every POST.
 struct Script {
     first: u64,
     after_control: Vec<String>,
     after_user: Vec<String>,
+    gate: Option<watch::Receiver<bool>>,
+    posted: Option<mpsc::UnboundedSender<Value>>,
 }
 
 type Events = Arc<Mutex<Option<mpsc::UnboundedReceiver<String>>>>;
@@ -377,6 +380,9 @@ async fn sse_connection(
         if method == "POST" {
             let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
             let payload = &body["events"][0]["payload"];
+            if let Some(posted) = &script.posted {
+                let _ = posted.send(payload.clone());
+            }
             match payload["type"].as_str() {
                 Some("control_request") => {
                     let answer = json!({
@@ -408,6 +414,11 @@ async fn sse_connection(
             std::future::pending::<()>().await;
             return;
         };
+        if let Some(mut gate) = script.gate.clone()
+            && gate.wait_for(|open| *open).await.is_err()
+        {
+            return;
+        }
         let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
         if socket.write_all(head.as_bytes()).await.is_err() {
             return;
@@ -463,6 +474,8 @@ async fn an_sse_query_exposes_the_transport_state_through_the_accessors() -> Tes
             "event: delivery_update\ndata: {\"event_id\":5}\n\n".to_owned(),
             client_event(2, "e2", &result_message()),
         ],
+        gate: None,
+        posted: None,
     })
     .await?;
     let options = BrowserQueryOptions::new(
@@ -485,6 +498,41 @@ async fn an_sse_query_exposes_the_transport_state_through_the_accessors() -> Tes
     assert!(!suspend_sse_stream(&query));
     assert!(resume_sse_stream(&query));
     assert!(!resume_sse_stream(&query));
+    query.close();
+    Ok(())
+}
+
+/// The browser `query()` constructs its Query, writing the initialize request, without waiting for the stream:
+/// `SSETransport.write` awaits the first readiness on its own, so the request is POSTed once the stream opens.
+#[tokio::test]
+async fn an_sse_query_returns_before_the_stream_opens_and_initializes_once_it_does() -> TestResult {
+    let (open, gate) = watch::channel(false);
+    let (posted, mut payloads) = mpsc::unbounded_channel();
+    let origin = sse_origin(Script {
+        first: 1,
+        after_control: Vec::new(),
+        after_user: vec![client_event(2, "e2", &result_message())],
+        gate: Some(gate),
+        posted: Some(posted),
+    })
+    .await?;
+    let options = BrowserQueryOptions::new(
+        stream::iter([UserInput::from(Prompt::from("hi"))]),
+        BrowserTransport::Sse(sse_options(&origin)),
+    );
+    let mut query = timeout(WAIT, browser_query(options)).await??;
+    assert!(
+        timeout(Duration::from_millis(200), payloads.recv()).await.is_err(),
+        "nothing is POSTed before the stream opens"
+    );
+    open.send(true)?;
+    let first = timeout(WAIT, payloads.recv()).await?.ok_or("a POSTed payload")?;
+    assert_eq!(
+        (first["type"].as_str(), first["request"]["subtype"].as_str()),
+        (Some("control_request"), Some("initialize"))
+    );
+    let message = timeout(WAIT, query.next_message()).await??.ok_or("a message")?;
+    assert!(matches!(message, Message::Result(_)));
     query.close();
     Ok(())
 }
@@ -512,6 +560,8 @@ async fn envelopes_and_the_delivered_number_follow_the_consumer_not_the_reads() 
             first: case["first"].as_u64().ok_or("first")?,
             after_control: frames,
             after_user: Vec::new(),
+            gate: None,
+            posted: None,
         })
         .await?;
         let mut sse = sse_options(&origin);
