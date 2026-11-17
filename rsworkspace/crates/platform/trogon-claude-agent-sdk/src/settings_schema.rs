@@ -21,6 +21,7 @@ use crate::{
         Batteries, Payload, Predicate, Transform, payload_for, predicate_for, sentinel, transform_for,
     },
     settings_schema_ports::js_string,
+    settings_strings::js_length,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -41,7 +42,6 @@ pub(crate) struct SettingsSchema {
     roots: HashMap<String, Arc<Node>>,
     read: ReadSpec,
     merge: MergeSpec,
-    #[cfg(test)]
     policy: policy::PolicySpec,
 }
 
@@ -169,7 +169,6 @@ impl SettingsSchema {
             read: ReadSpec::from_json(read).map_err(SettingsSchemaError::Malformed)?,
             merge: MergeSpec::from_json(document.get("merge").ok_or_else(|| malformed("merge"))?)
                 .map_err(SettingsSchemaError::Malformed)?,
-            #[cfg(test)]
             policy: policy::PolicySpec::from_json(read).map_err(SettingsSchemaError::Malformed)?,
         })
     }
@@ -216,7 +215,7 @@ impl SettingsSchema {
             }
         }
         for (key, value) in document {
-            if !self.fields.contains_key(key) {
+            if !self.fields.contains_key(key) && assigns_a_member(key) {
                 parsed.insert(key.clone(), value.clone());
             }
         }
@@ -233,6 +232,14 @@ impl SettingsSchema {
         found.dedup();
         found
     }
+}
+
+/// Whether zod keeps a member named `name` in an object it builds. It builds every object, record and the document
+/// itself by assignment, and assigning `__proto__` sets the prototype of the new object instead of adding a member,
+/// so a `__proto__` member that `JSON.parse` read is dropped there and kept only inside a value zod passes through
+/// whole.
+fn assigns_a_member(name: &str) -> bool {
+    name != "__proto__"
 }
 
 fn malformed(what: &str) -> SettingsSchemaError {
@@ -459,10 +466,6 @@ fn check_from(entry: &Value, batteries: &Batteries) -> Result<Check, SettingsSch
     })
 }
 
-fn utf16_length(text: &str) -> usize {
-    text.encode_utf16().count()
-}
-
 fn json_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Number(left), Value::Number(right)) => js_value(left) == js_value(right),
@@ -473,9 +476,17 @@ fn json_equal(left: &Value, right: &Value) -> bool {
 impl Check {
     fn passes(&self, value: &Value) -> bool {
         match self {
-            Check::MinLength(minimum) => length_of(value).is_none_or(|length| length >= *minimum),
-            Check::MaxLength(maximum) => length_of(value).is_none_or(|length| length <= *maximum),
-            Check::LengthEquals(expected) => length_of(value).is_none_or(|length| length == *expected),
+            Check::MinLength(minimum) => {
+                let counted = |units: usize| (*minimum..minimum.saturating_mul(2)).contains(&units);
+                length_of(value, counted).is_none_or(|length| length >= *minimum)
+            }
+            Check::MaxLength(maximum) => {
+                length_of(value, |units| units > *maximum).is_none_or(|length| length <= *maximum)
+            }
+            Check::LengthEquals(expected) => {
+                let counted = |units: usize| (*expected..=expected.saturating_mul(2)).contains(&units);
+                length_of(value, counted).is_none_or(|length| length == *expected)
+            }
             Check::SafeInteger => number_of(value)
                 .is_none_or(|number| number.fract() == 0.0 && number.abs() <= SETTINGS_SCHEMA_SAFE_INTEGER),
             Check::GreaterThan {
@@ -503,9 +514,15 @@ impl Check {
     }
 }
 
-fn length_of(value: &Value) -> Option<usize> {
+/// The length a zod length check reads: the elements of an array, and the UTF-16 units of a string, or its code
+/// points when `counted` holds for its units. Upstream `Bg` counts a surrogate pair as one code point and a lone
+/// surrogate as one, as Rust counts each `char`, a stand-in among them.
+fn length_of(value: &Value, counted: impl FnOnce(usize) -> bool) -> Option<usize> {
     match value {
-        Value::String(text) => Some(utf16_length(text)),
+        Value::String(text) => {
+            let units = js_length(text);
+            Some(if counted(units) { text.chars().count() } else { units })
+        }
         Value::Array(items) => Some(items.len()),
         _ => None,
     }
@@ -607,7 +624,9 @@ impl Node {
                 let mut output = Map::new();
                 for (name, entry) in entries {
                     key.validate(Some(&Value::String(name.clone())))?;
-                    if let Some(parsed) = value.validate(Some(entry))? {
+                    if let Some(parsed) = value.validate(Some(entry))?
+                        && assigns_a_member(name)
+                    {
                         output.insert(name.clone(), parsed);
                     }
                 }
@@ -651,7 +670,7 @@ impl Node {
                     Mode::Strict => {}
                     Mode::Passthrough => {
                         for (name, entry) in entries {
-                            if !known(name) {
+                            if !known(name) && assigns_a_member(name) {
                                 output.insert(name.clone(), entry.clone());
                             }
                         }
@@ -702,7 +721,6 @@ fn number_of(value: &Value) -> Option<f64> {
     value.as_number().and_then(js_value)
 }
 
-#[cfg(test)]
 #[path = "settings_schema_policy.rs"]
 mod policy;
 

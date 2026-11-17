@@ -131,9 +131,11 @@ reads the exact npm package recorded in `baseline.json`; `types.json` names the
 package version, source files, output files and root types. The output keeps the
 upstream wire shape and validates nothing:
 
-- every object type keeps keys upstream does not declare in a flattened `extra` map and
-  records the key order it was decoded with (`key_order`), so decoding then encoding
-  is lossless and byte-identical, including key order;
+- every object type keeps keys upstream does not declare in a flattened `extra` map
+  (`indexmap::IndexMap<String, crate::DeepJsonValue>`, whose values drop, clone, compare
+  and print at any nesting, and which the type writes past 64 levels as JSON text) and records the key order it was decoded with
+  (`key_order`), so decoding then encoding is lossless and byte-identical, including
+  key order;
 - typed maps are insertion ordered (`indexmap::IndexMap`) and untyped maps are
   `serde_json::Map`, which keeps insertion order through the crate's `preserve_order`
   feature;

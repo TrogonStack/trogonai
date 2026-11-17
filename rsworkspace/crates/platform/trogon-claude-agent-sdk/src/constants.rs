@@ -334,6 +334,13 @@ pub(crate) const SETTINGS_SCHEMA_JSON: &str = include_str!("upstream/settings_sc
 /// Magnitude up to which every integer is exactly a JavaScript number (2^53).
 pub(crate) const JS_MAX_EXACT_INTEGER: u64 = 1 << 53;
 
+/// The longest array JavaScript holds (2^32 - 1).
+pub(crate) const JS_MAX_ARRAY_LENGTH: u64 = u32::MAX as u64;
+
+/// The most UTF-16 units a V8 string holds (`String::kMaxLength`, 2^29 - 24); building a longer one throws
+/// `RangeError: Invalid string length`.
+pub(crate) const V8_MAX_STRING_LENGTH: u64 = (1 << 29) - 24;
+
 /// The double a settings value holds for `Infinity` (2^63). `serde_json` has no number for Infinity, and number
 /// normalization turns every whole double below 2^64 that a document holds into an integer, so no document
 /// leaves a float with this value behind.
@@ -358,6 +365,20 @@ pub(crate) const SETTINGS_PYTHON_NUMBER_MARKER_BASE: f64 = 4_611_686_018_427_387
 /// The distance between two consecutive Python number markers; doubles from 2^62 to 2^63 are 1024 apart.
 pub(crate) const SETTINGS_PYTHON_NUMBER_MARKER_STEP: f64 = 2048.0;
 
+/// The first surrogate code point, U+D800.
+pub(crate) const SURROGATE_FIRST: u32 = 0xD800;
+
+/// Where each range of private-use code points a lone surrogate of a Python-dialect settings string first tries to
+/// stand as begins: U+D800 + n tries the start plus n of each in turn. Each range is as wide as the surrogates and
+/// lies in the Basic Multilingual Plane, so a stand-in is one UTF-16 unit, as the surrogate is.
+pub(crate) const SETTINGS_SURROGATE_STAND_IN_STARTS: [u32; 3] = [0xE000, 0xE800, 0xF000];
+
+/// The private-use code points a lone surrogate of a Python-dialect settings string may stand as, in the order they
+/// are tried after its place in each of [`SETTINGS_SURROGATE_STAND_IN_STARTS`]: the Basic Multilingual Plane's,
+/// one UTF-16 unit each, then those of planes 15 and 16, two units each.
+pub(crate) const SETTINGS_SURROGATE_STAND_IN_RANGES: [(u32, u32); 3] =
+    [(0xE000, 0xF8FF), (0xF_0000, 0xF_FFFD), (0x10_0000, 0x10_FFFD)];
+
 /// The most decimal digits Python's `int()` converts from a string (`sys.get_int_max_str_digits()`).
 pub(crate) const PYTHON_INT_MAX_STR_DIGITS: usize = 4300;
 
@@ -365,11 +386,15 @@ pub(crate) const PYTHON_INT_MAX_STR_DIGITS: usize = 4300;
 /// `json.loads` opens one for each array and object it enters, and `sys.setrecursionlimit` does not move the limit.
 pub(crate) const PYTHON_C_RECURSION_LIMIT: usize = 10_000;
 
-/// How many arrays and objects a settings file the settings engine reads may nest, in either dialect. The
-/// TypeScript dialect's parse stops where `serde_json`'s recursion limit does, and the Python dialect stops at the
-/// same depth because the engine walks the parsed document recursively. A deeper file does not load, where
-/// `JSON.parse` and `json.loads` read it.
-pub(crate) const SETTINGS_JSON_DEPTH: usize = 127;
+/// The stack of the thread the settings engine runs the Python dialect on. The Python dialect reads a settings file
+/// nested as deep as `json.loads` reads it, almost [`PYTHON_C_RECURSION_LIMIT`] levels, and the engine walks the
+/// document recursively, a few frames per level at each step. Untouched stack pages are never committed, so the
+/// reservation costs address space, not memory.
+pub(crate) const SETTINGS_ENGINE_STACK_BYTES: usize = 256 * 1024 * 1024;
+
+/// The most arrays and objects `serde_json` reads nested in one document before it stops with "recursion limit
+/// exceeded".
+pub(crate) const SERDE_JSON_NESTING: usize = 127;
 
 /// Largest integer a JavaScript number holds exactly (`Number.MAX_SAFE_INTEGER`).
 pub(crate) const SETTINGS_SCHEMA_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
@@ -2565,3 +2590,9 @@ pub(crate) const REG_DWORD: u32 = 4;
 pub(crate) const REG_MULTI_SZ: u32 = 7;
 #[cfg(any(test, windows))]
 pub(crate) const REG_QWORD: u32 = 11;
+
+/// The bytes a file starts with when the TypeScript settings reader decodes it as UTF-16LE.
+pub(crate) const UTF16LE_BOM: &[u8] = b"\xff\xfe";
+
+/// The UTF-8 byte order mark the `utf-8-sig` codec drops from the start of a Python settings file.
+pub(crate) const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";

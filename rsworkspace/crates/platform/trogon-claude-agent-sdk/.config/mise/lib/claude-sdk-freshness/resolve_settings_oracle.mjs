@@ -3,13 +3,21 @@
 //
 // usage: node resolve_settings_oracle.mjs <package-dir> <spec.json>
 //
-// The spec holds {root, platform, env, process?, writable?, cases: [{name, options, at?, files?, durations?}]}.
-// Machine-wide locations that the SDK reads (managed settings, managed preferences, /proc/version, plutil) are
-// remapped under `root`, and `process.platform` is replaced by `platform`, so every case runs the same way on any host.
+// The spec holds {root, platform, env, process?, writable?, deep?, rejections?, cases: [{name, options, at?, files?,
+// durations?}]}. Machine-wide locations that the SDK reads (managed settings, managed preferences, /proc/version,
+// plutil) are remapped under `root`, and `process.platform` is replaced by `platform`, so every case runs the same way
+// on any host.
 //
 // `process` pins the ids the process reports ({euid, uid, egid, gid, groups}; a missing or null field removes that
 // call, as on a platform without it), and `writable` answers write checks by the path asked about (`*` for every
 // other path): `yes` succeeds and an errno name such as `EACCES` fails. Paths without an answer get the real check.
+//
+// `deep: true` prints the output without recursing, so a result nested past the stack `JSON.stringify` has still prints
+// (the same text `JSON.stringify` gives), and leaves out `filtered`, whose filter recurses as deep as the result. Only
+// what runs after `resolveSettings` returns changes, so the stack every call starts on stays the same.
+//
+// `rejections: true` prints a call that rejects with a `RangeError` as `{name, error: {name, message}}` in place of its
+// result, and goes on with the next call; without it the error ends the run.
 //
 // Time is simulated. `Date.now` reads a fake clock, timers wait on that clock, and a spawned program ends when the
 // clock reaches its start plus the case's `durations` entry for its command line (zero when absent). The clock only
@@ -212,8 +220,53 @@ for (const entry of spec.cases) {
     }
   }
   durations = entry.durations || {};
-  const result = await settle(sdk.resolveSettings(entry.options));
-  out.push({ name: entry.name, result, filtered: sdk.filterEscalatingDefaultMode(result) });
+  let result;
+  try {
+    result = await settle(sdk.resolveSettings(entry.options));
+  } catch (error) {
+    if (!spec.rejections || !(error instanceof RangeError)) throw error;
+    out.push({ name: entry.name, error: { name: error.name, message: error.message } });
+    continue;
+  }
+  out.push(spec.deep ? { name: entry.name, result } : { name: entry.name, result, filtered: sdk.filterEscalatingDefaultMode(result) });
 }
+// `JSON.stringify` of the plain data `resolveSettings` returns, with a work list in place of recursion: each entry is
+// either text to print as is or a value (`{ value }`) to print in its place.
+const stringifyDeep = (top) => {
+  const printable = (value) => value !== undefined && typeof value !== 'function' && typeof value !== 'symbol';
+  const parts = [];
+  const work = [{ value: top }];
+  while (work.length > 0) {
+    const item = work.pop();
+    if (typeof item === 'string') {
+      parts.push(item);
+      continue;
+    }
+    const { value } = item;
+    if (value === null || typeof value !== 'object') {
+      parts.push(JSON.stringify(value));
+      continue;
+    }
+    const sequence = [];
+    if (Array.isArray(value)) {
+      sequence.push('[');
+      for (let index = 0; index < value.length; index++) {
+        if (index > 0) sequence.push(',');
+        sequence.push({ value: printable(value[index]) ? value[index] : null });
+      }
+      sequence.push(']');
+    } else {
+      sequence.push('{');
+      for (const key of Object.keys(value)) {
+        if (!printable(value[key])) continue;
+        if (sequence.length > 1) sequence.push(',');
+        sequence.push(`${JSON.stringify(key)}:`, { value: value[key] });
+      }
+      sequence.push('}');
+    }
+    for (let index = sequence.length - 1; index >= 0; index--) work.push(sequence[index]);
+  }
+  return parts.join('');
+};
 // Exits once the output is written: a background re-read may still hold a fake timer that never fires.
-process.stdout.write(JSON.stringify(out), () => process.exit(0));
+process.stdout.write(spec.deep ? stringifyDeep(out) : JSON.stringify(out), () => process.exit(0));

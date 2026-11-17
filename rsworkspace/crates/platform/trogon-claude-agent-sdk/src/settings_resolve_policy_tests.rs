@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::{
+    cell::Cell,
     io,
     path::{Path, PathBuf},
 };
@@ -13,6 +14,10 @@ use super::{
 use crate::{
     adapters::ReadFile,
     constants::{MCP_SERVER_ALLOW_LIST_KEY, SETTINGS_FILE_MAX_BYTES},
+    node_merge_warmth::MergeWarmth,
+    node_stack::NodeStack,
+    settings_dialect::SettingsDialect,
+    settings_managed_reader::{ManagedReader, ParsedFiles},
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_tier::{LoadState, TierRead},
     settings_resolve_values::SettingsMap,
@@ -52,9 +57,12 @@ impl ReadFile for OneFile {
 }
 
 fn read(answer: Answer) -> (TierRead, bool) {
+    let parsed = ParsedFiles::default();
+    let warmth = Cell::new(MergeWarmth::default());
     read_policy_file(
         &OneFile(answer),
         &PathBuf::from("/etc/claude-code/managed-settings.json"),
+        ManagedReader::new(SettingsDialect::Python, NodeStack::default(), &parsed, &warmth),
     )
 }
 

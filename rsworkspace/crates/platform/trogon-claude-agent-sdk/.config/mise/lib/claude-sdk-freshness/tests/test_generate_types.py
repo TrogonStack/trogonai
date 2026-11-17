@@ -108,9 +108,10 @@ class GenerateTypesTests(unittest.TestCase):
         self.assertIn("pub struct Empty {", output)
         mirrors = output.count("#[serde(remote = ")
         self.assertGreater(mirrors, 0)
-        self.assertEqual(output.count("#[serde(flatten)]"), mirrors)
+        self.assertEqual(output.count("#[serde(flatten"), mirrors)
         self.assertEqual(output.count("#[serde(skip)]"), mirrors)
-        self.assertIn("pub extra: serde_json::Map<String, serde_json::Value>,", output)
+        self.assertIn("pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,", output)
+        self.assertIn('#[serde(flatten, serialize_with = "super::support::shallow_members")]', output)
         self.assertIn("pub const KNOWN_KEYS: &'static [&'static str] = &[];", output)
         self.assertIn("decoded.key_order = super::support::KeyOrder::of(&value);", output)
 

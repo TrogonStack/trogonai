@@ -438,16 +438,18 @@ class Emitter {
     for (const reserved of ['extra', 'key_order']) {
       if (used.has(reserved)) fail(`Field name ${reserved} collides in ${name}`);
     }
-    const extraType = ir.index && ir.index.k !== 'unknown'
+    const typedExtra = ir.index && ir.index.k !== 'unknown';
+    const extraType = typedExtra
       ? `indexmap::IndexMap<String, ${this.type(ir.index, `${name}Extra`)}>`
-      : 'serde_json::Map<String, serde_json::Value>';
+      : 'indexmap::IndexMap<String, crate::DeepJsonValue>';
+    const extraSerde = typedExtra ? 'flatten' : 'flatten, serialize_with = "super::support::shallow_members"';
     const extraDoc = '    /// Keys the pinned upstream declarations do not list, in the order they were decoded.\n';
     const orderDoc = '    /// The key order this value was decoded with; encoding reproduces it.\n';
     const wire = this.claimWire(name);
     const plain = fields.map(field => `${field.doc}${field.decl}`);
     plain.push(`${extraDoc}    pub extra: ${extraType},`, `${orderDoc}    pub key_order: super::support::KeyOrder,`);
     const mirror = fields.map(field => `${field.serde}${field.decl}`);
-    mirror.push(`    #[serde(flatten)]\n    pub extra: ${extraType},`, '    #[serde(skip)]\n    pub key_order: super::support::KeyOrder,');
+    mirror.push(`    #[serde(${extraSerde})]\n    pub extra: ${extraType},`, '    #[serde(skip)]\n    pub key_order: super::support::KeyOrder,');
     const known = ir.props.map(prop => rustString(prop.name)).join(', ');
     // String-literal properties: a value outside the listed ones would still decode (as the
     // enum's `Unknown`), so a union that picks a member by shape counts it as a mismatch.
@@ -461,7 +463,7 @@ class Emitter {
     out.push(`${doc}#[derive(Clone, Debug, PartialEq, Eq)]\npub struct ${name} {\n${plain.join('\n')}\n}\n`);
     out.push(`#[derive(Serialize, Deserialize)]\n#[serde(remote = "${name}")]\nstruct ${wire} {\n${mirror.join('\n')}\n}\n`);
     out.push(`impl ${name} {`, '    /// The keys the pinned upstream declarations list for this object.', `    pub const KNOWN_KEYS: &'static [&'static str] = &[${known}];`, '', '    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.', '    pub fn match_score(value: &serde_json::Value) -> usize {', `        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[${literals.join(', ')}])`, '    }', '}', '');
-    out.push(`impl Serialize for ${name} {`, '    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {', `        super::support::ordered(${wire}::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)`, '    }', '}', '');
+    out.push(`impl Serialize for ${name} {`, '    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {', `        super::support::ordered(${wire}::serialize(self, serde_json::value::Serializer), |text| ${wire}::serialize(self, text), &self.key_order, serializer)`, '    }', '}', '');
     out.push(`impl<'de> Deserialize<'de> for ${name} {`, '    fn deserialize<D: serde::Deserializer<\'de>>(deserializer: D) -> Result<Self, D::Error> {', '        let value = serde_json::Value::deserialize(deserializer)?;', `        let mut decoded = ${wire}::deserialize(value.clone()).map_err(serde::de::Error::custom)?;`, '        decoded.key_order = super::support::KeyOrder::of(&value);', '        Ok(decoded)', '    }', '}', '');
     this.chunks.push(out.join('\n'));
   }

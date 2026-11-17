@@ -838,7 +838,14 @@ hours.
 
 `Settings` is generated from the pinned TypeScript declarations: every declared key is a
 typed field, and keys it does not declare are kept in order. `Settings::from_json` then
-`to_json` reproduces the input byte for byte. `SettingsInput` names the three forms the
+`to_json` reproduces the input byte for byte. Each value under a key the declarations do not
+list, in `Settings` and every other generated type, is a `DeepJsonValue`: a `serde_json::Value`
+that drops, clones, compares and prints with loops, so a member nested 9997 levels deep needs no
+more than the 2 MiB stack of a spawned thread. A generated type writes such a member as the
+`Value` would, but past 64 levels as its JSON text, which `serde_json::to_value` reads back only to
+128 levels; `DeepJsonValue::encode` reads it back at any nesting, and `DeepJsonValue::to_json`
+writes a lone value at any nesting. A `DeepJsonValue` on its own serializes and deserializes
+exactly as the `Value` it holds. `SettingsInput` names the three forms the
 `--settings` value takes: `Path`, `Json` and `Inline(Settings)`. Nothing is validated.
 `SandboxSettings` and its parts, `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`,
 `PolicySettingsOrigin`, `ResolveSettingsOptions` and `SDKSettingsParseError` carry the upstream
@@ -870,7 +877,75 @@ return the result as a `PythonJsonValue`, where each integer is an `ExactInteger
 `ResolvedSettings` instead, which holds integers up to the `u64` and `i64` range exactly, a double
 for larger ones and `null` for the non-finite floats. `python_json_loads` and `python_json_dumps`
 are checked against CPython over a corpus of doubles, documents and refused text
-(`.config/mise/lib/claude-sdk-freshness/python_json_goldens.py` writes the goldens):
+(`.config/mise/lib/claude-sdk-freshness/python_json_goldens.py` writes the goldens).
+
+A settings file in the Python dialect nests as deeply as `json.loads` lets it where the Python SDK
+runs: 9997 arrays and objects from a plain function (`PythonCStack::MODULE`, the default), 9993
+under `ClaudeSDKClient.connect` (`PythonCStack::CLIENT_CONNECT`) and 9987 under `query()`
+(`PythonCStack::QUERY`). `ResolverState::with_python_c_stack` picks one. The Python dialect runs
+on a thread of its own whose stack holds a walk that deep; a result nested thousands of levels
+deep needs a stack that size wherever it is dropped, compared or printed, except under a key the
+declarations do not list (`.config/mise/lib/claude-sdk-freshness/python_settings_file_goldens.py`
+records each boundary).
+Its bytes decode as `Path.read_text(encoding="utf-8-sig")` decodes them in the Python SDK's
+`_build_settings_value`: one leading byte order mark is dropped, `\r\n` and a lone `\r` become `\n`,
+and a file that is not UTF-8 is skipped like a file `json.loads` rejects. The `--settings` value
+the Python dialect builds reports such a file with CPython's `UnicodeDecodeError` message
+(`.config/mise/lib/claude-sdk-freshness/python_settings_goldens.py` records the messages).
+A string or key holding a lone surrogate escape such as `"\ud800"` keeps it, as `json.loads` does:
+`resolve_python_settings` returns the exact `str`, and `ResolvedSettings` holds U+FFFD for each
+lone surrogate. Inside the engine such a string stands as the same text with each lone surrogate
+moved to a private-use code point, so it measures and matches like the surrogate. The resolve
+first reserves every private-use code point its inputs hold (settings texts, escapes included,
+managed settings, settings paths and the working directory) and picks stand-ins only among the
+rest, so a private-use code point read anywhere in the resolve stays as it is. The TypeScript
+dialect reads a settings file as the pinned resolver does on Node: UTF-16LE when it starts with
+the bytes FF FE, UTF-8 with U+FFFD for each invalid sequence otherwise, one leading byte order
+mark stripped before `JSON.parse`. It keeps lone surrogates, escaped or decoded from UTF-16LE,
+with the same stand-ins, and `ResolvedSettings` holds U+FFFD for each one, while
+`resolve_settings_json_with_state` returns the text `JSON.stringify` prints for the object
+`resolveSettings` resolves, each lone surrogate escaped as `\udxxx`
+(`.config/mise/lib/claude-sdk-freshness/ts_settings_file_goldens.py` records the cases).
+The settings schema drops each `__proto__` member of the document, of a schema object and of a
+record, as zod's assignment does, and keeps one inside a value it passes through whole.
+The files merge as lodash `mergeWith` merges them: an array or object under `__proto__` merges
+nothing, a scalar there is written, and members merge in `for...in` order, index-like keys first.
+An array merged into an array-like object, one whose `length` is a whole number from 0 to
+2^53 - 1, first turns it into an array of that length holding its index members, and an object
+merged into an array sets its elements, its `length` and named properties no later step prints.
+Each hole or `undefined` element prints as `null`; a `length` that is no valid array length
+rejects with `RangeError` (`ResolveSettingsError::InvalidArrayLength`), and more holes than a V8
+string can print reject with `ResolveSettingsError::InvalidStringLength`
+(`.config/mise/lib/claude-sdk-freshness/ts_settings_merge_goldens.py` records the cases).
+A settings file in the TypeScript dialect nests as deeply as the pinned resolver lets it on Node:
+`resolveSettings` skips a file its read walks run out of stack on, and rejects with `RangeError`
+(`ResolveSettingsError::MaximumCallStack`) when copying the file into its cache or merging it does,
+or with `SyntaxError` (`ResolveSettingsError::InvalidRegularExpression`) when V8 runs out of stack
+compiling the regular expression lodash `isIndex` tests array indexes with, which it does on the
+first two tests of the process.
+`NodeStack::NODE_24_DARWIN_ARM64` holds the stack each pass takes per object and per array on Node
+24.13.1 darwin arm64, started with 4384 bytes of command line and environment, where a file reads up
+to 2223 nested objects and merges up to 1244. `NodeStack::NODE_24_LINUX_ARM64` (1957 and 1252) and
+`NodeStack::NODE_24_LINUX_X64` (1649 and 1307) hold the same for Node 24.13.1 on Linux, where the
+command line and environment take nothing from the stack. Each profile assumes no background
+compile lands while a merge runs, as on Node with every function kept in the interpreter, which the
+goldens record each case with; they also record the cases Node answers more than one way with its
+default flags on each host, and the engine answers each of those as one of them. The default, `NodeStack::for_build_target`, is the profile of the platform the
+crate is built for, and darwin arm64 elsewhere. Each pass also spends a fixed amount at
+the array or object that ends a path, by whether it is empty, and the merge spends more the first
+time V8 runs part of lodash in the process, so the merges of one resolve share that history. A merge
+that assigns a scalar at most levels of a path gets optimized while it runs and reaches deeper than
+the profile by an amount that varies from run to run; the profile follows the unoptimized merge. An array the merge joins onto another
+array is not walked, so a result can nest deeper than any merge: the goldens hold one 2224 levels
+deep. The stack Node has depends on its
+release, its platform and, on macOS, those startup bytes: `NodeStack::with_startup_bytes` sets them
+and `ResolverState::with_node_stack` picks the profile
+(`.config/mise/lib/claude-sdk-freshness/ts_settings_depth_goldens.py` records each boundary).
+Managed settings documents take the passes of the pinned reader: a document too deep to read is
+skipped as unreadable, the managed file rejects when its merge runs out, and a drop-in that runs out
+keeps what it merged, leaves the file tier unloaded and ends the folder. The origin and the machine
+policy come from evaluations with stacks of their own, as upstream
+(`.config/mise/lib/claude-sdk-freshness/ts_managed_settings_goldens.py` records the cases):
 
 ```rust,no_run
 use trogon_claude_agent_sdk::{ResolveSettingsOptions, python_json_dumps, resolve_python_settings};

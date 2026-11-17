@@ -4,13 +4,19 @@ use serde_json::Value;
 
 use super::{read_document, read_policy_document, sanitize_policy_document};
 use crate::{
-    constants::SETTINGS_SCHEMA_JSON, settings_dialect::SettingsDialect, settings_json::js_stringify,
-    settings_numbers::infinities_to_null,
+    constants::SETTINGS_SCHEMA_JSON, node_stack::NodeStack, python_c_stack::PythonCStack,
+    settings_dialect::SettingsDialect, settings_json::js_stringify, settings_numbers::infinities_to_null,
 };
 
 /// The document `read_document` yields as the resolver prints it, with each infinity as `null`.
 fn printed(text: &str) -> Option<Value> {
-    read_document(text, SettingsDialect::TypeScript).map(|document| {
+    read_document(
+        text,
+        SettingsDialect::TypeScript,
+        PythonCStack::MODULE,
+        NodeStack::NODE_24_DARWIN_ARM64,
+    )
+    .map(|document| {
         let mut document = Value::Object(document);
         infinities_to_null(&mut document);
         document
@@ -88,7 +94,15 @@ fn a_finite_number_with_the_value_of_an_infinity_marker_prints_like_the_pinned_r
 
 #[test]
 fn the_python_dialect_keeps_large_integers_exact() {
-    let document = |text: &str| read_document(text, SettingsDialect::Python).map(Value::Object);
+    let document = |text: &str| {
+        read_document(
+            text,
+            SettingsDialect::Python,
+            PythonCStack::MODULE,
+            NodeStack::NODE_24_DARWIN_ARM64,
+        )
+        .map(Value::Object)
+    };
     assert_eq!(
         serialized(document(r#"{"n":12345678901234567890}"#).as_ref()),
         r#"{"n":12345678901234567890}"#
@@ -118,6 +132,13 @@ fn every_recorded_policy_document_is_sanitized_like_the_pinned_resolver() {
         }
     }
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[test]
+fn a_policy_text_that_is_not_an_object_never_reaches_the_sanitizers() {
+    for text in ["[1]", "null", "\"text\"", "{"] {
+        assert!(sanitize_policy_document(text).is_none(), "{text}");
+    }
 }
 
 #[test]
