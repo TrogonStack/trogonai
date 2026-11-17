@@ -72,3 +72,38 @@ pub(crate) const OPENBAO_LOGIN_RETRY_INITIAL: Duration = Duration::from_secs(1);
 
 /// The longest the service waits between two AppRole logins OpenBao refused.
 pub(crate) const OPENBAO_LOGIN_RETRY_MAX: Duration = Duration::from_secs(30);
+
+/// How far back an invalidation consumer that resumes reads: the longest a
+/// released copy can still be held, the ADR#0049 bound of
+/// [`RELEASE_TTL_BOUND`] plus its 30 seconds of per-key jitter. A notice older
+/// than this concerns only copies that have already expired.
+pub const INVALIDATION_REPLAY_WINDOW: Duration = RELEASE_TTL_BOUND.saturating_add(Duration::from_secs(30));
+
+/// The stream that holds release invalidation notices.
+pub const INVALIDATION_STREAM: &str = "SECRETS_INVALIDATION";
+
+/// The subjects of [`INVALIDATION_STREAM`]: every tenant's notices, the tenant
+/// account in the fourth token so each account imports only its own. The
+/// literal prefix comes first because the server refuses a stream subject
+/// that starts with a wildcard unless it drops publish acks (ADR#0081
+/// Decision 3 amendment).
+pub const INVALIDATION_SUBJECTS: &str = "secrets.invalidation.v1.*.>";
+
+/// What precedes the tenant account in a notice subject, which the owner
+/// token and the credential id follow.
+pub(crate) const INVALIDATION_SUBJECT_INFIX: &str = "secrets.invalidation.v1";
+
+/// How long the invalidation stream keeps a notice: the hour ADR#0083
+/// Decision 7 keeps sealing-key invalidations for. It is well past
+/// [`INVALIDATION_REPLAY_WINDOW`], and short enough that the stream stays
+/// small with no count or byte bound.
+pub(crate) const INVALIDATION_MAX_AGE: Duration = Duration::from_secs(3600);
+
+/// How long the invalidation stream remembers a notice's `Nats-Msg-Id`, so a
+/// credential event delivered again within it publishes one notice.
+pub(crate) const INVALIDATION_DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
+
+/// The largest message the invalidation stream takes, in bytes. The largest
+/// notice, a 128 character owner and the longest sequence, fits with its
+/// headers several times over, and anything larger is not a notice.
+pub(crate) const INVALIDATION_MAX_MESSAGE_SIZE: i32 = 1024;

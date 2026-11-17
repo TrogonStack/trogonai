@@ -5,12 +5,16 @@ use trogon_credential_domain::CredentialOwnerId;
 use trogon_std::ReadFile;
 
 use super::tenant_owners_file_wire::TenantOwnersFileWire;
-use super::{OwnerHolding, TenantAccount, TenantOwners, TenantOwnersFileError, TomlSyntax};
+use super::{OwnerHolding, OwnerTenants, TenantAccount, TenantOwners, TenantOwnersFileError, TomlSyntax};
 
 /// Tenant owners loaded once at startup.
+///
+/// Each owner has one holder, kept by owner, so the forward and reverse
+/// questions answer from the same record and can never disagree.
 #[derive(Clone, Debug, Default)]
 pub struct StaticTenantOwners {
-    owners: BTreeMap<TenantAccount, BTreeSet<CredentialOwnerId>>,
+    tenants: BTreeSet<TenantAccount>,
+    holders: BTreeMap<CredentialOwnerId, TenantAccount>,
 }
 
 impl StaticTenantOwners {
@@ -19,9 +23,14 @@ impl StaticTenantOwners {
     }
 
     /// Records that `tenant` holds `owner`.
+    ///
+    /// An owner already held moves to `tenant`, and the tenant it leaves stays
+    /// known, so an owner never has two holders that could both receive its
+    /// credentials.
     #[must_use]
     pub fn with_owner(mut self, tenant: TenantAccount, owner: CredentialOwnerId) -> Self {
-        self.owners.entry(tenant).or_default().insert(owner);
+        self.tenants.insert(tenant.clone());
+        self.holders.insert(owner, tenant);
         self
     }
 
@@ -57,7 +66,6 @@ impl StaticTenantOwners {
         if wire.tenants.is_empty() {
             return Err(TenantOwnersFileError::NoTenants { path: path.to_owned() });
         }
-        let mut holders = BTreeMap::<CredentialOwnerId, TenantAccount>::new();
         let mut loaded = Self::new();
         for (named, owners) in wire.tenants {
             let tenant = TenantAccount::parse(&named).map_err(|source| TenantOwnersFileError::InvalidTenant {
@@ -77,7 +85,7 @@ impl StaticTenantOwners {
                     tenant: tenant.clone(),
                     source,
                 })?;
-                if let Some(first) = holders.insert(owner.clone(), tenant.clone())
+                if let Some(first) = loaded.holders.get(&owner).cloned()
                     && first != tenant
                 {
                     return Err(TenantOwnersFileError::SharedOwner {
@@ -96,11 +104,19 @@ impl StaticTenantOwners {
 
 impl TenantOwners for StaticTenantOwners {
     fn holding(&self, tenant: &TenantAccount, owner: &CredentialOwnerId) -> OwnerHolding {
-        match self.owners.get(tenant) {
-            None => OwnerHolding::UnknownTenant,
-            Some(owners) if owners.contains(owner) => OwnerHolding::Held,
-            Some(_) => OwnerHolding::NotHeld,
+        if !self.tenants.contains(tenant) {
+            OwnerHolding::UnknownTenant
+        } else if self.holders.get(owner) == Some(tenant) {
+            OwnerHolding::Held
+        } else {
+            OwnerHolding::NotHeld
         }
+    }
+}
+
+impl OwnerTenants for StaticTenantOwners {
+    fn holder(&self, owner: &CredentialOwnerId) -> Option<TenantAccount> {
+        self.holders.get(owner).cloned()
     }
 }
 
