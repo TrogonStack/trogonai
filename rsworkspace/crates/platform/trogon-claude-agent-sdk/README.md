@@ -908,7 +908,12 @@ the bytes FF FE, UTF-8 with U+FFFD for each invalid sequence otherwise, one lead
 mark stripped before `JSON.parse`. It keeps lone surrogates, escaped or decoded from UTF-16LE,
 with the same stand-ins, and `ResolvedSettings` holds U+FFFD for each one, while
 `resolve_settings_json_with_state` returns the text `JSON.stringify` prints for the object
-`resolveSettings` resolves, each lone surrogate escaped as `\udxxx`
+`resolveSettings` resolves, each lone surrogate escaped as `\udxxx`.
+`resolve_settings_exact` and `resolve_settings_exact_with_state` return that object as a
+`PythonJsonValue` whose strings and keys keep every lone surrogate and whose numbers hold the
+doubles `JSON.stringify` prints, and `js_stringify_exact` prints it as `JSON.stringify` does.
+`resolve_settings_exact_in_dialect_with_state` returns it for `SettingsDialect::TypeScript`, the
+default, and the `resolve_python_settings` value for `SettingsDialect::Python`
 (`.config/mise/lib/claude-sdk-freshness/ts_settings_file_goldens.py` records the cases).
 The settings schema drops each `__proto__` member of the document, of a schema object and of a
 record, as zod's assignment does, and keeps one inside a value it passes through whole.

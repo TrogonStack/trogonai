@@ -13,6 +13,7 @@ use crate::{
     node_merge_warmth::MergeWarmth,
     python_json_value::PythonJsonValue,
     settings_dialect::SettingsDialect,
+    settings_exact::js_exact_value,
     settings_json::js_stringify,
     settings_managed_reader::{ManagedReader, ParsedFiles},
     settings_numbers::{PythonNumbers, approximate_numbers, exact_value, infinities_to_null, normalize_numbers},
@@ -157,6 +158,63 @@ pub fn resolve_settings_json_with<H: SettingsHost>(
     resolve_settings_json_with_state(host, options, &ResolverState::new())
 }
 
+/// [`resolve_settings_with_state`] as the object the pinned `resolveSettings` returns, with every string and key
+/// exact: each lone surrogate a settings file spells, escaped or decoded from UTF-16LE, stays in it as a
+/// [`PythonString`](crate::PythonString) code point where [`ResolvedSettings`] holds U+FFFD. Each number holds the
+/// double the JavaScript object holds, as an integer when `JSON.stringify` spells it with digits only, and an
+/// infinity holds `null`, as [`resolve_settings_json_with_state`] prints it. Objects keep JavaScript enumeration
+/// order. [`js_stringify_exact`](crate::js_stringify_exact) prints the value as `JSON.stringify` prints the
+/// object, the text [`resolve_settings_json_with_state`] returns. It fails as [`resolve_settings_with_state`] does.
+pub fn resolve_settings_exact_with_state<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    state: &ResolverState,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    on_engine_stack(|| {
+        let _strings = SurrogateStandIns::start();
+        let mut result = resolve_core(host, options, SettingsDialect::TypeScript, state)?;
+        infinities_to_null(&mut result);
+        let exact = js_exact_value(&result);
+        decode(result)?;
+        Ok(exact)
+    })
+}
+
+/// [`resolve_settings_exact_with_state`] with the module state of a process that starts now.
+pub fn resolve_settings_exact_with<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    resolve_settings_exact_with_state(host, options, &ResolverState::new())
+}
+
+/// The resolved settings with every string and key exact, as the chosen SDK holds them:
+/// [`resolve_settings_exact_with_state`] for [`SettingsDialect::TypeScript`] and
+/// [`resolve_python_settings_with_state`] for [`SettingsDialect::Python`]. Both keep every lone surrogate.
+/// [`js_stringify_exact`](crate::js_stringify_exact) prints the TypeScript value as `JSON.stringify` does and
+/// [`python_json_dumps`](crate::python_json_dumps) the Python value as `json.dumps` does, each lone surrogate as
+/// its `\udxxx` escape.
+pub fn resolve_settings_exact_in_dialect_with_state<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+    state: &ResolverState,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    match dialect {
+        SettingsDialect::TypeScript => resolve_settings_exact_with_state(host, options, state),
+        SettingsDialect::Python => resolve_python_settings_with_state(host, options, state),
+    }
+}
+
+/// [`resolve_settings_exact_in_dialect_with_state`] with the module state of a process that starts now.
+pub fn resolve_settings_exact_in_dialect_with<H: SettingsHost>(
+    host: &H,
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    resolve_settings_exact_in_dialect_with_state(host, options, dialect, &ResolverState::new())
+}
+
 /// [`resolve_settings_with`] reading numbers like the chosen SDK's JSON parser.
 pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
     host: &H,
@@ -173,7 +231,8 @@ pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
 /// settings file as deeply as the Node process [`ResolverState::with_node_stack`] describes, on such a thread too,
 /// and fails with [`ResolveSettingsError::MaximumCallStack`] where `resolveSettings` rejects with that `RangeError`,
 /// or with [`ResolveSettingsError::InvalidRegularExpression`] where it rejects with that `SyntaxError`.
-/// A string or key that holds a lone surrogate in either dialect holds U+FFFD for each one.
+/// A string or key that holds a lone surrogate in either dialect holds U+FFFD for each one;
+/// [`resolve_settings_exact_in_dialect_with_state`] keeps it.
 pub fn resolve_settings_in_dialect_with_state<H: SettingsHost>(
     host: &H,
     options: &ResolveSettingsOptions,
@@ -501,6 +560,25 @@ pub async fn resolve_settings_in_dialect(
     let options = options.clone();
     tokio::task::spawn_blocking(move || {
         resolve_settings_in_dialect_with_state(&NativeHost, &options, dialect, &PROCESS_STATE)
+    })
+    .await
+    .map_err(ResolveSettingsError::Join)?
+}
+
+/// [`resolve_settings`] with every string and key exact; see [`resolve_settings_exact_with_state`].
+pub async fn resolve_settings_exact(options: &ResolveSettingsOptions) -> Result<PythonJsonValue, ResolveSettingsError> {
+    resolve_settings_exact_in_dialect(options, SettingsDialect::TypeScript).await
+}
+
+/// [`resolve_settings_in_dialect`] with every string and key exact; see
+/// [`resolve_settings_exact_in_dialect_with_state`].
+pub async fn resolve_settings_exact_in_dialect(
+    options: &ResolveSettingsOptions,
+    dialect: SettingsDialect,
+) -> Result<PythonJsonValue, ResolveSettingsError> {
+    let options = options.clone();
+    tokio::task::spawn_blocking(move || {
+        resolve_settings_exact_in_dialect_with_state(&NativeHost, &options, dialect, &PROCESS_STATE)
     })
     .await
     .map_err(ResolveSettingsError::Join)?
