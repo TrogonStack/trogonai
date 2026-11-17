@@ -4,13 +4,19 @@ use serde_json::Value;
 
 use super::{read_document, read_policy_document, sanitize_policy_document};
 use crate::{
-    constants::SETTINGS_SCHEMA_JSON, settings_dialect::SettingsDialect, settings_json::js_stringify,
-    settings_numbers::infinities_to_null,
+    constants::SETTINGS_SCHEMA_JSON, node_stack::NodeStack, python_c_stack::PythonCStack,
+    settings_dialect::SettingsDialect, settings_json::js_stringify, settings_numbers::infinities_to_null,
 };
 
 /// The document `read_document` yields as the resolver prints it, with each infinity as `null`.
 fn printed(text: &str) -> Option<Value> {
-    read_document(text, SettingsDialect::TypeScript).map(|document| {
+    read_document(
+        text,
+        SettingsDialect::TypeScript,
+        PythonCStack::MODULE,
+        NodeStack::NODE_24_DARWIN_ARM64,
+    )
+    .map(|document| {
         let mut document = Value::Object(document);
         infinities_to_null(&mut document);
         document
@@ -88,7 +94,15 @@ fn a_finite_number_with_the_value_of_an_infinity_marker_prints_like_the_pinned_r
 
 #[test]
 fn the_python_dialect_keeps_large_integers_exact() {
-    let document = |text: &str| read_document(text, SettingsDialect::Python).map(Value::Object);
+    let document = |text: &str| {
+        read_document(
+            text,
+            SettingsDialect::Python,
+            PythonCStack::MODULE,
+            NodeStack::NODE_24_DARWIN_ARM64,
+        )
+        .map(Value::Object)
+    };
     assert_eq!(
         serialized(document(r#"{"n":12345678901234567890}"#).as_ref()),
         r#"{"n":12345678901234567890}"#
@@ -121,6 +135,13 @@ fn every_recorded_policy_document_is_sanitized_like_the_pinned_resolver() {
 }
 
 #[test]
+fn a_policy_text_that_is_not_an_object_never_reaches_the_sanitizers() {
+    for text in ["[1]", "null", "\"text\"", "{"] {
+        assert!(sanitize_policy_document(text).is_none(), "{text}");
+    }
+}
+
+#[test]
 fn every_recorded_policy_document_is_read_like_the_pinned_resolver() {
     let description: Value = serde_json::from_str(SETTINGS_SCHEMA_JSON).expect("description");
     let documents = description["read"]["policy"]["documents"]
@@ -131,12 +152,15 @@ fn every_recorded_policy_document_is_read_like_the_pinned_resolver() {
     for probe in documents {
         let input = probe["input"].as_str().expect("input");
         let expected = &probe["output"];
-        let read = read_policy_document(input);
-        let actual = serde_json::json!({
+        let read = read_policy_document(input, Some("f"));
+        let mut actual = serde_json::json!({
             "settings": read.settings.map_or(Value::Null, Value::Object),
             "documentHasPolicyContent": read.has_policy_content.map_or(Value::Null, Value::Bool),
             "loadState": if read.loaded { "loaded" } else { "didNotLoad" },
         });
+        if read.only_substitutes {
+            actual["onlySubstitutes"] = Value::Bool(true);
+        }
         if !same(&actual, expected) {
             mismatches.push(format!("{input}\n  rust:     {actual}\n  upstream: {expected}"));
         }
@@ -147,7 +171,7 @@ fn every_recorded_policy_document_is_read_like_the_pinned_resolver() {
 #[test]
 fn a_blank_managed_document_loads_as_no_settings() {
     for text in ["", " \n\t "] {
-        let read = read_policy_document(text);
+        let read = read_policy_document(text, Some("f"));
         assert!(read.settings.expect("settings").is_empty(), "{text:?}");
         assert_eq!(read.has_policy_content, None, "{text:?}");
         assert!(read.loaded, "{text:?}");
@@ -157,7 +181,7 @@ fn a_blank_managed_document_loads_as_no_settings() {
 #[test]
 fn a_managed_document_that_is_not_an_object_does_not_load() {
     for text in ["not json", "[1]", "5"] {
-        let read = read_policy_document(text);
+        let read = read_policy_document(text, Some("f"));
         assert!(read.settings.is_none(), "{text:?}");
         assert_eq!(read.has_policy_content, None, "{text:?}");
         assert!(!read.loaded, "{text:?}");

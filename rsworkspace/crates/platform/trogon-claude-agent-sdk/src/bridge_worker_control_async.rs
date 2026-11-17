@@ -16,10 +16,10 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::CancellationToken;
-use crate::bridge_js::js_trim;
 use crate::bridge_worker_control::{
     CallbackResult, DeferredControl, HostError, HostFuture, ModelVerdict, PendingControl, Replier, clean_control_text,
 };
+use crate::session_prompt::js_truthy;
 
 mod constants;
 
@@ -262,17 +262,12 @@ impl AsyncControl {
     }
 }
 
-/// `ue`: whether an environment value reads as switched on.
-fn is_switched_on(value: &str) -> bool {
-    matches!(js_trim(value).to_lowercase().as_str(), "1" | "true" | "yes" | "on")
-}
-
 /// `P4` without the settings (the attach path has none): background tasks are off when
 /// `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` or `CLAUDE_CODE_SIMPLE` reads as on, or `--bare` is among the arguments
 /// before any `--`. `variable` reads the environment and is asked on every request.
 #[must_use]
 pub fn background_tasks_disabled(variable: impl Fn(&str) -> Option<String>, arguments: &[String]) -> bool {
-    let on = |name: &str| variable(name).is_some_and(|value| is_switched_on(&value));
+    let on = |name: &str| variable(name).is_some_and(|value| js_truthy(&value));
     on("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS")
         || on("CLAUDE_CODE_SIMPLE")
         || arguments

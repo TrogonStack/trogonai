@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
-use crate::{McpToolName, SchemaPointer, SdkTool};
+use crate::{McpToolName, SchemaPointer, SdkTool, js_object_order::array_index};
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum SdkToolsError {
@@ -91,14 +91,6 @@ impl SdkTools {
         listed.sort_by_key(|tool| array_index(tool.name().as_str()).map_or((1, 0), |index| (0, index)));
         listed
     }
-}
-
-/// A canonical JavaScript array index: digits without a leading zero, below 2^32 - 1.
-fn array_index(name: &str) -> Option<u32> {
-    if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_digit()) || (name.len() > 1 && name.starts_with('0')) {
-        return None;
-    }
-    name.parse::<u32>().ok().filter(|index| *index < u32::MAX)
 }
 
 impl From<SdkTool> for SdkTools {
