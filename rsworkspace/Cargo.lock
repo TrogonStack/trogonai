@@ -7778,6 +7778,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-secrets-client"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "futures",
+ "grpc-nats-micro",
+ "nkeys",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "trogon-credential-aggregate",
+ "trogon-credential-domain",
+ "trogon-identity-types",
+ "trogon-nats",
+ "trogon-secret-store",
+ "trogon-secrets-service",
+ "trogon-std",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogon-secrets-service"
 version = "0.1.0"
 dependencies = [
