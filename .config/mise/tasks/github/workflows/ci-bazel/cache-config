@@ -48,9 +48,9 @@ fi
   # them. toplevel, not minimal, because the coverage report and the lint
   # output groups are top level outputs that later steps read from disk.
   echo "build --remote_download_outputs=toplevel"
-  # The cache is on the same private network, and the default of 60s per call
-  # would stall every action when the server is down.
-  echo "build --remote_timeout=10s"
+  # Uploads of large Rust outputs to the cache box take longer than 10s while a
+  # cold build saturates it, and timeouts trip the circuit breaker below.
+  echo "build --remote_timeout=60s"
   echo "build --remote_retries=2"
   echo "build --remote_retry_max_delay=2s"
   # Stop calling the cache once more than 10% of calls failed within a minute,
