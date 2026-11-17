@@ -4,7 +4,8 @@ With R3_NATIVE=1 every run of resolve_settings_oracle.mjs gets the call position
 and the caller context R3_CONTEXT names (`toplevel` by default) written into its spec, and after the run its
 `.native.json` report must show this host's platform, a real clock that started inside the run, the call and context
 asked for, every spawned program ended, the Python R3_PYTHON names running the recorder, and no refusal. On Windows
-every run also spawns reg.exe for HKLM and HKCU alike, at least twice each (the load and the first call's re-read).
+every run also spawns reg.exe for HKLM and HKCU alike, as many times as `windows_pairs` predicts from the spec: the
+load, plus each resolve whose o8 re-reads.
 With R3_WSL=1 every run must see a WSL kernel, and an organization session must have read /proc/version, found WSL
 there and spawned reg.exe at least twice; without it no run may see a WSL kernel. A refusal raises NativeRefusal, any other
 failed check raises NativeViolation; both stop the unit, which records why. TALLY counts what every run reported.
@@ -37,7 +38,8 @@ class NativeViolation(RuntimeError):
 def fresh():
     return {"runs": 0, "platforms": {}, "calls": {}, "contexts": {}, "hives": {}, "wsl_kernel": {}, "org_sessions": 0,
             "proc_reads": 0, "context_child": 0, "stand_in_installed": 0, "clock_first_start": None, "clock_offsets": {},
-            "spawns": {}, "exits": {}, "unfinished_at_settle": 0, "ignored": {}, "refusals": {}, "violations": []}
+            "spawns": {}, "exits": {}, "unfinished_at_settle": 0, "ignored": {}, "refusals": {}, "violations": [],
+            "predicted_pairs": {}}
 
 
 TALLY = fresh()
@@ -75,7 +77,73 @@ def before(command):
     report = spec + ".native.json"
     if os.path.exists(report):
         os.remove(report)
-    return {"spec": spec, "report": report, "started": int(time.time() * 1000)}
+    # A spec for another platform is refused before the load, so it predicts no reg.exe run.
+    parsed = json.loads(text)
+    pairs = windows_pairs(parsed) if sys.platform == "win32" and parsed.get("platform") in (None, "win32") else None
+    return {"spec": spec, "report": report, "started": int(time.time() * 1000), "pairs": pairs}
+
+
+# The reg.exe stdout limit (Sy, sdk.mjs line 136, passed to every query by Aq): a longer answer fails the query, which
+# leaves that hive unanswered.
+REG_STDOUT_LIMIT = 2097152
+# o8 (sdk.mjs line 165 col 76539): the lossSeen wait (set), the wait while every read answers (ret) and the wait after
+# 2 to 4 unanswered reads in a row (_q, line 136).
+LOSS_WAIT, ANSWERED_WAIT, UNANSWERED_WAIT = 30000, 1800000, 60000
+HKLM_ANSWER = os.path.join("System32", "hklm.txt")
+
+
+def o8_rereads(unanswered, seen_loss, since):
+    """Whether o8 starts a re-read: `unanswered` reads in a row, a lossSeen reason, `since` ms after the last read."""
+    retrying = 1 <= unanswered <= 4
+    wait = LOSS_WAIT if seen_loss else ANSWERED_WAIT if not retrying else 0 if unanswered == 1 else UNANSWERED_WAIT
+    return not 0 <= since < wait
+
+
+def windows_pairs(spec):
+    """How many times a native Windows run of `spec` spawns reg.exe for each hive: the load's pair, plus one per resolve
+    whose o8 re-reads.
+
+    The load (r8.startLoad) and each re-read query HKLM and HKCU together. r8.replace (sdk.mjs line 165 col ~74980)
+    sets lastReadAt to the load's end, lossSeen to "", and unansweredReadsInARow to 0 when HKLM answers or to 1 when it
+    does not. The registry stand-in answers HKLM from System32\\hklm.txt under SYSTEMROOT; past REG_STDOUT_LIMIT bytes
+    the query ends in ERR_CHILD_PROCESS_STDIO_MAXBUFFER and HKLM is unanswered. o8's re-read (line 165 col 76539) ends
+    with lastReadAt at its end. With HKLM unanswered and at most 4 reads in a row unanswered, the count grows by one
+    whether iet takes the reading (r8.replace) or not (cet), and lossSeen stays "". Otherwise the count may drop to 0,
+    grow by one, or stay with lossSeen set, depending on more than the registry: every such state is kept, and a later
+    resolve the states decide differently raises NativeViolation, since o8 then predicts no one count. Each `at` moves
+    the clock that many ms past the real time; the prime of a second call runs first, at the real time.
+    """
+    root = spec.get("root") or ""
+    system_root = (spec.get("env") or {}).get("SYSTEMROOT") or os.path.join(root, "mnt", "c", "Windows")
+    answer = os.path.join(system_root, HKLM_ANSWER)
+    relative = os.path.relpath(answer, root).replace(os.sep, "/") if root else None
+    size = os.path.getsize(answer) if os.path.isfile(answer) else None
+    cases = spec.get("cases") or []
+    # The prime writes the first case's files but keeps the real clock.
+    calls = ([{"files": cases[0].get("files")}] if CALL == "second" and cases else []) + cases
+    states, last_read, offset, pairs = None, 0, 0, 1
+    for call in calls:
+        if isinstance(call.get("at"), (int, float)):
+            offset = call["at"]
+        files = call.get("files") or {}
+        if relative in files:
+            size = None if files[relative] is None else len(files[relative].encode("utf-8"))
+        if states is None:
+            # The first call loads with its own files and clock.
+            states, last_read = {(1 if size is not None and size > REG_STDOUT_LIMIT else 0, False)}, offset
+        decisions = {o8_rereads(unanswered, seen_loss, offset - last_read) for unanswered, seen_loss in states}
+        if len(decisions) > 1:
+            raise NativeViolation(f"{root}: o8 predicts no one reg.exe count once a re-read answers HKLM")
+        if not decisions.pop():
+            continue
+        pairs += 1
+        last_read = offset
+        # Past 4 unanswered reads in a row, or with HKLM answered, iet and aet decide on more than the registry.
+        states = {state for unanswered, _ in states for state in (
+            [(unanswered + 1, False)] if size is not None and size > REG_STDOUT_LIMIT and unanswered <= 4
+            else [(unanswered + 1, False), (unanswered, True)] if size is not None and size > REG_STDOUT_LIMIT
+            else [(0, False), (unanswered + 1, False)] + [(unanswered, True)] * (not 1 <= unanswered <= 4))}
+    return pairs
 
 
 def count(table, key, by=1):
@@ -115,9 +183,9 @@ def after(context):
         problems.append(f"python {platform.python_version()}, not R3_PYTHON {PYTHON!r}")
     hives = report.get("hives") or {}
     if sys.platform == "win32":
-        hklm, hkcu = hives.get("reg.exe:HKLM", 0), hives.get("reg.exe:HKCU", 0)
-        if hklm != hkcu or hklm < 2:
-            problems.append(f"reg.exe spawned HKLM {hklm} and HKCU {hkcu} times, not the same and at least 2")
+        hklm, hkcu, pairs = hives.get("reg.exe:HKLM", 0), hives.get("reg.exe:HKCU", 0), context["pairs"]
+        if pairs is not None and (hklm != hkcu or hklm != pairs):
+            problems.append(f"reg.exe spawned HKLM {hklm} and HKCU {hkcu} times, not the {pairs} o8 predicts")
     if WSL:
         if not report.get("wsl_kernel"):
             problems.append("no WSL kernel under R3_WSL=1")
@@ -133,6 +201,8 @@ def after(context):
         count(TALLY["platforms"], str(report.get("platform")))
         count(TALLY["calls"], str(report.get("call")))
         count(TALLY["contexts"], str(report.get("context")))
+        if context["pairs"] is not None:
+            count(TALLY["predicted_pairs"], str(context["pairs"]))
         count(TALLY["wsl_kernel"], str(bool(report.get("wsl_kernel"))))
         TALLY["org_sessions"] += 1 if report.get("org_session") else 0
         TALLY["proc_reads"] += report.get("proc_reads") or 0

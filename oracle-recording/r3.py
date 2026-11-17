@@ -1392,7 +1392,12 @@ def r7_control(place):
         for location in (spec_path, trace):
             if os.path.exists(location):
                 os.remove(location)
-    with_x = [record for record in records if "x" in record["info"]]
+    # The native oracle marks where its recorded cases start. A warm second call reads every record, since its prime
+    # holds the first parse; a first call reads the cases' records. The marker itself carries no stage. The simulated
+    # oracle writes no marker and no prime, so its records are all the cases'.
+    primed, cases = r8_split(records) if GATE["NATIVE"] else ([], records)
+    records = [record for record in records if record != R8_MARKER] if R8_SECOND else cases
+    with_x = [record for record in records if "x" in (record.get("info") or {})]
 
     def shows(record):
         x = record["info"]["x"]
@@ -1403,7 +1408,8 @@ def r7_control(place):
         "pinned_exit": pinned[0], "identical": pinned[0] == 0 and pinned == instrumented,
         "instrumented_exit": instrumented[0], "stderr": instrumented[2] if instrumented[0] else "",
         "stages": stages, "labels": sorted({record["label"] for record in with_x}), "records": records[:40],
-        "answer": pinned[1][:4000], **{k: v for k, v in traced.items() if k != "package"},
+        "answer": pinned[1][:4000], "prime_records": len(primed), "case_records": len(cases),
+        "read": "all" if R8_SECOND else "cases", **{k: v for k, v in traced.items() if k != "package"},
     }
     passed = (detail["identical"] and all(stages[stage] and all(stages[stage]) for stage in R7_STAGES)
               and (stages["copy"] or stages["copy-hit"]) and all(stages["copy"] + stages["copy-hit"]))
@@ -3009,6 +3015,10 @@ def units():
     return out
 
 
+# The reason the native oracle gives for a spec that names another platform than the host's.
+PLATFORM_REFUSAL = __import__("re").compile(r"platform \w+ on a \w+ host")
+
+
 def main():
     version = subprocess.run([NODE, "--version"], capture_output=True, check=True).stdout.decode().strip()
     result = {"host": HOST, "node": version, "shard": SHARD, "shards": SHARDS, "machine": machine(), "units": {},
@@ -3031,6 +3041,16 @@ def main():
             if GATE["NATIVE"]:
                 # What every oracle run of the unit reported; a unit whose runs broke a check failed with them.
                 assertion = GATE["delta"](tally, GATE["snapshot"]())
+                # A spec written for another platform is refused by the native oracle (resolve_settings_oracle.mjs
+                # line 110) before it resolves anything, so it can record no wrong data. On Unix the tool base's
+                # `native` place writes a win32 spec, and when that unit stops on the refusal, the probes it still had
+                # in flight on the quiet pool end during the next unit and land in its tally. Those are expected
+                # platform refusals, not a check the next unit failed.
+                platform_refusals = {reason: number for reason, number in assertion["refusals"].items()
+                                     if PLATFORM_REFUSAL.fullmatch(reason)}
+                assertion["refusals"] = {reason: number for reason, number in assertion["refusals"].items()
+                                         if reason not in platform_refusals}
+                assertion["expected_platform_refusals"] = platform_refusals
                 result["units"][name]["native_assertion"] = assertion
                 if (assertion["violations"] or assertion["refusals"]) and "error" not in result["units"][name]:
                     result["units"][name]["error"] = f"native runs failed their checks: {assertion['refusals']} " \
@@ -3041,7 +3061,8 @@ def main():
             brief = {k: v for k, v in result["units"][name].items() if k in ("class", "startup_max", "budget", "error", "changes", "edge_guess", "profile", "window", "room_at_class")}
             if GATE["NATIVE"]:
                 native = result["units"][name]["native_assertion"]
-                brief["native"] = {key: native[key] for key in ("runs", "platforms", "spawns", "refusals")}
+                brief["native"] = {key: native[key] for key in ("runs", "platforms", "spawns", "refusals",
+                                                                  "expected_platform_refusals")}
             sys.stderr.write(f"{name} {json.dumps(brief)[:600]}\n")
             sys.stderr.flush()
     shutil.rmtree(D["SCRATCH"], ignore_errors=True)

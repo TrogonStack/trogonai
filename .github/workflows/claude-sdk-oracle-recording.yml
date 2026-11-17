@@ -17,8 +17,8 @@ env:
 
 jobs:
   refit:
-    # Runs only when the head commit asks for it with `[refit]`.
-    if: contains(github.event.head_commit.message, '[refit]') && !contains(github.event.head_commit.message, '[wsl-only]')
+    # Runs only when the head commit asks for it with `[refit]`; `[wsl-only]` and `[windows-only]` each run one host.
+    if: contains(github.event.head_commit.message, '[refit]') && !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]')
     # Every fit unit natively: the host's own platform, real spawned programs (the real plutil on darwin, a real
     # reg.exe at the WSL path on linux) and the real clock, as the first call of a process and as a call within the
     # 30-minute window after it, from each caller context the resolve can start in.
@@ -209,7 +209,7 @@ jobs:
     # The organization and held units under a real WSL 2 kernel: Node runs natively inside the distribution and the
     # SDK's own /proc/version read sees the kernel, which every org run asserts. The distribution is imported from a
     # pinned Ubuntu rootfs; oracle-recording/wsl_job.sh runs inside it.
-    if: contains(github.event.head_commit.message, '[refit]')
+    if: contains(github.event.head_commit.message, '[refit]') && !contains(github.event.head_commit.message, '[windows-only]')
     strategy:
       fail-fast: false
       matrix:
@@ -262,7 +262,7 @@ jobs:
   goldens:
     # Every golden recorder natively, through record.py, starting from the committed golden of the host so each
     # change shows as a diff.
-    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -369,6 +369,7 @@ jobs:
 
   wsl-goldens:
     # The managed organization goldens under a real WSL 2 kernel, starting from the committed linux x64 golden.
+    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') }}
     strategy:
       fail-fast: false
       matrix:

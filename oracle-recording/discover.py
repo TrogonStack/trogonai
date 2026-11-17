@@ -42,6 +42,8 @@ if WINDOWS and not started({"PAD": "x"}):
 # registry query is a real program's run; it takes the variable out of the environment before the SDK loads.
 if WINDOWS and STUB:
     EXTRA_ENV = {**EXTRA_ENV, "REGISTRY_STAND_IN": STUB}
+    # The round 8 recorder r3 loads reads the program from its own environment for an organization case's root.
+    os.environ.setdefault("REGISTRY_STAND_IN", STUB)
 
 
 ORACLE_NAME = "resolve_settings_oracle.mjs"
