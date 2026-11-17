@@ -1835,8 +1835,12 @@ async fn mirror_fence_does_not_make_the_deferred_message_queue_unbounded() -> Te
     Ok(())
 }
 
+/// TypeScript `[Symbol.asyncDispose]()` runs the same cleanup as `close()`: the prompt is already on the stdin stream,
+/// and `end()` closes the stream behind it. Python's `__aexit__` disconnects, and its close waits on the write lock
+/// for the write in progress. Dropping the client is that disposal, so the frame reaches the CLI whole, the send
+/// resolves, and input ends behind it.
 #[tokio::test]
-async fn owner_disposal_interrupts_a_backpressured_write() -> TestResult {
+async fn owner_disposal_finishes_a_backpressured_write_before_ending_input() -> TestResult {
     let mut configured = options()?;
     configured.limits.max_buffer_size = Some(16 * 1024 * 1024);
     let (client, cli) = connect(configured).await?;
@@ -1848,17 +1852,22 @@ async fn owner_disposal_interrupts_a_backpressured_write() -> TestResult {
     } = cli;
     let mut input = lines.into_inner();
     let handle = client.handle();
-    let prompt = Prompt::from("x".repeat(8 * 1024 * 1024));
+    let text = "x".repeat(8 * 1024 * 1024);
+    let prompt = Prompt::from(text.clone());
     let sending = tokio::spawn(async move { handle.send_prompt(prompt).await });
     let mut first = [0_u8; 1];
     timeout(Duration::from_secs(2), input.read_exact(&mut first)).await??;
     drop(client);
-    let mut remainder = Vec::new();
-    timeout(Duration::from_secs(2), input.read_to_end(&mut remainder)).await??;
+    let mut written = first.to_vec();
+    timeout(Duration::from_secs(2), input.read_to_end(&mut written)).await??;
+    assert_eq!(written.iter().filter(|byte| **byte == b'\n').count(), 1);
+    let frame: Value = serde_json::from_slice(written.strip_suffix(b"\n").ok_or("the frame ends without a newline")?)?;
+    assert_eq!(frame["type"], "user");
+    assert_eq!(frame["message"]["content"], text.as_str());
     observer.complete(0);
     drop(stdout);
     drop(stderr);
-    assert!(matches!(sending.await?, Err(Error::DriverStopped)));
+    sending.await??;
     observer.wait_for(ScriptedProcessEvent::StdinClosed).await?;
     Ok(())
 }
@@ -2199,36 +2208,77 @@ async fn a_stderr_pipe_that_stays_open_is_reported_beside_the_error_that_ended_t
     Ok(())
 }
 
-/// Whether the runtime saw the CLI exit before the prompt arrived, which races with the prompt.
-async fn startup_fails_before_a_healthy_shutdown() -> Result<bool, Box<dyn std::error::Error>> {
-    let (process, harness) = ScriptedProcessSpawner::new();
-    let mut cli = ScriptedCli::from(harness);
-    // Python style: TypeScript hands the query back without waiting for the prompt to be written, so only Python
-    // reports a startup failure from `query`.
-    let mut python = options()?;
-    python.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
-    let querying = tokio::spawn(query_with_adapters(Prompt::from("prompt"), python, adapters(process)));
-    let request = cli.read().await?;
-    cli.success(&request, json!({"hooks_applied":true,"hook_on_failure_supported":true}))
-        .await?;
-    cli.observer.complete(0);
-    tokio::task::yield_now().await;
-    // Nothing runs while this thread waits, so the response and the exit of the CLI usually reach
-    // the runtime together and the exit is seen before the prompt is sent.
-    std::thread::sleep(Duration::from_millis(100));
-    drop(cli.stdout);
-    drop(cli.stderr);
-    Ok(matches!(querying.await?, Err(Error::NotReadyForWriting)))
+/// Spawns the scripted CLI with its stdin swapped for that of `cat`, whose stdout hands the test what the runtime
+/// writes and then the end of the input, which the runtime closes only once its run is over.
+struct WitnessedStdin {
+    process: ScriptedProcessSpawner,
+    witness: Mutex<Option<tokio::sync::oneshot::Sender<tokio::process::ChildStdout>>>,
+}
+
+impl SpawnProcess for WitnessedStdin {
+    type Error = io::Error;
+
+    fn spawn(&self, command: &mut tokio::process::Command) -> io::Result<tokio::process::Child> {
+        let mut child = self.process.spawn(command)?;
+        let mut cat = tokio::process::Command::new("cat");
+        cat.stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        let mut witness = TokioProcessSpawner.spawn(&mut cat)?;
+        child.stdin = witness.stdin.take();
+        let stdout = witness
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("the stdin witness has no stdout"))?;
+        self.witness
+            .lock()
+            .map_err(|_| io::Error::other("the stdin witness slot is poisoned"))?
+            .take()
+            .ok_or_else(|| io::Error::other("the stdin witness was already handed out"))?
+            .send(stdout)
+            .map_err(|_| io::Error::other("the test stopped waiting for the stdin witness"))?;
+        Ok(child)
+    }
 }
 
 #[tokio::test]
 async fn a_startup_failure_on_a_healthy_shutdown_reports_only_the_startup_error() -> TestResult {
-    for _ in 0..40 {
-        if startup_fails_before_a_healthy_shutdown().await? {
-            return Ok(());
+    let (process, harness) = ScriptedProcessSpawner::new();
+    let (witness, written) = tokio::sync::oneshot::channel();
+    let spawner = WitnessedStdin {
+        process,
+        witness: Mutex::new(Some(witness)),
+    };
+    // Python style: TypeScript hands the query back without waiting for the prompt to be written, so only Python
+    // reports a startup failure from `query`.
+    let mut python = options()?;
+    python.argv_style = trogon_claude_agent_sdk::ArgvStyle::Python;
+    let querying = query_with_adapters(Prompt::from("prompt"), python, adapters(spawner));
+    tokio::pin!(querying);
+    let initialize = async {
+        let mut lines = BufReader::new(written.await?).lines();
+        let line = lines
+            .next_line()
+            .await?
+            .ok_or_else(|| io::Error::other("expected the initialize request"))?;
+        Ok::<_, Box<dyn std::error::Error>>((lines, serde_json::from_str::<Value>(&line)?))
+    };
+    // The query is polled only until the initialize request is on stdin, so it cannot send the prompt until the
+    // test awaits it again.
+    let (mut lines, request) = tokio::select! {
+        outcome = &mut querying => {
+            return Err(outcome.err().map_or_else(|| "the query settled before initialize was written".into(), Into::into));
         }
-    }
-    Err("the CLI exit was never observed before the prompt".into())
+        read = timeout(Duration::from_secs(2), initialize) => read??,
+    };
+    let mut cli = ScriptedCli::from(harness);
+    cli.success(&request, json!({"hooks_applied":true,"hook_on_failure_supported":true}))
+        .await?;
+    cli.end(0);
+    // The runtime ends its input when the run is over, so the exit was seen before the held query sends the prompt.
+    assert!(timeout(Duration::from_secs(2), lines.next_line()).await??.is_none());
+    assert!(matches!(querying.await, Err(Error::NotReadyForWriting)));
+    Ok(())
 }
 
 #[tokio::test]

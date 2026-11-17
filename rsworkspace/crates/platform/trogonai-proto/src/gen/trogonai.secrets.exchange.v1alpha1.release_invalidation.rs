@@ -194,11 +194,11 @@ impl ::buffa::Enumeration for ReleaseInvalidationReason {
 /// This is not trogonai.secrets.credentials.v1alpha1.CredentialInvalidated,
 /// which records a credential becoming unusable on its own stream.
 ///
-/// Published on `{tenant}.secrets.invalidation.v1.{owner_token}.{credential_id}`,
+/// Published on `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`,
 /// where `{tenant}` is the account key of the tenant holding the owner, so only
-/// that account can import it (ADR#0081 Decision 3), and `{owner_token}` is the
-/// owner id with each `.` written as `~`, as the credential event subjects
-/// write it.
+/// that account can import it (ADR#0081 Decision 3 amendment), and
+/// `{owner_token}` is the owner id with each `.` written as `~`, as the
+/// credential event subjects write it.
 ///
 /// It carries metadata only and has no field that could hold a value, since
 /// values stay out of JetStream (ADR#0023 Decision 3). A consumer evicts every

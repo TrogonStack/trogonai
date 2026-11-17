@@ -6,9 +6,9 @@ use regex::Regex;
 use serde_json::{Map, Value};
 
 use crate::bridge_gitcmd::GitProbeContext;
-use crate::bridge_js::js_trim;
 use crate::bridge_refs::guess_default_branch;
 use crate::bridge_url::rejected;
+use crate::session_prompt::js_trim;
 
 static SCP: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^git@([^:/@]+):([^/]+)/([^/]+?)(?:\.git)?/?$").ok());

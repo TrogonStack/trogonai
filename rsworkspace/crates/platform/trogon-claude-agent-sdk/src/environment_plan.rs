@@ -27,13 +27,9 @@ pub struct EnvironmentPlan {
 
 pub(crate) type Inherited = BTreeMap<OsString, OsString>;
 
+/// `Te(c.DEBUG_CLAUDE_AGENT_SDK)` in `sdk.mjs` 0.3.323, which trims the value before it compares.
 fn truthy(value: Option<&OsString>) -> bool {
-    value.is_some_and(|value| {
-        matches!(
-            value.to_string_lossy().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
+    value.is_some_and(|value| crate::session_prompt::js_truthy(&value.to_string_lossy()))
 }
 
 pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> EnvironmentPlan {

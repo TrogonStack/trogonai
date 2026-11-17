@@ -1,0 +1,201 @@
+//! How a resolve reads its managed settings documents in each dialect.
+
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
+
+use serde_json::Value;
+
+use crate::{
+    node_managed_pass::ManagedPass,
+    node_merge::NodeMerge,
+    node_merge_call::NodeMergeCall,
+    node_merge_warmth::MergeWarmth,
+    node_stack::NodeStack,
+    node_text_file::read_node_text,
+    session_prompt::js_trim,
+    settings_dialect::SettingsDialect,
+    settings_numbers::normalize_numbers,
+    settings_parse::parse_json,
+    settings_policy_parse::{PolicyParse, parse_policy_text},
+    settings_read::read_policy_object,
+    settings_resolve_tier::{LoadState, TierRead},
+    settings_resolve_values::{SettingsMap, merge_unbounded, merge_within},
+};
+
+/// The managed settings documents a resolve read so far, by path, and whether each read opened its file: the parse
+/// cache of the file cache (`Fu` upstream), which every evaluation of the managed settings shares.
+#[derive(Debug, Default)]
+pub(crate) struct ParsedFiles(RefCell<HashMap<PathBuf, (TierRead, bool)>>);
+
+/// The reader of a resolve's managed settings documents.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ManagedReader<'p> {
+    decoder: Decoder,
+    /// The stack of this Node process, which the TypeScript dialect reads and merges on.
+    node: NodeStack,
+    /// The evaluation of the managed settings the TypeScript dialect reads and merges in. The Python dialect evaluates
+    /// the managed settings once, on no stack, and never looks at it.
+    pass: ManagedPass,
+    parsed: &'p ParsedFiles,
+    /// What the merges of the resolve left V8 having run, which the merges of the sources go on from.
+    warmth: &'p Cell<MergeWarmth>,
+}
+
+/// How a reader decodes, parses and merges managed settings documents.
+#[derive(Clone, Copy, Debug)]
+enum Decoder {
+    /// The Python dialect: the bytes as UTF-8 with replacement characters, parsed by `serde_json`.
+    Lossy,
+    /// The TypeScript dialect: the bytes as Node decodes them, read and merged on the stack of this Node process in
+    /// the reader's evaluation of the managed settings.
+    Node,
+}
+
+impl<'p> ManagedReader<'p> {
+    /// The reader of the first evaluation of the managed settings, keeping what the TypeScript dialect parses in
+    /// `parsed` and what its merges run in `warmth`.
+    pub(crate) fn new(
+        dialect: SettingsDialect,
+        node: NodeStack,
+        parsed: &'p ParsedFiles,
+        warmth: &'p Cell<MergeWarmth>,
+    ) -> Self {
+        let decoder = match dialect {
+            SettingsDialect::Python => Decoder::Lossy,
+            SettingsDialect::TypeScript => Decoder::Node,
+        };
+        Self {
+            decoder,
+            node,
+            pass: ManagedPass::Sources,
+            parsed,
+            warmth,
+        }
+    }
+
+    /// The same reader in the evaluation `pass`, sharing what the others parsed.
+    pub(crate) fn in_pass(self, pass: ManagedPass) -> Self {
+        Self { pass, ..self }
+    }
+
+    /// Whether the reader runs on a Node stack, where each evaluation of the managed settings has its own room.
+    pub(crate) fn has_stack(self) -> bool {
+        matches!(self.decoder, Decoder::Node)
+    }
+
+    /// The managed settings document at `path`, from `read` the first time the TypeScript dialect reads it and from
+    /// the parse cache after that.
+    pub(crate) fn read_file(self, path: &Path, read: impl FnOnce(Self) -> (TierRead, bool)) -> (TierRead, bool) {
+        if !self.has_stack() {
+            return read(self);
+        }
+        let cached = self.parsed.0.borrow().get(path).cloned();
+        if let Some(cached) = cached {
+            return cached;
+        }
+        let fresh = read(self);
+        self.parsed.0.borrow_mut().insert(path.to_path_buf(), fresh.clone());
+        fresh
+    }
+
+    /// A managed settings document from the bytes of its file at `path`, which fit the size limit, sanitized and read
+    /// by the policy-tolerant schema parse in either dialect.
+    pub(crate) fn read(self, bytes: &[u8], path: &Path) -> TierRead {
+        let parsed = match self.decoder {
+            Decoder::Lossy => {
+                let text = String::from_utf8_lossy(bytes);
+                if text.trim().is_empty() {
+                    return loaded(SettingsMap::new());
+                }
+                match parse_json(&text) {
+                    Ok(Value::Object(document)) => PolicyParse::Object(document),
+                    _ => PolicyParse::NotObject,
+                }
+            }
+            Decoder::Node => {
+                let text = read_node_text(bytes);
+                if js_trim(&text).is_empty() {
+                    return loaded(SettingsMap::new());
+                }
+                match parse_policy_text(&text, self.node, self.pass) {
+                    PolicyParse::Object(mut document) => {
+                        for entry in document.values_mut() {
+                            normalize_numbers(entry, SettingsDialect::TypeScript);
+                        }
+                        PolicyParse::Object(document)
+                    }
+                    other => other,
+                }
+            }
+        };
+        match parsed {
+            PolicyParse::Object(document) => read_policy(document, path),
+            PolicyParse::NotObject => not_loaded(false),
+            PolicyParse::Overflow => not_loaded(true),
+        }
+    }
+
+    /// Whether the file cache (`Fu` upstream) runs out of stack copying the settings read from a managed document.
+    pub(crate) fn copy_overflows(self, settings: &SettingsMap) -> bool {
+        match self.decoder {
+            Decoder::Lossy => false,
+            Decoder::Node => self.node.policy_copy_overflows(self.pass, settings),
+        }
+    }
+
+    /// Merges the settings a document kept into its folder (`UP` upstream), keeping what merged before the merge ran
+    /// out of stack.
+    pub(crate) fn merge_into_folder(self, destination: &mut SettingsMap, source: &SettingsMap) -> NodeMerge {
+        self.merge(NodeMergeCall::Folder, destination, source)
+    }
+
+    /// Merges part of the admin settings into the policy tier (`QP` upstream).
+    pub(crate) fn merge_admin(self, destination: &mut SettingsMap, source: &SettingsMap) -> NodeMerge {
+        self.merge(|_| NodeMergeCall::Admin, destination, source)
+    }
+
+    fn merge(
+        self,
+        call: impl FnOnce(ManagedPass) -> NodeMergeCall,
+        destination: &mut SettingsMap,
+        source: &SettingsMap,
+    ) -> NodeMerge {
+        match self.decoder {
+            Decoder::Lossy => merge_unbounded(destination, source),
+            Decoder::Node => merge_within(self.node, call(self.pass), self.warmth, destination, source),
+        }
+    }
+}
+
+fn loaded(settings: SettingsMap) -> TierRead {
+    TierRead {
+        settings: Some(settings),
+        load_state: LoadState::Loaded,
+        ..TierRead::absent()
+    }
+}
+
+/// `lE(..., true)` upstream for a document that parsed as an object.
+fn read_policy(document: SettingsMap, path: &Path) -> TierRead {
+    let read = read_policy_object(document, Some(&path.to_string_lossy()));
+    read.map_or(not_loaded(false), |read| TierRead {
+        has_policy_content: read.has_policy_content,
+        only_substitutes: read.only_substitutes,
+        floored: read.floored,
+        ..loaded(read.settings)
+    })
+}
+
+fn not_loaded(unreadable: bool) -> TierRead {
+    TierRead {
+        settings: None,
+        ..TierRead::did_not_load(unreadable)
+    }
+}
+
+#[cfg(test)]
+#[path = "settings_managed_reader_tests.rs"]
+mod tests;

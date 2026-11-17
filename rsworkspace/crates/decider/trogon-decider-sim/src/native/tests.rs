@@ -89,28 +89,30 @@ enum CounterError {
 #[error("invalid counter event")]
 struct CounterEvolveError;
 
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+struct CounterState(i64);
+
+impl trogon_decider::Evolve<CounterEvent> for CounterState {
+    type Error = CounterEvolveError;
+
+    fn evolve(self, event: &CounterEvent) -> Result<Self, Self::Error> {
+        Ok(Self(self.0 + i64::from(event.amount)))
+    }
+}
+
 impl Decider for Increment {
     type StreamId = str;
-    type State = i64;
+    type State = CounterState;
     type Event = CounterEvent;
     type DecideError = CounterError;
-    type EvolveError = CounterEvolveError;
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         "counter"
     }
 
-    fn initial_state() -> Self::State {
-        0
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        Ok(state + i64::from(event.amount))
-    }
-
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        if state + i64::from(command.amount) > 100 {
+        if state.0 + i64::from(command.amount) > 100 {
             return Err(CounterError::TooLarge);
         }
         Ok(Decision::event(CounterEvent { amount: command.amount }))
@@ -128,11 +130,7 @@ fn incremented_envelope(amount: u32) -> WireEnvelope {
 struct CounterBundle;
 
 impl NativeDeciderBundle for CounterBundle {
-    type State = i64;
-
-    fn initial_state() -> Self::State {
-        Increment::initial_state()
-    }
+    type State = CounterState;
 
     fn stream_id(_command: &WireEnvelope) -> Result<String, NativeDomainError> {
         Ok("counter".to_string())

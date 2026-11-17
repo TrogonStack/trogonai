@@ -15,7 +15,6 @@ import {
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { useNotify } from '@/components/ui/toaster';
 
 import { keyBackendIdOf, type KeyBackendId } from '../domain/identifiers';
 import { keyProviderLabels, type RegistrableProvider } from '../domain/provider';
@@ -231,12 +230,10 @@ function ValidateStep({
   onDone: (id: KeyBackendId) => void;
 }) {
   const complete = useCompleteRegistration();
-  const notify = useNotify();
 
   const finish = async () => {
     try {
       const registration = await complete.mutateAsync(plan.attemptId);
-      notify.success('Backend registered', registration.displayName);
       onDone(keyBackendIdOf(registration.registration.keyBackendId));
     } catch {
       return;

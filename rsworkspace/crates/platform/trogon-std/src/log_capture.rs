@@ -82,7 +82,10 @@ impl CapturedEvents {
 /// as never, and a capture installed on another thread misses its events. A
 /// second dispatcher that lives for the whole process makes `tracing` ask every
 /// registered dispatcher instead.
-fn ask_every_dispatcher_for_interest() {
+///
+/// [`CapturedEvents::install`] already calls this. A test that builds its own
+/// capturing [`Dispatch`] calls it before building one.
+pub fn ask_every_dispatcher_for_interest() {
     static NEVER_INTERESTED: OnceLock<Dispatch> = OnceLock::new();
     NEVER_INTERESTED.get_or_init(|| Dispatch::new(NoSubscriber::default()));
 }

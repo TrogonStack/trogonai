@@ -1,0 +1,17 @@
+{
+  "platform": "linux",
+  "env": {},
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "managedSettings": {
+      "allowManagedHooksOnly": true,
+      "model": "parent",
+      "permissions": {
+        "allow": [
+          "Bash(ls)"
+        ]
+      }
+    }
+  }
+}
