@@ -436,6 +436,10 @@ async fn generic_webhooks_serve_refuses_missing_credential_backend_configuration
     .unwrap()
     .unwrap_err();
 
+    assert!(matches!(
+        error.downcast_ref::<std::env::VarError>(),
+        Some(std::env::VarError::NotPresent)
+    ));
     assert_eq!(
         error.to_string(),
         format!("{OPENBAO_ADDR} must be set when webhooks is enabled")
