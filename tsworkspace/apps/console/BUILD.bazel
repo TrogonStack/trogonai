@@ -1,5 +1,6 @@
 load("@aspect_bazel_lib//lib:copy_file.bzl", "copy_file")
-load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
+load("@aspect_bazel_lib//lib:copy_to_bin.bzl", "copy_to_bin")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary", "js_test")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
 load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
@@ -8,6 +9,13 @@ load("@npm_tsworkspace//tsworkspace/apps/console:vite/package_json.bzl", vite_bi
 load("@npm_tsworkspace//tsworkspace/apps/console:vitest/package_json.bzl", vitest_bin = "bin")
 
 npm_link_all_packages(name = "node_modules")
+
+# Every Vitest target in this package runs under the same environment.
+VITEST_ENV = {
+    "VITEST_MAX_WORKERS": "4",
+    "VITE_ALLOW_OUTSIDE_ROOT": "1",
+    "VITE_BAZEL_RUNFILES": "1",
+}
 
 filegroup(
     name = "sources",
@@ -93,20 +101,6 @@ js_library(
     ],
 )
 
-# CI-only control: an undeclared test file in the canonical output tree.
-copy_file(
-    name = "undeclared_sibling",
-    src = "control/undeclared-sibling.txt",
-    out = "src/screens/declared1.test.tsx",
-)
-
-# Builds the sibling before the test without making it a test input.
-copy_file(
-    name = "undeclared_sibling_order",
-    src = ":undeclared_sibling",
-    out = "undeclared-sibling-order.txt",
-)
-
 vitest_bin.vitest_test(
     name = "test",
     args = ["run"],
@@ -115,18 +109,57 @@ vitest_bin.vitest_test(
     data = [
         ":node_modules",
         ":test_inputs",
-        ":undeclared_sibling_order",
         "//tsworkspace:node_modules/vitest",
     ],
-    env = {
-        "VITEST_MAX_WORKERS": "4",
-        "VITE_ALLOW_OUTSIDE_ROOT": "1",
-        "VITE_BAZEL_RUNFILES": "1",
-    },
+    env = VITEST_ENV,
     # Native ESM and Vite must agree on the canonical paths of declared dependencies.
     patch_node_fs = False,
     # Bazel must reserve the CPUs that Vitest's worker pool consumes.
     tags = ["cpu:4"],
+)
+
+# A declared test whose name holds glob metacharacters, and an undeclared
+# sibling in the output tree that the same name read as a glob would match.
+copy_file(
+    name = "discovery_declared",
+    src = "discovery/declared.fixture.tsx",
+    out = "src/discovery/declared[12].test.tsx",
+)
+
+copy_file(
+    name = "discovery_undeclared",
+    src = "discovery/undeclared.fixture.tsx",
+    out = "src/discovery/declared1.test.tsx",
+)
+
+# Builds the undeclared sibling before the check without making it a check input.
+copy_file(
+    name = "discovery_undeclared_order",
+    src = ":discovery_undeclared",
+    out = "discovery-undeclared-order.txt",
+)
+
+copy_to_bin(
+    name = "discovery_check",
+    srcs = ["discovery/check.mjs"],
+)
+
+# Vitest under :test must collect every declared test file and nothing else
+# from the output tree, so this lists what it collects with the same layout.
+js_test(
+    name = "test_discovery",
+    chdir = package_name(),
+    copy_data_to_bin = False,
+    data = [
+        ":discovery_declared",
+        ":discovery_undeclared_order",
+        ":node_modules",
+        ":test_inputs",
+        "//tsworkspace:node_modules/vitest",
+    ],
+    entry_point = ":discovery_check",
+    env = dict(VITEST_ENV, VITEST_MAX_WORKERS = "1"),
+    patch_node_fs = False,
 )
 
 oxlint_bin.oxlint_test(

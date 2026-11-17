@@ -11,7 +11,11 @@ import { configDefaults, defineConfig } from 'vitest/config';
 const bazelRoot = process.env.VITE_BAZEL_RUNFILES === '1' ? dirname(realpathSync('vite.config.ts')) : undefined;
 
 // Vitest reads each entry as a glob, so a declared name must only ever match itself.
-const literalPattern = (file: string) => file.split(sep).join('/').replace(/[*?[\]{}()!+@|\\#]/g, '\\$&');
+const literalPattern = (file: string) =>
+  file
+    .split(sep)
+    .join('/')
+    .replace(/[*?[\]{}()!+@|\\#]/g, '\\$&');
 
 // The canonical output tree keeps test files that later changes deleted, while the
 // working directory holds only this test's declared inputs.
