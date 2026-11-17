@@ -141,6 +141,21 @@ class DependencyTests(unittest.TestCase):
             gate_z.openssl_dependencies(text)
         self.assertEqual(caught.exception.code, Code.REFERENCE)
 
+    def test_a_replaced_package_is_walked_through_its_replacement(self):
+        crates_io = "registry+https://github.com/rust-lang/crates.io-index"
+        text = (lock(("trogon-claude-agent-sdk", "0.1.0", [f"tls 1.0.0 ({crates_io})"]),
+                     ("tls", "1.0.0", ["native-tls"]), ("native-tls", "0.2.0", []))
+                + f'\n[[package]]\nname = "tls"\nversion = "1.0.0"\nsource = "{crates_io}"\nreplace = "tls 1.0.0"\n')
+        self.assertEqual(gate_z.openssl_dependencies(text), ["native-tls 0.2.0"])
+
+    def test_a_replacement_missing_from_the_lock_is_a_stale_reference(self):
+        crates_io = "registry+https://github.com/rust-lang/crates.io-index"
+        text = (lock(("trogon-claude-agent-sdk", "0.1.0", [f"tls 1.0.0 ({crates_io})"]))
+                + f'\n[[package]]\nname = "tls"\nversion = "1.0.0"\nsource = "{crates_io}"\nreplace = "tls 2.0.0"\n')
+        with self.assertRaises(GateError) as caught:
+            gate_z.openssl_dependencies(text)
+        self.assertEqual(caught.exception.code, Code.REFERENCE)
+
     def test_a_dependency_missing_from_the_lock_is_a_stale_reference(self):
         with self.assertRaises(GateError) as caught:
             gate_z.openssl_dependencies(lock(("trogon-claude-agent-sdk", "0.1.0", ["gone 1.0.0"])))

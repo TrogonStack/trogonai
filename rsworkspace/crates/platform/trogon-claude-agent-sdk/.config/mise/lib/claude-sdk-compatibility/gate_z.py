@@ -84,7 +84,9 @@ def openssl_dependencies(lock_text, package=SDK_PACKAGE):
     """Each OpenSSL crate reachable from `package` in a Cargo.lock, as `name version`.
 
     The lockfile does not record targets, features or dependency kinds, so the walk counts every locked edge, dev and
-    platform-specific ones included. That only over-reports, which is the safe side for this check.
+    platform-specific ones included. That only over-reports, which is the safe side for this check. A package swapped
+    out with `[replace]` lists no dependencies of its own; Cargo writes `replace` naming the package built in its place,
+    so the walk follows that the same way.
     """
     packages = {}
     for locked in tomllib.loads(lock_text)["package"]:
@@ -98,6 +100,9 @@ def openssl_dependencies(lock_text, package=SDK_PACKAGE):
         seen.add(key)
         if locked["name"] in OPENSSL_CRATES:
             found.add(f"{locked['name']} {locked['version']}")
-        for dependency in locked.get("dependencies", ()):
-            pending.extend(_locked_packages(packages, dependency))
+        references = list(locked.get("dependencies", ()))
+        if "replace" in locked:
+            references.append(locked["replace"])
+        for reference in references:
+            pending.extend(_locked_packages(packages, reference))
     return sorted(found)
