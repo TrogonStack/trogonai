@@ -712,8 +712,10 @@ async fn a_stream_that_never_answers_is_reconnected() -> TestResult {
     let shared = Arc::clone(&started.transport.shared);
     let mut ready = shared.first_ready.subscribe();
 
-    let first_get = timeout(BOUND, started.server.gets_seen.wait_for(|gets| *gets >= 1)).await;
-    let first_seen = first_get.is_ok_and(|seen| seen.is_ok());
+    // Each wait is reduced to a flag at once, so the `watch::Ref` it returns does not keep `started` borrowed.
+    let first_seen = timeout(BOUND, started.server.gets_seen.wait_for(|gets| *gets >= 1))
+        .await
+        .is_ok_and(|seen| seen.is_ok());
     // The first request hangs, so only the connect timeout ends it.
     tokio::time::advance(shared.scaled(CONNECT_TIMEOUT)).await;
     // The stream task arms the reconnect wait in the same poll that sees the connect timeout fire, so once the attempt
@@ -727,8 +729,10 @@ async fn a_stream_that_never_answers_is_reconnected() -> TestResult {
         tokio::task::yield_now().await;
     }
     tokio::time::advance(shared.scaled(reconnect_delay(1))).await;
-    let second_get = timeout(BOUND, started.server.gets_seen.wait_for(|gets| *gets >= 2)).await;
-    let wait_gets = json!({"reached": first_seen && second_get.is_ok_and(|seen| seen.is_ok())});
+    let second_seen = timeout(BOUND, started.server.gets_seen.wait_for(|gets| *gets >= 2))
+        .await
+        .is_ok_and(|seen| seen.is_ok());
+    let wait_gets = json!({"reached": first_seen && second_seen});
     let settled = timeout(BOUND, ready.wait_for(Option::is_some)).await;
     let opened = settled.is_ok_and(|value| value.is_ok_and(|value| value.as_ref().is_some_and(Result::is_ok)));
     let wait_ready = json!({"reached": opened && started.transport.is_ready()});
