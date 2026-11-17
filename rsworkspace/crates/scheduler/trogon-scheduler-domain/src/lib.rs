@@ -12,5 +12,5 @@ pub use commands::CommandWireError;
 pub use commands::domain;
 pub use commands::{
     CreateSchedule, CreateScheduleDecideError, EvolveError, PauseSchedule, PauseScheduleError, RemoveSchedule,
-    RemoveScheduleError, ResumeSchedule, ResumeScheduleError, evolve, initial_state,
+    RemoveScheduleError, ResumeSchedule, ResumeScheduleError, ScheduleState, evolve,
 };

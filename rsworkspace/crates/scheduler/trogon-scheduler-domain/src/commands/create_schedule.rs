@@ -36,10 +36,9 @@ pub enum CreateScheduleDecideError {
 
 impl Decider for CreateSchedule {
     type StreamId = ScheduleId;
-    type State = state_v1::State;
+    type State = super::state::ScheduleState;
     type Event = v1::ScheduleEvent;
     type DecideError = CreateScheduleDecideError;
-    type EvolveError = super::EvolveError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
@@ -47,15 +46,7 @@ impl Decider for CreateSchedule {
         &self.id
     }
 
-    fn initial_state() -> Self::State {
-        super::state::initial_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
-    }
-
-    fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+    fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         let Some(value) = state.state.as_ref() else {
             return Err(CreateScheduleDecideError::MissingStateValue);
         };

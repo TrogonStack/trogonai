@@ -234,8 +234,11 @@ pub(crate) struct CredentialHandlerOutcome {
 }
 
 impl CredentialHandlerOutcome {
-    fn new(state: state_v1::CredentialStateSnapshot, stream_position: StreamPosition) -> Self {
-        Self { state, stream_position }
+    fn new(state: impl Into<state_v1::CredentialStateSnapshot>, stream_position: StreamPosition) -> Self {
+        Self {
+            state: state.into(),
+            stream_position,
+        }
     }
 
     pub(crate) fn state(&self) -> &state_v1::CredentialStateSnapshot {
