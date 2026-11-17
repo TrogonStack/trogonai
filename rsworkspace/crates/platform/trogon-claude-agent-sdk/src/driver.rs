@@ -840,7 +840,16 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         }
     }
     // `sdk.mjs` writes the initialize request while it constructs the Query, so it is on stdin before the caller
-    // holds anything; the outcome travels into the task so a failed write ends the run like any other error.
+    // holds anything; the outcome travels into the task so a failed write ends the run like any other error. A
+    // transport that is not ready yet, as an SSE stream still opening, would hold the caller until it is, where the
+    // browser `query()` returns at once and its write waits for readiness on its own; the task writes it instead,
+    // before it takes any command.
+    if !driver.transport.is_ready() {
+        return Ok(tokio::spawn(async move {
+            let started = driver.start(first_initialize).await;
+            driver.run(started, terminal).await
+        }));
+    }
     let started = driver.start(first_initialize).await;
     Ok(tokio::spawn(driver.run(started, terminal)))
 }
@@ -2598,6 +2607,7 @@ where
             crate::ArgvStyle::TypeScript => constants::TYPESCRIPT_CLOSE_GRACE,
             crate::ArgvStyle::Python => constants::PYTHON_CLOSE_WAIT,
         };
+        let whole = self.transport.writes_whole_documents();
         let Self {
             transport,
             abort,
@@ -2612,8 +2622,9 @@ where
         // waits on the write lock for a write in progress. A transport write that stops partway leaves half a line,
         // so once the frame is started it is finished before the close is honored. A pipe that stops draining is
         // waited for only until the close grace: TypeScript stops such a process 2 seconds after `close()`, and
-        // Python gives up on the write lock after 5.
-        *frame_cut = true;
+        // Python gives up on the write lock after 5. A transport that takes a frame whole or not at all never leaves
+        // half of one.
+        *frame_cut = !whole;
         let write = async {
             let written = match limit {
                 Some(limit) => match timeout(limit, transport.write(&text)).await {
@@ -2633,6 +2644,10 @@ where
                 result = &mut write => return result,
                 () = abort.cancelled() => return Err(crate::AbortError::PROCESS.into()),
                 _ = &mut *shutdown => { *shutdown_seen = true; }
+            }
+            // Nothing of the frame reached the peer yet, as a JavaScript write still awaiting its transport.
+            if whole {
+                return Err(Error::ShutdownRequested);
             }
         }
         let deadline = *close_deadline.get_or_insert_with(|| Instant::now() + grace);
