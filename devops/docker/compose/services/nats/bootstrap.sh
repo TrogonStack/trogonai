@@ -199,6 +199,7 @@ PLATFORM channel-bridge-telegram 0
 PLATFORM nats-cli 0
 PLATFORM kv-provisioner 0
 PLATFORM audit-provisioner 0
+PLATFORM secrets-invalidation-provisioner 0
 USERS
 
 ensure_sentinel
