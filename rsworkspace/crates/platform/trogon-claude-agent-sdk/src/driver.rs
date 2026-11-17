@@ -335,6 +335,11 @@ where
     shutdown: oneshot::Receiver<()>,
     /// The shutdown signal has been taken, so the receiver must not be polled again.
     shutdown_seen: bool,
+    /// When the frames still owed after the close stop being waited for, set by the first write that meets the close.
+    close_deadline: Option<Instant>,
+    /// A frame was handed to the transport and its write was dropped before it finished, so stdin may end in the
+    /// middle of a line. The process is stopped before input ends, so the CLI never reads that half line.
+    frame_cut: bool,
     /// TypeScript `abortController`: once cancelled, the process is stopped and the run ends with an `AbortError`.
     abort: crate::CancellationToken,
     limits: Limits,
@@ -777,6 +782,8 @@ pub(crate) async fn spawn<T: Transport, F: crate::adapters::SessionFileSystem>(
         overflow: VecDeque::new(),
         shutdown,
         shutdown_seen: false,
+        close_deadline: None,
+        frame_cut: false,
         abort,
         limits: options.limits,
         handler: options.permission_handler,
@@ -863,9 +870,20 @@ where
         for signal in self.callback_signals.values().chain(self.detached_callbacks.values()) {
             signal.cancel();
         }
+        // A frame cut short leaves half a line on stdin; ending input behind it would hand the CLI that half line,
+        // so the process is stopped first, as TypeScript stops one that has not drained stdin by the close grace.
+        let cut = if self.frame_cut {
+            Some(self.transport.kill().await)
+        } else {
+            None
+        };
         self.end_input().await;
         let immediate = primary.is_err() && !matches!(primary, Err(Error::UnexpectedEof));
-        let killed = if immediate { self.transport.kill().await } else { Ok(()) };
+        let killed = match cut {
+            Some(killed) => killed,
+            None if immediate => self.transport.kill().await,
+            None => Ok(()),
+        };
         let closed = match killed {
             Ok(()) => self.transport.close().await,
             Err(error) => {
@@ -909,7 +927,8 @@ where
 
     /// `sdk.mjs` writes a prompt to stdin as `query()` takes it, so one taken before `close()` is on stdin when the
     /// input ends. The close can reach the driver ahead of a prompt queued before it, so those prompts are written
-    /// now; the other commands are handed back untouched.
+    /// now; the other commands are handed back untouched. A pipe that stops draining ends the flush at the close
+    /// grace, as it ends any write that meets the close.
     async fn write_queued_prompts(&mut self) -> Vec<Command> {
         let mut unapplied = Vec::new();
         while let Some(command) = self.commands.try_recv() {
@@ -2565,19 +2584,58 @@ where
             Outgoing::Python(frame) => crate::mcp_wire_ids::splice_markers(crate::python_json_dumps(&frame)),
         };
         text.push('\n');
-        if !self.input_open() {
+        // After a frame was cut, anything more would follow half a line.
+        if self.frame_cut || !self.input_open() {
             return Err(Error::NotReadyForWriting);
         }
         let limit = self.limits.write_timeout.map(crate::Timeout::as_duration);
-        // The driver took this frame before it saw any close, so the caller handed it over first. `sdk.mjs` writes
-        // such a frame to stdin at once and `close()` only ends the stream behind it, so the write is polled first
-        // and goes out when the transport takes it right away. Only a write that has to wait gives way to the close
-        // or the abort, as a JavaScript write still awaiting its transport does.
+        let grace = match self.argv_style {
+            crate::ArgvStyle::TypeScript => constants::TYPESCRIPT_CLOSE_GRACE,
+            crate::ArgvStyle::Python => constants::PYTHON_CLOSE_WAIT,
+        };
+        let Self {
+            transport,
+            abort,
+            shutdown,
+            shutdown_seen,
+            close_deadline,
+            frame_cut,
+            ..
+        } = self;
+        // The driver took this frame before it saw any close, so the caller handed it over first. `sdk.mjs` hands
+        // the whole frame to the stdin stream at once and `close()` only ends the stream behind it; Python's close
+        // waits on the write lock for a write in progress. A transport write that stops partway leaves half a line,
+        // so once the frame is started it is finished before the close is honored. A pipe that stops draining is
+        // waited for only until the close grace: TypeScript stops such a process 2 seconds after `close()`, and
+        // Python gives up on the write lock after 5.
+        *frame_cut = true;
+        let write = async {
+            let written = match limit {
+                Some(limit) => match timeout(limit, transport.write(&text)).await {
+                    Ok(written) => written,
+                    Err(_) => return Err(Error::WriteTimeout),
+                },
+                None => transport.write(&text).await,
+            };
+            // The transport finished with the frame, whether or not it took it.
+            *frame_cut = false;
+            written
+        };
+        let mut write = std::pin::pin!(write);
+        if !*shutdown_seen {
+            tokio::select! {
+                biased;
+                result = &mut write => return result,
+                () = abort.cancelled() => return Err(crate::AbortError::PROCESS.into()),
+                _ = &mut *shutdown => { *shutdown_seen = true; }
+            }
+        }
+        let deadline = *close_deadline.get_or_insert_with(|| Instant::now() + grace);
         tokio::select! {
             biased;
-            result = async { match limit { Some(limit) => timeout(limit, self.transport.write(&text)).await.map_err(|_| Error::WriteTimeout)?, None => self.transport.write(&text).await } } => result,
-            () = self.abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
-            _ = &mut self.shutdown, if !self.shutdown_seen => { self.shutdown_seen = true; Err(Error::ShutdownRequested) }
+            result = &mut write => result,
+            () = abort.cancelled() => Err(crate::AbortError::PROCESS.into()),
+            () = sleep_until(deadline) => Err(Error::ShutdownRequested),
         }
     }
 }

@@ -65,8 +65,9 @@ pub trait Transport: Send + 'static {
     fn expect_control_response(&mut self, _request_id: &str) {}
 
     /// TypeScript `SpawnedProcess.kill` and `abortController.abort()`: stop the peer now, without waiting for it
-    /// to finish. Called before [`Transport::close`] when the run ends on an error or an abort. The default does
-    /// nothing, which is right for a transport whose `close` already tears the connection down.
+    /// to finish. Called before [`Transport::close`] when the run ends on an error or an abort, and before
+    /// [`Transport::end_input`] when a write was dropped partway through a frame. The default does nothing, which is
+    /// right for a transport whose `close` already tears the connection down.
     fn kill(&mut self) -> impl Future<Output = Result<(), Error>> + Send {
         async { Ok(()) }
     }
