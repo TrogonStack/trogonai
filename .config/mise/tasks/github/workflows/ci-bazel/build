@@ -2,15 +2,12 @@
 #MISE description="Build every Bazel target using the runner's Bazel cache"
 set -euo pipefail
 
-# shellcheck source=../../../../lib/bazel-ci.sh
-source "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/.config/mise/lib/bazel-ci.sh"
-
 mkdir -p "${RUNNER_TEMP:?}/bazel-profiles"
 
 # The coverage config matches the test run, so the targets it already built
 # come from the cache instead of building again without instrumentation.
 # --keep_going so one broken target does not hide the results of all others.
-bazel_ci build \
+exec bazel build \
   --config=ci \
   --config=coverage \
   --keep_going \

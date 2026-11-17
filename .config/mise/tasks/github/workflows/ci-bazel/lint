@@ -2,13 +2,10 @@
 #MISE description="Run the Bazel lint aspects over every target using the runner's Bazel cache"
 set -euo pipefail
 
-# shellcheck source=../../../../lib/bazel-ci.sh
-source "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/.config/mise/lib/bazel-ci.sh"
-
 mkdir -p "${RUNNER_TEMP:?}/bazel-profiles"
 
 # --keep_going so one target's findings do not hide the findings of all others.
-bazel_ci build \
+exec bazel build \
   --config=ci \
   --config=lint \
   --keep_going \
