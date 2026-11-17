@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Delete the generated Bazel cache config and any credential it holds"
+set -euo pipefail
+
+rm -f "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/.bazelrc.local"
