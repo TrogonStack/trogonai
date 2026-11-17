@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn trims_the_javascript_white_space_set() {
     assert_eq!(js_trim("\u{feff}\u{a0} a b\u{2028}\n"), "a b");
-    assert!(is_js_space('\u{3000}'));
-    assert!(!is_js_space('\u{200b}'));
+    assert!(js_space('\u{3000}'));
+    assert!(!js_space('\u{200b}'));
 }
 
 #[test]
