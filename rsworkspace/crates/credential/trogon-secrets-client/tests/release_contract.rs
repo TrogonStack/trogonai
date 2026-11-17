@@ -15,6 +15,7 @@ use async_nats::{Client, RequestErrorKind, Subscriber};
 use buffa::Message;
 use bytes::Bytes;
 use futures::StreamExt;
+use nkeys::error::ErrorKind;
 use nkeys::{KeyPair, XKey};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -255,7 +256,9 @@ async fn does_not_open_a_release_when_pinned_to_another_service_key() {
         .await
         .unwrap_err();
 
-    assert!(matches!(refused, ReleaseError::Unseal(UnsealError::NotOpened)));
+    assert!(
+        matches!(refused, ReleaseError::Unseal(UnsealError::NotOpened(source)) if source.kind() == ErrorKind::InvalidPayload)
+    );
     deployment.stop().await;
 }
 

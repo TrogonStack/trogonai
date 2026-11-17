@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use nkeys::XKey;
@@ -44,7 +45,7 @@ impl ReleasedValue {
         }
         let opened = requester
             .open(&access.xkey_sealed_value, service.key())
-            .map_err(|_| UnsealError::NotOpened)?;
+            .map_err(|error| UnsealError::NotOpened(Arc::new(error)))?;
         let opened = String::from_utf8(opened).map_err(|_| UnsealError::NotUtf8)?;
         let value = SecretString::new(opened).map_err(|_| UnsealError::Empty)?;
         let hold_until = now

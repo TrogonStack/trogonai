@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use nkeys::{KeyPair, KeyPairType};
 
@@ -14,7 +15,7 @@ pub struct TenantAccount(String);
 
 impl TenantAccount {
     pub fn parse(raw: &str) -> Result<Self, TenantAccountError> {
-        let key = KeyPair::from_public_key(raw).map_err(|_| TenantAccountError::NotAPublicKey)?;
+        let key = KeyPair::from_public_key(raw).map_err(|error| TenantAccountError::NotAPublicKey(Arc::new(error)))?;
         if key.key_pair_type() != KeyPairType::Account {
             return Err(TenantAccountError::NotAnAccount);
         }
