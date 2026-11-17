@@ -7,6 +7,7 @@ use grpc_nats_micro::constants::{CONTENT_TYPE_PROTOBUF, HEADER_CONTENT_TYPE};
 use grpc_nats_micro::status_codec::encode_reply;
 use grpc_nats_micro::{ContentType, Outcome, ReplyError, ServiceErrorCode, ServiceFault};
 use nkeys::XKey;
+use nkeys::error::ErrorKind;
 use trogon_nats::mocks::AdvancedMockNatsClient;
 use trogon_std::time::FixedEpochClock;
 use trogonai_proto::secrets::exchange::v1alpha1::release_location::Value;
@@ -210,7 +211,9 @@ async fn refuses_a_value_sealed_by_a_service_it_did_not_pin() {
 
     let refused = client.release(&request(&tenant())).await.unwrap_err();
 
-    assert!(matches!(refused, ReleaseError::Unseal(UnsealError::NotOpened)));
+    assert!(
+        matches!(refused, ReleaseError::Unseal(UnsealError::NotOpened(source)) if source.kind() == ErrorKind::InvalidPayload)
+    );
 }
 
 #[tokio::test]

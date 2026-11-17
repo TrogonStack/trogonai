@@ -2,12 +2,13 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_nats::subject::ToSubject;
-use async_nats::{HeaderMap, Message};
+use async_nats::{HeaderMap, Message, Subject};
 use bytes::Bytes;
 use nkeys::XKey;
 use trogon_nats::RequestClient;
 use trogonai_proto::nats::micro::v1alpha1::{ContentType as ProtoContentType, ServiceOptions};
 
+use super::fake_answer::FakeAnswer;
 use super::fake_release_handler::FakeReleaseHandler;
 use super::{FakeOutcome, FakeRequestError, ReceivedRelease, ServiceXkey};
 
@@ -20,7 +21,8 @@ use super::{FakeOutcome, FakeRequestError, ReceivedRelease, ServiceXkey};
 /// client reads the same bytes it would read from the bus.
 ///
 /// Each request takes the next scripted [`FakeOutcome`]; with none left, the
-/// fake denies. A release is sealed with the fake's own xkey, which
+/// fake denies. A request is recorded as it arrives, so a scripted delay holds
+/// back only its reply. A release is sealed with the fake's own xkey, which
 /// [`FakeSecretsService::service_xkey`] pins.
 #[derive(Clone)]
 pub struct FakeSecretsService {
@@ -63,6 +65,32 @@ impl FakeSecretsService {
             .pop_front()
             .unwrap_or_else(FakeOutcome::denied)
     }
+
+    async fn answer(
+        &self,
+        subject: Subject,
+        headers: &HeaderMap,
+        payload: &Bytes,
+        answer: &FakeAnswer,
+    ) -> Result<Message, FakeRequestError> {
+        let handler = FakeReleaseHandler::new(subject.as_str(), answer, &self.xkey, &self.received);
+        let options = ServiceOptions {
+            content_type: ProtoContentType::CONTENT_TYPE_PROTOBUF.into(),
+            ..ServiceOptions::default()
+        };
+        let reply = grpc_nats_micro::answer(Some(headers), payload, &options, &handler)
+            .await
+            .map_err(FakeRequestError::Reply)?;
+        Ok(Message {
+            subject,
+            reply: None,
+            length: reply.body.len(),
+            payload: reply.body,
+            headers: Some(reply.headers),
+            status: None,
+            description: None,
+        })
+    }
 }
 
 impl Default for FakeSecretsService {
@@ -80,27 +108,14 @@ impl RequestClient for FakeSecretsService {
         headers: HeaderMap,
         payload: Bytes,
     ) -> Result<Message, FakeRequestError> {
-        let subject = subject.to_subject();
         let outcome = self.next_outcome();
-        tokio::time::sleep(outcome.delay()).await;
-        let answer = outcome.into_answer().ok_or(FakeRequestError::Unreachable)?;
-        let handler = FakeReleaseHandler::new(subject.as_str(), &answer, &self.xkey, &self.received);
-        let options = ServiceOptions {
-            content_type: ProtoContentType::CONTENT_TYPE_PROTOBUF.into(),
-            ..ServiceOptions::default()
+        let delay = outcome.delay();
+        let replied = match outcome.into_answer() {
+            Some(answer) => self.answer(subject.to_subject(), &headers, &payload, &answer).await,
+            None => Err(FakeRequestError::Unreachable),
         };
-        let reply = grpc_nats_micro::answer(Some(&headers), &payload, &options, &handler)
-            .await
-            .map_err(FakeRequestError::Reply)?;
-        Ok(Message {
-            subject,
-            reply: None,
-            length: reply.body.len(),
-            payload: reply.body,
-            headers: Some(reply.headers),
-            status: None,
-            description: None,
-        })
+        tokio::time::sleep(delay).await;
+        replied
     }
 }
 

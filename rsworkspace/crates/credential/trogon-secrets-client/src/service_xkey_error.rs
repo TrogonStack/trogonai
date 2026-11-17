@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 /// Why a value is not the secrets service's public curve key.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum ServiceXkeyError {
     #[error("service xkey is not a curve public key")]
-    NotACurvePublicKey,
+    NotACurvePublicKey(#[source] Arc<nkeys::error::Error>),
 }
