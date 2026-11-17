@@ -260,7 +260,7 @@ modes fail before the checker runs.
 
    ```sh
    mise run claude-sdk:baseline \
-     --python-version 0.2.179 --typescript-version 0.3.319 \
+     --python-version 0.2.181 --typescript-version 0.3.323 \
      --out /path/to/claude-sdk-baseline-review
    ```
 
