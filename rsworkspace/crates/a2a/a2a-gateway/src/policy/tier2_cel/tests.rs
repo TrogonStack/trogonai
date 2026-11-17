@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::sync::Arc;
-use std::time::Duration;
 
 use a2a_auth_callout::SpiceDbSubject;
 use a2a_nats::server::A2aMethod;
@@ -37,6 +36,26 @@ fn bundle_with_rule(name: &str, source: &str) -> (tempfile::TempDir, Tier2Compil
 }
 
 #[test]
+fn a_staged_bundle_refreshes_before_and_after_its_directory_is_created() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("tier2");
+    let mut bundle = Tier2CompiledBundle::load_from_dir(&path).unwrap();
+    bundle.refresh_if_stale().unwrap();
+    assert_eq!(bundle.rules().count(), 0);
+
+    fs::create_dir(&path).unwrap();
+    fs::write(path.join("access.cel"), "false").unwrap();
+    bundle.refresh_if_stale().unwrap();
+    let evaluator = RealTier2CelEvaluator::new(bundle);
+    assert_eq!(
+        evaluator.evaluate(&sample_ctx("message/send")),
+        Tier2Decision::Deny {
+            rule: RuleName::new("access").unwrap()
+        }
+    );
+}
+
+#[test]
 fn compile_valid_cel_source_ok() {
     let handle = compile_cel_source("true").expect("valid cel");
     assert!(handle.program().execute(&cel_interpreter::Context::default()).is_ok());
@@ -51,32 +70,41 @@ fn compile_invalid_cel_source_err() {
 }
 
 #[test]
-fn mtime_change_triggers_recompile() {
-    // Use `filetime::set_file_mtime` to bump mtime deterministically
-    // instead of sleeping past filesystem granularity — the prior
-    // `thread::sleep(1.1s)` approach depended on filesystem mtime
-    // resolution and added a full second of wall-clock per test run.
+fn a_rewrite_that_keeps_the_same_mtime_triggers_recompile() {
+    // Back-to-back writes can land within one filesystem timestamp tick.
+    // Pin the mtime back to its original value so the rewrite is only
+    // visible through the file content.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("rule.cel");
     fs::write(&path, "true").expect("write cel");
+    let original_mtime = fs::metadata(&path).expect("meta").modified().expect("mtime");
 
-    let bundle = Tier2CompiledBundle::load_from_dir(dir.path()).expect("load bundle");
+    let mut bundle = Tier2CompiledBundle::load_from_dir(dir.path()).expect("load bundle");
     assert_eq!(bundle.rules().count(), 1);
 
     fs::write(&path, "false").expect("rewrite cel");
-    // Bump mtime by a known amount so the bundle's cached mtime is
-    // guaranteed to differ from the new file mtime regardless of
-    // underlying FS time resolution.
-    let original_mtime = fs::metadata(&path).expect("meta").modified().expect("mtime");
-    let bumped = original_mtime + Duration::from_secs(5);
-    filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(bumped)).expect("bump mtime");
+    filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(original_mtime)).expect("pin mtime");
 
-    let mut refreshed = bundle;
-    refreshed.refresh_if_stale().expect("refresh");
+    bundle.refresh_if_stale().expect("refresh");
     let ctx = cel_interpreter::Context::default();
-    let (_, program) = refreshed.rules().next().expect("rule");
+    let (_, program) = bundle.rules().next().expect("rule");
     let value = program.program().execute(&ctx).expect("execute refreshed program");
     assert_eq!(value, cel_interpreter::Value::Bool(false));
+}
+
+#[test]
+fn bundle_refresh_fails_when_a_rule_path_becomes_unreadable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("rule.cel");
+    fs::write(&path, "true").expect("write cel");
+    let mut bundle = Tier2CompiledBundle::load_from_dir(dir.path()).expect("load bundle");
+
+    fs::remove_file(&path).expect("remove rule");
+    fs::create_dir(&path).expect("replace rule with a directory");
+
+    let err = bundle.refresh_if_stale().expect_err("unreadable rule");
+    assert_eq!(err.path(), &path);
+    assert!(matches!(err, CelCompileError::Read { .. }));
 }
 
 #[test]
@@ -288,24 +316,18 @@ fn rule_name_new_rejects_empty_or_whitespace() {
 
 #[test]
 fn evaluator_denies_when_refresh_fails() {
-    // If the bundle's tier2_dir is replaced with a file under it after
-    // load, the next refresh_if_stale will surface a Read error and
-    // the evaluator must deny closed rather than fall through to allow.
+    // Rewriting the rule with invalid CEL, even within the same mtime
+    // tick, must make the next refresh fail and the evaluator deny closed
+    // rather than keep enforcing the previous rule or fall through to allow.
     let dir = tempfile::tempdir().expect("tempdir");
     let rule_path = dir.path().join("ok.cel");
     fs::write(&rule_path, "true").expect("write cel");
+    let original_mtime = fs::metadata(&rule_path).expect("meta").modified().expect("mtime");
     let bundle = Tier2CompiledBundle::load_from_dir(dir.path()).expect("load");
     let evaluator = RealTier2CelEvaluator::new(bundle);
 
-    // Replace the rule file with a directory so the next mtime check on
-    // the bundled `ok.cel` succeeds (it's still a regular file via
-    // metadata), but a `compile_cel_file` retry on a newly-mtime'd file
-    // returning malformed bytes would also fail. Easier: rewrite the
-    // rule file with invalid CEL and bump its mtime so refresh compiles
-    // it and fails, denying closed.
     fs::write(&rule_path, "(1 + 2").expect("invalid rewrite");
-    let bumped = fs::metadata(&rule_path).expect("meta").modified().expect("mtime") + Duration::from_secs(5);
-    filetime::set_file_mtime(&rule_path, filetime::FileTime::from_system_time(bumped)).expect("bump mtime");
+    filetime::set_file_mtime(&rule_path, filetime::FileTime::from_system_time(original_mtime)).expect("pin mtime");
 
     let decision = evaluator.evaluate(&sample_ctx("any"));
     assert_eq!(
@@ -327,11 +349,12 @@ fn cel_compile_error_path_accessor_exposes_offending_file() {
 }
 
 #[test]
-fn cel_compile_error_metadata_failure_is_typed() {
+fn cel_compile_error_read_failure_is_typed() {
     let dir = tempfile::tempdir().expect("tempdir");
     let missing = dir.path().join("never-was.cel");
     let err = compile_cel_file(&missing).expect_err("missing file");
-    assert!(matches!(err, CelCompileError::Metadata { .. }));
+    assert_eq!(err.path(), &missing);
+    assert!(matches!(err, CelCompileError::Read { .. }));
 }
 
 #[test]

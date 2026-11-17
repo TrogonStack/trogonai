@@ -1,10 +1,7 @@
 use tracing_subscriber::util::SubscriberInitExt;
 
 use super::*;
-use crate::constants::{
-    DEFAULT_PUSH_DLQ_CALLER_SEGMENT as PLACEHOLDER_CALLER_SEGMENT, ENV_MAX_CONCURRENT_CLIENT_TASKS,
-    ENV_PUSH_DLQ_CALLER_SEGMENT,
-};
+use crate::constants::ENV_MAX_CONCURRENT_CLIENT_TASKS;
 
 fn default_nats() -> NatsConfig {
     NatsConfig::new(vec!["localhost:4222".to_string()], trogon_nats::NatsAuth::None)
@@ -47,18 +44,6 @@ fn config_default_max_concurrent_client_tasks() {
         config.max_concurrent_client_tasks(),
         DEFAULT_MAX_CONCURRENT_CLIENT_TASKS
     );
-}
-
-#[test]
-fn config_push_dlq_caller_segment_trim_empty_falls_back() {
-    let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_push_dlq_caller_segment("");
-    assert_eq!(config.push_dlq_caller_segment().as_str(), PLACEHOLDER_CALLER_SEGMENT);
-}
-
-#[test]
-fn config_push_dlq_caller_segment_preserves_explicit_value() {
-    let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_push_dlq_caller_segment("alice");
-    assert_eq!(config.push_dlq_caller_segment().as_str(), "alice");
 }
 
 #[test]
@@ -173,22 +158,6 @@ fn task_timeout_valid_override() {
         let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
         assert_eq!(cfg.task_timeout(), Duration::from_secs(120));
     });
-}
-
-#[test]
-fn push_dlq_caller_segment_env_override() {
-    let env = trogon_std::env::InMemoryEnv::new();
-    env.set(ENV_PUSH_DLQ_CALLER_SEGMENT, "oidc-sub-7");
-    let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-    assert_eq!(cfg.push_dlq_caller_segment().as_str(), "oidc-sub-7");
-}
-
-#[test]
-fn push_dlq_caller_segment_blank_env_falls_back_via_builder() {
-    let env = trogon_std::env::InMemoryEnv::new();
-    env.set(ENV_PUSH_DLQ_CALLER_SEGMENT, "   ");
-    let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-    assert_eq!(cfg.push_dlq_caller_segment().as_str(), PLACEHOLDER_CALLER_SEGMENT);
 }
 
 #[test]

@@ -36,19 +36,19 @@ pub mod schedule_status {
             Self::Some(Kind::from(v))
         }
     }
-    impl serde::Serialize for Kind {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Kind {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Scheduled(v) => {
-                    map.serialize_entry("scheduled", v)?;
+                    map.serialize_entry("scheduled", &**v)?;
                 }
                 Self::Paused(v) => {
-                    map.serialize_entry("paused", v)?;
+                    map.serialize_entry("paused", &**v)?;
                 }
             }
             map.end()

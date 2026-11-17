@@ -92,8 +92,6 @@ pub struct AuditEnvelopeFields {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub caller_source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub tier1_decision: Option<Tier1Decision>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tier3_decision: Option<Tier3Decision>,

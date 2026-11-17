@@ -1,0 +1,262 @@
+{
+  "templates": {
+    "snapshot": {
+      "type": "trogonai.platform.workload_identity.v1alpha1.RegistrationSnapshot",
+      "payload": {
+        "tenant": "tenant_1",
+        "project": "project_1",
+        "recoveryFence": "1",
+        "registrationRevision": "2",
+        "trustRevision": "3",
+        "issuedAt": "2030-01-01T00:00:00Z",
+        "expiresAt": "2030-01-01T00:05:00Z",
+        "bindings": [
+          {
+            "spiffeId": "spiffe://example.test/proxy",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 1
+          }
+        ],
+        "approvedRootSha256": [
+          "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        ]
+      }
+    },
+    "activation": {
+      "type": "trogonai.platform.workload_identity.v1alpha1.CredentialActivation",
+      "payload": {
+        "binding": {
+          "spiffeId": "spiffe://example.test/proxy",
+          "tenant": "tenant_1",
+          "project": "project_1",
+          "role": 1
+        },
+        "recoveryFence": "1",
+        "registrationRevision": "2",
+        "trustRevision": "3",
+        "sourceRevision": "4",
+        "activationRevision": "4",
+        "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "notBefore": "2030-01-01T00:00:00Z",
+        "expiresAt": "2030-01-01T01:00:00Z"
+      }
+    },
+    "audit": {
+      "type": "trogonai.platform.audit.v1.AuditRecord",
+      "payload": {
+        "recordId": "01939a4e-7b1c-7d2e-8f3a-5b6c7d8e9f01",
+        "class": 1,
+        "occurredAt": "2030-01-01T00:00:00Z",
+        "recordedAt": "2030-01-01T00:00:00Z",
+        "tenant": {
+          "value": "tenant_1"
+        },
+        "project": {
+          "value": "project_1"
+        },
+        "actor": {
+          "unattributed": {}
+        },
+        "attribution": {
+          "decision": 1,
+          "enforcementMode": 1,
+          "wouldDeny": false
+        },
+        "credentialActivation": {
+          "binding": {
+            "spiffeId": "spiffe://example.test/proxy",
+            "tenant": "tenant_1",
+            "project": "project_1",
+            "role": 1
+          },
+          "recoveryFence": "1",
+          "registrationRevision": "2",
+          "trustRevision": "3",
+          "sourceRevision": "4",
+          "activationRevision": "4",
+          "leafSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "publicKeySha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "bundleSha256": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+          "notBefore": "2030-01-01T00:00:00Z",
+          "expiresAt": "2030-01-01T01:00:00Z"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "finite registration snapshot",
+      "template": "snapshot",
+      "violations": []
+    },
+    {
+      "name": "bounded activation intent",
+      "template": "activation",
+      "violations": []
+    },
+    {
+      "name": "registration cannot cross tenant",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/tenant",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "every registration belongs to this exact tenant and project"
+      ]
+    },
+    {
+      "name": "agent requires application identity",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/role",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "only an agent registration has an application identity"
+      ]
+    },
+    {
+      "name": "registration cannot lease past backstop",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": "2030-01-01T00:05:31Z"
+        }
+      ],
+      "violations": [
+        "registration authority has a positive lease no longer than 330 seconds"
+      ]
+    },
+    {
+      "name": "activation cannot exceed one hour",
+      "template": "activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": "2030-01-01T01:00:01Z"
+        }
+      ],
+      "violations": [
+        "an SVID has positive validity no longer than one hour"
+      ]
+    },
+    {
+      "name": "activation requires exact fingerprint",
+      "template": "activation",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/leafSha256",
+          "value": "AA=="
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
+    },
+    {
+      "name": "empty trust withdrawal retains its scoped revisions",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvedRootSha256",
+          "value": []
+        }
+      ],
+      "violations": []
+    },
+    {
+      "name": "activation audit is must before effect",
+      "template": "audit"
+    },
+    {
+      "name": "activation audit cannot be best effort",
+      "template": "audit",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/class",
+          "value": 2
+        }
+      ],
+      "violations": [
+        "credential activation is must-audit under its exact registered scope"
+      ]
+    },
+    {
+      "name": "activation audit cannot change tenant",
+      "template": "audit",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/tenant/value",
+          "value": "tenant_2"
+        }
+      ],
+      "violations": [
+        "credential activation is must-audit under its exact registered scope"
+      ]
+    },
+    {
+      "name": "registered trust-domain identity needs no inferred path",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test"
+        }
+      ]
+    },
+    {
+      "name": "empty trust withdrawal can also remove every binding",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvedRootSha256",
+          "value": []
+        },
+        {
+          "op": "replace",
+          "path": "/bindings",
+          "value": []
+        }
+      ],
+      "violations": []
+    },
+    {
+      "name": "empty trust withdrawal cannot lose its trust revision",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/approvedRootSha256",
+          "value": []
+        },
+        {
+          "op": "replace",
+          "path": "/trustRevision",
+          "value": "0"
+        }
+      ],
+      "violations": [
+        "must be greater than 0"
+      ]
+    }
+  ]
+}

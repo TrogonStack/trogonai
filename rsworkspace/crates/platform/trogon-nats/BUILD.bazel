@@ -1,0 +1,11 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    integration_tests = {
+        # Scans the sources of sibling crates, so it runs only under Cargo.
+        "subject_literal_policy": {"tags": ["manual"]},
+        "tls_handshake": {"tags": ["requires-network"]},
+    },
+    # Some tests start a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+)

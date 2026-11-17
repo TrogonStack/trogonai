@@ -15,7 +15,19 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::warn;
+use trogon_credential_aggregate::proto::{
+    decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
+    decode_message_field, decode_revoked_state,
+};
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKey, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
+    CredentialStatus, CredentialVersion, SourceIntegrationId, SourceKind,
+};
 use trogon_decider_runtime::{CommandError, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
+use trogon_secret_store::{
+    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
+};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1};
 
@@ -30,13 +42,6 @@ use self::idempotency::{
     CredentialCommandIdempotencyStore, CredentialCommandIdempotencyStoreError, IdempotencyDecision, IdempotencyKey,
     IdempotencyScope, RequestFingerprint,
 };
-use crate::credential::commands::domain::{
-    CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
-};
-use crate::credential::commands::proto::{
-    decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
-    decode_message_field, decode_revoked_state,
-};
 use crate::credential_lifecycle::handler::{
     CredentialHandlerError, CredentialRuntimeHandler, CredentialRuntimeHandlerError, DestroyStoredCredential,
     PutCredential, RevokeStoredCredential, RotateCredential,
@@ -46,12 +51,6 @@ use crate::credential_lifecycle::recovery_worker::{
 };
 #[cfg(test)]
 use crate::credential_runtime_projection::RuntimeCredentialRegistry;
-use crate::secret_store::openbao_secret_store::openbao_credential_id;
-use crate::secret_store::{
-    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate,
-};
-use crate::source_integration_id::SourceIntegrationId;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -80,16 +79,16 @@ pub(crate) fn router<EventStore, Secrets, Idempotency>(
     idempotency: Idempotency,
 ) -> Router
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError>
         + SecretStoreRotate<Error = SecretStoreError>
         + SecretStoreRevoke<Error = SecretStoreError>
@@ -287,16 +286,16 @@ fn test_router<EventStore, Secrets>(
     admin_token: SecretString,
 ) -> Router
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError>
         + SecretStoreRotate<Error = SecretStoreError>
         + SecretStoreRevoke<Error = SecretStoreError>
@@ -345,16 +344,16 @@ async fn put_discord_bot_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -368,16 +367,16 @@ async fn put_github_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -391,16 +390,16 @@ async fn put_gitlab_signing_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -414,16 +413,16 @@ async fn put_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -437,16 +436,16 @@ async fn put_slack_signing_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -460,16 +459,16 @@ async fn put_linear_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -483,16 +482,16 @@ async fn put_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -506,16 +505,16 @@ async fn put_sentry_client_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -529,16 +528,16 @@ async fn put_notion_verification_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -552,16 +551,16 @@ async fn put_plaid_client_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -575,16 +574,16 @@ async fn put_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -598,16 +597,16 @@ async fn put_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<WriteCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -622,16 +621,16 @@ async fn put_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -646,16 +645,16 @@ async fn put_source_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -671,30 +670,30 @@ async fn put_scoped_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
     authorize(&headers, &state.admin_token)?;
     let idempotency_key = idempotency_key_from_headers(&headers)?;
-    let credential_id =
-        openbao_credential_id(&scope, target.kind).map_err(CredentialManagementHttpError::invalid_input)?;
+    let identity = CredentialIdentity::derive(scope, target.kind);
     let secret = SecretString::new(secret_value).map_err(CredentialManagementHttpError::invalid_input)?;
-    let scope_key = scope.scope_key();
+    let scope_key = identity.scope_key();
+    let credential_id = identity.id().to_string();
     let fingerprint = request_fingerprint(
         &state.admin_token,
         &[
             CommandNamespace::Create.as_str(),
-            scope.owner_id().as_str(),
+            identity.owner_id().as_str(),
             scope_key.as_str(),
             credential_id.as_str(),
             target.kind.as_str(),
@@ -702,7 +701,7 @@ where
         ],
     );
     let idempotency_scope = IdempotencyScope::new(
-        scope.owner_id().as_str(),
+        identity.owner_id().as_str(),
         CommandNamespace::Create.as_str(),
         credential_id.as_str(),
         idempotency_key,
@@ -718,7 +717,7 @@ where
         IdempotencyDecision::Conflict => return Err(CredentialManagementHttpError::IdempotencyConflict),
         IdempotencyDecision::InProgress => return Err(CredentialManagementHttpError::IdempotencyInProgress),
     }
-    let command = PutCredential::new(credential_id, scope, target.kind, secret);
+    let command = PutCredential::new(identity, secret);
 
     let outcome = match state.handler.put(command).await {
         Ok(outcome) => outcome,
@@ -739,16 +738,16 @@ async fn rotate_discord_bot_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -762,16 +761,16 @@ async fn rotate_github_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -785,16 +784,16 @@ async fn rotate_gitlab_signing_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -808,16 +807,16 @@ async fn rotate_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -831,16 +830,16 @@ async fn rotate_slack_signing_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -854,16 +853,16 @@ async fn rotate_linear_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -877,16 +876,16 @@ async fn rotate_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -900,16 +899,16 @@ async fn rotate_sentry_client_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -923,16 +922,16 @@ async fn rotate_notion_verification_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -946,16 +945,16 @@ async fn rotate_plaid_client_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -969,16 +968,16 @@ async fn rotate_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -992,16 +991,16 @@ async fn rotate_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RotateCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1016,16 +1015,16 @@ async fn rotate_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1040,16 +1039,16 @@ async fn rotate_source_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1066,22 +1065,23 @@ async fn rotate_scoped_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
     authorize(&headers, &state.admin_token)?;
     let idempotency_key = idempotency_key_from_headers(&headers)?;
     let credential_ref = credential_ref_from_request(&scope, target.kind, request_version)?;
+    let credential_id = credential_ref.id().to_string();
     let scope_key = scope.scope_key();
     let secret = SecretString::new(secret_value).map_err(CredentialManagementHttpError::invalid_input)?;
     let version = request_version.to_string();
@@ -1091,7 +1091,7 @@ where
             CommandNamespace::Rotate.as_str(),
             scope.owner_id().as_str(),
             scope_key.as_str(),
-            credential_ref.id().as_str(),
+            credential_id.as_str(),
             version.as_str(),
             target.kind.as_str(),
             secret.as_str(),
@@ -1100,7 +1100,7 @@ where
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Rotate.as_str(),
-        credential_ref.id().as_str(),
+        credential_id.as_str(),
         idempotency_key,
     );
     match state
@@ -1135,16 +1135,16 @@ async fn destroy_discord_bot_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1158,16 +1158,16 @@ async fn destroy_github_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1181,16 +1181,16 @@ async fn destroy_gitlab_signing_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1204,16 +1204,16 @@ async fn destroy_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1227,16 +1227,16 @@ async fn destroy_slack_signing_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1250,16 +1250,16 @@ async fn destroy_linear_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1273,16 +1273,16 @@ async fn destroy_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1296,16 +1296,16 @@ async fn destroy_sentry_client_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1319,16 +1319,16 @@ async fn destroy_notion_verification_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1342,16 +1342,16 @@ async fn destroy_plaid_client_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1365,16 +1365,16 @@ async fn destroy_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1388,16 +1388,16 @@ async fn destroy_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<DestroyCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1412,16 +1412,16 @@ async fn destroy_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1436,16 +1436,16 @@ async fn destroy_source_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1462,22 +1462,23 @@ async fn destroy_scoped_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreDestroy<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
     authorize(&headers, &state.admin_token)?;
     let idempotency_key = idempotency_key_from_headers(&headers)?;
     let credential_ref = credential_ref_from_request(&scope, target.kind, request_version)?;
+    let credential_id = credential_ref.id().to_string();
     let scope_key = scope.scope_key();
     let reason = SecretDestroyReason::new(reason).map_err(CredentialManagementHttpError::invalid_input)?;
     let version = request_version.to_string();
@@ -1487,7 +1488,7 @@ where
             CommandNamespace::Destroy.as_str(),
             scope.owner_id().as_str(),
             scope_key.as_str(),
-            credential_ref.id().as_str(),
+            credential_id.as_str(),
             version.as_str(),
             target.kind.as_str(),
             reason.as_str(),
@@ -1496,7 +1497,7 @@ where
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Destroy.as_str(),
-        credential_ref.id().as_str(),
+        credential_id.as_str(),
         idempotency_key,
     );
     match state
@@ -1531,16 +1532,16 @@ async fn revoke_discord_bot_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1554,16 +1555,16 @@ async fn revoke_github_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1577,16 +1578,16 @@ async fn revoke_gitlab_signing_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1600,16 +1601,16 @@ async fn revoke_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1623,16 +1624,16 @@ async fn revoke_slack_signing_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1646,16 +1647,16 @@ async fn revoke_linear_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1669,16 +1670,16 @@ async fn revoke_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1692,16 +1693,16 @@ async fn revoke_sentry_client_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1715,16 +1716,16 @@ async fn revoke_notion_verification_token<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1738,16 +1739,16 @@ async fn revoke_plaid_client_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1761,16 +1762,16 @@ async fn revoke_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1784,16 +1785,16 @@ async fn revoke_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
     Json(request): Json<RevokeCredentialSecretRequest>,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1808,16 +1809,16 @@ async fn revoke_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1832,16 +1833,16 @@ async fn revoke_source_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
@@ -1857,22 +1858,23 @@ async fn revoke_scoped_credential_secret<EventStore, Secrets, Idempotency>(
     target: ManagedCredentialTarget,
 ) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
 where
-    EventStore: StreamRead<str>
-        + StreamAppend<str>
-        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
-        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
         + Clone
         + Send
         + Sync
         + 'static,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
     Secrets: SecretStoreRevoke<Error = SecretStoreError>,
     Idempotency: CredentialCommandIdempotencyStore,
 {
     authorize(&headers, &state.admin_token)?;
     let idempotency_key = idempotency_key_from_headers(&headers)?;
     let credential_ref = credential_ref_from_request(&scope, target.kind, request_version)?;
+    let credential_id = credential_ref.id().to_string();
     let scope_key = scope.scope_key();
     let version = request_version.to_string();
     let fingerprint = request_fingerprint(
@@ -1881,7 +1883,7 @@ where
             CommandNamespace::Revoke.as_str(),
             scope.owner_id().as_str(),
             scope_key.as_str(),
-            credential_ref.id().as_str(),
+            credential_id.as_str(),
             version.as_str(),
             target.kind.as_str(),
         ],
@@ -1889,7 +1891,7 @@ where
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Revoke.as_str(),
-        credential_ref.id().as_str(),
+        credential_id.as_str(),
         idempotency_key,
     );
     match state
@@ -2269,9 +2271,11 @@ fn credential_ref_from_request(
     kind: CredentialKind,
     version: u64,
 ) -> Result<CredentialRef, CredentialManagementHttpError> {
-    let id = openbao_credential_id(scope, kind).map_err(CredentialManagementHttpError::invalid_input)?;
     let version = CredentialVersion::new(version).map_err(CredentialManagementHttpError::invalid_input)?;
-    Ok(CredentialRef::new(id, version, scope, kind))
+    Ok(CredentialRef::new(
+        CredentialIdentity::derive(scope.clone(), kind),
+        version,
+    ))
 }
 
 fn command_response(
@@ -2352,7 +2356,7 @@ fn credential_ref_response(credential: &CredentialRef, status: CredentialStatus)
         version: credential.version().get(),
         owner_id: credential.owner_id().as_str().to_string(),
         source: credential.source().as_str().to_string(),
-        scope_key: credential.scope_key().to_string(),
+        scope_key: credential.scope_key(),
         kind: credential.kind().as_str().to_string(),
         status: status.as_str().to_string(),
     }

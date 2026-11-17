@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+// TlsMode is how the egress proxy handled the TLS session of a connection.
+//
+// Only egress decisions carry it; a surface with no TLS leg leaves it
+// unspecified, which is a valid value on the record and not an error. Unknown
+// values are invalid.
+enum TlsMode {
+  TLS_MODE_UNSPECIFIED = 0;
+  // The tunnel is opaque to the proxy, which can neither read nor write inside
+  // it.
+  TLS_MODE_PASSTHROUGH = 1;
+  // The proxy terminated the session and could inspect or modify it.
+  TLS_MODE_INTERCEPTED = 2;
+}

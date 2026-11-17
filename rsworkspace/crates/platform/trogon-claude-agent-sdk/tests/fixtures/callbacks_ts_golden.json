@@ -1,0 +1,248 @@
+{
+ "_source": "captured by running @anthropic-ai/claude-agent-sdk 0.3.323 query() against a recording fake CLI",
+ "tool_environment": {
+  "all_options_no_env": {
+   "claude_code_question_extended": "old",
+   "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH": "1",
+   "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH": "1",
+   "CLAUDE_CODE_QUESTION_PREVIEW_FORMAT": "html",
+   "CLAUDE_CODE_QUESTION_EXTENDED": "1"
+  },
+  "no_options_no_env": {},
+  "explicit_env": {
+   "claude_code_question_extended": "q",
+   "CLAUDE_CODE_QUESTION_OPTIONAL_DESCRIPTIONS": "1"
+  }
+ },
+ "workload_argv_tail": [
+  "--foo",
+  "x",
+  "--workload",
+  "cron",
+  "--bar"
+ ],
+ "spawn_argv": {
+  "native": {
+   "argv": [
+    "--no-warnings",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "script": {
+   "argv": [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ]
+  },
+  "upper": {
+   "argv": [
+    "--no-warnings",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--input-format",
+    "stream-json"
+   ]
+  }
+ },
+ "oauth_responses": [
+  {
+   "subtype": "success",
+   "request_id": "r0",
+   "response": {
+    "accessToken": "tok"
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r1",
+   "response": {
+    "accessToken": "tok"
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r2",
+   "response": {
+    "accessToken": "tok"
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r3",
+   "response": {
+    "accessToken": "tok"
+   }
+  }
+ ],
+ "oauth_seen": [
+  {
+   "keys": [
+    "onDecline",
+    "signal"
+   ]
+  },
+  {
+   "kind": "proactive",
+   "tokenState": "refused",
+   "keys": [
+    "kind",
+    "onDecline",
+    "signal",
+    "tokenState"
+   ]
+  },
+  {
+   "tokenState": "not_refused",
+   "keys": [
+    "onDecline",
+    "signal",
+    "tokenState"
+   ]
+  },
+  {
+   "keys": [
+    "onDecline",
+    "signal"
+   ]
+  }
+ ],
+ "oauth_decline_responses": [
+  {
+   "subtype": "success",
+   "request_id": "r0",
+   "response": {
+    "accessToken": null,
+    "reason": "signed_out"
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r1",
+   "response": {
+    "accessToken": null
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r2",
+   "response": {
+    "accessToken": null,
+    "reason": "refresh_failed"
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r3",
+   "response": {
+    "accessToken": "tok"
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r4",
+   "response": {
+    "accessToken": null
+   }
+  },
+  {
+   "subtype": "error",
+   "request_id": "r5",
+   "error": "boom"
+  }
+ ],
+ "host_responses": [
+  {
+   "subtype": "success",
+   "request_id": "r0",
+   "response": {
+    "authToken": "h"
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r1",
+   "response": {
+    "authToken": null
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r2",
+   "response": {
+    "authToken": null
+   }
+  },
+  {
+   "subtype": "success",
+   "request_id": "r3",
+   "response": 42
+  },
+  {
+   "subtype": "error",
+   "request_id": "r4",
+   "error": "hboom"
+  }
+ ],
+ "host_seen": [
+  {
+   "status": "expired",
+   "keys": [
+    "signal",
+    "status"
+   ]
+  },
+  {
+   "keys": [
+    "signal",
+    "status"
+   ]
+  },
+  {
+   "keys": [
+    "signal",
+    "status"
+   ]
+  },
+  {
+   "status": {
+    "a": 1
+   },
+   "keys": [
+    "signal",
+    "status"
+   ]
+  },
+  {
+   "keys": [
+    "signal",
+    "status"
+   ]
+  }
+ ],
+ "missing_callback_responses": [
+  {
+   "subtype": "error",
+   "request_id": "r0",
+   "error": "getOAuthToken callback is not provided."
+  },
+  {
+   "subtype": "error",
+   "request_id": "r1",
+   "error": "getHostAuthToken callback is not provided."
+  }
+ ],
+ "load_timeouts": {
+  "load": "SessionStore.load() timed out after 30ms for session 11111111-1111-4111-8111-111111111111",
+  "listSessions": "SessionStore.listSessions() timed out after 30ms",
+  "listSubkeys": "SessionStore.listSubkeys() timed out after 30ms for session 11111111-1111-4111-8111-111111111111",
+  "subpath": "SessionStore.load() timed out after 30ms for session 11111111-1111-4111-8111-111111111111 subpath subagents/a"
+ }
+}

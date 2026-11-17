@@ -358,18 +358,21 @@ impl ::buffa::Message for DateTime {
         self.time_offset = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for DateTime {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for DateTime {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = DateTime;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct DateTime")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<DateTime, A::Error> {
@@ -388,9 +391,9 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                         "year" => {
                             __f_year = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = i32;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<i32, D::Error> {
@@ -403,9 +406,9 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                         "month" => {
                             __f_month = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = i32;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<i32, D::Error> {
@@ -418,9 +421,9 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                         "day" => {
                             __f_day = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = i32;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<i32, D::Error> {
@@ -433,9 +436,9 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                         "hours" => {
                             __f_hours = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = i32;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<i32, D::Error> {
@@ -448,9 +451,9 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                         "minutes" => {
                             __f_minutes = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = i32;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<i32, D::Error> {
@@ -463,9 +466,9 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                         "seconds" => {
                             __f_seconds = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = i32;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<i32, D::Error> {
@@ -478,9 +481,9 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                         "nanos" => {
                             __f_nanos = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = i32;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<i32, D::Error> {
@@ -504,7 +507,7 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                             if let Some(v) = v {
                                 if __oneof_time_offset.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'time_offset'",
                                         ),
                                     );
@@ -528,7 +531,7 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                             if let Some(v) = v {
                                 if __oneof_time_offset.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'time_offset'",
                                         ),
                                     );
@@ -541,7 +544,7 @@ impl<'de> serde::Deserialize<'de> for DateTime {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }

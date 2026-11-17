@@ -12,7 +12,7 @@ use trogon_nats::subject_conformance::{
     looks_like_request_id, validate_binding_version, validate_published_subject, validate_subject_pattern,
 };
 
-use super::{A2aStream, agents, gateway, subscriptions, tasks};
+use super::{A2aStream, agents, gateway, push, subscriptions, tasks};
 use crate::a2a_method::A2aMethod;
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
@@ -152,6 +152,9 @@ fn published(p: &A2aPrefix) -> Vec<(&'static str, String)> {
             "GatewayEgressEventsSubject",
             gateway::GatewayEgressEventsSubject::new(p, &c).to_string(),
         ));
+        let dead_letter = push::PushDlqSubject::new(p, &c, &task());
+        out.push(("PushDlqMirrorSubject", dead_letter.mirror().to_string()));
+        out.push(("PushDlqSubject", dead_letter.to_string()));
     }
     out
 }
@@ -174,6 +177,10 @@ fn patterns(p: &A2aPrefix) -> Vec<(&'static str, String)> {
         (
             "CallerTaskEventsSubject",
             subscriptions::CallerTaskEventsSubject::new(p, &caller()).to_string(),
+        ),
+        (
+            "PushDlqAllSubject",
+            subscriptions::PushDlqAllSubject::new(p).to_string(),
         ),
     ];
 
@@ -358,6 +365,47 @@ fn a_caller_scoped_event_filter_captures_only_that_callers_task_events() {
             assert!(
                 !nats_subject_matches(&pattern, &theirs),
                 "{pattern} must not match {theirs}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_push_dlq_stream_keeps_dead_letters_and_their_mirrors_in_separate_lanes() {
+    for prefix_str in PREFIXES {
+        let p = prefix(prefix_str);
+        let patterns = A2aStream::PushDlq.subject_patterns(&p);
+        let [authoritative, mirror_lane] = patterns.as_slice() else {
+            panic!("expected an authoritative and a mirror pattern, got {patterns:?}");
+        };
+        let consumer = subscriptions::PushDlqAllSubject::new(&p).to_string();
+        for c in callers() {
+            let dead_letter = push::PushDlqSubject::new(&p, &c, &task());
+            let original = dead_letter.to_string();
+            let mirror = dead_letter.mirror().to_string();
+            assert!(
+                nats_subject_matches(authoritative, &original),
+                "{authoritative} must match {original}"
+            );
+            assert!(
+                !nats_subject_matches(authoritative, &mirror),
+                "{authoritative} must not match {mirror}"
+            );
+            assert!(
+                nats_subject_matches(mirror_lane, &mirror),
+                "{mirror_lane} must match {mirror}"
+            );
+            assert!(
+                !nats_subject_matches(mirror_lane, &original),
+                "{mirror_lane} must not match {original}"
+            );
+            assert!(
+                nats_subject_matches(&consumer, &original),
+                "{consumer} must match {original}"
+            );
+            assert!(
+                nats_subject_matches(&consumer, &mirror),
+                "{consumer} must match {mirror}"
             );
         }
     }

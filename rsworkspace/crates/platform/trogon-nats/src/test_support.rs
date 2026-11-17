@@ -1,5 +1,9 @@
 //! Shared NATS infrastructure for integration tests.
 
+mod tls_cluster;
+
+pub use tls_cluster::TlsJetStreamCluster;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -16,7 +20,7 @@ use crate::auth::NatsConfig;
 use crate::connect::build_options;
 use crate::tls::NatsTls;
 
-const NATS_IMAGE_TAG: &str = "2.10.14";
+const NATS_IMAGE_TAG: &str = "2.14.2-alpine";
 const NATS_CLIENT_PORT: u16 = 4222;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const SERVER_NAMES: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
@@ -107,6 +111,17 @@ impl CoreTestServer {
         Self(TestServer::start(image(&NatsServerCmd::default())).await)
     }
 
+    /// Starts an isolated server with account and permission boundaries supplied by the test.
+    pub async fn start_with_config(config: &str) -> Self {
+        Self(
+            TestServer::start(
+                image(["--config", "/etc/nats/test.conf"])
+                    .with_copy_to("/etc/nats/test.conf", config.as_bytes().to_vec()),
+            )
+            .await,
+        )
+    }
+
     /// Starts the pinned NATS image so it turns away every client that does not
     /// present `token`.
     pub async fn start_requiring_token(token: &str) -> Self {
@@ -185,7 +200,7 @@ impl ClientCertificates {
     }
 }
 
-/// An isolated core NATS server that only accepts TLS, with a CA generated
+/// An isolated NATS server that only accepts TLS, with a CA generated
 /// for it alone.
 ///
 /// The CA and a client certificate it issued are written to a temporary
@@ -200,16 +215,21 @@ impl TlsTestServer {
     /// Starts a server that proves its identity to clients but asks none of
     /// them for a certificate.
     pub async fn start() -> Self {
-        Self::start_with(ClientCertificates::NotRequested).await
+        Self::start_with(ClientCertificates::NotRequested, &[]).await
     }
 
     /// Starts a server that turns away every client without a certificate
     /// issued by its CA.
     pub async fn start_verifying_clients() -> Self {
-        Self::start_with(ClientCertificates::Required).await
+        Self::start_with(ClientCertificates::Required, &[]).await
     }
 
-    async fn start_with(clients: ClientCertificates) -> Self {
+    /// Starts JetStream behind the same verified-client TLS boundary.
+    pub async fn start_jetstream_verifying_clients() -> Self {
+        Self::start_with(ClientCertificates::Required, &["--jetstream"]).await
+    }
+
+    async fn start_with(clients: ClientCertificates, extra_flags: &[&str]) -> Self {
         let certificates = TestCertificates::generate();
         let files = tempfile::tempdir().expect("create a directory for TLS test files");
         for (name, pem) in [
@@ -222,6 +242,7 @@ impl TlsTestServer {
 
         let mut command = vec!["--tlscert", SERVER_CERT, "--tlskey", SERVER_KEY];
         command.extend(clients.server_flags());
+        command.extend(extra_flags.iter().copied());
         let request = image(command)
             .with_copy_to(SERVER_CERT, certificates.server.cert.into_bytes())
             .with_copy_to(SERVER_KEY, certificates.server.key.into_bytes())

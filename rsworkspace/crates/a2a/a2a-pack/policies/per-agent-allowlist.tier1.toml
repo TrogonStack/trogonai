@@ -1,8 +1,9 @@
 _doc = """
 Caller allowlist: permits ingress only from enumerated SpiceDB caller_subject
-values (user/alice, user/bob, service/internal-*). Callers not matching any
-allowlisted subject are denied for all methods. Anonymous callers (empty
-caller_subject) are denied.
+values (user/alice, user/bob, service/internal-*). The gateway derives
+caller_subject from the principal in the ingress subject (person.alice is
+user/alice), so a caller of another kind that shares an allowlisted id is
+denied. Callers not matching any allowlisted subject are denied for all methods.
 """
 
 [[rule]]

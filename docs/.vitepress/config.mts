@@ -1,6 +1,15 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
-import { readAdrRecords, readGlossaryRecords, toAdrSidebarItem, toGlossarySidebarGroups } from "./helpers";
+import {
+  readAdrRecords,
+  readConnectorRecords,
+  readGlossaryRecords,
+  readProductAreaRecords,
+  toAdrSidebarItem,
+  toConnectorSidebarItem,
+  toGlossarySidebarGroups,
+  toProductNavItem,
+} from "./helpers";
 
 const base = process.env.DOCS_BASE ?? "/";
 
@@ -8,6 +17,11 @@ export default async () => {
   const rootDir = fileURLToPath(new URL("..", import.meta.url));
   const adrRecords = await readAdrRecords(rootDir);
   const glossaryRecords = await readGlossaryRecords(rootDir);
+  const connectorRecords = await readConnectorRecords(rootDir);
+  const productItems = [
+    { text: "Overview", link: "/product/" },
+    ...(await readProductAreaRecords(rootDir)).map(toProductNavItem),
+  ];
 
   return defineConfig({
     title: "TrogonAI",
@@ -24,12 +38,40 @@ export default async () => {
         provider: "local",
       },
       nav: [
-        { text: "Docs", link: "/get-started/" },
-        { text: "ADRs", link: "/adr/" },
-        { text: "Glossary", link: "/glossary/" },
+        { text: "Product", activeMatch: "^/product/", items: productItems },
+        { text: "Releases", link: "/releases/" },
+        {
+          text: "Docs",
+          activeMatch: "^/(get-started|how-to|architecture|reference|glossary|adr)/",
+          items: [
+            { text: "Get started", link: "/get-started/" },
+            { text: "Protocols", link: "/architecture/agent-protocols" },
+            { text: "Glossary", link: "/glossary/" },
+            { text: "Architecture Decisions", link: "/adr/" },
+          ],
+        },
         { text: "GitHub", link: "https://github.com/TrogonStack/trogonai" },
       ],
       sidebar: {
+        "/product/": [
+          { text: "Product", items: productItems },
+          {
+            text: "Connectors",
+            items: [
+              { text: "All connectors", link: "/product/connectors/" },
+              ...connectorRecords.map(toConnectorSidebarItem),
+            ],
+          },
+        ],
+        "/releases/": [
+          {
+            text: "Releases",
+            items: [
+              { text: "Overview", link: "/releases/" },
+              { text: "Release channels", link: "/releases/channels" },
+            ],
+          },
+        ],
         "/adr/": [
           {
             text: "Architecture Decision Records",
@@ -45,7 +87,10 @@ export default async () => {
         "/": [
           {
             text: "Get Started",
-            items: [{ text: "Overview", link: "/get-started/" }],
+            items: [
+              { text: "Overview", link: "/get-started/" },
+              { text: "Build with Bazel", link: "/how-to/use-bazel" },
+            ],
           },
           {
             text: "Agents",
@@ -61,9 +106,13 @@ export default async () => {
             ],
           },
           {
-            text: "ACP",
+            text: "Protocols",
             collapsed: true,
             items: [
+              {
+                text: "Explanation",
+                items: [{ text: "A2A, ACP & MCP", link: "/architecture/agent-protocols" }],
+              },
               {
                 text: "How-to",
                 items: [
@@ -75,7 +124,13 @@ export default async () => {
               },
               {
                 text: "Reference",
-                items: [{ text: "ACP Conformance", link: "/architecture/acp-conformance" }],
+                items: [
+                  { text: "Protocol Support", link: "/reference/agent-protocols" },
+                  { text: "A2A", link: "/reference/agent-protocols#a2a" },
+                  { text: "ACP", link: "/reference/agent-protocols#acp" },
+                  { text: "MCP", link: "/reference/agent-protocols#mcp" },
+                  { text: "ACP Conformance", link: "/architecture/acp-conformance" },
+                ],
               },
             ],
           },
@@ -173,12 +228,15 @@ export default async () => {
                   { text: "Connect a Provider", link: "/how-to/connect-a-provider" },
                   { text: "Integrate Connector HTTP", link: "/how-to/integrate-connector-http" },
                   { text: "Operate Connectors", link: "/how-to/operate-connectors" },
+                  { text: "Operate Workload Registration", link: "/how-to/operate-workload-registration" },
+                  { text: "Integrate Workload Identity", link: "/how-to/integrate-workload-identity" },
                 ],
               },
               {
                 text: "Reference",
                 items: [
                   { text: "Key States", link: "/architecture/key-states" },
+                  { text: "Key Wrapping", link: "/reference/key-wrapping" },
                   {
                     text: "Supplied Credential Material",
                     link: "/reference/supplied-credential-material",
@@ -186,6 +244,8 @@ export default async () => {
                   { text: "Connection HTTP Proxy", link: "/reference/connection-http-proxy" },
                   { text: "Connector Resource Parents", link: "/reference/connector-resource-parents" },
                   { text: "Connector Security Profile", link: "/reference/connector-security-profile" },
+                  { text: "Workload Identity", link: "/reference/workload-identity" },
+                  { text: "Workload Identity Configuration", link: "/reference/workload-identity-configuration" },
                   { text: "Connector Account Identity", link: "/reference/connector-account-identity" },
                   { text: "Connector MCP Authorization", link: "/reference/connector-mcp-authorization" },
                   { text: "Connector Control API", link: "/reference/connector-control-api" },
@@ -199,6 +259,7 @@ export default async () => {
               {
                 text: "Explanation",
                 items: [
+                  { text: "Workload Identity & Trust", link: "/architecture/workload-identity" },
                   { text: "Key Custody", link: "/architecture/key-custody" },
                   { text: "Key Management", link: "/architecture/key-management" },
                   { text: "Secret Management", link: "/architecture/secret-management" },
@@ -207,6 +268,16 @@ export default async () => {
                     text: "Provider Credential Custody",
                     link: "/architecture/provider-credential-custody",
                   },
+                ],
+              },
+              {
+                text: "Research Proposals",
+                items: [
+                  { text: "Portable Workload Identity", link: "/research/workload-identity/README" },
+                  { text: "Workload Federation", link: "/research/workload-identity/federation" },
+                  { text: "Federation Inventory", link: "/research/workload-identity/federation-inventory" },
+                  { text: "JWT-SVID Issuer Spike", link: "/research/workload-identity/jwt-svid-issuer-spike" },
+                  { text: "Identity & KMS Adapter Roadmap", link: "/research/workload-identity/adapter-roadmap" },
                 ],
               },
             ],
@@ -242,6 +313,8 @@ export default async () => {
           {
             text: "Browse",
             items: [
+              { text: "Product", link: "/product/" },
+              { text: "Releases", link: "/releases/" },
               { text: "Glossary", link: "/glossary/" },
               { text: "Architecture Decision Records", link: "/adr/" },
             ],
@@ -254,7 +327,7 @@ export default async () => {
         text: "Edit this page on GitHub",
       },
       footer: {
-        message: "Released under the MIT License.",
+        message: "Released under the Apache License 2.0.",
         copyright: "Copyright TrogonAI contributors.",
       },
     },

@@ -20,7 +20,9 @@ async fn main() -> ExitCode {
         )
         .init();
 
-    let config = match Config::try_from(Args::parse()) {
+    let args = Args::parse();
+    let readiness_listen = args.readiness_listen;
+    let config = match Config::try_from(args) {
         Ok(config) => config,
         Err(error) => return fail(&error),
     };
@@ -28,6 +30,11 @@ async fn main() -> ExitCode {
         Ok(server) => server,
         Err(error) => return fail(&error),
     };
+    let listener = match tokio::net::TcpListener::bind(readiness_listen).await {
+        Ok(listener) => listener,
+        Err(error) => return fail(&error),
+    };
+    let readiness = server.readiness();
 
     let shutdown = CancellationToken::new();
     let on_signal = shutdown.clone();
@@ -35,7 +42,7 @@ async fn main() -> ExitCode {
         trogon_std::signal::shutdown_signal().await;
         on_signal.cancel();
     });
-    server.run(shutdown).await;
+    tokio::join!(server.run(shutdown.clone()), readiness.serve(listener, shutdown));
     ExitCode::SUCCESS
 }
 

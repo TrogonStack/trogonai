@@ -1,0 +1,67 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+message QualifiedAttestorRef {
+  string attestor_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+// Exact literal selector admitted by the qualified attestor. This is not an
+// expression language or caller-selected pattern; plugin-specific semantics,
+// protected origin and selector completeness are qualification obligations.
+message AttestationSelector {
+  string type = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[A-Za-z0-9_.-]+$"
+    }
+  ];
+  string value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      not_in: ["*"]
+    }
+  ];
+}
+
+// References pinned attestor implementations and constrained issuer parent.
+// Neither possession of an application key nor node admission alone admits a
+// workload. The selected deployment artifact supplies native SPIRE configuration;
+// this record does not reproduce its plugin wire protocol (ADR#0098).
+message AttestationProfile {
+  option (buf.validate.message).cel = {
+    id: "attestation_profile.selectors"
+    message: "node and workload selector pairs must be unique"
+    expression: "this.node_selectors.map(s, s.type + ':' + s.value).unique() && this.workload_selectors.map(s, s.type + ':' + s.value).unique()"
+  };
+  QualifiedAttestorRef node_attestor_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  QualifiedAttestorRef workload_attestor_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  string parent_spiffe_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^spiffe://"
+    }
+  ];
+  repeated AttestationSelector node_selectors = 4 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 64
+  }];
+  repeated AttestationSelector workload_selectors = 5 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 64
+  }];
+}

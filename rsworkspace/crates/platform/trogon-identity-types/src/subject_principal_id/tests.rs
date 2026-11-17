@@ -86,6 +86,7 @@ fn every_mapped_token_parses_back_to_itself() {
         assert_eq!(SubjectPrincipalId::try_from(token.as_str()), Ok(token.clone()));
         assert_eq!(token.to_string(), token.as_str());
         assert_eq!(token.principal_id().as_str(), token.as_str());
+        assert_eq!(token.as_ref(), token.as_str());
     }
 }
 

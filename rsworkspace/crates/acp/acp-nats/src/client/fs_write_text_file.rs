@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{WriteTextFileRequest, WriteTextFileResponse};
+use agent_client_protocol::v1::schema::{WriteTextFileRequest, WriteTextFileResponse};
 use async_nats::header::HeaderMap;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -20,7 +20,7 @@ pub enum FsWriteTextFileError {
 pub fn error_code_and_message(e: &FsWriteTextFileError) -> (ErrorCode, String) {
     match e {
         FsWriteTextFileError::InvalidRequest(inner) => (
-            ErrorCode::InvalidParams,
+            ErrorCode::INVALID_PARAMS,
             format!("Invalid write_text_file request: {}", inner),
         ),
         FsWriteTextFileError::ClientError(inner) => (inner.code, inner.message.clone()),

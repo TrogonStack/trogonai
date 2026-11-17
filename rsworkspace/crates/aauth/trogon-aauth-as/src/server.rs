@@ -128,6 +128,7 @@ where
             .await
             .map_err(AccessServerError::Verification)?;
 
+        verified.auth_token_ttl(self.clock.now(), self.cfg.auth_token_ttl)?;
         let ctx = self.context_of(&verified);
         let decision = self.policy.decide(&ctx, &trust);
         self.apply_decision(decision, verified, trust)
@@ -149,6 +150,7 @@ where
             .take_for(pending_id, ps_iss)
             .ok_or_else(|| AccessServerError::UnknownPendingRequest(pending_id.as_str().to_string()))?;
 
+        verified.auth_token_ttl(self.clock.now(), self.cfg.auth_token_ttl)?;
         let ctx = self.context_of(&verified);
         let decision = self.policy.decide_with_claims(&ctx, &trust, claims);
         self.apply_decision(decision, verified, trust)
@@ -202,6 +204,7 @@ where
         let act = act_for(verified);
         let sub = subject_for(verified);
         let iat = self.clock.now();
+        let ttl = verified.auth_token_ttl(iat, self.cfg.auth_token_ttl)?;
         let jti = fresh_pending_id();
 
         let inputs = AuthTokenInputs {
@@ -217,7 +220,7 @@ where
             consent_id: None,
             resource: None,
             iat,
-            ttl: self.cfg.auth_token_ttl,
+            ttl,
         };
 
         let token = mint_auth_jwt(&self.cfg.signing_key, self.cfg.alg, &self.cfg.kid, &inputs)
@@ -225,17 +228,14 @@ where
 
         Ok(AsTokenResponse {
             auth_token: token,
-            expires_in: self.cfg.auth_token_ttl.get(),
+            expires_in: ttl.get(),
         })
     }
 }
 
 /// Builds `act` for the minted token, per "Upstream Token Verification"
 /// step 4 (call chaining) and "Parent-Mediated Authorization" step 4
-/// (sub-agent). Both nest under the same field, but only one applies per
-/// request -- a request is either a sub-agent authorization (`subagent_claims`
-/// present) or a call-chaining continuation (`upstream` present), not both,
-/// per "PS-to-AS Token Request".
+/// (sub-agent). A parent may already be acting in an upstream delegation chain.
 fn act_for(verified: &VerifiedRequest) -> Option<Act> {
     // Both cases nest under the *requesting* agent_token's own subject: in
     // call chaining that subject is "the intermediary resource's agent

@@ -3,6 +3,7 @@
 
 /// ContentType selects the NATS message Content-Type used by generated clients
 /// and handlers.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum ContentType {

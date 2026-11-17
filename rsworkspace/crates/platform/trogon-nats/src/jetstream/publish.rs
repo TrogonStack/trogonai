@@ -1,6 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use async_nats::jetstream::publish::PublishAck;
 use bytes::Bytes;
 use tracing::error;
 
@@ -8,7 +9,10 @@ use crate::jetstream::JetStreamPublisher;
 
 #[derive(Debug)]
 pub enum PublishOutcome<E: fmt::Display> {
-    Published,
+    /// The stream stored the message. The ack names the stream and the sequence
+    /// it stored it at, and whether it was a duplicate of a message already
+    /// stored under the same `Nats-Msg-Id`.
+    Published(PublishAck),
     PublishFailed(E),
     AckFailed(E),
     AckTimedOut(Duration),
@@ -17,12 +21,12 @@ pub enum PublishOutcome<E: fmt::Display> {
 
 impl<E: fmt::Display> PublishOutcome<E> {
     pub fn is_ok(&self) -> bool {
-        matches!(self, PublishOutcome::Published)
+        matches!(self, PublishOutcome::Published(_))
     }
 
     pub fn log_on_error(&self, source_name: &str) {
         match self {
-            PublishOutcome::Published => {}
+            PublishOutcome::Published(_) => {}
             PublishOutcome::PublishFailed(e) => {
                 error!(error = %e, source = source_name, "Failed to publish event to NATS");
             }
@@ -52,7 +56,7 @@ pub async fn publish_event<P: JetStreamPublisher>(
     };
 
     match tokio::time::timeout(ack_timeout, ack_future).await {
-        Ok(Ok(_)) => PublishOutcome::Published,
+        Ok(Ok(ack)) => PublishOutcome::Published(ack),
         Ok(Err(e)) => PublishOutcome::AckFailed(e),
         Err(_) => PublishOutcome::AckTimedOut(ack_timeout),
     }

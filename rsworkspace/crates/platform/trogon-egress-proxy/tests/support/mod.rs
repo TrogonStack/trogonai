@@ -23,14 +23,18 @@ use tokio::task::JoinHandle;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 use tokio_util::sync::CancellationToken;
+use trogon_audit::{AuditName, WriterId, WriterIdentity};
 use trogon_egress_proxy::audit::{AuditEvent, AuditSink, Decision};
-use trogon_egress_proxy::config::Config;
+use trogon_egress_proxy::audit_config::AuditConfig;
+use trogon_egress_proxy::audit_error::AuditError;
+use trogon_egress_proxy::config::{Config, PolicyInput};
 use trogon_egress_proxy::host_name::HostName;
 use trogon_egress_proxy::limits::Limits;
 use trogon_egress_proxy::mtls::TlsFiles;
 use trogon_egress_proxy::resolver::Resolver;
 use trogon_egress_proxy::runtime::start_with;
 use trogon_egress_proxy::trust_domain::TrustDomain;
+use trogon_nats::{NatsConfig, NatsToken};
 
 pub const TRUST_DOMAIN: &str = "trogon.example";
 pub const WAIT: Duration = Duration::from_secs(5);
@@ -87,9 +91,10 @@ impl Pki {
         std::fs::write(&policy_file, policy).expect("write");
         Config {
             listen,
-            policy_file,
-            tls: self.write_server_files(dir),
+            policy: PolicyInput::StaticFile(policy_file),
+            tls: trogon_egress_proxy::config::TlsInput::Files(self.write_server_files(dir)),
             trust_domain: TrustDomain::new(TRUST_DOMAIN).expect("trust domain"),
+            audit: audit_config(),
             non_tls_ports: Vec::new(),
             limits: Limits::default(),
         }
@@ -112,18 +117,35 @@ impl Pki {
     }
 }
 
+/// Audit settings that name a stream nobody listens on: tests that start the
+/// proxy through `start_with` bring their own sink, and `start` does not need
+/// the stream to answer.
+pub fn audit_config() -> AuditConfig {
+    AuditConfig {
+        nats: NatsConfig::from_url("nats://127.0.0.1:1"),
+        identity: WriterIdentity::new(
+            WriterId::new("egress-proxy:test").expect("writer"),
+            NatsToken::new("egress_proxy").expect("component"),
+            AuditName::new("acme").expect("tenant"),
+            NatsToken::new("payments").expect("project"),
+        ),
+    }
+}
+
 type Record = (Option<String>, Option<IpAddr>, Decision);
 
 #[derive(Default)]
 pub struct Recorder(Mutex<Vec<Record>>);
 
+#[async_trait]
 impl AuditSink for Recorder {
-    fn record(&self, event: &AuditEvent<'_>) {
+    async fn record(&self, event: &AuditEvent<'_>) -> Result<(), AuditError> {
         self.0.lock().expect("lock").push((
             event.destination.map(ToString::to_string),
             event.resolved_address,
             event.decision,
         ));
+        Ok(())
     }
 }
 

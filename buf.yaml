@@ -30,6 +30,8 @@ lint:
   ignore_only:
     IMPORT_USED:
       - proto/trogonai/decider/v1/decider_service.proto
+      # The audit import root retains the existing Rust policy-feature types.
+      - proto/trogonai/platform/audit/v1/policy_bindings.proto
 
 breaking:
   use:

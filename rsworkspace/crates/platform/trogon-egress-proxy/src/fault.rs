@@ -10,6 +10,7 @@ use crate::constants::{FAULT_HEADER, RETRY_AFTER_SECONDS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Fault {
+    AuthorityExpired,
     /// No permit of the calling agent names the destination.
     NoPermit,
     /// The destination resolves only to addresses the policy did not intend.
@@ -19,6 +20,11 @@ pub enum Fault {
     SniMismatch,
     /// The policy snapshot cannot decide right now.
     PolicyUnavailable,
+    /// The record of a permitted tunnel could not be stored, so the tunnel is
+    /// refused (ADR#0085 Decision 5). An operational fault, never a security
+    /// denial, and the one refusal that is not itself recorded: the record that
+    /// would carry it is the one audit just failed to take.
+    AuditUnavailable,
     /// The permitted destination could not be reached.
     UpstreamUnreachable,
     /// Only CONNECT is served.
@@ -30,20 +36,39 @@ pub enum Fault {
 impl Fault {
     pub fn code(self) -> &'static str {
         match self {
+            Self::AuthorityExpired => "AUTHORITY_EXPIRED",
             Self::NoPermit => "NO_PERMIT",
             Self::AddressForbidden => "ADDRESS_FORBIDDEN",
             Self::SniMismatch => "SNI_MISMATCH",
             Self::PolicyUnavailable => "POLICY_UNAVAILABLE",
+            Self::AuditUnavailable => "AUDIT_UNAVAILABLE",
             Self::UpstreamUnreachable => "UPSTREAM_UNREACHABLE",
             Self::MethodNotAllowed => "METHOD_NOT_ALLOWED",
             Self::BadRequest => "BAD_REQUEST",
         }
     }
 
+    /// The code an audit record carries for this refusal. An audit reason code
+    /// is lower snake case, so it is the response code spelled the way the
+    /// audit vocabulary spells it.
+    pub fn reason_code(self) -> &'static str {
+        match self {
+            Self::AuthorityExpired => "authority_expired",
+            Self::NoPermit => "no_permit",
+            Self::AddressForbidden => "address_forbidden",
+            Self::SniMismatch => "sni_mismatch",
+            Self::PolicyUnavailable => "policy_unavailable",
+            Self::AuditUnavailable => "audit_unavailable",
+            Self::UpstreamUnreachable => "upstream_unreachable",
+            Self::MethodNotAllowed => "method_not_allowed",
+            Self::BadRequest => "bad_request",
+        }
+    }
+
     pub fn status(self) -> Status {
         match self {
-            Self::NoPermit | Self::AddressForbidden | Self::SniMismatch => Status::Forbidden,
-            Self::PolicyUnavailable => Status::ServiceUnavailable,
+            Self::AuthorityExpired | Self::NoPermit | Self::AddressForbidden | Self::SniMismatch => Status::Forbidden,
+            Self::PolicyUnavailable | Self::AuditUnavailable => Status::ServiceUnavailable,
             Self::UpstreamUnreachable => Status::BadGateway,
             Self::MethodNotAllowed => Status::MethodNotAllowed,
             Self::BadRequest => Status::BadRequest,

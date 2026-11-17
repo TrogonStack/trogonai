@@ -8,6 +8,24 @@
 //! instrument, so call sites never restate them. The registry under
 //! `otel/semconv/` is authoritative for name, instrument, description, and unit.
 
+/// Imported reply requests refused by concurrent admission limits
+///
+/// Instrument: `counter`. Unit: `{request}`.
+pub const A2A_GATEWAY_IMPORTED_REPLY_CAPACITY_REFUSALS: &str = "a2a.gateway.imported_reply.capacity_refusals";
+
+/// Imported reply requests refused by concurrent admission limits
+///
+/// Instrument: `counter`. Unit: `{request}`.
+pub fn build_a2a_gateway_imported_reply_capacity_refusals(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(A2A_GATEWAY_IMPORTED_REPLY_CAPACITY_REFUSALS)
+        .with_description("Imported reply requests refused by concurrent admission limits.")
+        .with_unit("{request}")
+        .build()
+}
+
 /// Total number of ACP errors by operation and reason
 ///
 /// Instrument: `counter`. Unit: `{error}`.
@@ -562,5 +580,45 @@ pub fn build_scheduler_processor_redeliveries(
         .u64_counter(SCHEDULER_PROCESSOR_REDELIVERIES)
         .with_description("Schedule event records observed as NATS redeliveries.")
         .with_unit("{record}")
+        .build()
+}
+
+/// Times the invalidation reader lost its place and stopped holding releases until it read again
+///
+/// Instrument: `counter`. Unit: `{loss}`.
+pub const SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES: &str = "secrets.client.invalidation.position_losses";
+
+/// Times the invalidation reader lost its place and stopped holding releases until it read again
+///
+/// Instrument: `counter`. Unit: `{loss}`.
+pub fn build_secrets_client_invalidation_position_losses(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES)
+        .with_description(
+            "Times the invalidation reader lost its place and stopped holding releases until it read again.",
+        )
+        .with_unit("{loss}")
+        .build()
+}
+
+/// Releases served without being held because the release cache was full of copies that still serve
+///
+/// Instrument: `counter`. Unit: `{release}`.
+pub const SECRETS_CLIENT_RELEASE_CACHE_CAPACITY_SKIPS: &str = "secrets.client.release_cache.capacity_skips";
+
+/// Releases served without being held because the release cache was full of copies that still serve
+///
+/// Instrument: `counter`. Unit: `{release}`.
+pub fn build_secrets_client_release_cache_capacity_skips(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(SECRETS_CLIENT_RELEASE_CACHE_CAPACITY_SKIPS)
+        .with_description(
+            "Releases served without being held because the release cache was full of copies that still serve.",
+        )
+        .with_unit("{release}")
         .build()
 }

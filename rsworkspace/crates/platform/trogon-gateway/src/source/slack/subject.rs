@@ -1,4 +1,4 @@
-use trogon_nats::{NatsToken, SubjectTokenViolationError};
+use trogon_nats::{DottedNatsToken, NatsToken, SubjectTokenViolationError};
 
 use super::system_notice::SystemNoticeType;
 
@@ -13,40 +13,43 @@ fn token(raw: &str) -> Result<NatsToken, SubjectTokenViolationError> {
 }
 
 impl SlackSubject {
-    pub fn event(prefix: &NatsToken, event_type: &str) -> Result<Self, SubjectTokenViolationError> {
+    pub fn event(prefix: &DottedNatsToken, event_type: &str) -> Result<Self, SubjectTokenViolationError> {
         Ok(Self(format!("{prefix}.event.{}", token(event_type)?)))
     }
 
-    pub fn interaction(prefix: &NatsToken, interaction_type: &str) -> Result<Self, SubjectTokenViolationError> {
+    pub fn interaction(prefix: &DottedNatsToken, interaction_type: &str) -> Result<Self, SubjectTokenViolationError> {
         Ok(Self(format!("{prefix}.interaction.{}", token(interaction_type)?)))
     }
 
-    pub fn command(prefix: &NatsToken, command: &str) -> Result<Self, SubjectTokenViolationError> {
+    pub fn command(prefix: &DottedNatsToken, command: &str) -> Result<Self, SubjectTokenViolationError> {
         let name = command.trim_start_matches('/');
         Ok(Self(format!("{prefix}.command.{}", token(name)?)))
     }
 
-    pub fn respond_interaction(prefix: &NatsToken, interaction_type: &str) -> Result<Self, SubjectTokenViolationError> {
+    pub fn respond_interaction(
+        prefix: &DottedNatsToken,
+        interaction_type: &str,
+    ) -> Result<Self, SubjectTokenViolationError> {
         Ok(Self(format!(
             "{prefix}.respond.interaction.{}",
             token(interaction_type)?
         )))
     }
 
-    pub fn respond_command(prefix: &NatsToken, command: &str) -> Result<Self, SubjectTokenViolationError> {
+    pub fn respond_command(prefix: &DottedNatsToken, command: &str) -> Result<Self, SubjectTokenViolationError> {
         let name = command.trim_start_matches('/');
         Ok(Self(format!("{prefix}.respond.command.{}", token(name)?)))
     }
 
-    pub fn system(prefix: &NatsToken, notice: SystemNoticeType) -> Self {
+    pub fn system(prefix: &DottedNatsToken, notice: SystemNoticeType) -> Self {
         Self(format!("{prefix}.system.{}", notice.as_str()))
     }
 
-    pub fn unroutable(prefix: &NatsToken) -> Self {
+    pub fn unroutable(prefix: &DottedNatsToken) -> Self {
         Self(format!("{prefix}.unroutable"))
     }
 
-    pub fn stream_filters(prefix: &NatsToken) -> Vec<String> {
+    pub fn stream_filters(prefix: &DottedNatsToken) -> Vec<String> {
         ["event.>", "interaction.>", "command.>", "system.>", "unroutable"]
             .into_iter()
             .map(|filter| format!("{prefix}.{filter}"))

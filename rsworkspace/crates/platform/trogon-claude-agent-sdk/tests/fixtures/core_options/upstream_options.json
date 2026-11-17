@@ -1,0 +1,211 @@
+{
+ "typescript": {
+  "additional_directories": [
+   "--add-dir=/a",
+   "--add-dir=-b",
+   "--add-dir=",
+   "--add-dir=/c d"
+  ],
+  "additional_directories_empty": [],
+  "agent_named": [
+   "--agent=reviewer"
+  ],
+  "agent_empty": [],
+  "allowed_tools": [
+   "--allowedTools=Read,Bash(ls:*),mcp__s__t"
+  ],
+  "allowed_tools_empty": [],
+  "allowed_tools_empty_item": [
+   "--allowedTools="
+  ],
+  "disallowed_tools": [
+   "--disallowedTools=Write,Bash(rm:*)"
+  ],
+  "disallowed_tools_empty": [],
+  "continue_true": [
+   "--continue"
+  ],
+  "continue_false": [],
+  "resume_id": [
+   "--resume=11111111-1111-4111-8111-111111111111"
+  ],
+  "resume_empty": [],
+  "resume_dash": [
+   "--resume=-x"
+  ],
+  "fork_session": [
+   "--fork-session"
+  ],
+  "fork_session_false": [],
+  "partial_messages": [
+   "--include-partial-messages"
+  ],
+  "partial_messages_false": [],
+  "max_turns": [
+   "--max-turns=7"
+  ],
+  "max_turns_zero": [],
+  "persist_false": [
+   "--no-session-persistence"
+  ],
+  "persist_true": [],
+  "tools_list": [
+   "--tools=Read,Edit"
+  ],
+  "tools_empty": [
+   "--tools="
+  ],
+  "tools_preset": [
+   "--tools=default"
+  ],
+  "extra_args_mixed": [
+   "--1",
+   "one",
+   "--9",
+   "nine",
+   "--bare-flag",
+   "--spaced",
+   "value",
+   "--dashed=-1",
+   "--dash_only",
+   "-",
+   "--empty",
+   "",
+   "--two_dash=--x",
+   "--a b",
+   "c d",
+   "--zeta",
+   "z"
+  ],
+  "extra_args_empty": [],
+  "extra_args_order_all": [
+   "--max-turns=2",
+   "--agent=a",
+   "--continue",
+   "--resume=r1",
+   "--allowedTools=Read",
+   "--disallowedTools=Bash",
+   "--tools=Read",
+   "--include-partial-messages",
+   "--add-dir=/d",
+   "--fork-session",
+   "--no-session-persistence",
+   "--zz"
+  ],
+  "extra_args_sdk_url_guard": [
+   "--resume=s",
+   "--sdk-url",
+   "x"
+  ]
+ },
+ "python": {
+  "add_dirs": [
+   "--add-dir",
+   "/a",
+   "--add-dir",
+   "-b",
+   "--add-dir",
+   "",
+   "--add-dir",
+   "/c d"
+  ],
+  "add_dirs_empty": [],
+  "allowed": [
+   "--allowedTools",
+   "Read,Bash(ls:*)"
+  ],
+  "allowed_empty": [],
+  "disallowed": [
+   "--disallowedTools",
+   "Write"
+  ],
+  "continue_true": [
+   "--continue"
+  ],
+  "continue_false": [],
+  "resume": [
+   "--resume=11111111-1111-4111-8111-111111111111"
+  ],
+  "resume_empty": [],
+  "resume_dash": [
+   "--resume=-x"
+  ],
+  "fork": [
+   "--fork-session"
+  ],
+  "partial": [
+   "--include-partial-messages"
+  ],
+  "max_turns": [
+   "--max-turns",
+   "7"
+  ],
+  "max_turns_zero": [],
+  "tools_list": [
+   "--tools",
+   "Read,Edit"
+  ],
+  "tools_empty": [
+   "--tools",
+   ""
+  ],
+  "tools_preset": [
+   "--tools",
+   "default"
+  ],
+  "extra_mixed": [
+   "--bare-flag",
+   "--spaced",
+   "value",
+   "--dashed=-1",
+   "--dash_only=-",
+   "--empty",
+   "",
+   "--two_dash=--x",
+   "--a b",
+   "c d",
+   "--9",
+   "nine"
+  ],
+  "extra_order_all": [
+   "--tools",
+   "Read",
+   "--allowedTools",
+   "Read",
+   "--max-turns",
+   "2",
+   "--disallowedTools",
+   "Bash",
+   "--continue",
+   "--resume=r1",
+   "--add-dir",
+   "/d",
+   "--include-partial-messages",
+   "--fork-session",
+   "--zz"
+  ],
+  "user_none": [],
+  "debug_stderr_noop": []
+ },
+ "typescript_stderr_chunks": [
+  "one\n",
+  "two  \n\nthree",
+  " tail\n",
+  "xé",
+  "end"
+ ],
+ "python_stderr_lines": [
+  "one",
+  "two",
+  "three tail",
+  "xéend"
+ ],
+ "python_client_app": {
+  "client_app_x": "x",
+  "client_app_empty": "",
+  "client_app_none": null,
+  "client_app_opt_env": "x",
+  "client_app_inherited": "inh",
+  "client_app_inherited_plus_opt": "x"
+ }
+}

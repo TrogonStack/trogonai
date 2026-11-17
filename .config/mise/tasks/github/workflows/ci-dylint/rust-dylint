@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Run the Rust policy lints via cargo dylint with RUSTUP_TOOLCHAIN unset"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace"
+
+unset RUSTUP_TOOLCHAIN
+
+# A caching rustc wrapper replays the compile without invoking the linker, so
+# `dylint-link` never makes the `lib<name>@<toolchain>.dylib` copy dylint looks for.
+export RUSTC_WRAPPER=""
+export CARGO_BUILD_RUSTC_WRAPPER=""
+
+# dylint 6.0.x checks out Clippy's `master`, which rust-lang/rust-clippy no
+# longer has. Naming the clone's remote `master` makes that ref resolve to the
+# remote HEAD. Drop this once dylint is on a release that checks out `main`.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=clone.defaultRemoteName
+export GIT_CONFIG_VALUE_0=master
+
+cargo dylint --all --workspace --no-deps -- --keep-going --all-features --all-targets

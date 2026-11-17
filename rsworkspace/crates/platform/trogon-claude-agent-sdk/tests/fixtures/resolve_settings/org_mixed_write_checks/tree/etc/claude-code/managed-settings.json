@@ -1,0 +1,11 @@
+{
+  "model": "rewritable-model",
+  "permissions": {
+    "allow": [
+      "Bash(ls)"
+    ],
+    "deny": [
+      "Bash(rm:*)"
+    ]
+  }
+}

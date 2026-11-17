@@ -9,11 +9,10 @@ mod credential_lifecycle;
 mod credential_management;
 mod credential_runtime_projection;
 mod http;
-mod secret_store;
 mod source;
-mod source_integration_id;
 mod source_plugin;
 mod source_status;
+mod static_config_secret_store;
 mod streams;
 mod supervision;
 
@@ -23,25 +22,27 @@ use std::net::SocketAddr;
 
 use crate::constants::{
     CLAIM_CHECK_TTL_GRACE, CREDENTIAL_MANAGEMENT_ADMIN_TOKEN, CREDENTIAL_RUNTIME_PROJECTION_WORKER_INTERVAL,
-    CREDENTIAL_WORKER_INTERVAL, DISCORD_BOT_TOKEN_RETRY_BACKOFF, ENABLE_RUNTIME_DISCORD_CREDENTIALS,
-    ENABLE_RUNTIME_GITHUB_CREDENTIALS, ENABLE_RUNTIME_GITLAB_CREDENTIALS, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS,
-    ENABLE_RUNTIME_LINEAR_CREDENTIALS, ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS, ENABLE_RUNTIME_NOTION_CREDENTIALS,
-    ENABLE_RUNTIME_PLAID_CREDENTIALS, ENABLE_RUNTIME_SENTRY_CREDENTIALS, ENABLE_RUNTIME_SLACK_CREDENTIALS,
-    ENABLE_RUNTIME_TELEGRAM_CREDENTIALS, ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT,
-    NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR, OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
+    CREDENTIAL_WORKER_INTERVAL, DEFAULT_STREAM_MAX_AGE_SECS, DISCORD_BOT_TOKEN_RETRY_BACKOFF,
+    ENABLE_RUNTIME_DISCORD_CREDENTIALS, ENABLE_RUNTIME_GITHUB_CREDENTIALS, ENABLE_RUNTIME_GITLAB_CREDENTIALS,
+    ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS, ENABLE_RUNTIME_LINEAR_CREDENTIALS,
+    ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS, ENABLE_RUNTIME_NOTION_CREDENTIALS, ENABLE_RUNTIME_PLAID_CREDENTIALS,
+    ENABLE_RUNTIME_SENTRY_CREDENTIALS, ENABLE_RUNTIME_SLACK_CREDENTIALS, ENABLE_RUNTIME_TELEGRAM_CREDENTIALS,
+    ENABLE_RUNTIME_TWITTER_CREDENTIALS, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL, OPENBAO_ADDR,
+    OPENBAO_ALLOW_PLAINTEXT, OPENBAO_TOKEN, SLACK_RESTART_BACKOFF,
 };
-use crate::secret_store::openbao_secret_store::OpenBaoTransport;
 use anyhow::Context;
 use futures_util::FutureExt;
 use tokio::task::JoinSet;
 use tracing::{error, info, warn};
+use trogon_credential_domain::CredentialKey;
 use trogon_decider_runtime::StreamRead;
 use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{
     ClaimBucket, ClaimCheckPublisher, ClaimRetention, JetStreamGetRawMessage, JetStreamGetStreamInfo,
-    JetStreamPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, ObjectStorePut,
+    JetStreamPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, ObjectStorePut, StreamMaxAge,
 };
 use trogon_nats::{connect, wait_for_server_info};
+use trogon_secret_store::OpenBaoTransport;
 use trogon_std::SecretString;
 use trogon_std::args::{CliArgs, ParseArgs};
 use trogon_std::env::{ReadEnv, SystemEnv};
@@ -62,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
         cli::Command::Source { source } => match source {
             cli::SourceCommand::Notion { command } => match command {
                 cli::NotionCommand::VerificationToken { integration, watch } => {
-                    let integration = source_integration_id::SourceIntegrationId::new(&integration)?;
+                    let integration = trogon_credential_domain::SourceIntegrationId::new(&integration)?;
                     let nats = connect(&resolved.nats, NATS_CONNECT_TIMEOUT).await?;
                     let js_context = async_nats::jetstream::new(nats.clone());
                     let mut stdout = std::io::stdout();
@@ -85,13 +86,13 @@ async fn serve_with_env(
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
     env: &impl ReadEnv,
 ) -> anyhow::Result<()> {
-    if !resolved.has_any_source() {
-        anyhow::bail!("no sources configured — provide a config file with at least one source");
-    }
-
     trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
 
     info!("trogon-gateway starting");
+
+    if !resolved.has_any_source() {
+        info!("starting with no source integrations configured");
+    }
 
     let google_pubsub_sources = prepare_google_pubsub_sources(&resolved.google_pubsub)?;
 
@@ -103,13 +104,13 @@ async fn serve_with_env(
     log_nats_connection(server_max_payload, max_payload);
     let js_context = async_nats::jetstream::new(nats.clone());
     // Size the claim bucket TTL from the longest stream it serves so a message
-    // still on the stream can always resolve its claim. `has_any_source` is
-    // enforced above, so `max_stream_max_age` is always `Some` here; the fallback
-    // never expires rather than risk reclaiming a live claim.
-    let claim_retention = resolved
-        .max_stream_max_age()
-        .map(|stream_max_age| ClaimRetention::tracking(stream_max_age, CLAIM_CHECK_TTL_GRACE))
-        .unwrap_or(ClaimRetention::EventSourced);
+    // still on the stream can always resolve its claim. Empty-source mode uses
+    // the normal seven-day stream default until a source supplies its own age.
+    let claim_stream_max_age = match resolved.max_stream_max_age() {
+        Some(stream_max_age) => stream_max_age,
+        None => StreamMaxAge::from_secs(DEFAULT_STREAM_MAX_AGE_SECS)?,
+    };
+    let claim_retention = ClaimRetention::tracking(claim_stream_max_age, CLAIM_CHECK_TTL_GRACE);
     let claim_binding =
         NatsObjectStore::provision_claim_bucket(&js_context, ClaimBucket::default(), claim_retention).await?;
     let client = NatsJetStreamClient::new(js_context);
@@ -297,8 +298,8 @@ fn log_nats_connection(server_max_payload: usize, max_payload: MaxPayload) {
 struct TelegramWebhookRegistrations {
     registered_credentials: source::telegram::TelegramRegisteredWebhookCredentials,
     by_integration: std::collections::HashMap<
-        source_integration_id::SourceIntegrationId,
-        Option<credential::commands::domain::CredentialRef>,
+        trogon_credential_domain::SourceIntegrationId,
+        Option<trogon_credential_domain::CredentialRef>,
     >,
 }
 
@@ -312,16 +313,16 @@ impl TelegramWebhookRegistrations {
 
     fn is_current(
         &self,
-        integration: &source_integration_id::SourceIntegrationId,
-        credential: &Option<credential::commands::domain::CredentialRef>,
+        integration: &trogon_credential_domain::SourceIntegrationId,
+        credential: &Option<trogon_credential_domain::CredentialRef>,
     ) -> bool {
         self.by_integration.get(integration) == Some(credential)
     }
 
     fn record(
         &mut self,
-        integration: source_integration_id::SourceIntegrationId,
-        credential: Option<credential::commands::domain::CredentialRef>,
+        integration: trogon_credential_domain::SourceIntegrationId,
+        credential: Option<trogon_credential_domain::CredentialRef>,
     ) {
         self.by_integration.insert(integration, credential);
     }
@@ -341,7 +342,7 @@ async fn run_telegram_webhook_registration_worker<G>(
     interval: std::time::Duration,
 ) -> std::convert::Infallible
 where
-    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
+    G: trogon_secret_store::SecretStoreGet<Error = trogon_secret_store::SecretStoreError>,
 {
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -367,7 +368,7 @@ async fn register_telegram_webhooks<C, E, Register, G>(
     register: Register,
 ) where
     E: std::error::Error,
-    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
+    G: trogon_secret_store::SecretStoreGet<Error = trogon_secret_store::SecretStoreError>,
     Register: for<'a> std::ops::AsyncFn(
             &'a source::telegram::TelegramSourceConfig,
             &'a C,
@@ -381,11 +382,11 @@ async fn register_telegram_webhooks<C, E, Register, G>(
         let current = match runtime_credentials {
             Some(resolver) => {
                 let key = credential_runtime_projection::RuntimeIntegrationKey::new(
-                    credential::commands::domain::SourceKind::Telegram,
+                    trogon_credential_domain::SourceKind::Telegram,
                     &integration.id,
                 );
                 let current = resolver
-                    .active_credential_ref(&key, credential::commands::domain::CredentialKind::WebhookSecret)
+                    .active_credential_ref(&key, trogon_credential_domain::CredentialKind::WebhookSecret)
                     .await;
                 if registrations.is_current(&integration.id, &current) {
                     continue;
@@ -412,11 +413,11 @@ async fn register_telegram_webhooks<C, E, Register, G>(
                     let config = match runtime_credentials {
                         Some(resolver) => {
                             let key = credential_runtime_projection::RuntimeIntegrationKey::new(
-                                credential::commands::domain::SourceKind::Telegram,
+                                trogon_credential_domain::SourceKind::Telegram,
                                 &integration.id,
                             );
                             let secret = match resolver
-                                .resolve_plaintext(&key, credential::commands::domain::CredentialKind::WebhookSecret)
+                                .resolve_plaintext(&key, trogon_credential_domain::CredentialKind::WebhookSecret)
                                 .await
                             {
                                 Ok(secret) => secret,
@@ -499,7 +500,7 @@ fn spawn_discord_gateway_with_runtime_credentials<P, S, G, Shutdown, Run, Runnin
 ) where
     P: JetStreamPublisher + Clone,
     S: ObjectStorePut + Clone,
-    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError> + Send + Sync + 'static,
+    G: trogon_secret_store::SecretStoreGet<Error = trogon_secret_store::SecretStoreError> + Send + Sync + 'static,
     Shutdown: std::future::Future<Output = ()> + Send + 'static,
     Run: Fn(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running
         + Send
@@ -539,22 +540,21 @@ async fn supervise_discord_runtime_gateway<P, S, G, Run, Running>(
 where
     P: JetStreamPublisher + Clone,
     S: ObjectStorePut + Clone,
-    G: secret_store::SecretStoreGet<Error = secret_store::SecretStoreError>,
+    G: trogon_secret_store::SecretStoreGet<Error = trogon_secret_store::SecretStoreError>,
     Run: Fn(ClaimCheckPublisher<P, S>, source::discord::config::DiscordConfig, twilight_gateway::Shard) -> Running,
     Running: std::future::Future<Output = ()>,
 {
-    let key = credential_runtime_projection::RuntimeIntegrationKey::for_source(
-        credential::commands::domain::SourceKind::Discord,
-    );
+    let key =
+        credential_runtime_projection::RuntimeIntegrationKey::for_source(trogon_credential_domain::SourceKind::Discord);
     let mut restart_delay = backoff.initial();
     loop {
         let before = credentials
-            .active_credential_ref(&key, credential::commands::domain::CredentialKind::BotToken)
+            .active_credential_ref(&key, trogon_credential_domain::CredentialKind::BotToken)
             .await;
         let bot_token =
             source::discord::gateway_runner::resolve_runtime_bot_token_with_retry(&credentials, backoff).await;
         let active = credentials
-            .active_credential_ref(&key, credential::commands::domain::CredentialKind::BotToken)
+            .active_credential_ref(&key, trogon_credential_domain::CredentialKind::BotToken)
             .await;
         if before != active {
             continue;
@@ -589,13 +589,13 @@ where
 async fn wait_for_credential_change<G>(
     credentials: &credential_runtime_projection::RuntimeCredentialResolver<G>,
     key: &credential_runtime_projection::RuntimeIntegrationKey,
-    active: Option<credential::commands::domain::CredentialRef>,
+    active: Option<trogon_credential_domain::CredentialRef>,
     poll_interval: std::time::Duration,
 ) {
     loop {
         tokio::time::sleep(poll_interval).await;
         let current = credentials
-            .active_credential_ref(key, credential::commands::domain::CredentialKind::BotToken)
+            .active_credential_ref(key, trogon_credential_domain::CredentialKind::BotToken)
             .await;
         if current != active {
             return;
@@ -807,8 +807,8 @@ async fn refresh_credential_runtime_projection_from_start<EventStream, EventStor
 )>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-    EventStore: StreamRead<str>,
-    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    EventStore: StreamRead<CredentialKey>,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
 {
     let report = registry
         .refresh_from_credential_stream_tracked(event_stream, event_store)
@@ -844,9 +844,7 @@ fn log_projection_refresh(report: &credential_runtime_projection::RuntimeProject
 fn source_runtime_credentials_from_env(
     env: &impl ReadEnv,
     runtime_credentials: &credential_runtime_projection::RuntimeCredentialRegistry,
-) -> anyhow::Result<
-    Option<source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>>,
-> {
+) -> anyhow::Result<Option<source_plugin::RuntimeCredentialMounts<trogon_secret_store::OpenBaoSecretStore>>> {
     let github_enabled = env_flag_enabled(env, ENABLE_RUNTIME_GITHUB_CREDENTIALS);
     let gitlab_enabled = env_flag_enabled(env, ENABLE_RUNTIME_GITLAB_CREDENTIALS);
     let incidentio_enabled = env_flag_enabled(env, ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS);
@@ -978,11 +976,7 @@ fn discord_runtime_credentials_from_env(
     env: &impl ReadEnv,
     runtime_credentials: &credential_runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<
-    Option<
-        credential_runtime_projection::RuntimeCredentialResolver<
-            secret_store::openbao_secret_store::OpenBaoSecretStore,
-        >,
-    >,
+    Option<credential_runtime_projection::RuntimeCredentialResolver<trogon_secret_store::OpenBaoSecretStore>>,
 > {
     if !env_flag_enabled(env, ENABLE_RUNTIME_DISCORD_CREDENTIALS) {
         return Ok(None);
@@ -1006,7 +1000,7 @@ fn credential_management_admin_token_from_env(env: &impl ReadEnv) -> anyhow::Res
 fn openbao_secret_store_from_env(
     env: &impl ReadEnv,
     enabled_by: &str,
-) -> anyhow::Result<secret_store::openbao_secret_store::OpenBaoSecretStore> {
+) -> anyhow::Result<trogon_secret_store::OpenBaoSecretStore> {
     let address = env
         .var(OPENBAO_ADDR)
         .with_context(|| format!("{OPENBAO_ADDR} must be set when {enabled_by} is enabled"))?;
@@ -1014,7 +1008,7 @@ fn openbao_secret_store_from_env(
         .var(OPENBAO_TOKEN)
         .with_context(|| format!("{OPENBAO_TOKEN} must be set when {enabled_by} is enabled"))?;
     let transport = openbao_transport_from_env(env)?;
-    secret_store::openbao_secret_store::OpenBaoSecretStore::new(address, token, transport)
+    trogon_secret_store::OpenBaoSecretStore::new(address, token, transport)
         .context("OpenBao secret store configuration")
 }
 
@@ -1037,12 +1031,12 @@ fn env_flag_enabled(env: &impl ReadEnv, name: &str) -> bool {
 #[derive(Debug, thiserror::Error)]
 enum NotionVerificationTokenCommandError {
     #[error("notion integration '{0}' is not configured")]
-    IntegrationNotConfigured(source_integration_id::SourceIntegrationId),
+    IntegrationNotConfigured(trogon_credential_domain::SourceIntegrationId),
 }
 
 async fn notion_verification_token<N, J, W>(
     resolved: &config::ResolvedConfig,
-    integration: &source_integration_id::SourceIntegrationId,
+    integration: &trogon_credential_domain::SourceIntegrationId,
     watch: bool,
     nats: &N,
     js_context: &J,

@@ -1,0 +1,52 @@
+edition = "2024";
+
+package trogonai.platform.workload_identity.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_identity/v1alpha1/workload_role.proto";
+
+// Registration binds an attested transport identity to governed application
+// authority. Neither the path of an SVID nor a caller-supplied AgentId creates it.
+message RegistrationBinding {
+  option (buf.validate.message).cel = {
+    id: "registration_binding.application_identity"
+    message: "only an agent registration has an application identity"
+    expression: "has(this.application_id) == (this.role == 2)"
+  };
+  string spiffe_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^spiffe://"
+    }
+  ];
+  string tenant = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[A-Za-z0-9_.-]+$"
+    }
+  ];
+  string project = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[A-Za-z0-9_.-]+$"
+    }
+  ];
+  WorkloadRole role = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string application_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+    pattern: "^[A-Za-z0-9_.:-]+$"
+  }];
+}

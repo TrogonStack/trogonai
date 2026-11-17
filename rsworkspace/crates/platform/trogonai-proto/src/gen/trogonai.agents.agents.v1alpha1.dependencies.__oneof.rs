@@ -34,19 +34,19 @@ pub mod tool_declaration {
             Self::Some(Selection::from(v))
         }
     }
-    impl serde::Serialize for Selection {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Selection {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Selector(v) => {
-                    map.serialize_entry("selector", v)?;
+                    map.serialize_entry("selector", &**v)?;
                 }
                 Self::ExactPin(v) => {
-                    map.serialize_entry("exactPin", v)?;
+                    map.serialize_entry("exactPin", &**v)?;
                 }
             }
             map.end()
@@ -92,19 +92,19 @@ pub mod delegate_declaration {
             Self::Some(Selection::from(v))
         }
     }
-    impl serde::Serialize for Selection {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Selection {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Selector(v) => {
-                    map.serialize_entry("selector", v)?;
+                    map.serialize_entry("selector", &**v)?;
                 }
                 Self::ExactPin(v) => {
-                    map.serialize_entry("exactPin", v)?;
+                    map.serialize_entry("exactPin", &**v)?;
                 }
             }
             map.end()

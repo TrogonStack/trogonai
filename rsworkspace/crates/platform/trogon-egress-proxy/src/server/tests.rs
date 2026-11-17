@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair, KeyUsagePurpose, SanType, string::Ia5String,
@@ -15,11 +16,15 @@ use tokio_rustls::TlsConnector;
 
 use super::*;
 use crate::audit::{AuditEvent, AuditSink};
+use crate::audit_error::AuditError;
 use crate::limits::Limits;
 use crate::mtls::server_config;
 use crate::policy_source::PolicySource;
 use crate::resolver::SystemResolver;
 use crate::static_snapshot::StaticSnapshot;
+
+mod connection_budget_tests;
+mod readiness_tests;
 
 const WAIT: Duration = Duration::from_secs(5);
 const TRUST_DOMAIN: &str = "trogon.example";
@@ -27,9 +32,44 @@ const TRUST_DOMAIN: &str = "trogon.example";
 #[derive(Default)]
 struct Decisions(AtomicUsize);
 
+#[async_trait]
 impl AuditSink for Decisions {
-    fn record(&self, _: &AuditEvent<'_>) {
+    async fn record(&self, _: &AuditEvent<'_>) -> Result<(), AuditError> {
         self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// A sink with background work: it notes that it was told to flush, and only
+/// then that it finished.
+#[derive(Default)]
+struct Draining {
+    flushed: AtomicBool,
+}
+
+#[async_trait]
+impl AuditSink for Draining {
+    async fn record(&self, _: &AuditEvent<'_>) -> Result<(), AuditError> {
+        Ok(())
+    }
+
+    async fn run(&self, shutdown: CancellationToken) {
+        shutdown.cancelled().await;
+        self.flushed.store(true, Ordering::SeqCst);
+    }
+}
+
+/// A sink whose background work dies.
+struct Crashing;
+
+#[async_trait]
+impl AuditSink for Crashing {
+    async fn record(&self, _: &AuditEvent<'_>) -> Result<(), AuditError> {
+        Ok(())
+    }
+
+    async fn run(&self, _: CancellationToken) {
+        panic!("the drain task crashed");
     }
 }
 
@@ -136,6 +176,11 @@ impl Pki {
 }
 
 async fn server(tls: ServerConfig, limits: Limits) -> (Server, Arc<Decisions>) {
+    let decisions = Arc::new(Decisions::default());
+    (audited_server(tls, limits, decisions.clone()).await, decisions)
+}
+
+async fn audited_server(tls: ServerConfig, limits: Limits, audit: Arc<dyn AuditSink>) -> Server {
     let snapshot = StaticSnapshot::from_toml(
         PolicySource::StaticFile {
             path: PathBuf::from("policy.toml"),
@@ -143,17 +188,16 @@ async fn server(tls: ServerConfig, limits: Limits) -> (Server, Arc<Decisions>) {
         "[agents.agent-1]\nallow = [\"example.com:443\"]\n",
     )
     .expect("policy");
-    let decisions = Arc::new(Decisions::default());
     let proxy = Proxy::new(
         Arc::new(snapshot),
         Arc::new(SystemResolver),
-        decisions.clone(),
+        audit,
         limits,
         Default::default(),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let trust_domain = TrustDomain::new(TRUST_DOMAIN).expect("trust domain");
-    (Server::new(listener, Arc::new(tls), proxy, trust_domain), decisions)
+    Server::new(listener, Arc::new(tls), proxy, trust_domain)
 }
 
 /// Reads until the proxy closes the connection, however it does.
@@ -188,6 +232,27 @@ async fn a_client_that_never_finishes_the_handshake_is_dropped() {
     stop(shutdown, task).await;
 }
 
+#[tokio::test]
+async fn the_audit_drain_runs_while_serving_and_has_flushed_when_run_returns() {
+    let audit = Arc::new(Draining::default());
+    let server = audited_server(Pki::new().strict_config(), Limits::default(), audit.clone()).await;
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(server.run(shutdown.clone()));
+
+    tokio::task::yield_now().await;
+    assert!(!audit.flushed.load(Ordering::SeqCst), "not before shutdown");
+    stop(shutdown, task).await;
+    assert!(audit.flushed.load(Ordering::SeqCst), "run returns only after the flush");
+}
+
+#[tokio::test]
+async fn a_crashed_audit_drain_does_not_take_the_server_down_with_it() {
+    let server = audited_server(Pki::new().strict_config(), Limits::default(), Arc::new(Crashing)).await;
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(server.run(shutdown.clone()));
+    stop(shutdown, task).await;
+}
+
 struct Flaky {
     failures: Arc<AtomicUsize>,
     listener: TcpListener,
@@ -214,6 +279,7 @@ async fn the_accept_loop_outlives_failed_accepts() {
         acceptor,
         proxy,
         trust_domain,
+        ..
     } = server;
     let failures = Arc::new(AtomicUsize::new(2));
     let flaky = Flaky {
@@ -264,4 +330,65 @@ async fn a_certificate_naming_no_agent_gets_no_answer() {
 
     assert_eq!(decisions.count(), 1, "only the named agent was admitted to a decision");
     stop(shutdown, task).await;
+}
+
+#[tokio::test]
+async fn an_established_tunnel_closes_when_the_authenticated_certificate_expires() {
+    let upstream = TcpListener::bind("127.0.0.1:0").await.expect("upstream");
+    let port = upstream.local_addr().expect("upstream address").port();
+    let upstream_task = tokio::spawn(async move {
+        let (mut stream, _) = upstream.accept().await.expect("accept upstream");
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).await.expect("upstream closes");
+    });
+    let pki = Pki::new();
+    let snapshot = StaticSnapshot::from_toml(
+        PolicySource::StaticFile {
+            path: "test-policy.toml".into(),
+        },
+        &format!("[agents.agent-1]\nallow = [\"127.0.0.1:{port}\"]\n"),
+    )
+    .expect("snapshot");
+    let proxy = Proxy::new(
+        Arc::new(snapshot),
+        Arc::new(SystemResolver),
+        Arc::new(Decisions::default()),
+        Limits::default(),
+        Default::default(),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let server = Server::new(
+        listener,
+        Arc::new(pki.strict_config()),
+        proxy,
+        TrustDomain::new(TRUST_DOMAIN).expect("domain"),
+    );
+    let address = server.local_addr().expect("address");
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(server.run(shutdown.clone()));
+    let mut params = CertificateParams::default();
+    params.subject_alt_names = vec![SanType::URI(
+        Ia5String::try_from("spiffe://trogon.example/agent/agent-1").expect("uri"),
+    )];
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    params.not_after = (std::time::SystemTime::now() + Duration::from_secs(2)).into();
+    let identity = pki.issue(params);
+    let tcp = TcpStream::connect(address).await.expect("connect");
+    let mut stream = pki
+        .connector(identity)
+        .connect(ServerName::try_from("localhost").expect("name"), tcp)
+        .await
+        .expect("handshake");
+    stream
+        .write_all(format!("CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n").as_bytes())
+        .await
+        .expect("request");
+    let mut established = vec![0; 39];
+    stream.read_exact(&mut established).await.expect("established");
+    assert_eq!(established, b"HTTP/1.1 200 Connection Established\r\n\r\n");
+    let mut rest = Vec::new();
+    let closed = timeout(Duration::from_secs(4), stream.read_to_end(&mut rest)).await;
+    stop(shutdown, task).await;
+    upstream_task.await.expect("upstream task");
+    assert!(closed.is_ok(), "an established tunnel cannot outlive its certificate");
 }

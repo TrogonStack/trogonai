@@ -4,19 +4,20 @@ use axum::http::Request;
 use std::time::Duration;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{CredentialIdentity, CredentialOwnerId, CredentialRef, CredentialScope};
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
-use trogon_std::NonZeroDuration;
-
-use crate::credential::commands::domain::{CredentialOwnerId, CredentialRef, CredentialScope};
-use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{
+use trogon_secret_store::{
     MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStorePut, SecretStoreRevoke,
     SecretStoreRotate,
 };
+use trogon_std::NonZeroDuration;
+
+use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
 
 const TEST_SECRET: &str = "test-secret";
 
@@ -24,7 +25,7 @@ fn test_config() -> TelegramSourceConfig {
     TelegramSourceConfig {
         webhook_secret: TelegramWebhookSecret::new(TEST_SECRET).unwrap(),
         registration: None,
-        subject_prefix: NatsToken::new("telegram").unwrap(),
+        subject_prefix: DottedNatsToken::new("telegram").unwrap(),
         stream_name: NatsToken::new("TELEGRAM").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
@@ -69,12 +70,14 @@ impl RuntimeFixture {
     async fn put(&self, secret: &str) -> CredentialRef {
         self.store
             .put(
-                CredentialScope::integration(
-                    CredentialOwnerId::new("tenant-1").unwrap(),
-                    SourceKind::Telegram,
-                    self.integration_id.clone(),
+                CredentialIdentity::derive(
+                    CredentialScope::integration(
+                        CredentialOwnerId::new("tenant-1").unwrap(),
+                        SourceKind::Telegram,
+                        self.integration_id.clone(),
+                    ),
+                    CredentialKind::WebhookSecret,
                 ),
-                CredentialKind::WebhookSecret,
                 trogon_std::SecretString::new(secret).unwrap(),
             )
             .await
@@ -84,7 +87,9 @@ impl RuntimeFixture {
     async fn activate(&self, credential: CredentialRef, version: u64) {
         self.registry
             .projections()
-            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, version).unwrap())
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(
+                credential, version,
+            ))
             .await;
     }
 
@@ -380,7 +385,7 @@ async fn subject_uses_configured_prefix() {
     let state = AppState {
         publisher: wrap_publisher(publisher.clone()),
         webhook_secret: TelegramWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("custom").unwrap(),
+        subject_prefix: DottedNatsToken::new("custom").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 
@@ -428,7 +433,7 @@ async fn body_exceeding_limit_returns_413() {
     let state = AppState {
         publisher: wrap_publisher(publisher.clone()),
         webhook_secret: TelegramWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("telegram").unwrap(),
+        subject_prefix: DottedNatsToken::new("telegram").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 
@@ -486,7 +491,7 @@ async fn ack_failure_returns_500() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         webhook_secret: TelegramWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("telegram").unwrap(),
+        subject_prefix: DottedNatsToken::new("telegram").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 
@@ -513,7 +518,7 @@ async fn ack_timeout_returns_500() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         webhook_secret: TelegramWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("telegram").unwrap(),
+        subject_prefix: DottedNatsToken::new("telegram").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
     };
 

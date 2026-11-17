@@ -4,6 +4,7 @@ use rcgen::{
 };
 use rustls::internal::msgs::codec::{Codec, Reader};
 use rustls::pki_types::PrivatePkcs8KeyDer;
+use rustls::{ClientConfig, ClientConnection, Connection, HandshakeKind, ProtocolVersion, ServerConnection};
 
 use super::*;
 
@@ -192,4 +193,112 @@ fn a_full_configuration_loads_from_pem_files() {
         load_server_config(&files, domain()),
         Err(TlsError::NoCertificate { .. })
     ));
+}
+
+fn exchange(from: &mut Connection, to: &mut Connection) -> usize {
+    let mut flight = Vec::new();
+    let written = from.write_tls(&mut flight).expect("TLS flight");
+    if !flight.is_empty() {
+        let mut flight = flight.as_slice();
+        while !flight.is_empty() {
+            assert!(to.read_tls(&mut flight).expect("receive TLS flight") > 0);
+            to.process_new_packets().expect("authenticate TLS flight");
+        }
+    }
+    written
+}
+
+fn handshake(client: Arc<ClientConfig>, server: Arc<ServerConfig>) -> (ProtocolVersion, HandshakeKind) {
+    let mut client = Connection::Client(
+        ClientConnection::new(client, "proxy.example".try_into().expect("server name")).expect("TLS client"),
+    );
+    let mut server = Connection::Server(ServerConnection::new(server).expect("TLS server"));
+    while client.is_handshaking() || server.is_handshaking() || client.wants_write() || server.wants_write() {
+        let progress = exchange(&mut client, &mut server) + exchange(&mut server, &mut client);
+        assert!(progress > 0, "the handshake must make progress");
+    }
+    assert_eq!(client.handshake_kind(), server.handshake_kind());
+    assert_eq!(
+        peer_agent(server.peer_certificates(), &domain()),
+        Ok(AgentId::new("agent-1").expect("agent"))
+    );
+    (
+        server.protocol_version().expect("negotiated protocol"),
+        server.handshake_kind().expect("completed handshake"),
+    )
+}
+
+fn subsequent_handshakes(configure: impl Fn(&mut ServerConfig)) -> Vec<(ProtocolVersion, HandshakeKind)> {
+    rustls::ALL_VERSIONS
+        .iter()
+        .map(|version| {
+            let anchor = ca("resumption-test");
+            let mut params = CertificateParams::new(vec!["proxy.example".to_owned()]).expect("server params");
+            params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+            let server_key = KeyPair::generate().expect("server key");
+            let certificate = params.signed_by(&server_key, &anchor).expect("server certificate");
+            let mut server = server_config(
+                vec![certificate.der().clone()],
+                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(server_key.serialize_der())),
+                vec![anchor.der().clone()],
+                Path::new("test-ca.pem"),
+                domain(),
+            )
+            .expect("listener TLS configuration");
+            configure(&mut server);
+            let server = Arc::new(server);
+
+            let mut params = CertificateParams::default();
+            params.distinguished_name = DistinguishedName::new();
+            params.subject_alt_names = vec![SanType::URI(
+                Ia5String::try_from("spiffe://trogon.example/agent/agent-1").expect("agent URI"),
+            )];
+            params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+            let client_key = KeyPair::generate().expect("client key");
+            let certificate = params.signed_by(&client_key, &anchor).expect("client certificate");
+            let mut roots = RootCertStore::empty();
+            roots.add(anchor.der().clone()).expect("server trust");
+            let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+            let client = Arc::new(
+                ClientConfig::builder_with_provider(provider)
+                    .with_protocol_versions(&[version])
+                    .expect("supported protocol")
+                    .with_root_certificates(roots)
+                    .with_client_auth_cert(
+                        vec![certificate.der().clone()],
+                        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(client_key.serialize_der())),
+                    )
+                    .expect("client authentication"),
+            );
+
+            assert_eq!(
+                handshake(Arc::clone(&client), Arc::clone(&server)),
+                (version.version, HandshakeKind::Full)
+            );
+            handshake(client, server)
+        })
+        .collect()
+}
+
+#[test]
+fn every_connection_requires_a_fresh_mutual_tls_handshake() {
+    let handshakes = subsequent_handshakes(|_| {});
+    let expected: Vec<_> = rustls::ALL_VERSIONS
+        .iter()
+        .map(|version| (version.version, HandshakeKind::Full))
+        .collect();
+    assert_eq!(handshakes, expected);
+}
+
+#[test]
+fn handshake_fixture_can_resume_when_the_listener_explicitly_allows_it() {
+    let handshakes = subsequent_handshakes(|config| {
+        config.session_storage = rustls::server::ServerSessionMemoryCache::new(256);
+        config.send_tls13_tickets = 2;
+    });
+    let expected: Vec<_> = rustls::ALL_VERSIONS
+        .iter()
+        .map(|version| (version.version, HandshakeKind::Resumed))
+        .collect();
+    assert_eq!(handshakes, expected);
 }

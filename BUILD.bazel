@@ -1,0 +1,10 @@
+# crate_universe resolves //:MODULE.bazel, which needs a root package.
+
+exports_files(
+    [
+        "buf.gen.yaml",
+        "buf.lock",
+        "buf.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

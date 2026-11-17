@@ -3,6 +3,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Mutex;
 
 use buffa::MessageField;
+use tokio::sync::Notify;
 use trogon_decider_runtime::{StreamEvent, StreamPosition};
 use trogonai_proto::scheduler::schedules::v1;
 
@@ -28,11 +29,40 @@ enum Settlement {
     Retry,
 }
 
+/// Bounds a wait on the dispatcher so a stall fails the test instead of hanging
+/// it. Callers run on a paused clock, which only advances once every task is
+/// idle, so the bound never fires while the dispatcher can still make progress.
+async fn unless_stalled<F: std::future::Future>(future: F, stalled: &str) -> F::Output {
+    tokio::time::timeout(std::time::Duration::from_secs(60), future)
+        .await
+        .expect(stalled)
+}
+
+/// Parks a lane worker at settlement until the test releases it, so a test can
+/// pin the dispatcher at a chosen interleaving without sleeping.
+#[derive(Default)]
+struct SettlementGate {
+    held: Notify,
+    released: Notify,
+}
+
+impl SettlementGate {
+    /// Resolves once the gated record's lane worker is parked at settlement.
+    async fn wait_until_held(&self) {
+        unless_stalled(self.held.notified(), "gated record never reached settlement").await;
+    }
+
+    fn release(&self) {
+        self.released.notify_one();
+    }
+}
+
 #[derive(Clone)]
 struct MockMessage {
     log: Arc<Mutex<Vec<Settlement>>>,
     redelivery: bool,
     deliveries: i64,
+    gate: Option<Arc<SettlementGate>>,
 }
 
 fn mock_message(log: Arc<Mutex<Vec<Settlement>>>) -> MockMessage {
@@ -40,6 +70,23 @@ fn mock_message(log: Arc<Mutex<Vec<Settlement>>>) -> MockMessage {
         log,
         redelivery: false,
         deliveries: 1,
+        gate: None,
+    }
+}
+
+fn gated_message(log: Arc<Mutex<Vec<Settlement>>>, gate: &Arc<SettlementGate>) -> MockMessage {
+    MockMessage {
+        gate: Some(gate.clone()),
+        ..mock_message(log)
+    }
+}
+
+impl MockMessage {
+    async fn hold(&self) {
+        if let Some(gate) = &self.gate {
+            gate.held.notify_one();
+            gate.released.notified().await;
+        }
     }
 }
 
@@ -53,14 +100,17 @@ impl DeliveredMessage for MockMessage {
     }
 
     async fn ack(&self) -> Result<(), String> {
+        self.hold().await;
         self.log.lock().unwrap().push(Settlement::Ack);
         Ok(())
     }
     async fn term(&self) -> Result<(), String> {
+        self.hold().await;
         self.log.lock().unwrap().push(Settlement::Term);
         Ok(())
     }
     async fn retry(&self) -> Result<(), String> {
+        self.hold().await;
         self.log.lock().unwrap().push(Settlement::Retry);
         Ok(())
     }
@@ -407,6 +457,7 @@ async fn redelivered_record_is_processed() {
                 log: log.clone(),
                 redelivery: true,
                 deliveries: 2,
+                gate: None,
             },
         )
         .await
@@ -456,6 +507,7 @@ async fn missing_checkpoint_is_poisoned_at_the_delivery_ceiling() {
                 log: log.clone(),
                 redelivery: true,
                 deliveries: MISSING_CHECKPOINT_DELIVERY_CEILING,
+                gate: None,
             },
         )
         .await
@@ -952,6 +1004,156 @@ async fn same_lane_resumes_after_the_first_record_finishes() {
             .collect::<Vec<_>>(),
         vec![1, 2]
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn record_queued_behind_a_busy_lane_runs_once_the_lane_finishes() {
+    let (processor, _kv, _execution) = build();
+    // A one-slot submission channel makes `submit` return only after the
+    // dispatcher has taken the previous record off the channel.
+    let (handle, join, reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
+        processor,
+        clock(),
+        DispatcherConfig {
+            channel_capacity: 1,
+            ..DispatcherConfig::default()
+        },
+    );
+
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
+    let key = key_for_stream(id);
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let first_gate = Arc::new(SettlementGate::default());
+
+    let create = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
+    handle
+        .submit(stream_event(&create, id, 1), gated_message(log.clone(), &first_gate))
+        .await
+        .unwrap();
+    first_gate.wait_until_held().await;
+
+    handle
+        .submit(stream_event(&paused(id), id, 2), mock_message(log.clone()))
+        .await
+        .unwrap();
+    // Taking the pause off the channel is what frees the slot for the resume,
+    // so the pause is now queued behind the busy lane.
+    unless_stalled(
+        handle.submit(stream_event(&resumed(id), id, 3), mock_message(log.clone())),
+        "dispatcher never took the pause off the channel",
+    )
+    .await
+    .unwrap();
+    assert_eq!(handle.active_lanes(), 1, "the lane is still busy with the first record");
+
+    first_gate.release();
+    drop(handle);
+
+    let reports = unless_stalled(drain(reports, 3), "dispatcher stalled before reporting every record").await;
+    join.await.unwrap();
+
+    assert_eq!(
+        reports
+            .iter()
+            .map(|report| report.stream_position.as_u64())
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert!(reports.iter().all(|report| report.lane == key));
+    assert_eq!(
+        reports
+            .iter()
+            .map(|report| report.result.clone().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            ProcessedOutcome::Published,
+            ProcessedOutcome::Purged,
+            ProcessedOutcome::Published,
+        ]
+    );
+    assert!(matches!(
+        log.lock().unwrap().as_slice(),
+        [Settlement::Ack, Settlement::Ack, Settlement::Ack]
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn report_held_back_by_a_full_report_channel_is_sent_once_the_receiver_frees_capacity() {
+    let (processor, _kv, _execution) = build();
+    // One report slot: the second report finds it taken by the first.
+    let (handle, join, mut reports) = spawn_dispatcher::<_, _, _, _, MockMessage>(
+        processor,
+        clock(),
+        DispatcherConfig {
+            channel_capacity: 1,
+            ..DispatcherConfig::default()
+        },
+    );
+
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
+    let key = key_for_stream(id);
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let gates: [Arc<SettlementGate>; 3] = Default::default();
+
+    let create = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
+    handle
+        .submit(stream_event(&create, id, 1), gated_message(log.clone(), &gates[0]))
+        .await
+        .unwrap();
+    gates[0].wait_until_held().await;
+
+    handle
+        .submit(stream_event(&paused(id), id, 2), gated_message(log.clone(), &gates[1]))
+        .await
+        .unwrap();
+    gates[0].release();
+    // The lane runs one record at a time, so the second record reaching
+    // settlement means the first report already took the only slot.
+    gates[1].wait_until_held().await;
+
+    handle
+        .submit(stream_event(&resumed(id), id, 3), gated_message(log.clone(), &gates[2]))
+        .await
+        .unwrap();
+    gates[1].release();
+    // Likewise, the second report was produced while the slot was still taken.
+    gates[2].wait_until_held().await;
+
+    let first = reports.recv().await.unwrap();
+    assert_eq!(first.stream_position.as_u64(), 1);
+
+    // The third record stays held and nothing else is submitted, so only the
+    // freed report slot can wake the dispatcher to send the held-back report.
+    let second = unless_stalled(
+        reports.recv(),
+        "held-back report must be sent once the receiver frees capacity",
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.stream_position.as_u64(), 2);
+    assert_eq!(handle.active_lanes(), 1, "the third record is still held");
+
+    gates[2].release();
+    drop(handle);
+    let third = unless_stalled(reports.recv(), "dispatcher stalled before reporting the last record")
+        .await
+        .unwrap();
+    join.await.unwrap();
+
+    assert_eq!(third.stream_position.as_u64(), 3);
+    assert!([&first, &second, &third].iter().all(|report| report.lane == key));
+    assert_eq!(
+        [first, second, third].map(|report| report.result.unwrap()),
+        [
+            ProcessedOutcome::Published,
+            ProcessedOutcome::Purged,
+            ProcessedOutcome::Published,
+        ]
+    );
+    assert!(matches!(
+        log.lock().unwrap().as_slice(),
+        [Settlement::Ack, Settlement::Ack, Settlement::Ack]
+    ));
 }
 
 #[tokio::test]

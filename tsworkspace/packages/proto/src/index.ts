@@ -69,3 +69,15 @@ export {
   CreatedProjectSchema,
   type CreatedProject,
 } from './gen/trogonai/projects/projects/state/v1alpha1/state_pb';
+export { CreateScheduleSchema, type CreateSchedule } from './gen/trogonai/scheduler/schedules/v1/create_schedule_pb';
+export {
+  ScheduleSchema as ScheduleDefinitionSchema,
+  type Schedule as ScheduleDefinition,
+} from './gen/trogonai/scheduler/schedules/v1/schedule_pb';
+export {
+  ScheduleProjectionSchema,
+  type ScheduleProjection,
+} from './gen/trogonai/scheduler/schedules/projections/v1/schedule_projection_pb';
+export { PauseScheduleSchema } from './gen/trogonai/scheduler/schedules/v1/pause_schedule_pb';
+export { ResumeScheduleSchema } from './gen/trogonai/scheduler/schedules/v1/resume_schedule_pb';
+export { RemoveScheduleSchema } from './gen/trogonai/scheduler/schedules/v1/remove_schedule_pb';

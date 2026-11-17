@@ -1,6 +1,6 @@
 use super::*;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, ElicitationFormMode, ElicitationSchema, ElicitationSessionScope,
     RequestPermissionOutcome, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
@@ -21,7 +21,7 @@ impl ClientHandler for MinimalClient {
 
 fn assert_method_not_found<T>(result: Result<T>) {
     let error = result.err().unwrap();
-    assert_eq!(error.code, ErrorCode::MethodNotFound);
+    assert_eq!(error.code, ErrorCode::METHOD_NOT_FOUND);
 }
 
 fn empty_raw_value() -> Arc<serde_json::value::RawValue> {

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use trogon_identity_types::SubjectPrincipal;
+
 use crate::constants::{DLQ_KIND, TERMINAL_KIND};
 use crate::push::push_notification_config_id::PushNotificationConfigId;
 use crate::push::status_transition_id::StatusTransitionId;
@@ -34,12 +36,23 @@ impl PushIdempotencyKey {
     /// with a distinct kind discriminant so a terminal key and a DLQ key with
     /// equal-length components can't collide inside a shared dedupe store.
     ///
+    /// The caller is part of the key because the dead-letter subject is: task
+    /// ids are agent-chosen tokens, so two callers can share one, and a key
+    /// without the caller would let one caller's dead letter suppress the
+    /// other's.
+    ///
     /// `push_target_url` is accepted as `&str` here pending the validated
     /// `PushTargetUrl` value object that lands with the push-target PR; once
     /// that ships this parameter is retyped to `&PushTargetUrl`.
-    pub fn derive_dlq(task_id: &A2aTaskId, transition_id: &StatusTransitionId, push_target_url: &str) -> Self {
+    pub fn derive_dlq(
+        caller: &SubjectPrincipal,
+        task_id: &A2aTaskId,
+        transition_id: &StatusTransitionId,
+        push_target_url: &str,
+    ) -> Self {
         Self(encode_components([
             DLQ_KIND,
+            caller.to_string().as_str(),
             task_id.as_str(),
             transition_id.as_str(),
             push_target_url,

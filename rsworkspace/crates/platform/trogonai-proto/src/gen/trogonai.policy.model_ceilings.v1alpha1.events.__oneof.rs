@@ -35,19 +35,19 @@ pub mod model_ceiling_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::ModelCeilingSet(v) => {
-                    map.serialize_entry("modelCeilingSet", v)?;
+                    map.serialize_entry("modelCeilingSet", &**v)?;
                 }
                 Self::ModelCeilingCleared(v) => {
-                    map.serialize_entry("modelCeilingCleared", v)?;
+                    map.serialize_entry("modelCeilingCleared", &**v)?;
                 }
             }
             map.end()

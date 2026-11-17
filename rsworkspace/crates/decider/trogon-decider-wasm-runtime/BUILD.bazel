@@ -1,0 +1,16 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    data = ["//rsworkspace/wasm-components/trogon-schedules-decider:component"],
+    integration_tests = {
+        "act_chain_execution": {"data": ["//rsworkspace/wasm-components/trogon-act-chain-decider:component"]},
+        # Starts a NATS server in a container through Docker.
+        "nats_execution": {"tags": ["requires-network"]},
+        "schedules_execution": {"compile_data": ["tests/support/*.rs"]},
+    },
+    # The tests resolve the components through CARGO_MANIFEST_DIR, relative to
+    # the runfiles root at run time.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
+    # One registry test starts a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+)

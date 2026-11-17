@@ -5,16 +5,27 @@
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct CredentialActivated {
-    /// Field 1: `metadata`
-    #[serde(rename = "metadata")]
-    pub metadata: ::buffa::MessageField<
-        CredentialMetadata,
-        ::buffa::Inline<CredentialMetadata>,
-    >,
+    /// Field 1: `key`
+    #[serde(rename = "key")]
+    pub key: ::buffa::MessageField<CredentialKey, ::buffa::Inline<CredentialKey>>,
+    /// Field 2: `version`
+    #[serde(
+        rename = "version",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub version: ::core::option::Option<u64>,
+    /// Field 3: `fingerprint`
+    #[serde(rename = "fingerprint", with = "::buffa::json_helpers::proto_string")]
+    pub fingerprint: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for CredentialActivated {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("CredentialActivated").field("metadata", &self.metadata).finish()
+        f.debug_struct("CredentialActivated")
+            .field("key", &self.key)
+            .field("version", &self.version)
+            .field("fingerprint", &self.fingerprint)
+            .finish()
     }
 }
 impl CredentialActivated {
@@ -23,6 +34,15 @@ impl CredentialActivated {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialActivated";
+}
+impl CredentialActivated {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::version`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_version(mut self, value: u64) -> Self {
+        self.version = Some(value);
+        self
+    }
 }
 ::buffa::impl_default_instance!(CredentialActivated);
 impl ::buffa::MessageName for CredentialActivated {
@@ -44,14 +64,18 @@ impl ::buffa::Message for CredentialActivated {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        if self.metadata.is_set() {
+        if self.key.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.metadata.compute_size(__cache);
+            let inner_size = self.key.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        if let Some(v) = self.version {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
+        }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.fingerprint) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -61,14 +85,18 @@ impl ::buffa::Message for CredentialActivated {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.metadata.is_set() {
+        if self.key.is_set() {
             ::buffa::types::put_len_delimited_header(
                 1u32,
                 u64::from(__cache.consume_next()),
                 buf,
             );
-            self.metadata.write_to(__cache, buf);
+            self.key.write_to(__cache, buf);
         }
+        if let Some(v) = self.version {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
+        }
+        ::buffa::types::put_string_field(3u32, &self.fingerprint, buf);
     }
     fn merge_field(
         &mut self,
@@ -87,10 +115,26 @@ impl ::buffa::Message for CredentialActivated {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.metadata.get_or_insert_default(),
+                    self.key.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.version = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.fingerprint, buf)?;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -99,7 +143,9 @@ impl ::buffa::Message for CredentialActivated {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.metadata = ::buffa::MessageField::none();
+        self.key = ::buffa::MessageField::none();
+        self.version = ::core::option::Option::None;
+        self.fingerprint.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for CredentialActivated {

@@ -1,0 +1,477 @@
+{
+ "cases": [
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b\ud800/c",
+    "../\udc80"
+   ],
+   "ok": "http://a/\udc80"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b\ud800/c",
+    "g\udfff"
+   ],
+   "ok": "http://a/b\ud800/g\udfff"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/\ud800",
+    "#\udc80"
+   ],
+   "ok": "http://a/\ud800#\udc80"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/\ud800",
+    "?\udc80"
+   ],
+   "ok": "http://a/\ud800?\udc80"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b;\ud800",
+    "c"
+   ],
+   "ok": "http://a/c"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b;\ud800?q\udc80",
+    ""
+   ],
+   "ok": "http://a/b;\ud800?q\udc80"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b;\ud800?q\udc80",
+    "#f"
+   ],
+   "ok": "http://a/b;\ud800?q\udc80#f"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "x\ud800:y"
+   ],
+   "ok": "http://a/x\ud800:y"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "\ud800://c/d"
+   ],
+   "ok": "http://a/\ud800:/c/d"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//h\ud800/p"
+   ],
+   "ok": "http://h\ud800/p"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://h\ud800/a/b",
+    "../../c"
+   ],
+   "ok": "http://h\ud800/c"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://h\ud800/a/b",
+    "//[\ud800]/p"
+   ],
+   "error": "'\\ud800' does not appear to be an IPv4 or IPv6 address"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//a\ud800\uff0fb/c"
+   ],
+   "error": "netloc 'a\ud800\uff0fb' contains invalid characters under NFKC normalization"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a\ud800\uff0fb/c",
+    "d"
+   ],
+   "error": "netloc 'a\ud800\uff0fb' contains invalid characters under NFKC normalization"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//[v1.\ud800]/x"
+   ],
+   "ok": "http://[v1.\ud800]/x"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//[v\ud800.a]/x"
+   ],
+   "error": "IPvFuture address is invalid"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//[::1%\ud800]/x"
+   ],
+   "ok": "http://[::1%\ud800]/x"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//[\ud800::1]/x"
+   ],
+   "error": "'\\ud800::1' does not appear to be an IPv4 or IPv6 address"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//[1.2.3.\ud800]/x"
+   ],
+   "error": "'1.2.3.\\ud800' does not appear to be an IPv4 or IPv6 address"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//u\ud800@[::1]/x"
+   ],
+   "ok": "http://u\ud800@[::1]/x"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "//[::1]:\ud800/x"
+   ],
+   "ok": "http://[::1]:\ud800/x"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "urn:\ud800",
+    "x"
+   ],
+   "ok": "x"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "\ud800",
+    "\udc80"
+   ],
+   "ok": "\udc80"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "\ud800/a/b",
+    "../\udfff"
+   ],
+   "ok": "\ud800/\udfff"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "",
+    "\ud800"
+   ],
+   "ok": "\ud800"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "\ud800",
+    ""
+   ],
+   "ok": "\ud800"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a/b",
+    "\t\ud800\n/\udc80"
+   ],
+   "ok": "http://a/\ud800/\udc80"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "file:///\udcff/a",
+    "b\udcff"
+   ],
+   "ok": "file:///\udcff/b\udcff"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://e\ud800\u0301/x",
+    "y"
+   ],
+   "ok": "http://e\ud800\u0301/y"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://\u1100\ud800\u1161/x",
+    "y"
+   ],
+   "ok": "http://\u1100\ud800\u1161/y"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://\u00c5\ud800\u2126/x",
+    "y"
+   ],
+   "ok": "http://\u00c5\ud800\u2126/y"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://\ufb01\ud800/x",
+    "y"
+   ],
+   "ok": "http://\ufb01\ud800/y"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://a\ud800\ufe55b/x",
+    "y"
+   ],
+   "error": "netloc 'a\ud800\ufe55b' contains invalid characters under NFKC normalization"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://\ud800\uff20b/x",
+    "y"
+   ],
+   "error": "netloc '\ud800\uff20b' contains invalid characters under NFKC normalization"
+  },
+  {
+   "fn": "urljoin",
+   "args": [
+    "http://\ud800@h\uff1a/x",
+    "y"
+   ],
+   "error": "netloc '\ud800@h\uff1a' contains invalid characters under NFKC normalization"
+  },
+  {
+   "fn": "urldefrag",
+   "args": [
+    "http://a/b#\ud800"
+   ],
+   "ok": [
+    "http://a/b",
+    "\ud800"
+   ]
+  },
+  {
+   "fn": "urldefrag",
+   "args": [
+    "\ud800#\udc80"
+   ],
+   "ok": [
+    "\ud800",
+    "\udc80"
+   ]
+  },
+  {
+   "fn": "urldefrag",
+   "args": [
+    "http://[\ud800]/#f"
+   ],
+   "error": "'\\ud800' does not appear to be an IPv4 or IPv6 address"
+  },
+  {
+   "fn": "urldefrag",
+   "args": [
+    "http://a\ud800\uff1fb/#f"
+   ],
+   "error": "netloc 'a\ud800\uff1fb' contains invalid characters under NFKC normalization"
+  },
+  {
+   "fn": "urldefrag",
+   "args": [
+    "urn:x\ud800"
+   ],
+   "ok": [
+    "urn:x\ud800",
+    ""
+   ]
+  },
+  {
+   "fn": "urldefrag",
+   "args": [
+    "http://a/b;\ud800?\udc80#\udfff"
+   ],
+   "ok": [
+    "http://a/b;\ud800?\udc80",
+    "\udfff"
+   ]
+  },
+  {
+   "fn": "urldefrag",
+   "args": [
+    "#\ud800"
+   ],
+   "ok": [
+    "",
+    "\ud800"
+   ]
+  },
+  {
+   "fn": "urldefrag",
+   "args": [
+    "\ud800"
+   ],
+   "ok": [
+    "\ud800",
+    ""
+   ]
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "%41\ud800%42"
+   ],
+   "ok": "A\ud800B"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "\ud800%e9"
+   ],
+   "ok": "\ud800\ufffd"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "%C3\ud800%A9"
+   ],
+   "ok": "\ufffd\ud800\ufffd"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "%ED%A0%80\udc80"
+   ],
+   "ok": "\ufffd\ufffd\ufffd\udc80"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "\udcff%2F\udcff"
+   ],
+   "ok": "\udcff/\udcff"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "\ud800"
+   ],
+   "ok": "\ud800"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "\ud800%"
+   ],
+   "ok": "\ud800%"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "%\ud80041"
+   ],
+   "ok": "%\ud80041"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "%4\ud8001"
+   ],
+   "ok": "%4\ud8001"
+  },
+  {
+   "fn": "unquote",
+   "args": [
+    "a\ud800b%20c\udc80%zz"
+   ],
+   "ok": "a\ud800b c\udc80%zz"
+  },
+  {
+   "fn": "geturl",
+   "args": [
+    "HTTP://h/\ud800#"
+   ],
+   "ok": "http://h/\ud800"
+  },
+  {
+   "fn": "geturl",
+   "args": [
+    "\ud800:x"
+   ],
+   "ok": "\ud800:x"
+  },
+  {
+   "fn": "geturl",
+   "args": [
+    "  http://a\ud800/?"
+   ],
+   "ok": "http://a\ud800/"
+  },
+  {
+   "fn": "geturl",
+   "args": [
+    "http:\ud800"
+   ],
+   "ok": "http:\ud800"
+  },
+  {
+   "fn": "geturl",
+   "args": [
+    "x\ud800y://h/p"
+   ],
+   "ok": "x\ud800y://h/p"
+  },
+  {
+   "fn": "geturl",
+   "args": [
+    "http://[\ud800]/"
+   ],
+   "error": "'\\ud800' does not appear to be an IPv4 or IPv6 address"
+  },
+  {
+   "fn": "geturl",
+   "args": [
+    "http://h\uff03\ud800/"
+   ],
+   "error": "netloc 'h\uff03\ud800' contains invalid characters under NFKC normalization"
+  }
+ ]
+}

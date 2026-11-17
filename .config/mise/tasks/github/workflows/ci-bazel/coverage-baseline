@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#MISE description="Report whether the Bazel coverage gate has a main baseline, seeding it on a push to main"
+set -euo pipefail
+
+# The coverage action compares against the baseline main stored, and it stores
+# a report only after that comparison passed, so a new storage branch can never
+# fill itself. A push to main stores its own report as the first baseline,
+# captured by the action's own helper so the action accepts it. Until then pull
+# requests check only the threshold.
+#
+# Inputs: COVERAGE_STORAGE (storage branch), COVERAGE_REPORT (Cobertura report),
+# COVERAGE_TOOLS (checkout of the coverage-report action), GH_TOKEN (contents
+# write), and the GitHub Actions context variables.
+
+: "${COVERAGE_STORAGE:?}" "${COVERAGE_REPORT:?}" "${COVERAGE_TOOLS:?}" "${GH_TOKEN:?}"
+: "${GITHUB_REPOSITORY:?}" "${GITHUB_OUTPUT:?}" "${RUNNER_TEMP:?}"
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+
+baseline="data/main/coverage.xml"
+storage="$(mktemp -d "${RUNNER_TEMP}/coverage-storage.XXXXXX")"
+trap 'rm -rf "${storage}"' EXIT
+
+# The header goes through the environment so the token never reaches argv.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+export GIT_CONFIG_VALUE_0
+
+git -C "${storage}" init --quiet
+git -C "${storage}" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
+# Only a confirmed missing branch means no baseline. A transport or auth error
+# must fail here, or the gate would silently fall back to the threshold alone.
+branch_status=0
+git -C "${storage}" ls-remote --exit-code --heads origin "refs/heads/${COVERAGE_STORAGE}" >/dev/null || branch_status=$?
+case "${branch_status}" in
+  0)
+    git -C "${storage}" fetch --quiet --no-tags --depth=1 origin "refs/heads/${COVERAGE_STORAGE}"
+    if git -C "${storage}" cat-file -e "FETCH_HEAD:${baseline}" 2>/dev/null; then
+      echo "${COVERAGE_STORAGE} has ${baseline}"
+      echo "ready=true" >>"${GITHUB_OUTPUT}"
+      exit 0
+    fi
+    git -C "${storage}" checkout --quiet -B "${COVERAGE_STORAGE}" FETCH_HEAD
+    ;;
+  2)
+    git -C "${storage}" checkout --quiet --orphan "${COVERAGE_STORAGE}"
+    ;;
+  *)
+    echo "Could not query ${COVERAGE_STORAGE} (git ls-remote exited ${branch_status})" >&2
+    exit "${branch_status}"
+    ;;
+esac
+
+if [[ "${GITHUB_EVENT_NAME:-}" != "push" || "${GITHUB_REF:-}" != "refs/heads/main" ]]; then
+  echo "${COVERAGE_STORAGE} has no ${baseline} yet; checking only the threshold until main stores one"
+  echo "ready=false" >>"${GITHUB_OUTPUT}"
+  exit 0
+fi
+
+mkdir -p "${storage}/data/main"
+python3 "${COVERAGE_TOOLS}/report.py" capture \
+  --report "${COVERAGE_REPORT}" \
+  --output "${storage}/data/main/sources.json" \
+  --source-root rsworkspace
+git -C "${storage}" add data/main/coverage.xml data/main/sources.json
+git -C "${storage}" \
+  -c user.name="github-actions[bot]" \
+  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+  commit --quiet -m "Seed the Bazel coverage baseline from ${GITHUB_SHA:?}"
+git -C "${storage}" push --quiet origin "HEAD:refs/heads/${COVERAGE_STORAGE}"
+echo "Seeded ${COVERAGE_STORAGE}:${baseline} from ${GITHUB_SHA}"
+echo "ready=true" >>"${GITHUB_OUTPUT}"

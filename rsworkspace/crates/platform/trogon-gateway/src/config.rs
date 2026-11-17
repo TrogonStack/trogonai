@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
-use crate::secret_store::{StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError};
 use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
@@ -33,14 +31,19 @@ use crate::source::telegram::config::{
 use crate::source::twitter::config::TwitterConsumerSecret;
 use crate::source::zoom::config::ZoomConfig as ZoomSourceConfig;
 use crate::source::zoom::zoom_secret_token::ZoomSecretToken;
-use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
+use crate::static_config_secret_store::{
+    StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError,
+};
 use axum::http::HeaderName;
 use confique::Config;
 use trogon_config_value::{ConfigValue, ConfigValueError};
+use trogon_credential_domain::{
+    CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceIntegrationIdError, SourceKind,
+};
 #[cfg(test)]
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_nats::{NatsToken, SubjectTokenViolationError};
+use trogon_nats::{DottedNatsToken, NatsToken, SubjectTokenViolationError};
 use trogon_service_config::{NatsArgs, NatsArgsError, NatsConfigSection, load_config, resolve_nats};
 use trogon_std::env::{ReadEnv, SystemEnv};
 use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, ZeroDurationError};
@@ -297,6 +300,21 @@ pub enum ConfigValidationError {
         integration: String,
         field: &'static str,
         violation: SubjectTokenViolationError,
+    },
+    #[error(
+        "{first}: subject_prefix `{first_prefix}` overlaps {second}: subject_prefix `{second_prefix}`; each stream needs its own subjects"
+    )]
+    OverlappingSubjectPrefix {
+        first: String,
+        first_prefix: String,
+        second: String,
+        second_prefix: String,
+    },
+    #[error("{first} and {second} both use stream_name `{stream_name}`")]
+    DuplicateStreamName {
+        first: String,
+        second: String,
+        stream_name: String,
     },
 }
 
@@ -837,6 +855,134 @@ fn longest_stream_max_age(ages: impl Iterator<Item = StreamMaxAge>) -> Option<St
     })
 }
 
+/// The JetStream stream one source owns: the label it reports under, the
+/// subject prefix its stream captures, and the stream's name.
+struct StreamBinding<'a> {
+    owner: String,
+    subject_prefix: &'a str,
+    stream_name: &'a str,
+}
+
+impl<'a> StreamBinding<'a> {
+    fn new(owner: String, subject_prefix: &'a str, stream_name: &'a str) -> Self {
+        Self {
+            owner,
+            subject_prefix,
+            stream_name,
+        }
+    }
+
+    /// Whether both streams would capture a common subject. A prefix captures
+    /// itself and everything below it, so two prefixes overlap when they are
+    /// equal or one is a token-wise ancestor of the other.
+    fn overlaps(&self, other: &Self) -> bool {
+        let (a, b) = (self.subject_prefix, other.subject_prefix);
+        a == b || is_subject_ancestor(a, b) || is_subject_ancestor(b, a)
+    }
+}
+
+fn is_subject_ancestor(ancestor: &str, subject: &str) -> bool {
+    subject.strip_prefix(ancestor).is_some_and(|rest| rest.starts_with('.'))
+}
+
+fn integration_bindings<'a, T: 'a>(
+    source: &'static str,
+    integrations: &'a [SourceIntegration<T>],
+    stream: impl Fn(&'a T) -> (&'a DottedNatsToken, &'a NatsToken) + 'a,
+) -> impl Iterator<Item = StreamBinding<'a>> + 'a {
+    integrations.iter().map(move |integration| {
+        let (subject_prefix, stream_name) = stream(&integration.config);
+        StreamBinding::new(format!("{source}/{}", integration.id), subject_prefix, stream_name)
+    })
+}
+
+impl ResolvedConfig {
+    fn stream_bindings(&self) -> Vec<StreamBinding<'_>> {
+        let credential = StreamBinding::new(
+            "gateway credentials".to_string(),
+            crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX,
+            crate::credential::constants::CREDENTIAL_STREAM,
+        );
+        let discord = self
+            .discord
+            .iter()
+            .map(|c| StreamBinding::new("discord".to_string(), &c.subject_prefix, &c.stream_name));
+        std::iter::once(credential)
+            .chain(discord)
+            .chain(integration_bindings("github", &self.github, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("slack", &self.slack, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("telegram", &self.telegram, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("twitter", &self.twitter, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("gitlab", &self.gitlab, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("google_pubsub", &self.google_pubsub, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("incidentio", &self.incidentio, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("linear", &self.linear, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("microsoft_graph", &self.microsoft_graph, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("notion", &self.notion, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("sentry", &self.sentry, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("datadog", &self.datadog, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("zoom", &self.zoom, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("plaid", &self.plaid, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .collect()
+    }
+}
+
+/// JetStream refuses a stream whose subjects overlap an existing stream, and a
+/// stream name can be bound only once, so a clash would otherwise surface as a
+/// provisioning failure at startup instead of a config error.
+fn validate_stream_bindings(config: &ResolvedConfig) -> Vec<ConfigValidationError> {
+    let bindings = config.stream_bindings();
+    let mut errors = Vec::new();
+    for (index, first) in bindings.iter().enumerate() {
+        for second in &bindings[index + 1..] {
+            if first.overlaps(second) {
+                errors.push(ConfigValidationError::OverlappingSubjectPrefix {
+                    first: first.owner.clone(),
+                    first_prefix: first.subject_prefix.to_string(),
+                    second: second.owner.clone(),
+                    second_prefix: second.subject_prefix.to_string(),
+                });
+            }
+            if first.stream_name == second.stream_name {
+                errors.push(ConfigValidationError::DuplicateStreamName {
+                    first: first.owner.clone(),
+                    second: second.owner.clone(),
+                    stream_name: first.stream_name.to_string(),
+                });
+            }
+        }
+    }
+    errors
+}
+
 #[cfg(test)]
 pub fn load(config_path: Option<&Path>) -> Result<ResolvedConfig, ConfigError> {
     load_with_overrides(config_path, &NatsArgs::default())
@@ -874,7 +1020,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
         return Err(ConfigError::Validation(AggregateValidationError(errors)));
     }
 
-    Ok(ResolvedConfig {
+    let config = ResolvedConfig {
         http_server: ResolvedHttpServerConfig {
             port: cfg.http_server.port,
         },
@@ -894,7 +1040,14 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
         datadog,
         zoom,
         plaid,
-    })
+    };
+
+    let errors = validate_stream_bindings(&config);
+    if !errors.is_empty() {
+        return Err(ConfigError::Validation(AggregateValidationError(errors)));
+    }
+
+    Ok(config)
 }
 
 fn resolve_github_integrations(
@@ -1026,7 +1179,7 @@ fn resolve_discord(
         crate::source::discord::config::default_intents()
     };
 
-    let subject_prefix = match NatsToken::new(subject_prefix.as_deref().unwrap_or("discord")) {
+    let subject_prefix = match DottedNatsToken::new(subject_prefix.as_deref().unwrap_or("discord")) {
         Ok(t) => t,
         Err(e) => {
             errors.push(ConfigValidationError::invalid_subject_token(
@@ -2627,7 +2780,7 @@ struct CommonIntegrationFieldsInput<'a> {
 fn resolve_common_integration_fields(
     input: CommonIntegrationFieldsInput<'_>,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<(NatsToken, NatsToken, StreamMaxAge, NonZeroDuration)> {
+) -> Option<(DottedNatsToken, NatsToken, StreamMaxAge, NonZeroDuration)> {
     let CommonIntegrationFieldsInput {
         source,
         id,
@@ -2640,7 +2793,7 @@ fn resolve_common_integration_fields(
         default_nats_ack_timeout_secs,
     } = input;
 
-    let subject_prefix = match NatsToken::new(
+    let subject_prefix = match DottedNatsToken::new(
         subject_prefix.unwrap_or_else(|| default_integration_subject_prefix(subject_source_prefix, id)),
     ) {
         Ok(token) => token,

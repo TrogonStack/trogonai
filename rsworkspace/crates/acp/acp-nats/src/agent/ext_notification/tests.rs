@@ -1,7 +1,7 @@
 use crate::AgentHandler;
 use crate::agent::test_support::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::ExtNotification;
+use agent_client_protocol::v1::schema::ExtNotification;
 use serde_json::value::RawValue;
 
 #[tokio::test]
@@ -30,7 +30,7 @@ async fn ext_notification_validates_method_name() {
     let err = bridge.ext_notification(notification).await.unwrap_err();
 
     assert!(err.message.contains("Invalid method name"));
-    assert_eq!(err.code, ErrorCode::InvalidParams);
+    assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]

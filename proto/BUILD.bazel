@@ -1,0 +1,160 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Every file of the Buf module. A BUILD file below proto/ starts a package that
+# this glob cannot see, so that package's sources are listed explicitly.
+filegroup(
+    name = "sources",
+    srcs = glob(["**/*.proto"]) + [
+        "//proto/trogonai/scheduler/schedules/v1:sources",
+    ],
+    visibility = [
+        "//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__",
+        "//tests/proto:__pkg__",
+        "//tsworkspace/packages/proto:__pkg__",
+    ],
+)
+
+_WORKSPACE = [
+    "//:buf.lock",
+    "//:buf.yaml",
+    ":sources",
+]
+
+genrule(
+    name = "schedules_descriptor_set",
+    srcs = _WORKSPACE + [":buf_cache"],
+    outs = ["trogon_schedules_decider.binpb"],
+    cmd = "work=$$(mktemp -d) && trap 'rm -rf \"$$work\"' EXIT && " +
+          "TEST_TMPDIR=$$work $(execpath buf_test.sh) $(execpath //.config/bazel:buf) " +
+          "$(execpath :buf_cache) schedules-descriptor $$PWD/$@ -- " +
+          "$(execpath //:buf.lock) $(execpath //:buf.yaml) $(execpaths :sources)",
+    tools = [
+        "buf_test.sh",
+        "//.config/bazel:buf",
+    ],
+    visibility = ["//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__"],
+)
+
+# The registry modules pinned in buf.lock. Fetching them is the only step that
+# needs the network; the tests below run offline from this archive.
+genrule(
+    name = "buf_cache",
+    srcs = [
+        "//:buf.lock",
+        "//:buf.yaml",
+    ],
+    outs = ["buf_cache.tar"],
+    cmd = "$(execpath buf_cache.sh) $(execpath //.config/bazel:buf) $(execpath //:buf.yaml) $(execpath //:buf.lock) $@",
+    tags = ["requires-network"],
+    tools = [
+        "buf_cache.sh",
+        "//.config/bazel:buf",
+    ],
+    visibility = [
+        "//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__",
+        "//tests/proto:__pkg__",
+        "//tsworkspace/packages/proto:__pkg__",
+    ],
+)
+
+exports_files(
+    ["buf_test.sh"],
+    visibility = ["//tsworkspace/packages/proto:__pkg__"],
+)
+
+[
+    sh_test(
+        name = check + "_test",
+        srcs = ["buf_test.sh"],
+        args = [
+            "$(rootpath //.config/bazel:buf)",
+            "$(rootpath :buf_cache)",
+            check,
+            "--",
+            "$(rootpaths //:buf.lock)",
+            "$(rootpaths //:buf.yaml)",
+            "$(rootpaths :sources)",
+        ],
+        data = _WORKSPACE + [
+            ":buf_cache",
+            "//.config/bazel:buf",
+        ],
+    )
+    for check in [
+        "build",
+        "format",
+        "lint",
+    ]
+]
+
+_TROGONAI_PROTO = "rsworkspace/crates/platform/trogonai-proto"
+
+# Regenerates the Rust bindings the way `mise run proto:generate` does and
+# fails when they differ from the committed tree.
+sh_test(
+    name = "trogonai_proto_generated_test",
+    srcs = ["buf_test.sh"],
+    args = [
+        "$(rootpath //.config/bazel:buf)",
+        "$(rootpath :buf_cache)",
+        "rust",
+        _TROGONAI_PROTO + "/src/gen",
+        "$(rootpath //%s:Cargo.toml)" % _TROGONAI_PROTO,
+        "$(rootpath @mise//tools/protoc-gen-buffa)",
+        "$(rootpath @mise//tools/protoc-gen-buffa-packaging)",
+        "$(rootpath @mise_rust//:bin/rustfmt)",
+        "$(rootpath //rsworkspace:rustfmt.toml)",
+        "--",
+        "$(rootpaths //:buf.gen.yaml)",
+        "$(rootpaths //:buf.lock)",
+        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths :sources)",
+    ],
+    data = _WORKSPACE + [
+        ":buf_cache",
+        "//:buf.gen.yaml",
+        "//.config/bazel:buf",
+        "//%s:Cargo.toml" % _TROGONAI_PROTO,
+        "//%s:generated" % _TROGONAI_PROTO,
+        "//rsworkspace:rustfmt.toml",
+        "@mise//tools/protoc-gen-buffa",
+        "@mise//tools/protoc-gen-buffa-packaging",
+        "@mise_rust//:bin/rustfmt",
+        "@mise_rust//:rustc_lib",
+    ],
+)
+
+py_binary(
+    name = "run_contract_validator",
+    srcs = ["run_contract_validator.py"],
+)
+
+# Checks every fixture under tests/proto against the protovalidate rules the
+# way `mise run proto:validate` does. The validator reads the pinned Buf
+# version from the mise config and refuses any other.
+sh_test(
+    name = "contracts_test",
+    # Every fixture is a separate buf convert, which takes minutes.
+    size = "large",
+    srcs = ["buf_test.sh"],
+    args = [
+        "$(rootpath //.config/bazel:buf)",
+        "$(rootpath :buf_cache)",
+        "contracts",
+        "$(rootpath :run_contract_validator)",
+        "--",
+        "$(rootpaths //.config/mise:config.toml)",
+        "$(rootpaths //:buf.lock)",
+        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths :sources)",
+        "$(rootpaths //tests/proto:contracts)",
+    ],
+    data = _WORKSPACE + [
+        ":buf_cache",
+        ":run_contract_validator",
+        "//.config/bazel:buf",
+        "//.config/mise:config.toml",
+        "//tests/proto:contracts",
+    ],
+)

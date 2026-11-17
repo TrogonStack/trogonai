@@ -77,6 +77,9 @@ impl PostgresSchedulesProjection {
     }
 }
 
+#[cfg(test)]
+mod tests;
+
 fn malformed(context: &'static str) -> SchedulerError {
     SchedulerError::kv_source(
         "stored schedule projection is malformed",

@@ -1,0 +1,271 @@
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_rust", version = "0.75.0")
+
+# Build scripts that the coverage instrumentation filter excludes still compile
+# their C code with coverage, which embeds timestamps and changes every
+# downstream Rust cache key. Not reported upstream yet; drop the patch once
+# rules_rust skips coverage for uninstrumented build scripts.
+single_version_override(
+    module_name = "rules_rust",
+    patch_strip = 1,
+    patches = ["//.config/bazel:patches/rules_rust-native-coverage-filter.patch"],
+)
+
+bazel_dep(name = "rules_go", version = "0.65.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "gazelle", version = "0.54.0")
+bazel_dep(name = "aspect_rules_js", version = "3.6.1")
+bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
+bazel_dep(name = "rules_python", version = "1.7.0")
+bazel_dep(name = "mise-bazel")
+local_path_override(
+    module_name = "mise-bazel",
+    path = "projects/mise-bazel",
+)
+
+# Every tool pinned in the mise configuration, linked from mise's installs.
+# Bazel resolves a tool only when a target uses it.
+mise = use_extension("@mise-bazel//mise:extensions.bzl", "mise")
+mise.config(file = "//.config/mise:config.toml")
+use_repo(mise, "mise", "mise_go", "mise_node", "mise_rust")
+
+# Registered before the toolchains that rules_nodejs declares for itself, so
+# Bazel resolves Node.js to the mise install and never downloads one.
+register_toolchains(
+    "@mise_node//:node_toolchain",
+    "@mise_node//:node_runtime_toolchain",
+)
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(versions = [])
+
+register_toolchains(
+    "@mise_rust//:rust_toolchain",
+    "@mise_rust//:cargo_toolchain",
+    "@mise_rust//:rustfmt_toolchain",
+    "@mise_rust//:rust_toolchain_wasm32-unknown-unknown",
+)
+
+# Python targets run on a pinned interpreter that rules_python downloads, so
+# they never depend on whichever python3 a runner happens to have.
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.14",
+)
+
+# The Kubernetes schemas //devops/kubernetes/spire:schemas_test validates the
+# generated resources against, at the commit check_schemas.py pins, one file
+# per resource kind the deployment renders.
+kubernetes_json_schema = use_repo_rule("//.config/bazel:kubernetes_json_schema.bzl", "kubernetes_json_schema")
+
+kubernetes_json_schema(
+    name = "kubernetes_json_schema",
+    commit = "102361970337d65537d40141dc29b991b8e95786",
+    kubernetes_version = "1.37.2",
+    schemas = {
+        "clusterrole-rbac-v1": "3fd79fbc322d89090be016a046630b6a399941547e7fbf7501645ee379e4fccb",
+        "clusterrolebinding-rbac-v1": "3f83a2198fe9c178bf742849df9a3fb719fe2f3bb8ef425fee855931dad554cf",
+        "configmap-v1": "fed751af12c2873a7db2b4cd1294c2959497fda8520f1fc8e5d21adf967ad72e",
+        "daemonset-apps-v1": "410871aa51ca678b861fddf530925f1fc6c9f38766975cbae3bb113c339fcecc",
+        "namespace-v1": "324fae677b98d1a6d54340db0c334d053e8ffbafceb3f73326e41de2610d5843",
+        "networkpolicy-networking-v1": "f6324cc464f62228b0418f438d167208e4f86c7e3677ba30f608e79a8b26ba79",
+        "poddisruptionbudget-policy-v1": "0f7e20f2683a2c5a1b890a14f8837d41c70dd0237eb44ba1f4204ae9c2138f4d",
+        "service-v1": "8bf019854daed511e7c174896a898173fa65d88ec5937c687a37303d4cc9351b",
+        "serviceaccount-v1": "8193d6c3561475c6d3d5c44e1faedb1df53905373d904bc17015694326d659cf",
+        "statefulset-apps-v1": "05cb2c0c4cb956b1e76ca1b3ecbfc90275b47f210fe5654e084d3c5d4f17eb10",
+        "validatingadmissionpolicy-admissionregistration-v1": "6f694e5637b097f781139af4fc466afa63b992d3dc55d28808028c99746be35e",
+        "validatingadmissionpolicybinding-admissionregistration-v1": "829b6a2fabcad663ba303c13e493a9b8c18a5737b0ca91c45dc0cf49a24c3927",
+    },
+)
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+
+# C code compiled by build scripts embeds the sandbox path, which differs per
+# run, so downstream Rust cache keys never matched. The runner expands ${pwd};
+# rules_rust appends these to the C toolchain flags. Drop this once rules_rust
+# ships the same remapping:
+# https://github.com/bazelbuild/rules_rust/issues/4407
+# https://github.com/bazelbuild/rules_rust/pull/4408
+crate.annotation(
+    build_script_env = {
+        "CFLAGS": "-ffile-prefix-map=$${pwd}=.",
+        "CXXFLAGS": "-ffile-prefix-map=$${pwd}=.",
+    },
+    crate = "*",
+    repositories = ["crates"],
+)
+
+# Resolve Rust dependencies from the Cargo workspace lockfile. crate_universe
+# discovers workspace members from the root manifest.
+crate.from_cargo(
+    name = "crates",
+    cargo_lockfile = "//rsworkspace:Cargo.lock",
+    host_tools = "@mise_rust//:ROOT",
+    manifests = ["//rsworkspace:Cargo.toml"],
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+    ],
+)
+
+# The decider components under rsworkspace/wasm-components build for wasm32,
+# where the workspace resolution above does not fit: it unifies features across
+# every member, which pulls host-only dependencies into the guest. This one
+# holds the external dependencies of the crates a component reaches, declared
+# as their Cargo manifests declare them, so Cargo resolves the same features it
+# does for `cargo component build`. The cargo_workspace extension lists which
+# of these each crate uses. Its lockfile keeps the versions rsworkspace/Cargo.lock
+# pins, which //.config/bazel:wasm_components_lockfile_test checks.
+crate.from_specs(
+    name = "crates_wasm",
+    cargo_lockfile = "//.config/bazel:wasm-components.Cargo.lock",
+    host_tools = "@mise_rust//:ROOT",
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "wasm32-unknown-unknown",
+    ],
+)
+crate.spec(
+    features = ["json"],
+    package = "buffa",
+    repositories = ["crates_wasm"],
+    version = "=0.9.2",
+)
+crate.spec(
+    package = "buffa-descriptor",
+    repositories = ["crates_wasm"],
+    version = "=0.9.2",
+)
+crate.spec(
+    features = ["json"],
+    package = "buffa-types",
+    repositories = ["crates_wasm"],
+    version = "=0.9.2",
+)
+crate.spec(
+    default_features = False,
+    features = ["std"],
+    package = "chrono",
+    repositories = ["crates_wasm"],
+    version = "=0.4.45",
+)
+crate.spec(
+    package = "chrono-tz",
+    repositories = ["crates_wasm"],
+    version = "=0.10.4",
+)
+crate.spec(
+    package = "cron",
+    repositories = ["crates_wasm"],
+    version = "=0.17.0",
+)
+crate.spec(
+    features = ["derive"],
+    package = "serde",
+    repositories = ["crates_wasm"],
+    version = "=1.0.229",
+)
+crate.spec(
+    package = "serde_json",
+    repositories = ["crates_wasm"],
+    version = "=1.0.154",
+)
+crate.spec(
+    package = "thiserror",
+    repositories = ["crates_wasm"],
+    version = "=2.0.21",
+)
+crate.spec(
+    default_features = False,
+    package = "uuid",
+    repositories = ["crates_wasm"],
+    version = "=1.24.0",
+)
+crate.spec(
+    package = "wit-bindgen",
+    repositories = ["crates_wasm"],
+    version = "=0.63.0",
+)
+use_repo(crate, "crates", "crates_wasm")
+
+# Every Rust BUILD.bazel calls workspace_crate(), which reads its targets,
+# features, and workspace dependencies from this repository. It runs
+# `cargo metadata` with the mise toolchain and reruns when a Cargo manifest or
+# the lockfile changes, so Cargo stays the only place they are declared.
+cargo_workspace = use_extension("//.config/bazel:cargo_workspace.bzl", "cargo_workspace")
+cargo_workspace.workspace(
+    name = "cargo_workspace",
+    lockfile = "//rsworkspace:Cargo.lock",
+    manifest = "//rsworkspace:Cargo.toml",
+    rust_root = "@mise_rust//:ROOT",
+)
+use_repo(cargo_workspace, "cargo_workspace")
+
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.wrap(root_file = "@mise_go//:ROOT")
+
+# Runs the go vet analyzers on every compile of the repository's own Go code.
+go_sdk.nogo(
+    includes = ["//goworkspace:__subpackages__"],
+    nogo = "//goworkspace:nogo",
+)
+
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_mod = "//goworkspace:go.mod")
+use_repo(
+    go_deps,
+    "com_github_google_cel_go",
+    "com_github_stretchr_testify",
+    "org_golang_google_protobuf",
+)
+
+# One translation per pnpm lockfile. pnpm owns the lockfiles; Bazel only reads them.
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm_docs",
+    data = [
+        "//docs:package.json",
+        "//docs:pnpm-workspace.yaml",
+    ],
+    pnpm_lock = "//docs:pnpm-lock.yaml",
+    update_pnpm_lock = False,
+    verify_node_modules_ignored = "//:.bazelignore",
+)
+npm.npm_translate_lock(
+    name = "npm_tsworkspace",
+    data = [
+        "//tsworkspace:package.json",
+        "//tsworkspace:pnpm-workspace.yaml",
+        "//tsworkspace/apps/console:package.json",
+        "//tsworkspace/packages/proto:package.json",
+        "//tsworkspace/packages/slack-bolt-fixtures:package.json",
+    ],
+    npmrc = "//tsworkspace:.npmrc",
+    pnpm_lock = "//tsworkspace:pnpm-lock.yaml",
+    # Some packages reach modules they do not declare: jest-dom augments and
+    # imports vitest, and the TanStack declarations import react, whose types
+    # live in @types/react. pnpm makes that work through its hidden hoisting,
+    # which rules_js does not reproduce, so these are hoisted explicitly to
+    # the workspace root, where the lookup from the package store reaches them.
+    public_hoist_packages = {
+        "@types/react": ["tsworkspace"],
+        "vitest": ["tsworkspace"],
+    },
+    update_pnpm_lock = False,
+    verify_node_modules_ignored = "//:.bazelignore",
+)
+use_repo(npm, "npm_docs", "npm_tsworkspace")
+
+# rules_ts runs its own copy of the TypeScript compiler, fetched from the npm
+# registry. The version comes from the console package manifest and the
+# integrity from the same pnpm lockfile entry, so both stay in step with pnpm.
+typescript = use_extension("@aspect_rules_ts//ts:extensions.bzl", "typescript")
+typescript.deps(
+    integrity = "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
+    version_from = "//tsworkspace/apps/console:package.json",
+)
+use_repo(typescript, "npm_typescript")

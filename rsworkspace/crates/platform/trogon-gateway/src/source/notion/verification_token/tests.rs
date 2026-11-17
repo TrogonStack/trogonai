@@ -6,6 +6,7 @@ use async_nats::jetstream::stream::LastRawMessageError;
 use bytes::Bytes;
 use time::OffsetDateTime;
 use trogon_nats::MockNatsClient;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{MockJetStreamConsumerFactory, StreamMaxAge};
 use trogon_nats::mocks::MockError;
 use trogon_std::NonZeroDuration;
@@ -13,7 +14,7 @@ use trogon_std::NonZeroDuration;
 fn config() -> NotionConfig {
     NotionConfig {
         verification_token: NotionVerificationToken::new("configured-token").unwrap(),
-        subject_prefix: NatsToken::new("notion-primary").unwrap(),
+        subject_prefix: DottedNatsToken::new("notion-primary").unwrap(),
         stream_name: NatsToken::new("NOTION_PRIMARY").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),

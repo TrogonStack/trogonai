@@ -30,19 +30,19 @@ pub mod hold_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::HoldPlaced(v) => {
-                    map.serialize_entry("holdPlaced", v)?;
+                    map.serialize_entry("holdPlaced", &**v)?;
                 }
                 Self::HoldReleased(v) => {
-                    map.serialize_entry("holdReleased", v)?;
+                    map.serialize_entry("holdReleased", &**v)?;
                 }
             }
             map.end()

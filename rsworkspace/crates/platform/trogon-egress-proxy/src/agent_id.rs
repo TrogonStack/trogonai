@@ -30,7 +30,7 @@ impl AgentId {
 }
 
 fn is_allowed(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':')
 }
 
 impl fmt::Display for AgentId {

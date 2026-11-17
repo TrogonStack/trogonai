@@ -218,12 +218,15 @@ async fn a_client_hello_for_another_host_is_cut_and_audited_as_sni_mismatch() {
     );
     assert!(upstream.received().is_empty(), "the hello never reached the upstream");
     let events = harness.audit.events();
-    assert_eq!(events.len(), 1);
-    assert_eq!(
-        events[0].0.as_deref(),
-        Some(format!("upstream.test:{}", upstream.port).as_str())
-    );
-    assert_eq!(events[0].2, Decision::Refused(Fault::SniMismatch));
+    assert_eq!(events.len(), 2, "the permit that opened the tunnel, then the refusal");
+    for event in &events {
+        assert_eq!(
+            event.0.as_deref(),
+            Some(format!("upstream.test:{}", upstream.port).as_str())
+        );
+    }
+    assert_eq!(events[0].2, Decision::Permitted);
+    assert_eq!(events[1].2, Decision::Refused(Fault::SniMismatch));
     harness.stop().await;
 }
 
@@ -259,7 +262,15 @@ async fn a_missing_sni_or_a_non_tls_first_record_is_cut() {
     }
     assert!(upstream.received().is_empty());
     let decisions: Vec<_> = harness.audit.events().into_iter().map(|event| event.2).collect();
-    assert_eq!(decisions, vec![Decision::Refused(Fault::SniMismatch); 2]);
+    assert_eq!(
+        decisions,
+        vec![
+            Decision::Permitted,
+            Decision::Refused(Fault::SniMismatch),
+            Decision::Permitted,
+            Decision::Refused(Fault::SniMismatch),
+        ]
+    );
     harness.stop().await;
 }
 

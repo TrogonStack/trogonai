@@ -10,7 +10,6 @@ fn spawn(kind: StreamingIngressKind) -> StreamingIngressSpawn {
     StreamingIngressSpawn {
         kind,
         reply: "_INBOX.stream".into(),
-        caller_key: CallerKey::new("alice").unwrap(),
         caller: event_caller(),
     }
 }

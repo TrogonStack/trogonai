@@ -1,4 +1,5 @@
 use super::*;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore, StreamMaxAge,
@@ -16,7 +17,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 fn bridge() -> GatewayBridge<MockJetStreamPublisher, MockObjectStore> {
     GatewayBridge::new(
         wrap_publisher(MockJetStreamPublisher::new()),
-        NatsToken::new("discord").unwrap(),
+        DottedNatsToken::new("discord").unwrap(),
         Duration::from_secs(5),
     )
 }
@@ -25,7 +26,7 @@ fn discord_config() -> DiscordConfig {
     DiscordConfig {
         bot_token: Some(super::super::config::DiscordBotToken::new("Bot token").unwrap()),
         intents: twilight_model::gateway::Intents::GUILDS,
-        subject_prefix: NatsToken::new("discord").unwrap(),
+        subject_prefix: DottedNatsToken::new("discord").unwrap(),
         stream_name: NatsToken::new("DISCORD").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(5).unwrap(),
@@ -63,7 +64,7 @@ fn bridge_with_mock() -> (
     let mock = MockJetStreamPublisher::new();
     let b = GatewayBridge::new(
         wrap_publisher(mock.clone()),
-        NatsToken::new("discord").unwrap(),
+        DottedNatsToken::new("discord").unwrap(),
         Duration::from_secs(5),
     );
     (b, mock)
@@ -78,7 +79,7 @@ fn bridge_with_prefix(
     let mock = MockJetStreamPublisher::new();
     let b = GatewayBridge::new(
         wrap_publisher(mock.clone()),
-        NatsToken::new(prefix).unwrap(),
+        DottedNatsToken::new(prefix).unwrap(),
         Duration::from_secs(5),
     );
     (b, mock)
@@ -301,6 +302,26 @@ async fn dispatch_omits_guild_id_when_absent() {
 
     let msgs = mock.published_messages();
     assert!(msgs[0].headers.get(NATS_HEADER_GUILD_ID).is_none());
+}
+
+#[tokio::test]
+async fn dispatch_preserves_payload_without_forwarding_malformed_guild_metadata() {
+    for data in [
+        r#"{"id":"1","guild_id":true}"#,
+        r#"{"id":"1","guild_id":{}}"#,
+        r#"{"id":"1","guild_id":[]}"#,
+    ] {
+        let (b, mock) = bridge_with_mock();
+        let raw = format!(r#"{{"op":0,"t":"MESSAGE_CREATE","d":{data}}}"#);
+
+        b.dispatch(&raw).await;
+
+        let messages = mock.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(mock.published_subjects(), vec!["discord.message_create"]);
+        assert!(messages[0].headers.get(NATS_HEADER_GUILD_ID).is_none());
+        assert_eq!(messages[0].payload.as_ref(), data.as_bytes());
+    }
 }
 
 #[tokio::test]

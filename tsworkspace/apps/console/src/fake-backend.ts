@@ -17,6 +17,7 @@ import type { InMemoryProjectsClient } from './features/projects/fake/in-memory-
 import { seedProjectIds } from './features/projects/fake/seed';
 import { createFakeProviderConnectionsClient } from './features/provider-connections/fake';
 import type { InMemoryProviderConnectionsClient } from './features/provider-connections/fake/in-memory-client';
+import { InMemorySchedulesClient } from './features/schedules/fake';
 import { createFakeSecretsClient } from './features/secrets/fake';
 import type { InMemorySecretsClient } from './features/secrets/fake/in-memory-client';
 import { populateBeaconSeed, populateSeed } from './features/secrets/fake/seed';
@@ -34,10 +35,12 @@ export interface FakeBackend {
   readonly secrets: { forProject(projectId: ProjectId): InMemorySecretsClient };
   readonly environments: { forProject(projectId: ProjectId): InMemoryEnvironmentsClient };
   readonly gatewaySources: { forProject(projectId: ProjectId): InMemorySourcesClient };
+  readonly schedules: { forProject(projectId: ProjectId): InMemorySchedulesClient };
   readonly keyCustody: InMemoryTenantCustodyClient;
 }
 
 interface ProjectWorkspace {
+  readonly schedules: InMemorySchedulesClient;
   readonly secrets: InMemorySecretsClient;
   readonly environments: InMemoryEnvironmentsClient;
   readonly gatewaySources: InMemorySourcesClient;
@@ -83,7 +86,8 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
       seeded: (options.seeded ?? true) && isDemo,
     });
 
-    const workspace = { secrets, environments, gatewaySources };
+    const schedules = new InMemorySchedulesClient({ ...options, seeded: (options.seeded ?? true) && isDemo });
+    const workspace = { secrets, environments, gatewaySources, schedules };
     workspaces.set(projectId, workspace);
     return workspace;
   };
@@ -121,6 +125,7 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
     secrets: { forProject: (projectId) => workspaceOf(projectId).secrets },
     environments: { forProject: (projectId) => workspaceOf(projectId).environments },
     gatewaySources: { forProject: (projectId) => workspaceOf(projectId).gatewaySources },
+    schedules: { forProject: (projectId) => workspaceOf(projectId).schedules },
     keyCustody: createFakeTenantCustodyClient(options),
   };
 }

@@ -52,22 +52,22 @@ pub mod delegation_permission_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::DelegationPermissionInitialized(v) => {
-                    map.serialize_entry("delegationPermissionInitialized", v)?;
+                    map.serialize_entry("delegationPermissionInitialized", &**v)?;
                 }
                 Self::DelegationPermissionSet(v) => {
-                    map.serialize_entry("delegationPermissionSet", v)?;
+                    map.serialize_entry("delegationPermissionSet", &**v)?;
                 }
                 Self::DelegationPermissionCleared(v) => {
-                    map.serialize_entry("delegationPermissionCleared", v)?;
+                    map.serialize_entry("delegationPermissionCleared", &**v)?;
                 }
             }
             map.end()

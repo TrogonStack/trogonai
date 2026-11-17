@@ -1,0 +1,19 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    # These start NATS JetStream servers in containers through Docker.
+    integration_tests = {
+        "cluster": {"tags": ["requires-network"]},
+        "producer": {"tags": ["requires-network"]},
+        "production": {"tags": ["requires-network"]},
+        "recovery": {"tags": ["requires-network"]},
+        "runner": {
+            # input_boundary_tests opens Cargo.toml relative to the manifest directory at run time.
+            "data": ["Cargo.toml"],
+            "rustc_env": {"CARGO_MANIFEST_DIR": "{package}"},
+            "tags": ["requires-network"],
+        },
+    },
+    # Some unit tests start a NATS JetStream server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+)

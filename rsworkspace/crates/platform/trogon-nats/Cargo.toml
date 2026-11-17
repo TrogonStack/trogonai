@@ -12,6 +12,7 @@ thiserror = { workspace = true }
 async-nats = { workspace = true, features = ["nkeys", "jetstream", "kv", "object-store", "server_2_10", "server_2_11", "server_2_12"] }
 bytes = { workspace = true }
 nkeys = { workspace = true }
+log = { version = "=0.4.29", features = ["std"] }
 futures = { workspace = true }
 opentelemetry = { workspace = true }
 trogon-semconv = { workspace = true }
@@ -36,7 +37,7 @@ rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs"
 rustls = { workspace = true, features = ["ring"] }
 tempfile = { workspace = true }
 testcontainers-modules = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tracing-subscriber = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }
 

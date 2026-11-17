@@ -13,6 +13,13 @@ use crate::jwt::{
 use crate::permissions::IssuedPermissions;
 use crate::signing_key_source::{KeyVersion, MintingMaterial};
 
+pub fn verified_test_credential(claims: UserJwtClaims) -> crate::VerifiedCredential {
+    let expires_at =
+        crate::CredentialExpiry::from_unix_seconds(time::OffsetDateTime::now_utc().unix_timestamp() + 3600)
+            .expect("fixture credential expiry");
+    crate::VerifiedCredential::new(claims, expires_at)
+}
+
 /// Mints a short-lived User JWT suitable for gateway ingress header tests.
 pub fn mint_test_user_jwt(caller_id: &str, audience_account: &str, ttl: Duration) -> MintedUserJwt {
     let issuer = KeyPair::new_account();

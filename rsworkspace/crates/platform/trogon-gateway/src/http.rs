@@ -2,9 +2,9 @@ use axum::Router;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use trogon_nats::client::RequestClient;
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 
 use crate::config::ResolvedConfig;
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_plugin;
 use crate::source_plugin::RuntimeCredentialMounts;
 

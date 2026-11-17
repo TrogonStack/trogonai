@@ -17,6 +17,13 @@ fn subject_pattern_rejects_whitespace() {
 }
 
 #[test]
+fn no_permissions_grant_no_subject() {
+    let perms = IssuedPermissions::none();
+    assert!(perms.publish_allow.is_empty());
+    assert!(perms.subscribe_allow.is_empty());
+}
+
+#[test]
 fn default_permissions_scope_publish_to_gateway() {
     let caller = CallerId::new("usr1").unwrap();
     let perms = IssuedPermissions::default_for_caller(&caller);

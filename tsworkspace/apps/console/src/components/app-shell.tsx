@@ -1,6 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import {
   BirdIcon,
+  CalendarClockIcon,
   FolderKanbanIcon,
   KeyRoundIcon,
   KeySquareIcon,
@@ -29,6 +30,7 @@ import { ProjectSwitcher } from '@/features/projects/components/project-switcher
 import { useCurrentProject } from '@/features/projects/current-project';
 import { useProjectQuery, useProjectsQuery } from '@/features/projects/queries';
 import { useConnectionQuery, useConnectionsQuery } from '@/features/provider-connections/queries';
+import { useSchedulesQuery } from '@/features/schedules/queries';
 import { useCredentialQuery, useCredentialsQuery, useVaultQuery } from '@/features/secrets/queries';
 import { cn } from '@/lib/utils';
 
@@ -110,6 +112,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
   const environments = useEnvironmentsQuery();
   const custody = useCustodyQuery();
   const sources = useSourcesQuery();
+  const schedules = useSchedulesQuery();
   const label = collapsed ? 'hidden' : 'hidden lg:inline';
   const block = collapsed ? 'hidden' : 'hidden lg:flex';
   return (
@@ -257,6 +260,18 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
             <LayersIcon className="size-4 shrink-0" aria-hidden="true" />
             <span className={label}>Environments</span>
             <NavCount collapsed={collapsed} count={environments.data?.length} />
+          </Link>
+        </div>
+        <div className="flex flex-col gap-1">
+          <p className={cn('micro px-2.5 pt-2 pb-1 text-[10px] text-muted-foreground', label)}>Automation</p>
+          <Link
+            to="/schedules"
+            title="Schedules"
+            className="group/nav text-sidebar-foreground hover:bg-foreground/5 focus-visible:ring-sidebar-ring/70 data-[status=active]:bg-sidebar-accent data-[status=active]:text-sidebar-accent-foreground relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors outline-none focus-visible:ring-2"
+          >
+            <CalendarClockIcon className="size-4 shrink-0" aria-hidden="true" />
+            <span className={label}>Schedules</span>
+            <NavCount collapsed={collapsed} count={schedules.data?.length} />
           </Link>
         </div>
       </nav>
@@ -481,6 +496,20 @@ function RouteBreadcrumbs() {
       return <CredentialCrumbs secretRef={decodeURIComponent(segments[2])} />;
     }
     return <ScopedCrumbs crumbs={[{ label: 'Secrets' }]} />;
+  }
+  if (segments[0] === 'schedules') {
+    return (
+      <ScopedCrumbs
+        crumbs={
+          segments.length === 1
+            ? [{ label: 'Schedules' }]
+            : [
+                { label: 'Schedules', to: '/schedules' },
+                { label: segments[1] === 'new' ? 'Create schedule' : decodeURIComponent(segments[1]!) },
+              ]
+        }
+      />
+    );
   }
   if (segments[0] === 'sources') {
     if (segments[1]) return <SourceCrumbs integrationId={decodeURIComponent(segments[1])} />;

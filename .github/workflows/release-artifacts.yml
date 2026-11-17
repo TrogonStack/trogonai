@@ -46,11 +46,13 @@ jobs:
       - name: Extract version from tag
         id: version
         shell: bash
-        run: mise run --skip-tools github-actions:resolve-release-version
+        run: mise run --skip-tools github:workflows:release-artifacts:resolve-release-version
 
       - name: Add Rust target
         if: ${{ !matrix.use-cross }}
-        run: rustup target add ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: mise run --skip-tools github:workflows:release-artifacts:add-rust-target
 
       - name: Install cross
         if: ${{ matrix.use-cross }}
@@ -63,14 +65,14 @@ jobs:
         env:
           USE_CROSS: ${{ matrix.use-cross }}
           TARGET: ${{ matrix.target }}
-        run: mise run github-actions:build-release-binary
+        run: mise run github:workflows:release-artifacts:build-release-binary
 
       - name: Package
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
           TARGET: ${{ matrix.target }}
-        run: mise run github-actions:package-release-binary
+        run: mise run github:workflows:release-artifacts:package-release-binary
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -108,9 +110,9 @@ jobs:
           merge-multiple: true
 
       - name: Generate checksums
-        run: mise run --skip-tools github-actions:release-checksums
+        run: mise run --skip-tools github:workflows:release-artifacts:release-checksums
 
       - name: Upload to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: mise run --skip-tools github-actions:release-upload
+        run: mise run --skip-tools github:workflows:release-artifacts:release-upload

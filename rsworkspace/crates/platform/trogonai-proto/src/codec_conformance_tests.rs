@@ -21,6 +21,8 @@ mod retained_fixture;
 mod transport_retained_tests;
 mod wire_boundary_tests;
 
+#[cfg(feature = "audit")]
+mod audit_tests;
 #[cfg(all(feature = "decider", feature = "schedules"))]
 mod decider_retained_tests;
 #[cfg(all(feature = "decider", feature = "schedules"))]
@@ -61,6 +63,8 @@ mod scheduler_presence_tests;
 mod scheduler_retained_tests;
 #[cfg(feature = "schedules")]
 mod scheduler_tests;
+#[cfg(feature = "secrets-exchange")]
+mod secrets_exchange_tests;
 
 fn assert_wire_codec<M>(wire: &[u8], expected: &M)
 where

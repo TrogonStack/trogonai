@@ -9,7 +9,8 @@ fn principal_id(value: &str) -> PrincipalId {
 
 #[test]
 fn a_principal_position_renders_as_its_kind_token_then_its_id_token() {
-    let principal = SubjectPrincipal::from_principal(PrincipalKind::Person, &principal_id("caller_01"));
+    let id = SubjectPrincipalId::from(&principal_id("caller_01"));
+    let principal = SubjectPrincipal::new(PrincipalKind::Person, id);
 
     assert_eq!(principal.to_string(), "person.caller_01");
     assert_eq!(principal.kind(), PrincipalKind::Person);

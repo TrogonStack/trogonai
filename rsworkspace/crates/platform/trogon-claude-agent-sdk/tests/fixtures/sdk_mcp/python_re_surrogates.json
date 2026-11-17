@@ -1,0 +1,135 @@
+{
+ "python": "3.12.16",
+ "search": [
+  {
+   "pattern": "\ud800",
+   "text": "a\ud800b",
+   "match": true
+  },
+  {
+   "pattern": "\ud800",
+   "text": "\udc00",
+   "match": false
+  },
+  {
+   "pattern": "[\ud800-\udbff]",
+   "text": "\udc00",
+   "match": false
+  },
+  {
+   "pattern": "[\ud800-\udfff]",
+   "text": "\udc00",
+   "match": true
+  },
+  {
+   "pattern": "\\\ud800",
+   "text": "\ud800",
+   "match": true
+  },
+  {
+   "pattern": "[\\\udc00]",
+   "text": "\udc00",
+   "match": true
+  },
+  {
+   "pattern": "(?i)\ud800",
+   "text": "\ud800",
+   "match": true
+  },
+  {
+   "pattern": "\ud800+",
+   "text": "\ud800\ud800",
+   "match": true
+  },
+  {
+   "pattern": "a.b",
+   "text": "a\udc00b",
+   "match": true
+  },
+  {
+   "pattern": "\\w",
+   "text": "\ud800",
+   "match": false
+  },
+  {
+   "pattern": "\\s",
+   "text": "\udc00",
+   "match": false
+  },
+  {
+   "pattern": "[^a]",
+   "text": "\ud800",
+   "match": true
+  },
+  {
+   "pattern": "\\ud800",
+   "text": "\ud800",
+   "match": true
+  },
+  {
+   "pattern": "\\udc00\\ud800",
+   "text": "\udc00\ud800",
+   "match": true
+  },
+  {
+   "pattern": "[\udc00-\ud800]",
+   "text": "",
+   "error": "bad character range \udc00-\ud800 at position 1"
+  },
+  {
+   "pattern": "(?P\ud800)",
+   "text": "",
+   "error": "unknown extension ?P\ud800 at position 1"
+  },
+  {
+   "pattern": "(?\ud800)",
+   "text": "",
+   "error": "unknown extension ?\ud800 at position 1"
+  },
+  {
+   "pattern": "(?<\ud800)",
+   "text": "",
+   "error": "unknown extension ?<\ud800 at position 1"
+  },
+  {
+   "pattern": "(?P<a\ud800>x)",
+   "text": "",
+   "error": "bad character in group name 'a\\ud800' at position 4"
+  },
+  {
+   "pattern": "(?P=\udc00)",
+   "text": "",
+   "error": "bad character in group name '\\udc00' at position 4"
+  },
+  {
+   "pattern": "(a)(?(\ud800)b)",
+   "text": "",
+   "error": "bad character in group name '\\ud800' at position 6"
+  },
+  {
+   "pattern": "\\N{\ud800}",
+   "text": "",
+   "error": "bad escape \\N at position 3"
+  },
+  {
+   "pattern": "[\\\ud800-a]",
+   "text": "",
+   "error": "bad character range \\\ud800-a at position 1"
+  },
+  {
+   "pattern": "\ud800\n(",
+   "text": "",
+   "error": "missing ), unterminated subpattern at position 2 (line 2, column 1)"
+  },
+  {
+   "pattern": "(?P<\ud800\ud800>",
+   "text": "",
+   "error": "bad character in group name '\\ud800\\ud800' at position 4"
+  },
+  {
+   "pattern": "(?P<x>a)(?P<x>\ud800)",
+   "text": "",
+   "error": "redefinition of group name 'x' as group 2; was group 1 at position 12"
+  }
+ ]
+}

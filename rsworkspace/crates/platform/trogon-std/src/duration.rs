@@ -36,5 +36,16 @@ impl From<NonZeroDuration> for Duration {
     }
 }
 
+impl TryFrom<Duration> for NonZeroDuration {
+    type Error = ZeroDurationError;
+
+    fn try_from(duration: Duration) -> Result<Self, Self::Error> {
+        if duration.is_zero() {
+            return Err(ZeroDurationError);
+        }
+        Ok(Self(duration))
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -1,0 +1,48 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+filegroup(
+    name = "bootstrap",
+    srcs = glob(
+        [
+            "*.conf",
+            "*.sh",
+        ],
+        exclude = ["run_from_copy.sh"],
+    ),
+)
+
+sh_test(
+    name = "gateway_env_test",
+    srcs = ["run_from_copy.sh"],
+    args = [
+        "gateway-env.test.sh",
+        "$(rootpaths :bootstrap)",
+    ],
+    data = [":bootstrap"],
+    # Runs the bootstrap in a container through Docker, which pulls its image.
+    tags = ["requires-network"],
+)
+
+# Drives provision-audit.sh against a stand-in `nats` CLI, so it needs no
+# server, no container and no copy; jq comes from the host like Docker does.
+sh_test(
+    name = "provision_audit_test",
+    srcs = ["provision-audit.test.sh"],
+    data = ["provision-audit.sh"],
+)
+
+# Each sources the install helper it checks and stages files in a temporary
+# directory, so neither needs a server or a container.
+sh_test(
+    name = "install_seed_test",
+    srcs = ["install-seed.test.sh"],
+    data = ["install-seed.sh"],
+)
+
+sh_test(
+    name = "install_memberships_test",
+    srcs = ["install-memberships.test.sh"],
+    data = ["install-memberships.sh"],
+    # chown lives in /usr/sbin on macOS, which the default test PATH leaves out.
+    env = {"PATH": "/bin:/usr/bin:/usr/sbin:/usr/local/bin"},
+)

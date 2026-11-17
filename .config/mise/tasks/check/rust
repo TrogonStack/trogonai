@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE dir="rsworkspace"
+
+cargo clippy --workspace && cargo fmt --check "$@"

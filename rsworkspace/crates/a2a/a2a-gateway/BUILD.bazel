@@ -1,0 +1,33 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    # Deployments build without spicedb, so that feature set is checked too.
+    feature_variants = {"default": []},
+    integration_tests = {
+        # Runs the docker CLI against the repository's devops/ directory, which lies
+        # outside this Bazel package.
+        "compose_bootstrap_jwt": {"tags": ["manual"]},
+        "default_build_enforces_policy": {"tags": ["requires-network"]},
+        "imported_reply": {"tags": ["requires-network"]},
+        "run_smoke": {"tags": ["requires-network"]},
+        "runtime_process": {"tags": ["requires-network"]},
+        # Reads a2a-pack/policies through CARGO_MANIFEST_DIR/../, which is a sibling
+        # Bazel package that does not export those files yet.
+        "tier1_declarative_bundles": {"tags": ["manual"]},
+        # Copies wasm fixtures from a2a-redaction/tests/fixtures, a sibling Bazel
+        # package that does not export them yet.
+        "tier3_manifest_boot": {"tags": ["manual"]},
+    },
+    # These read a2a-redaction/tests/fixtures/identity_redact_part.wasm through
+    # CARGO_MANIFEST_DIR/../, which the unit test target cannot resolve.
+    unit_test_args = [
+        "--skip",
+        "policy::wasmtime_substrate::tests::register_redaction_skill_round_trips_fixture",
+        "--skip",
+        "runtime::policy_stack::tests::boot_tests::configured_skills_load_usable_bundles",
+        "--skip",
+        "runtime::policy_stack::tests::boot_tests::from_env_rejects_an_invalid_skill_slug",
+    ],
+    # Some tests start a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+)

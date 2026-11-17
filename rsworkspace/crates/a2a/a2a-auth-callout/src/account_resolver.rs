@@ -1,8 +1,4 @@
-use std::collections::BTreeSet;
-use std::sync::Arc;
-
 use crate::error::AuthCalloutError;
-use crate::jwt::AccountName;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestedAccount(String);
@@ -39,42 +35,6 @@ impl From<AccountResolverError> for AuthCalloutError {
             }
             AccountResolverError::Unknown(name) => crate::error::CredentialError::UnknownAccount(name).into(),
         }
-    }
-}
-
-pub trait AccountResolver: Send + Sync + 'static {
-    fn resolve(&self, requested: &RequestedAccount) -> Result<AccountName, AccountResolverError>;
-}
-
-pub struct StaticAccountResolver {
-    allowed: BTreeSet<String>,
-}
-
-impl StaticAccountResolver {
-    pub fn new<I, S>(allowed: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        Self {
-            allowed: allowed.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl AccountResolver for StaticAccountResolver {
-    fn resolve(&self, requested: &RequestedAccount) -> Result<AccountName, AccountResolverError> {
-        if self.allowed.contains(requested.as_str()) {
-            Ok(AccountName::new(requested.as_str()))
-        } else {
-            Err(AccountResolverError::Unknown(requested.as_str().to_owned()))
-        }
-    }
-}
-
-impl<R: AccountResolver + ?Sized> AccountResolver for Arc<R> {
-    fn resolve(&self, requested: &RequestedAccount) -> Result<AccountName, AccountResolverError> {
-        (**self).resolve(requested)
     }
 }
 

@@ -15,6 +15,8 @@ pub struct Tier3SkillManifest {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Tier3SkillManifestError {
+    #[error("json_path must be a string")]
+    MissingJsonPath,
     #[error("json_path must not be empty")]
     EmptyJsonPath,
     #[error("json_path {0:?} is not a valid JSONPath or JSON Pointer (expected `$.`, `$`, or `/`-prefixed)")]
@@ -45,10 +47,14 @@ impl Tier3SkillManifest {
     }
 
     pub fn parse(skill_id: SkillId, raw: &serde_json::Value) -> Option<Self> {
-        let json_path = raw.get("json_path")?.as_str()?.to_owned();
-        if json_path.is_empty() {
-            return None;
-        }
+        Self::try_parse(skill_id, raw).ok()
+    }
+
+    fn try_parse(skill_id: SkillId, raw: &serde_json::Value) -> Result<Self, Tier3SkillManifestError> {
+        let json_path = raw
+            .get("json_path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(Tier3SkillManifestError::MissingJsonPath)?;
         let kind = raw
             .get("kind")
             .and_then(|v| v.as_str())
@@ -70,7 +76,7 @@ impl Tier3SkillManifest {
                 "tier-3 manifest skill_id disagrees with bundle file stem; using file stem so the wasm module lookup hits"
             );
         }
-        Self::new(skill_id, json_path, kind).ok()
+        Self::new(skill_id, json_path, kind)
     }
 
     pub fn skill_id(&self) -> &SkillId {
@@ -98,44 +104,41 @@ fn is_recognized_json_path(path: &str) -> bool {
     to_json_pointer(path).is_some()
 }
 
+/// Best-effort manifest discovery for callers that do not enforce Tier-3.
+/// Enabled gateway boot must use [`load_tier3_manifest_from_bundle`] instead.
 pub fn load_tier3_manifests_from_bundle(
     bundle_path: &WasmBundlePath,
     skill_slugs: &[SkillId],
 ) -> BTreeMap<SkillId, Tier3SkillManifest> {
     let mut manifests = BTreeMap::new();
     for skill in skill_slugs {
-        let path = bundle_path.join_skill_manifest(skill);
-        match std::fs::read_to_string(&path) {
-            Err(err) => {
-                warn!(
-                    skill = %skill,
-                    path = %path.display(),
-                    error = %err,
-                    "tier-3 manifest missing or unreadable; skill skipped at redaction site"
-                );
+        match load_tier3_manifest_from_bundle(bundle_path, skill) {
+            Ok(manifest) => {
+                manifests.insert(skill.clone(), manifest);
             }
-            Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-                Err(err) => {
-                    warn!(
-                        skill = %skill,
-                        path = %path.display(),
-                        error = %err,
-                        "tier-3 manifest JSON invalid; skill skipped"
-                    );
-                }
-                Ok(value) => {
-                    if let Some(manifest) = Tier3SkillManifest::parse(skill.clone(), &value) {
-                        manifests.insert(manifest.skill_id().clone(), manifest);
-                    } else {
-                        warn!(
-                            skill = %skill,
-                            path = %path.display(),
-                            "tier-3 manifest missing json_path; skill skipped"
-                        );
-                    }
-                }
-            },
+            Err(error) => warn!(skill = %skill, error = %error, "tier-3 manifest unusable; skill skipped"),
         }
     }
     manifests
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Tier3ManifestLoadError {
+    #[error("manifest cannot be read")]
+    Read(#[source] std::io::Error),
+    #[error("manifest is not valid JSON")]
+    Json(#[source] serde_json::Error),
+    #[error("manifest has no usable redaction path")]
+    Manifest(#[source] Tier3SkillManifestError),
+}
+
+/// Load a required manifest without omitting a configured redaction skill.
+/// File, JSON and path failures retain their typed source for boot diagnostics.
+pub fn load_tier3_manifest_from_bundle(
+    bundle_path: &WasmBundlePath,
+    skill: &SkillId,
+) -> Result<Tier3SkillManifest, Tier3ManifestLoadError> {
+    let text = std::fs::read_to_string(bundle_path.join_skill_manifest(skill)).map_err(Tier3ManifestLoadError::Read)?;
+    let raw = serde_json::from_str(&text).map_err(Tier3ManifestLoadError::Json)?;
+    Tier3SkillManifest::try_parse(skill.clone(), &raw).map_err(Tier3ManifestLoadError::Manifest)
 }

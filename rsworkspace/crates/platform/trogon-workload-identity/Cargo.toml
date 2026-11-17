@@ -1,0 +1,46 @@
+[package]
+name = "trogon-workload-identity"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Supervisor-owned attested workload credential activation"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+test-support = ["dep:rcgen", "dep:tempfile", "dep:tokio-stream", "dep:time"]
+
+[dependencies]
+async-trait = { workspace = true }
+futures = { workspace = true }
+rustls = { workspace = true }
+rustls-webpki = { workspace = true }
+sha2 = { workspace = true }
+spiffe = { workspace = true, features = ["workload-api-x509"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+x509-parser = { workspace = true }
+zeroize = "=1.8.2"
+rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"], optional = true }
+tempfile = { workspace = true, optional = true }
+tonic = { workspace = true }
+tonic-prost = "=0.14.5"
+prost = "=0.14.3"
+tokio-stream = { version = "=0.1.18", features = ["net"], optional = true }
+time = { workspace = true, optional = true }
+
+[dev-dependencies]
+rustls = { workspace = true, features = ["tls12"] }
+rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util", "io-util"] }
+tokio-rustls = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = "=0.14.5"
+prost = "=0.14.3"
+tokio-stream = { version = "=0.1.18", features = ["net"] }
+time = { workspace = true }

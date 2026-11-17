@@ -9,17 +9,18 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{CredentialIdentity, CredentialOwnerId, CredentialScope};
 use trogon_nats::AdvancedMockNatsClient;
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use trogon_std::NonZeroDuration;
 
-use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -56,7 +57,7 @@ fn current_timestamp() -> String {
 
 fn test_config() -> SlackConfig {
     SlackConfig {
-        subject_prefix: NatsToken::new("slack").unwrap(),
+        subject_prefix: DottedNatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         ack_budget: AckBudget::default(),
@@ -105,12 +106,14 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router 
     let integration_id = SourceIntegrationId::new("primary").unwrap();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Slack,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Slack,
+                    integration_id.clone(),
+                ),
+                CredentialKind::SigningSecret,
             ),
-            CredentialKind::SigningSecret,
             trogon_std::SecretString::new(secret).unwrap(),
         )
         .await
@@ -118,7 +121,7 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router 
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
 
     runtime_router_with_clock(
@@ -520,7 +523,7 @@ async fn subject_uses_configured_prefix() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
     let config = SlackConfig {
-        subject_prefix: NatsToken::new("custom").unwrap(),
+        subject_prefix: DottedNatsToken::new("custom").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         ack_budget: AckBudget::default(),
@@ -647,7 +650,7 @@ async fn ack_timeout_returns_500() {
     let _guard = tracing_guard();
     let publisher = AckFailPublisher::hanging();
     let config = SlackConfig {
-        subject_prefix: NatsToken::new("slack").unwrap(),
+        subject_prefix: DottedNatsToken::new("slack").unwrap(),
         stream_name: NatsToken::new("SLACK").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         ack_budget: AckBudget::new(Some(NonZeroDuration::from_millis(10).unwrap())),

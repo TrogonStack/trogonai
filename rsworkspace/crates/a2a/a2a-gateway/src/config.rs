@@ -1,7 +1,7 @@
 //! Env-driven [`Args`] + resolved [`Config`] for the gateway.
 //!
-//! The CLI surface is intentionally small — gateway tuning lives on `NatsConfig`
-//! and per-slice env vars (queue group, JWT audience, trust-caller-headers).
+//! The CLI surface is intentionally small: gateway tuning lives on `NatsConfig`
+//! and per-slice env vars (queue group, JWT audience).
 //! `config_from_args` is the single seam tests and the binary share so the
 //! same env-resolution path is exercised under both.
 
@@ -98,6 +98,10 @@ pub struct Config {
     pub nats_servers: Vec<NatsServerUrl>,
     pub a2a_prefix: A2aPrefix,
     pub queue_group: Option<QueueGroup>,
+    /// First imported non-unary reply deadline. Environment setting
+    /// `A2A_GATEWAY_NON_UNARY_RELAY_TIMEOUT_SECS` accepts 1..=3600 (default 300).
+    /// This bounds bootstrap retention, not the separate streaming event pump.
+    pub non_unary_relay_timeout: crate::NonUnaryRelayTimeout,
 }
 
 impl Config {
@@ -110,6 +114,8 @@ impl Config {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    #[error("invalid A2A_GATEWAY_NON_UNARY_RELAY_TIMEOUT_SECS")]
+    NonUnaryRelayTimeout(#[source] crate::NonUnaryRelayTimeoutError),
     /// `--prefix` / `A2A_PREFIX` failed the subject-segment validation in
     /// `a2a-nats`. Surface the typed source so operators see which character
     /// is rejected.
@@ -146,10 +152,18 @@ pub fn config_from_args<E: ReadEnv>(args: Args, env: &E) -> Result<(Config, Nats
         None => None,
     };
 
+    let non_unary_relay_timeout = env
+        .var(crate::constants::ENV_GATEWAY_NON_UNARY_RELAY_TIMEOUT_SECS)
+        .ok()
+        .map(|raw| raw.parse())
+        .transpose()
+        .map_err(ConfigError::NonUnaryRelayTimeout)?
+        .unwrap_or_default();
     let config = Config {
         nats_servers,
         a2a_prefix,
         queue_group,
+        non_unary_relay_timeout,
     };
 
     Ok((config, nats_config))

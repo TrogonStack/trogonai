@@ -1,0 +1,100 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+
+// Type-specific references prevent substituting one configuration owner for
+// another. Each resolves only within its exact scope and immutable version.
+message TrustRegistrationRef {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationVersion version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message SubjectBindingRef {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationVersion version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message RecipientBindingRef {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationVersion version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message IssuerProfileRef {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationVersion version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ExecutionProfileRef {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationVersion version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message SigningProfileRef {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationVersion version = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The protected approval owner resolves each receipt and proves independent
+// approver authorization for this exact configuration. These are metadata, not
+// self-authenticating approvals. No receipt can renew an earlier grant.
+message ConfigurationApprovalRef {
+  ConfigurationApprovalId approval_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  WorkloadScope scope = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationVersion version = 3 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationOwnerKind owner_kind = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConfigurationOperationPurpose operation_purpose = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// Validation is owner-authenticated evidence for the exact configuration, not
+// a caller-provided success flag. Provider/issuer checks stay outside Deciders.
+message ConfigurationValidationRef {
+  ConfigurationValidationId validation_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  WorkloadScope scope = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationVersion version = 3 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationOwnerKind owner_kind = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConfigurationOperationPurpose operation_purpose = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+// Receipt ownership and operation are part of lookup and signing domain
+// separation. A digest shared across message types never crosses this boundary.
+enum ConfigurationOwnerKind {
+  CONFIGURATION_OWNER_KIND_UNSPECIFIED = 0;
+  CONFIGURATION_OWNER_KIND_TRUST_REGISTRATION = 1;
+  CONFIGURATION_OWNER_KIND_SUBJECT_BINDING = 2;
+  CONFIGURATION_OWNER_KIND_RECIPIENT_BINDING = 3;
+  CONFIGURATION_OWNER_KIND_ISSUER_PROFILE = 4;
+  CONFIGURATION_OWNER_KIND_EXECUTION_PROFILE = 5;
+  CONFIGURATION_OWNER_KIND_SIGNING_PROFILE = 6;
+}
+
+enum ConfigurationOperationPurpose {
+  CONFIGURATION_OPERATION_PURPOSE_UNSPECIFIED = 0;
+  CONFIGURATION_OPERATION_PURPOSE_ACTIVATE = 1;
+}
