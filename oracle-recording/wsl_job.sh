@@ -14,7 +14,14 @@ mkdir -p "$out/goldens"
   uname -a
 } | tee "$out/host.txt"
 grep -qi microsoft /proc/version
-test ! -e /mnt/c
+# The first boot, before wsl.conf moved the automount root, can leave an empty /mnt/c folder behind on the rootfs.
+# What matters is that no Windows drive is mounted there and no real reg.exe is reachable at the WSL path.
+{
+  ls -la /mnt
+  findmnt -rn -o TARGET,FSTYPE,SOURCE
+} | tee -a "$out/host.txt"
+! mountpoint -q /mnt/c
+test ! -e /mnt/c/Windows/System32/reg.exe
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
