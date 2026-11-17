@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::{
+    cell::Cell,
     io,
     path::{Path, PathBuf},
 };
@@ -12,7 +13,14 @@ use super::{
 };
 use crate::{
     adapters::ReadFile,
-    constants::{MCP_SERVER_ALLOW_LIST_KEY, SETTINGS_FILE_MAX_BYTES},
+    constants::{
+        MCP_SERVER_ALLOW_LIST_KEY, PARENT_MANAGED_FILE, REGISTRY_USER_FILE, REMOTE_MANAGED_FILE,
+        SETTINGS_FILE_MAX_BYTES,
+    },
+    node_merge_warmth::MergeWarmth,
+    node_stack::NodeStack,
+    settings_dialect::SettingsDialect,
+    settings_managed_reader::{ManagedReader, ParsedFiles},
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_tier::{LoadState, TierRead},
     settings_resolve_values::SettingsMap,
@@ -27,8 +35,7 @@ fn loaded(settings: Option<Value>, has_policy_content: bool) -> TierRead {
         settings: settings.as_ref().map(object),
         has_policy_content,
         load_state: LoadState::Loaded,
-        user_writable: false,
-        unreadable: false,
+        ..TierRead::absent()
     }
 }
 
@@ -52,9 +59,12 @@ impl ReadFile for OneFile {
 }
 
 fn read(answer: Answer) -> (TierRead, bool) {
+    let parsed = ParsedFiles::default();
+    let warmth = Cell::new(MergeWarmth::default());
     read_policy_file(
         &OneFile(answer),
         &PathBuf::from("/etc/claude-code/managed-settings.json"),
+        ManagedReader::new(SettingsDialect::Python, NodeStack::default(), &parsed, &warmth),
     )
 }
 
@@ -104,6 +114,86 @@ fn a_managed_document_that_is_not_an_object_did_not_load_but_was_opened() {
     assert_eq!(tier.load_state, LoadState::Loaded);
     assert!(tier.has_policy_content);
     assert_eq!(tier.settings, Some(object(&json!({"model": "opus"}))));
+}
+
+#[test]
+fn a_managed_document_reads_through_the_policy_schema() {
+    let (tier, opened) = read(Answer::Bytes(
+        br#"{"model": 5, "custom": {"a": 1}, "permissions": {"defaultMode": 5}}"#.to_vec(),
+    ));
+    assert!(opened);
+    assert_eq!(tier.load_state, LoadState::Loaded);
+    assert_eq!(
+        tier.settings,
+        Some(object(
+            &json!({"permissions": {"defaultMode": "default"}, "custom": {"a": 1}})
+        ))
+    );
+    assert!(tier.floored);
+    assert!(tier.has_policy_content);
+
+    let (tier, _) = read(Answer::Bytes(
+        br#"{"permissions": {"disableBypassPermissionsMode": "bogus"}}"#.to_vec(),
+    ));
+    assert_eq!(
+        tier.settings,
+        Some(object(
+            &json!({"permissions": {"disableBypassPermissionsMode": "disable"}})
+        ))
+    );
+    assert!(tier.only_substitutes);
+    assert!(!tier.floored);
+    assert!(!tier.is_authored());
+
+    let (tier, _) = read(Answer::Bytes(br#"{"model": "opus"}"#.to_vec()));
+    assert!(!tier.only_substitutes);
+    assert!(tier.is_authored());
+}
+
+#[test]
+fn a_document_handed_over_reads_through_the_policy_schema() {
+    let tier = TierRead::from_pm(
+        object(&json!({"model": 5})),
+        SettingsDialect::TypeScript,
+        REMOTE_MANAGED_FILE,
+    );
+    assert_eq!(tier.load_state, LoadState::Loaded);
+    assert_eq!(tier.settings, None);
+    assert!(!tier.only_substitutes);
+
+    let tier = TierRead::from_pm(
+        object(&json!({"permissions": {"disableBypassPermissionsMode": "bogus"}})),
+        SettingsDialect::Python,
+        PARENT_MANAGED_FILE,
+    );
+    assert_eq!(
+        tier.settings,
+        Some(object(
+            &json!({"permissions": {"disableBypassPermissionsMode": "disable"}})
+        ))
+    );
+    assert!(tier.only_substitutes);
+    assert!(!tier.is_authored());
+
+    let tier = TierRead::from_hm(r#"{"model": 5, "isolation": {}}"#, true, REGISTRY_USER_FILE);
+    assert_eq!(tier.settings, Some(SettingsMap::new()));
+    assert!(tier.user_writable);
+    assert!(!tier.is_authored());
+}
+
+#[test]
+fn a_tier_of_only_stand_ins_does_not_shut_the_parent_out() {
+    let stand_ins = TierRead {
+        only_substitutes: true,
+        ..loaded(Some(json!({"model": "opus"})), true)
+    };
+    let authored = loaded(Some(json!({"model": "opus"})), true);
+    let absent = TierRead::absent();
+    let held = Held::default();
+    assert!(select_admin(Some(&stand_ins), &absent, &absent, &held, None, "linux").parent_never_shut_out);
+    assert!(!select_admin(Some(&authored), &absent, &absent, &held, None, "linux").parent_never_shut_out);
+    assert!(select_admin(None, &stand_ins, &absent, &held, None, "linux").parent_never_shut_out);
+    assert!(!select_admin(None, &authored, &absent, &held, None, "linux").parent_never_shut_out);
 }
 
 #[test]
@@ -170,7 +260,7 @@ fn a_remote_tier_that_loses_to_an_authored_mdm_tier_ranks_after_it() {
     let remote = object(&json!({"permissions": {}}));
     let mdm = loaded(Some(json!({"model": "opus"})), true);
     let selection = select_admin(
-        Some(&remote),
+        Some(&loaded(Some(Value::Object(remote.clone())), true)),
         &mdm,
         &TierRead::absent(),
         &Held::default(),
