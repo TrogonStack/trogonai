@@ -50,7 +50,7 @@ progress:
     note: NATS client and server adapters, HTTP and stdio surfaces, task streaming and push notification support.
   - name: A2A policy and authenticated edge
     status: built
-    note: Gateway enforcement and a separate HTTPS bridge with caller proof of possession and caller-scoped NATS credentials.
+    note: Gateway ingress enforcement and a separate HTTP edge with default-enforced caller proof and caller-scoped NATS credentials. Public HTTPS needs external TLS termination.
   - name: ACP editor and remote connections
     status: built
     note: A stdio bridge and an official SDK-backed HTTP and WebSocket listener connect clients to NATS-backed agents.
@@ -59,7 +59,7 @@ progress:
     note: NATS transports for both protocol roles, plus stdio and Streamable HTTP bridges.
   - name: Verified callers at MCP and ACP remote edges
     status: designed
-    note: The caller-identity proposal remains draft. Host and Origin checks do not authenticate the caller.
+    note: The caller-identity proposal remains draft. MCP Host checks and ACP Origin checks do not authenticate the caller.
 ---
 
 <ProductHeader />
@@ -91,10 +91,16 @@ adapters carry messages, task queries, cancellation and streamed updates. Agent
 cards describe an agent's capabilities; push notifications provide another way
 to follow its work.
 
-The policy gateway checks incoming agent calls. A separate HTTPS bridge verifies
-caller proof of possession before obtaining caller-scoped NATS credentials.
-The local HTTP adapter and the authenticated HTTPS bridge are distinct entry
-points, so choose the boundary appropriate to your deployment.
+The policy gateway checks calls routed through gateway ingress. The local HTTP
+adapter sends calls directly to agents unless gateway routing is enabled.
+A separate edge, `a2a-bridge`, obtains caller-scoped NATS credentials before
+forwarding. Its default `enforce` mode requires caller proof of possession;
+development-only `shadow` and `off` modes relax that enforcement.
+
+The bridge serves plain HTTP and needs an external TLS terminator for public
+HTTPS. No TLS-terminating bridge deployment is defined in this repository.
+The local HTTP adapter and the bridge are distinct entry points, so choose and
+configure the boundary appropriate to your deployment.
 
 [A2A support and boundaries](/reference/agent-protocols#a2a)
 

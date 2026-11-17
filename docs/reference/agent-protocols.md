@@ -10,7 +10,7 @@ For the role of each protocol, see [How agent protocols fit together](../archite
 
 | Protocol | Shared NATS adapter | Local surface | Remote surface |
 | --- | --- | --- | --- |
-| A2A | `a2a-nats` client and server | `a2a-nats-stdio` | `a2a-nats-http` for local agents behind NATS; `a2a-bridge` for the separate HTTPS cross-binding edge |
+| A2A | `a2a-nats` client and server | `a2a-nats-stdio` | `a2a-nats-http` for local agents behind NATS; `a2a-bridge` for the separate HTTP cross-binding edge, requiring external TLS termination for HTTPS |
 | ACP | `acp-nats` and its bridge traits | `acp-nats-stdio` | `acp-nats-server`, using the official SDK HTTP and WebSocket transport |
 | MCP | `mcp-nats`, implementing the official Rust SDK transport traits for both roles | `mcp-nats-stdio` | `mcp-nats-server`, serving Streamable HTTP on `/mcp` |
 
@@ -28,15 +28,25 @@ existence does not mean upstream protocol clients connect directly to NATS.
 - The HTTP adapter exposes JSON-RPC, streaming, REST routes and agent-card
   discovery at `/.well-known/agent-card.json`.
 - The gateway owns layered policy enforcement and audit on its ingress path.
-  The separate `a2a-bridge` HTTP edge verifies AAuth proof of possession and
-  obtains caller-scoped NATS credentials through the auth callout.
+  The separate `a2a-bridge` HTTP edge obtains caller-scoped NATS credentials
+  through the auth callout. Its default `enforce` mode requires verified AAuth
+  proof of possession; development-only `shadow` can admit a failed proof and
+  `off` skips proof verification.
 
 ### Boundaries
 
-The HTTP adapter, HTTPS bridge and gateway are different components. Their
-security properties depend on the configured path, caller credentials and
+The local HTTP adapter, cross-binding edge and gateway are different components.
+Their security properties depend on the configured path, caller credentials and
 broker permissions. Do not infer authenticated public ingress from the presence
 of an HTTP listener alone.
+
+The local HTTP adapter routes directly to agent subjects by default. Enable
+`A2A_USE_GATEWAY` to send its calls through gateway ingress.
+
+The `a2a-bridge` binary binds a TCP listener and serves plain HTTP with
+`axum::serve`. An external reverse proxy or ingress must terminate TLS for public
+HTTPS. The repository provisions bridge NATS credentials and a replay bucket,
+but does not define a bridge deployment with a TLS-terminating component.
 
 The adapters do not implement an agent's business behavior or the platform's
 definition/revision registry. Task transport is distinct from the proposed
@@ -48,6 +58,7 @@ definition/revision registry. Task transport is distinct from the proposed
 - [`a2a-nats-http` router](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/a2a/a2a-nats-http/src/router.rs)
 - [`a2a-gateway` runtime](https://github.com/TrogonStack/trogonai/tree/main/rsworkspace/crates/a2a/a2a-gateway/src/runtime)
 - [`a2a-bridge` edge authentication](https://github.com/TrogonStack/trogonai/tree/main/rsworkspace/crates/a2a/a2a-bridge/src/edge_auth)
+- [`a2a-bridge` listener and bootstrap](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/a2a/a2a-bridge/src/main.rs)
 - [ADR#0082: bus principal and edge proof of possession](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md)
 
 ## ACP
@@ -113,8 +124,9 @@ subscriptions do not imply NATS micro discovery or queue-balanced service
 behavior.
 
 The Streamable HTTP listener's allowed-host check is a DNS-rebinding defense,
-not caller authentication. It uses a shared NATS connection with generated
-client peer IDs. The verified caller boundary remains proposed in
+not caller authentication. Its configuration sets allowed hosts without setting
+allowed origins, so it does not enforce Origin validation. It uses a shared NATS
+connection with generated client peer IDs. The verified caller boundary remains proposed in
 [ADR#0087](../adr/0087-mcp-acp-caller-identity-from-subject-and-edge-credential.md).
 
 The [connector MCP authorization reference](./connector-mcp-authorization.md)

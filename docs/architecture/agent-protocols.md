@@ -39,10 +39,18 @@ can outlive an initial response, report updates, return artifacts and accept
 cancellation. Agent cards describe the capabilities a caller can discover.
 
 TrogonAI has NATS client/server adapters, a local HTTP adapter and stdio support.
-The policy gateway and the HTTPS cross-binding bridge are separate components.
-The gateway owns enforcement on its ingress path; the HTTPS bridge verifies
-caller proof and obtains caller-scoped NATS credentials before forwarding.
-Deploying the local HTTP adapter does not implicitly deploy those controls.
+The policy gateway and the cross-binding edge, `a2a-bridge`, are separate
+components. The gateway checks calls routed through its ingress path. The local
+HTTP adapter sends calls directly to agents unless gateway routing is enabled.
+The bridge obtains caller-scoped NATS credentials before forwarding. Its default
+`enforce` mode requires verified caller proof. The development-only `shadow`
+mode can admit a failed proof, while `off` skips proof verification.
+
+The bridge listener serves plain HTTP. Public HTTPS requires an external
+TLS-terminating reverse proxy or ingress in front of it. This repository does
+not define a TLS-terminating deployment for the bridge; the deployment owner
+must configure that boundary before exposing it beyond loopback. Deploying the
+local HTTP adapter does not implicitly deploy these controls.
 
 ## ACP connects a client to an agent
 
@@ -81,8 +89,10 @@ work described in the [MCP authorization reference](../reference/connector-mcp-a
 
 Routing a request over NATS does not establish who the external caller is or
 what they may do. A2A has an authenticated edge and gateway enforcement path.
-MCP and ACP remote listeners currently share service-level NATS connections;
-their host and Origin checks do not authenticate individual callers.
+MCP and ACP remote listeners currently share service-level NATS connections.
+The MCP listener configures Host validation, but does not configure Origin
+validation. The ACP listener also enforces Origin. These checks do not
+authenticate individual callers.
 
 [ADR#0087](../adr/0087-mcp-acp-caller-identity-from-subject-and-edge-credential.md)
 proposes the missing MCP/ACP identity boundary and remains draft. Apply security
