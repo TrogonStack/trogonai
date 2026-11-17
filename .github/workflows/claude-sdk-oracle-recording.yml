@@ -14,6 +14,8 @@ env:
 
 jobs:
   refit:
+    # Runs only when the head commit asks for it with `[refit]`.
+    if: contains(github.event.head_commit.message, '[refit]')
     # Every fit unit natively: the host's own platform, real spawned programs (the real plutil on darwin, a real
     # reg.exe at the WSL path on linux) and the real clock, once as the first call of a process and once as a call
     # within the 30-minute window after it.
@@ -141,7 +143,10 @@ jobs:
           "$PY" -I "$FETCH_LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
           "$PY" -I "$FETCH_LIB/fetch_pinned_python.py" "$RUNNER_TEMP/python"
           "$PY" -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet "$RUNNER_TEMP/python"
+          "$PY" -c 'import sys, tomllib; print("\n".join(tomllib.load(open(sys.argv[1], "rb"))["project"]["dependencies"]))' \
+            "$RUNNER_TEMP/python/pyproject.toml" > "$RUNNER_TEMP/requirements.txt"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet --no-cache-dir --disable-pip-version-check -r "$RUNNER_TEMP/requirements.txt"
+          echo "PYTHON_SDK=$RUNNER_TEMP/python/src" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/venv/bin/python" --version | tee -a "$OUT/host.txt"
 
       - name: Record every golden natively
