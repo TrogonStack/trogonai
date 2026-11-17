@@ -25,6 +25,7 @@ otel/semconv/
     gateway.yaml     # trogon-gateway webhooks and credentials
     std.yaml         # trogon-std (HTTP server span)
     provider.yaml    # trogon-provider-gateway (standard HTTP duration)
+    genai.yaml       # vendored, pinned subset of the OpenTelemetry GenAI conventions
   policies/          # Rego policies (metric + attribute naming)
     trogon_naming.rego
   templates/         # Weaver Forge codegen templates, one subtree per target
@@ -79,6 +80,21 @@ Several signals reuse standard OTel attributes (`messaging.*`, `server.*`,
 registry as the manifest `dependencies` entry (see the commented block in
 `registry/manifest.yaml`). That requires network access during `check`/
 `generate`, so it is omitted from the initial self-contained scaffold.
+
+## Vendored GenAI conventions
+
+`registry/genai.yaml` copies a pinned subset of the upstream OpenTelemetry GenAI
+semantic conventions (inference, agent invocation and tool execution spans, plus
+their attributes and duration and token metrics). The header of the file records
+the exact upstream commit and what was left out. Upstream ids, enum values, units
+and stability are kept as published, so the `gen_ai` namespace is exempt from the
+reserved-root metric policy for the listed metric names only. Prompt and
+completion content attributes are not vendored; content capture stays off.
+
+GenAI span names are patterns (`invoke_agent {gen_ai.agent.name}`). A span group
+carries `annotations.code_generation.span_name` (`operation`, `target`) and the
+Rust target emits an `..._OPERATION` constant plus a `..._name(Option<&str>)`
+helper instead of a fixed name constant.
 
 ## Adding a new signal
 
