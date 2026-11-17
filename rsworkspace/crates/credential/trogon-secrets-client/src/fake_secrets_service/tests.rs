@@ -190,10 +190,47 @@ async fn takes_its_outcomes_in_the_order_they_were_scripted() {
 
     assert!(matches!(
         first,
-        RequestError::Reply(ReplyError::Service(fault)) if fault.message() == "fake-invalid"
+        RequestError::Reply(ReplyError::Service(fault))
+            if fault.code() == ServiceErrorCode::INVALID_ARGUMENT && fault.message() == "fake-invalid"
     ));
     assert!(matches!(
         second.result,
         Some(Outcome::Failure(failure)) if failure.category.as_known() == Some(Category::RESOLVE_FAILURE_CATEGORY_UNAVAILABLE)
     ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn records_each_request_as_it_arrives_not_as_it_is_answered() {
+    let fake = FakeSecretsService::new();
+    fake.script(FakeOutcome::denied().after(Duration::from_secs(3)));
+    fake.script(FakeOutcome::denied());
+    let binding = endpoint();
+    let (slow, fast) = (XKey::new().public_key(), XKey::new().public_key());
+    let (asked_slow, asked_fast) = (asking_with(&slow), asking_with(&fast));
+
+    let mut first = std::pin::pin!(call::<_, _, ResolveForReleaseResponse>(
+        &fake,
+        &binding,
+        ContentType::Protobuf,
+        &asked_slow,
+        Duration::from_secs(5),
+    ));
+    assert!(futures::poll!(&mut first).is_pending());
+    call::<_, _, ResolveForReleaseResponse>(
+        &fake,
+        &binding,
+        ContentType::Protobuf,
+        &asked_fast,
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+    first.await.unwrap();
+
+    let askers: Vec<String> = fake
+        .received()
+        .iter()
+        .map(|received| received.request().requester_xkey.public_key.clone())
+        .collect();
+    assert_eq!(askers, [slow, fast]);
 }
