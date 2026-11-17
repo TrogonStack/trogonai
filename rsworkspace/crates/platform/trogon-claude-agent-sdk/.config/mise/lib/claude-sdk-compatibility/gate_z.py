@@ -62,14 +62,21 @@ def behavior_gaps(behaviors):
     return gaps
 
 
-def _locked_package(packages, dependency):
-    # Cargo.lock writes a dependency as `name`, `name version` or `name version (source)`.
+def _locked_packages(packages, dependency):
+    # Cargo.lock writes a dependency as `name`, `name version` or `name version (source)`, adding only what it needs to
+    # tell same-named packages apart. Every package the reference could name is walked, so an ambiguous one over-reports
+    # instead of hiding a branch.
     name, _, rest = dependency.partition(" ")
-    version = rest.split(" ", 1)[0] if rest else None
-    matches = [package for package in packages.get(name, ()) if version is None or package["version"] == version]
+    version, _, source = rest.partition(" ")
+    if source:
+        if not (source.startswith("(") and source.endswith(")")):
+            raise GateError(Code.FORMAT, f"Cargo.lock.{dependency}")
+        source = source[1:-1]
+    matches = [package for package in packages.get(name, ())
+               if (not version or package["version"] == version) and (not source or package.get("source") == source)]
     if not matches:
         raise GateError(Code.REFERENCE, f"Cargo.lock.{dependency}")
-    return matches[0]
+    return matches
 
 
 @format_boundary("Cargo.lock")
@@ -82,14 +89,15 @@ def openssl_dependencies(lock_text, package=SDK_PACKAGE):
     packages = {}
     for locked in tomllib.loads(lock_text)["package"]:
         packages.setdefault(locked["name"], []).append(locked)
-    found, seen, pending = set(), set(), [_locked_package(packages, package)]
+    found, seen, pending = set(), set(), _locked_packages(packages, package)
     while pending:
         locked = pending.pop()
-        key = (locked["name"], locked["version"])
+        key = (locked["name"], locked["version"], locked.get("source"))
         if key in seen:
             continue
         seen.add(key)
         if locked["name"] in OPENSSL_CRATES:
             found.add(f"{locked['name']} {locked['version']}")
-        pending.extend(_locked_package(packages, dependency) for dependency in locked.get("dependencies", ()))
+        for dependency in locked.get("dependencies", ()):
+            pending.extend(_locked_packages(packages, dependency))
     return sorted(found)

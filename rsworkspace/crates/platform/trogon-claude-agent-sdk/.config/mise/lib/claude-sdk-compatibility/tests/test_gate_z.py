@@ -25,9 +25,10 @@ def behaviors(*rows):
 
 def lock(*packages):
     blocks = []
-    for name, version, dependencies in packages:
+    for name, version, dependencies, *source in packages:
         listed = "".join(f' "{dependency}",\n' for dependency in dependencies)
-        blocks.append(f'[[package]]\nname = "{name}"\nversion = "{version}"\ndependencies = [\n{listed}]\n')
+        origin = f'source = "{source[0]}"\n' if source else ""
+        blocks.append(f'[[package]]\nname = "{name}"\nversion = "{version}"\n{origin}dependencies = [\n{listed}]\n')
     return "version = 4\n\n" + "\n".join(blocks)
 
 
@@ -113,9 +114,32 @@ class DependencyTests(unittest.TestCase):
         text = lock(("trogon-claude-agent-sdk", "0.1.0", ["reqwest 0.12.0", "tls"]),
                     ("reqwest", "0.12.0", ["native-tls"]), ("reqwest", "0.11.0", ["openssl-src"]),
                     ("native-tls", "0.2.0", ["openssl 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)"]),
-                    ("openssl", "0.10.0", ["openssl-sys"]), ("openssl-sys", "0.9.0", []), ("openssl-src", "300.0.0", []),
+                    ("openssl", "0.10.0", ["openssl-sys"], "registry+https://github.com/rust-lang/crates.io-index"),
+                    ("openssl-sys", "0.9.0", []), ("openssl-src", "300.0.0", []),
                     ("tls", "1.0.0", ["native-tls"]))
         self.assertEqual(gate_z.openssl_dependencies(text), ["native-tls 0.2.0", "openssl 0.10.0", "openssl-sys 0.9.0"])
+
+    def test_a_source_qualifier_picks_the_package_it_names(self):
+        crates_io = "registry+https://github.com/rust-lang/crates.io-index"
+        mirror = "registry+https://example.com/mirror-index"
+        text = lock(("trogon-claude-agent-sdk", "0.1.0", [f"tls 1.0.0 ({mirror})"]),
+                    ("tls", "1.0.0", ["rustls"], crates_io), ("tls", "1.0.0", ["native-tls"], mirror),
+                    ("rustls", "0.23.0", [], crates_io), ("native-tls", "0.2.0", [], crates_io))
+        self.assertEqual(gate_z.openssl_dependencies(text), ["native-tls 0.2.0"])
+
+    def test_an_ambiguous_reference_walks_every_package_it_could_name(self):
+        text = lock(("trogon-claude-agent-sdk", "0.1.0", ["tls 1.0.0"]),
+                    ("tls", "1.0.0", ["rustls"], "registry+https://example.com/a"),
+                    ("tls", "1.0.0", ["native-tls"], "registry+https://example.com/b"),
+                    ("rustls", "0.23.0", []), ("native-tls", "0.2.0", []))
+        self.assertEqual(gate_z.openssl_dependencies(text), ["native-tls 0.2.0"])
+
+    def test_a_source_that_names_no_locked_package_is_a_stale_reference(self):
+        text = lock(("trogon-claude-agent-sdk", "0.1.0", ["tls 1.0.0 (registry+https://example.com/gone)"]),
+                    ("tls", "1.0.0", [], "registry+https://example.com/a"))
+        with self.assertRaises(GateError) as caught:
+            gate_z.openssl_dependencies(text)
+        self.assertEqual(caught.exception.code, Code.REFERENCE)
 
     def test_a_dependency_missing_from_the_lock_is_a_stale_reference(self):
         with self.assertRaises(GateError) as caught:
