@@ -152,12 +152,15 @@ fn every_recorded_policy_document_is_read_like_the_pinned_resolver() {
     for probe in documents {
         let input = probe["input"].as_str().expect("input");
         let expected = &probe["output"];
-        let read = read_policy_document(input);
-        let actual = serde_json::json!({
+        let read = read_policy_document(input, Some("f"));
+        let mut actual = serde_json::json!({
             "settings": read.settings.map_or(Value::Null, Value::Object),
             "documentHasPolicyContent": read.has_policy_content.map_or(Value::Null, Value::Bool),
             "loadState": if read.loaded { "loaded" } else { "didNotLoad" },
         });
+        if read.only_substitutes {
+            actual["onlySubstitutes"] = Value::Bool(true);
+        }
         if !same(&actual, expected) {
             mismatches.push(format!("{input}\n  rust:     {actual}\n  upstream: {expected}"));
         }
@@ -168,7 +171,7 @@ fn every_recorded_policy_document_is_read_like_the_pinned_resolver() {
 #[test]
 fn a_blank_managed_document_loads_as_no_settings() {
     for text in ["", " \n\t "] {
-        let read = read_policy_document(text);
+        let read = read_policy_document(text, Some("f"));
         assert!(read.settings.expect("settings").is_empty(), "{text:?}");
         assert_eq!(read.has_policy_content, None, "{text:?}");
         assert!(read.loaded, "{text:?}");
@@ -178,7 +181,7 @@ fn a_blank_managed_document_loads_as_no_settings() {
 #[test]
 fn a_managed_document_that_is_not_an_object_does_not_load() {
     for text in ["not json", "[1]", "5"] {
-        let read = read_policy_document(text);
+        let read = read_policy_document(text, Some("f"));
         assert!(read.settings.is_none(), "{text:?}");
         assert_eq!(read.has_policy_content, None, "{text:?}");
         assert!(!read.loaded, "{text:?}");

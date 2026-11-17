@@ -101,9 +101,9 @@ impl<'p> ManagedReader<'p> {
         fresh
     }
 
-    /// A managed settings document from the bytes of its file, which fit the size limit, sanitized and read by the
-    /// policy-tolerant schema parse in either dialect.
-    pub(crate) fn read(self, bytes: &[u8]) -> TierRead {
+    /// A managed settings document from the bytes of its file at `path`, which fit the size limit, sanitized and read
+    /// by the policy-tolerant schema parse in either dialect.
+    pub(crate) fn read(self, bytes: &[u8], path: &Path) -> TierRead {
         let parsed = match self.decoder {
             Decoder::Lossy => {
                 let text = String::from_utf8_lossy(bytes);
@@ -132,12 +132,7 @@ impl<'p> ManagedReader<'p> {
             }
         };
         match parsed {
-            PolicyParse::Object(document) => {
-                read_policy_object(document).map_or(not_loaded(false), |(settings, has_policy_content)| TierRead {
-                    has_policy_content,
-                    ..loaded(settings)
-                })
-            }
+            PolicyParse::Object(document) => read_policy(document, path),
             PolicyParse::NotObject => not_loaded(false),
             PolicyParse::Overflow => not_loaded(true),
         }
@@ -178,11 +173,20 @@ impl<'p> ManagedReader<'p> {
 fn loaded(settings: SettingsMap) -> TierRead {
     TierRead {
         settings: Some(settings),
-        has_policy_content: false,
         load_state: LoadState::Loaded,
-        user_writable: false,
-        unreadable: false,
+        ..TierRead::absent()
     }
+}
+
+/// `lE(..., true)` upstream for a document that parsed as an object.
+fn read_policy(document: SettingsMap, path: &Path) -> TierRead {
+    let read = read_policy_object(document, Some(&path.to_string_lossy()));
+    read.map_or(not_loaded(false), |read| TierRead {
+        has_policy_content: read.has_policy_content,
+        only_substitutes: read.only_substitutes,
+        floored: read.floored,
+        ..loaded(read.settings)
+    })
 }
 
 fn not_loaded(unreadable: bool) -> TierRead {

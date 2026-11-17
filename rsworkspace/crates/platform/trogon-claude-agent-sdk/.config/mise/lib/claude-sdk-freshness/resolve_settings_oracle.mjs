@@ -6,7 +6,8 @@
 // The spec holds {root, platform, env, process?, writable?, deep?, rejections?, cases: [{name, options, at?, files?,
 // durations?}]}. Machine-wide locations that the SDK reads (managed settings, managed preferences, /proc/version,
 // plutil) are remapped under `root`, and `process.platform` is replaced by `platform`, so every case runs the same way
-// on any host.
+// on any host. All of /etc moves, not only the managed settings folder: a write check walks every folder down from the
+// root, and a host where /etc is a link (macOS) would otherwise answer it differently from one where it is a folder.
 //
 // `process` pins the ids the process reports ({euid, uid, egid, gid, groups}; a missing or null field removes that
 // call, as on a platform without it), and `writable` answers write checks by the path asked about (`*` for every
@@ -39,7 +40,7 @@ if (!pkg || !specPath) {
 const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
 const root = spec.root;
 const VIRTUAL = [
-  '/etc/claude-code',
+  '/etc',
   '/Library/Application Support/ClaudeCode',
   '/Library/Managed Preferences',
   '/mnt/c',

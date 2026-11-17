@@ -1,9 +1,9 @@
-use std::cell::Cell;
+use std::{cell::Cell, path::Path};
 
 use super::{ManagedReader, ParsedFiles};
 use crate::{
-    node_merge_warmth::MergeWarmth, node_stack::NodeStack, settings_dialect::SettingsDialect,
-    settings_resolve_tier::LoadState, settings_resolve_values::SettingsMap,
+    constants::MANAGED_SETTINGS_FILE, node_merge_warmth::MergeWarmth, node_stack::NodeStack,
+    settings_dialect::SettingsDialect, settings_resolve_tier::LoadState, settings_resolve_values::SettingsMap,
 };
 
 #[test]
@@ -16,7 +16,7 @@ fn the_typescript_dialect_reads_a_blank_managed_document_as_empty_settings() {
         &parsed,
         &warmth,
     );
-    let read = reader.read(b" \n\t\r\n");
+    let read = reader.read(b" \n\t\r\n", Path::new(MANAGED_SETTINGS_FILE));
     assert_eq!(
         (read.load_state, read.settings, read.has_policy_content, read.unreadable),
         (LoadState::Loaded, Some(SettingsMap::new()), false, false)

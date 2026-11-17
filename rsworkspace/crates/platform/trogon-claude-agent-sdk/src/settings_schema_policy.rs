@@ -2,20 +2,31 @@
 //!
 //! A managed document is not rejected for a bad field. Each carried key is read on its own: a lock that
 //! cannot be read becomes its restrictive value, a list loses the entries that cannot be read, and a grant
-//! sitting beside a restriction that could not be read is withheld. Only the values are reproduced here;
-//! the upstream error list does not reach the resolver.
+//! sitting beside a restriction that could not be read is withheld. Only the values are reproduced here,
+//! with the one diagnostic the resolver acts on: whether every key the document carries holds only a value
+//! put in place of what was written.
 //!
 //! This module lives under `settings_schema` because it walks the private schema nodes.
 
 use std::{
+    cell::Cell,
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 
 use serde_json::{Map, Value};
 
-use super::{Check, Mode, Node, SettingsSchema, all_pass};
-use crate::{constants::POLICY_META_KEYS, settings_policy_content::has_policy_content};
+use super::{
+    Check, Mode, Node, SettingsSchema, all_pass,
+    policy_lists::{self, ListKind},
+};
+use crate::{
+    constants::{POLICY_META_KEYS, POLICY_NEVER_SUBSTITUTED, POLICY_SKELETON_EXCLUDED, POLICY_UNSYNTHESIZED_BLOCKS},
+    settings_policy_content::{has_policy_content, is_empty_tree},
+};
+
+#[path = "settings_schema_policy_credentials.rs"]
+mod credentials;
 
 /// One block whose grants are withheld when one of its restrictions cannot be read (`J5e`).
 struct Block {
@@ -151,11 +162,37 @@ impl PolicySpec {
     }
 }
 
-/// What one block parse could not read, by key (`i` and `a` upstream).
+/// What one block parse could not read, by key (`i` and `a` upstream), and which members hold a value put in
+/// place of what was written (`s` upstream) or a block made up from restrictive values alone.
 #[derive(Default)]
 struct Findings {
     unreadable: HashSet<String>,
     trimmed: HashSet<String>,
+    substituted: HashSet<String>,
+    synthesized: HashSet<String>,
+}
+
+/// The policy read of one document (`cP(...).safeParse(document)` and its closing transform).
+pub(crate) struct PolicyParse {
+    pub(crate) settings: Map<String, Value>,
+    /// Every key that carries content holds only a value the reader put in place of what was written (the
+    /// `onlySubstitutes` diagnostic upstream).
+    pub(crate) only_substitutes: bool,
+    /// The default mode holds the value put in place of one that could not be read (an error at its path marked
+    /// `substituted` upstream).
+    pub(crate) floored: bool,
+}
+
+/// What every block of one document parse shares: where the document came from, and whether a block put a value in
+/// place of a default mode it could not read.
+struct Reading<'a> {
+    file: Option<&'a str>,
+    floored: Cell<bool>,
+}
+
+/// A value read as written, never a stand-in.
+fn as_written(value: Option<Value>) -> Option<(Value, bool)> {
+    value.map(|value| (value, false))
 }
 
 /// The parts of an object schema a block read walks.
@@ -227,31 +264,56 @@ fn failing_entries(node: &Node, value: &Value) -> BTreeSet<usize> {
 
 impl SettingsSchema {
     /// `cP(...).safeParse(document)`: the carried keys read one by one, unknown keys passed through. It
-    /// never fails.
-    pub(crate) fn parse_policy_document(&self, document: &Map<String, Value>) -> Map<String, Value> {
-        let mut parsed = Map::new();
+    /// never fails. `file` is where the document came from.
+    ///
+    /// A key whose reader yields `undefined` is never inserted, which is what the closing transform does when
+    /// it deletes undefined keys. The `wrongDocumentIssues` check before it only flags a key the parsed value
+    /// holds but the document `cP` was built from did not; both callers (`j7e` and `lE`) parse the very document
+    /// they built the schema from, so the check never adds an issue and has no counterpart here.
+    pub(crate) fn parse_policy(&self, document: &Map<String, Value>, file: Option<&str>) -> PolicyParse {
+        let mut settings = Map::new();
+        let mut stand_ins = HashSet::new();
+        let reading = Reading {
+            file,
+            floored: Cell::new(false),
+        };
         for key in &self.keys {
             let Some(value) = document.get(key) else {
                 continue;
             };
-            if let Some(output) = self.policy_value(key, value) {
-                parsed.insert(key.clone(), output);
+            if let Some((output, stand_in)) = self.policy_value(key, value, &reading) {
+                if stand_in {
+                    stand_ins.insert(key.clone());
+                }
+                settings.insert(key.clone(), output);
             }
         }
         for (key, value) in document {
             if !self.fields.contains_key(key) {
-                parsed.insert(key.clone(), value.clone());
+                settings.insert(key.clone(), value.clone());
             }
         }
-        parsed
+        let mut carried = settings
+            .iter()
+            .filter(|(key, value)| !POLICY_META_KEYS.contains(&key.as_str()) && !is_empty_tree(value))
+            .peekable();
+        let only_substitutes = carried.peek().is_some() && carried.all(|(key, _)| stand_ins.contains(key));
+        PolicyParse {
+            settings,
+            only_substitutes,
+            floored: reading.floored.get(),
+        }
     }
 
-    fn policy_value(&self, key: &str, value: &Value) -> Option<Value> {
+    /// One carried key, with whether its value stands in for what was written (`l` and the synthesized set
+    /// upstream).
+    fn policy_value(&self, key: &str, value: &Value, reading: &Reading<'_>) -> Option<(Value, bool)> {
         let field = self.fields.get(key)?;
-        let generic = || field.validate(Some(value)).unwrap_or(None);
-        if key != "sandbox" && self.is_lock_block(key) {
+        let generic = || as_written(field.validate(Some(value)).unwrap_or(None));
+        if self.is_lock_block(key) {
+            let strict = (key != "sandbox").then_some(&**field);
             return match object_of(field) {
-                Some(shape) => self.read_block(key, &shape, value, Some(&**field)),
+                Some(shape) => self.read_block(key, &shape, value, strict, reading),
                 None => generic(),
             };
         }
@@ -260,27 +322,41 @@ impl SettingsSchema {
                 if value.is_null() {
                     return None;
                 }
-                field.validate(read_boolean_text(Some(value)).as_ref()).unwrap_or(None)
+                as_written(field.validate(read_boolean_text(Some(value)).as_ref()).unwrap_or(None))
             }
             "strictPluginOnlyCustomization" => {
                 if value.is_null() {
                     return None;
                 }
                 match unwrap_catch_optional(field).validate(Some(value)) {
-                    Ok(output) => output,
-                    Err(()) => Some(Value::Bool(true)),
+                    Ok(output) => as_written(output),
+                    Err(()) => Some((Value::Bool(true), true)),
                 }
             }
-            "policyHelpers" => read_policy_helpers(field, value),
-            "managedMcpServers" => read_managed_mcp_servers(field, value),
+            "policyHelpers" => as_written(read_policy_helpers(field, value)),
+            "managedMcpServers" => as_written(read_managed_mcp_servers(field, value)),
+            "strictKnownMarketplaces" => as_written(policy_lists::marketplaces(field, ListKind::Allow, value)),
+            "blockedMarketplaces" => as_written(policy_lists::marketplaces(field, ListKind::Block, value)),
+            "allowedMcpServers" => as_written(policy_lists::server_list(field, ListKind::Allow, value)),
+            "deniedMcpServers" => as_written(policy_lists::server_list(field, ListKind::Block, value)),
+            "enabledPlugins" => as_written(policy_lists::enabled_plugins(value)),
+            "availableModels" => as_written(policy_lists::models(ListKind::Allow, value)),
+            "deniedModels" => as_written(policy_lists::models(ListKind::Block, value)),
+            "allowedHttpHookUrls" | "httpHookAllowedEnvVars" | "allowedChannelPlugins" | "allowedProviders" => {
+                Some((policy_lists::allowlist(key, value), false))
+            }
+            "forceLoginOrgUUID" => as_written(match field.validate(Some(value)) {
+                Ok(output) => output,
+                Err(()) => Some(Value::Array(Vec::new())),
+            }),
             _ => match self.top_level_restrictive(key) {
                 Some(restrictive) => {
                     if value.is_null() {
                         return None;
                     }
                     match field.validate(prepare(Some(restrictive), Some(value)).as_ref()) {
-                        Ok(output) => output,
-                        Err(()) => Some(restrictive.clone()),
+                        Ok(output) => as_written(output),
+                        Err(()) => Some((restrictive.clone(), true)),
                     }
                 }
                 None => generic(),
@@ -318,8 +394,16 @@ impl SettingsSchema {
         path != "sandbox.credentials" && !path.starts_with("sandbox.credentials.") && self.has_locked_children(path)
     }
 
-    /// `Yk`: reads one block field by field. `None` is an unset block.
-    fn read_block(&self, path: &str, shape: &Shape<'_>, input: &Value, strict: Option<&Node>) -> Option<Value> {
+    /// `Yk`: reads one block field by field, with whether the block is made up only of values put in place of
+    /// what was written. `None` is an unset block.
+    fn read_block(
+        &self,
+        path: &str,
+        shape: &Shape<'_>,
+        input: &Value,
+        strict: Option<&Node>,
+        reading: &Reading<'_>,
+    ) -> Option<(Value, bool)> {
         if input.is_null() {
             return None;
         }
@@ -338,17 +422,21 @@ impl SettingsSchema {
                 .filter(|(_, value)| !value.is_null())
                 .map(|(name, value)| (name.clone(), value.clone()))
                 .collect();
-            self.parse_block(path, shape, &present, &mut findings)
+            self.parse_block(path, shape, &present, &mut findings, reading)
         });
         let Some(mut parsed) = parsed else {
             let skeleton = self.skeleton(path, shape);
             return if skeleton.is_empty() {
                 None
             } else {
-                Some(Value::Object(skeleton))
+                Some((Value::Object(skeleton), synthesizes(path)))
             };
         };
-        self.withhold_grants(path, &mut parsed, &findings);
+        self.withhold_grants(path, &mut parsed, &mut findings);
+        let at_default_mode = |name: &String| format!("{path}.{name}") == self.policy.default_mode.path;
+        if findings.substituted.iter().any(at_default_mode) {
+            reading.floored.set(true);
+        }
         if parsed.is_empty() {
             let carries_known_key = block.as_object().is_some_and(|entries| {
                 entries
@@ -358,10 +446,14 @@ impl SettingsSchema {
             return if carries_known_key {
                 None
             } else {
-                Some(Value::Object(parsed))
+                Some((Value::Object(parsed), false))
             };
         }
-        Some(Value::Object(parsed))
+        let synthesized = synthesizes(path)
+            && parsed.iter().all(|(name, value)| {
+                findings.substituted.contains(name) || findings.synthesized.contains(name) || is_empty_tree(value)
+            });
+        Some((Value::Object(parsed), synthesized))
     }
 
     /// The block schema extended with the readers of its members (`t.safeExtend(l)` parsed).
@@ -371,18 +463,25 @@ impl SettingsSchema {
         shape: &Shape<'_>,
         entries: &Map<String, Value>,
         findings: &mut Findings,
+        reading: &Reading<'_>,
     ) -> Option<Map<String, Value>> {
         let mut output = Map::new();
         for (name, member) in shape.members {
             let child = format!("{path}.{name}");
             let present = entries.get(name);
-            let value = match object_of(member) {
-                Some(inner) if self.is_lock_block(&child) => {
-                    present.and_then(|value| self.read_block(&child, &inner, value, Some(&**member)))
+            let read = match object_of(member) {
+                _ if child == "sandbox.credentials" => {
+                    present.and_then(|value| credentials::read(member, reading.file, value))
                 }
-                _ => self.read_member(&child, member, present, findings, name),
+                Some(inner) if self.is_lock_block(&child) => {
+                    present.and_then(|value| self.read_block(&child, &inner, value, Some(&**member), reading))
+                }
+                _ => as_written(self.read_member(&child, member, present, findings, name)),
             };
-            if let Some(value) = value {
+            if let Some((value, synthesized)) = read {
+                if synthesized {
+                    findings.synthesized.insert(name.clone());
+                }
                 output.insert(name.clone(), value);
             }
         }
@@ -425,10 +524,12 @@ impl SettingsSchema {
         if let Ok(output) = schema.validate(prepared.as_ref()) {
             return output;
         }
-        if let Some(value) = restrictive {
+        if let Some(value) = restrictive.filter(|_| !POLICY_NEVER_SUBSTITUTED.contains(&path)) {
+            findings.substituted.insert(name.to_owned());
             return Some(value.clone());
         }
         if path == self.policy.default_mode.path {
+            findings.substituted.insert(name.to_owned());
             return Some(Value::String(self.policy.default_mode.floor.clone()));
         }
         if schema.validate(Some(&Value::Array(Vec::new()))).is_ok()
@@ -458,6 +559,10 @@ impl SettingsSchema {
         let mut output = Map::new();
         for (name, member) in shape.members {
             let child = format!("{path}.{name}");
+            if POLICY_SKELETON_EXCLUDED.contains(&child.as_str()) || POLICY_NEVER_SUBSTITUTED.contains(&child.as_str())
+            {
+                continue;
+            }
             if let Some(value) = self.policy.nested.get(&child) {
                 output.insert(name.clone(), value.clone());
             } else if let Some(inner) = object_of(member)
@@ -470,7 +575,7 @@ impl SettingsSchema {
     }
 
     /// `iP`: grants beside a restriction that could not be read are withheld.
-    fn withhold_grants(&self, path: &str, block: &mut Map<String, Value>, findings: &Findings) {
+    fn withhold_grants(&self, path: &str, block: &mut Map<String, Value>, findings: &mut Findings) {
         let Some(rule) = self.policy.blocks.iter().find(|rule| rule.name == path) else {
             return;
         };
@@ -492,10 +597,35 @@ impl SettingsSchema {
                     continue;
                 }
                 block.insert(grant.clone(), Value::String(mode.floor.clone()));
+                findings.substituted.insert(grant.clone());
             } else if current.is_some() {
                 block.shift_remove(grant);
             }
         }
+    }
+
+    /// The `WS` loop of `UP` upstream for the default mode, the one grant with a floor. A document whose default mode
+    /// stands in for one it could not read leaves that stand-in out of `settings` when an earlier document of the folder
+    /// wrote an inert mode into `merged` and no floor is held, and otherwise holds the floor exactly when its mode is a
+    /// stand-in. Returns whether the folder holds the floor after the document.
+    pub(crate) fn hold_default_mode_floor(
+        &self,
+        merged: &Map<String, Value>,
+        settings: &mut Map<String, Value>,
+        substituted: bool,
+        floored: bool,
+    ) -> bool {
+        let mode = &self.policy.default_mode;
+        let path: Vec<&str> = mode.path.split('.').collect();
+        if value_at(settings, &path).is_none() {
+            return floored;
+        }
+        let earlier = value_at(merged, &path).and_then(|current| mode.read(current));
+        if substituted && !floored && earlier.is_some_and(|current| mode.inert.contains(&current)) {
+            let _ = unset_path(settings, &path);
+            return floored;
+        }
+        substituted
     }
 
     /// `NX`: whether the raw document holds anything that is policy and not merely an unset or a
@@ -636,6 +766,29 @@ fn record_of(node: &Node) -> Option<(&Node, &Node)> {
         Node::Record { key, value, .. } => Some((key, value)),
         _ => None,
     }
+}
+
+/// Lodash `get` (`Et` upstream): the value at `path`.
+fn value_at<'a>(settings: &'a Map<String, Value>, path: &[&str]) -> Option<&'a Value> {
+    let (first, rest) = path.split_first()?;
+    rest.iter().try_fold(settings.get(*first)?, |current, segment| {
+        current.as_object()?.get(*segment)
+    })
+}
+
+/// Lodash `unset`: removes the value at `path`, leaving the objects on the way in place.
+fn unset_path(settings: &mut Map<String, Value>, path: &[&str]) -> Option<Value> {
+    let (last, parents) = path.split_last()?;
+    let mut current = settings;
+    for segment in parents {
+        current = current.get_mut(*segment)?.as_object_mut()?;
+    }
+    current.shift_remove(*last)
+}
+
+/// `K3`: whether a block read from restrictive values alone stands in for policy content.
+fn synthesizes(path: &str) -> bool {
+    !POLICY_UNSYNTHESIZED_BLOCKS.contains(&path)
 }
 
 /// The schema inside a catch and an optional wrapper.

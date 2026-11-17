@@ -6079,7 +6079,8 @@
         "behavior": "Neither SDK fails for a missing HOME. TypeScript calls Node os.homedir(): HOME as set (even empty), else the passwd entry of the effective user, and it throws a system error only when there is no entry; the result is joined with path.join, which normalizes dot segments, repeated separators and empty bases. Python calls Path.home() (expanduser): HOME as set (even empty, which becomes the root directory), else the passwd entry of the real user, else it raises RuntimeError; a home that still starts with a tilde also raises, and dot-dot segments are kept. Both read the process environment, not options.env. Rust ports the exact algorithms: Node path.win32.join and normalize over UTF-16 code units, CPython ntpath.expanduser, splitroot and join with the pathlib PureWindowsPath normalization, byte-exact POSIX homes that are not UTF-8 (lossy UTF-8 for Node, surrogate escapes for Python), and the Windows process-token profile directory that libuv asks. Python has no Windows passwd fallback. The Python dialect reports a missing home as the RuntimeError text through SessionFiles::from_environment and the session helpers instead of an empty result."
       },
       "decision": {
-        "kind": "upstream"
+        "kind": "follow-typescript",
+        "reason": "TypeScript is the default dialect and resolves the home with Node os.homedir() (the effective user's passwd entry) joined by path.join. SummaryDialect::Python on the session store options selects Path.home(): the real user's passwd entry, the RuntimeError text when there is none or the home starts with a tilde, and dot-dot segments kept. SessionFiles::from_environment and the CLI discovery port Python-only entry points, so they always follow Python."
       },
       "contracts": [
         "home_directory::an_unset_home_resolves_to_the_passwd_home_in_both_dialects",
@@ -7008,6 +7009,461 @@
       ],
       "rust": [
         "src/prewarm.rs"
+      ]
+    },
+    {
+      "id": "r36-policy-marketplace-lists",
+      "concept": "Managed strictKnownMarketplaces and blockedMarketplaces read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"strictKnownMarketplaces\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 456,
+        "sha256": "291b0d4baaf97b66178e207c59ce84b51e4765512171659abc24021009aeafbf"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through B3: null reads as unset, a source that can never match is dropped from strictKnownMarketplaces and kept in blockedMarketplaces, an entry that cannot be read is dropped alone, and any other value that is not an array becomes an empty allowlist for strictKnownMarketplaces and is dropped for blockedMarketplaces."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_policy_marketplace_tests.rs::flags_the_sources_that_can_never_match",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs",
+        "src/settings_policy_marketplace.rs"
+      ]
+    },
+    {
+      "id": "r37-policy-mcp-server-lists",
+      "concept": "Managed allowedMcpServers and deniedMcpServers read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedMcpServers\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 435,
+        "sha256": "fd980e204ac358e1ed1e20c660f83dc8a9b50562983a081e452fa87370b3f32d"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through j3, dropping each entry that fails its server schema; a list that cannot be read at all becomes an empty allowlist for allowedMcpServers and is dropped for deniedMcpServers."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r38-policy-enabled-plugins",
+      "concept": "Managed enabledPlugins read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"enabledPlugins\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 844,
+        "sha256": "c9352db0c5588aa9eceddd1838dfeb0ba9087b55584ed8da445cfbe8beb73f14"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps each enabledPlugins entry whose value is true, false or a list of version constraints and drops every other entry alone; a record whose every entry was dropped, and a value that is not a record, are dropped."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r39-policy-model-lists",
+      "concept": "Managed availableModels and deniedModels read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"availableModels\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 630,
+        "sha256": "032ba3e0f6ca89184f64a7b4bcf2d828054c4c02f2e8a920512297951b5f61ec"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps the string entries of availableModels and passes deniedModels through nk; a value that is not an array becomes an empty allowlist for availableModels and is dropped for deniedModels."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r40-policy-hook-allowlists",
+      "concept": "Managed allowedHttpHookUrls and httpHookAllowedEnvVars read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedHttpHookUrls\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 197,
+        "sha256": "8a385f51dff8168d66f16c1549feba213c30d6c3ed0367e0a84fbeae07df0d81"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads both lists through NS: string entries are kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r41-policy-channel-plugins",
+      "concept": "Managed allowedChannelPlugins read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedChannelPlugins\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 253,
+        "sha256": "111325d2b499ecfb962f99ab208a1202b32d23ab5a8432ceb09b0bf6948fb5b1"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads allowedChannelPlugins through NS with the b5e entry schema: a plugin@marketplace string or a plugin and marketplace object is kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs"
+      ]
+    },
+    {
+      "id": "r42-policy-gateway-networks",
+      "concept": "Managed gatewayInternalNetworks read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"gatewayInternalNetworks\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 207,
+        "sha256": "8521af513dd006c90e1a66f43cb5f3c71c4ca64662f91ef1c73f5183e5282c8c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps gatewayInternalNetworks only as an array of strings; any other value becomes the single unreadable marker, which refuses gateway sign-in for that source."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema.rs"
+      ]
+    },
+    {
+      "id": "r43-policy-forced-login-orgs",
+      "concept": "Managed forceLoginOrgUUID read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"forceLoginOrgUUID\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 186,
+        "sha256": "ca46417f50f588efba69b7d47032ec903ad5006daa502f5a0df2f4771bc6b6f9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP keeps forceLoginOrgUUID when it is a string or an array of strings; any other value becomes an empty array, so no organization may log in."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs"
+      ]
+    },
+    {
+      "id": "r44-policy-allowed-providers",
+      "concept": "Managed allowedProviders read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"allowedProviders\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 207,
+        "sha256": "0a0dce4ebd7a2347e46a8725b2881ec31a17d84572b57885bbb3d2efb76d44dd"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads allowedProviders through NS with the hk provider names: known names are kept, every other entry is dropped alone, and a value that is not an array becomes an empty allowlist."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_lists.rs",
+        "src/constants.rs"
+      ]
+    },
+    {
+      "id": "r45-policy-helper",
+      "concept": "Managed policyHelper read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"policyHelper\",",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 2599,
+        "sha256": "099bd8af0b25149bd15d4d3decad5b3ba94412f1f31c9cd86b9f5036064e798c"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "The singular policyHelper reader only records notes for the fields that belong elsewhere and reads null as unset; its value is whatever the helper schema keeps, so unknown fields are stripped and a value the schema rejects is dropped."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema.rs"
+      ]
+    },
+    {
+      "id": "r46-policy-sandbox-credentials",
+      "concept": "Managed sandbox.credentials read by the policy parser",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "a(\"sandbox\",()=>{let R=O({files:M(\"files\",yS(),",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 4253,
+        "sha256": "68620293cf5050489a6bf835ed246d2bb82fe9c660b3e7882e8f64fa31cb23f9"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP reads sandbox.credentials so that an entry that cannot be read never unprotects what it names: a file or variable entry keeps blocking it, an AWS pair keeps suppressing the implicit pairing, and a SigV4 shape stays denied; a block that is not an object reads as the fail-closed skeleton."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_schema_policy_credentials_tests.rs::file_prefix_hashes_the_file_name_like_upstream",
+        "src/settings_schema_policy_credentials_tests.rs::a_schema_without_the_credential_lists_reads_nothing",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_schema_policy_credentials.rs"
+      ]
+    },
+    {
+      "id": "r47-policy-document-closing",
+      "concept": "The checks the policy parser runs after every key is read",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": ".check((R)=>{R.issues.push(...r.wrongDocumentIssues(R.value,F))})",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 269,
+        "span_after": 502,
+        "sha256": "6c52185cd2fb1e9be0b6adde9cce63498f476075c7182e78c60ba6397c9870c2"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "cP deletes every key whose reader yielded undefined and notes a source whose only policy content is stand-ins as onlySubstitutes. The wrongDocumentIssues check flags only a key the document holds that the document cP was built from did not, and j7e and lE parse the very document they built cP from, so it never adds an issue."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_read_tests.rs::every_recorded_policy_document_is_read_like_the_pinned_resolver",
+        "src/settings_resolve_policy_tests.rs::a_tier_of_only_stand_ins_does_not_shut_the_parent_out",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_schema_policy.rs",
+        "src/settings_read.rs",
+        "src/settings_policy_content.rs"
+      ]
+    },
+    {
+      "id": "r48-managed-object-reads",
+      "concept": "Managed documents handed over as objects (pm)",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function j7e(e,t){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 402,
+        "span_after": 598,
+        "sha256": "feb10e464760aae75365160a925de7a24c346f824fd2c6227cc28fb8c3af7cc0"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "pm reads a managed document handed over as an object, such as the registry, plist, remote or parent settings, through j7e: the same cP parser a managed file goes through, under the name of the source it came from."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_resolve_policy_tests.rs::a_document_handed_over_reads_through_the_policy_schema",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_resolve_tier.rs",
+        "src/settings_resolve.rs",
+        "src/settings_read.rs"
+      ]
+    },
+    {
+      "id": "r49-managed-only-substitutes-tier",
+      "concept": "A managed tier made only of stand-ins",
+      "python": {
+        "status": "absent",
+        "reason": "The Python SDK has no settings resolver of its own: it starts the bundled CLI, which reads managed settings with this same sdk.mjs code, so the pinned Python sources hold no reader to compare."
+      },
+      "typescript": {
+        "file": "package/sdk.mjs",
+        "anchor": "function rX(e,t,n,r,o){",
+        "occurrence": 0,
+        "occurrences": 1,
+        "span_before": 0,
+        "span_after": 235,
+        "sha256": "aa5323c6076fb26f9b80ac233dea53a33133001c846ef549f556239874ab004f"
+      },
+      "upstream": {
+        "verdict": "agree",
+        "behavior": "rX marks a merged managed tier that holds only stand-ins and none of its own authored values as onlySubstitutes, and Nu then keeps that tier from shutting out the lower managed source."
+      },
+      "decision": {
+        "kind": "upstream"
+      },
+      "contracts": [
+        "src/settings_resolve_policy_tests.rs::a_tier_of_only_stand_ins_does_not_shut_the_parent_out",
+        "resolve_settings_differential::rust_matches_the_recorded_typescript_output"
+      ],
+      "rust": [
+        "src/settings_resolve_policy.rs",
+        "src/settings_resolve_tier.rs"
       ]
     }
   ]

@@ -850,6 +850,10 @@ exactly as the `Value` it holds. `SettingsInput` names the three forms the
 `SandboxSettings` and its parts, `ResolvedSettings`, `ProvenanceEntry`, `ResolvedSettingSource`,
 `PolicySettingsOrigin`, `ResolveSettingsOptions` and `SDKSettingsParseError` carry the upstream
 names; Python sandbox dicts decode and encode through the sandbox types unchanged.
+`ResolveSettingsOptions` holds `managed_settings` and `server_managed_settings` as untyped
+`DeepJsonObject`s, because `resolveSettings` takes them as raw objects and reads them key by key
+through the policy schema, keeping a key the `Settings` type would refuse out of the result
+instead of refusing the call.
 
 `resolve_settings` ports TypeScript `resolveSettings`: the user, project, local and flag sources
 cascade with array union, and the managed policy comes from the first tier that has settings

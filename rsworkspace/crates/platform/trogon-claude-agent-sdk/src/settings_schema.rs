@@ -724,6 +724,9 @@ fn number_of(value: &Value) -> Option<f64> {
 #[path = "settings_schema_policy.rs"]
 mod policy;
 
+#[path = "settings_schema_policy_lists.rs"]
+mod policy_lists;
+
 #[cfg(test)]
 #[path = "settings_schema_tests.rs"]
 mod tests;

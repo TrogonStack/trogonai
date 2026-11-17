@@ -504,13 +504,13 @@ pub struct ResolveSettingsOptions {
     /// filtered through a restrictive-key allowlist (`allowManaged*Only` locks,
     /// `permissions.deny`/`ask`, sandbox restrictions); non-restrictive keys
     /// such as `model`, `env`, `cleanupPeriodDays` are silently dropped.
-    pub managed_settings: Option<super::settings::Settings>,
+    pub managed_settings: Option<crate::DeepJsonObject>,
     /// Server-managed settings payload (the result of fetching
     /// `/api/claude_code/settings`). Feeds the `'remote'` policy sub-source -
     /// same trust level as the on-disk cache it replaces, so non-restrictive
     /// keys flow through unfiltered. Use this when the embedding host has a
     /// fresher result than the CLI's `~/.claude/remote-settings.json` cache.
-    pub server_managed_settings: Option<super::settings::Settings>,
+    pub server_managed_settings: Option<crate::DeepJsonObject>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
     pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
@@ -524,10 +524,10 @@ struct ResolveSettingsOptionsWire {
     pub cwd: Option<String>,
     #[serde(rename = "settingSources", default, skip_serializing_if = "Option::is_none")]
     pub setting_sources: Option<Vec<SettingSource>>,
-    #[serde(rename = "managedSettings", default, skip_serializing_if = "Option::is_none")]
-    pub managed_settings: Option<super::settings::Settings>,
-    #[serde(rename = "serverManagedSettings", default, skip_serializing_if = "Option::is_none")]
-    pub server_managed_settings: Option<super::settings::Settings>,
+    #[serde(rename = "managedSettings", default, skip_serializing_if = "Option::is_none", serialize_with = "super::support::optional_shallow_object")]
+    pub managed_settings: Option<crate::DeepJsonObject>,
+    #[serde(rename = "serverManagedSettings", default, skip_serializing_if = "Option::is_none", serialize_with = "super::support::optional_shallow_object")]
+    pub server_managed_settings: Option<crate::DeepJsonObject>,
     #[serde(flatten, serialize_with = "super::support::shallow_members")]
     pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]

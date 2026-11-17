@@ -5,8 +5,8 @@ use serde_json::{Map, Value};
 use crate::{
     adapters::{NativeHost, SettingsHost},
     constants::{
-        DEFAULT_SETTING_SOURCES, ESCALATING_DEFAULT_MODES, SETTINGS_ENGINE_STACK_BYTES, SOURCE_ORDER,
-        STRICT_ESCALATING_DEFAULT_MODES, V8_MAX_STRING_LENGTH,
+        DEFAULT_SETTING_SOURCES, ESCALATING_DEFAULT_MODES, PARENT_MANAGED_FILE, REMOTE_MANAGED_FILE,
+        SETTINGS_ENGINE_STACK_BYTES, SOURCE_ORDER, STRICT_ESCALATING_DEFAULT_MODES, V8_MAX_STRING_LENGTH,
     },
     js_array::{StringTooLong, settle},
     node_merge_call::NodeMergeCall,
@@ -27,6 +27,7 @@ use crate::{
         local_settings_path, project_settings_path, read_settings_text, resolve_cwd, user_settings_path,
     },
     settings_resolve_state::ResolverState,
+    settings_resolve_tier::TierRead,
     settings_resolve_values::{SettingsMap, in_schema_order, merge_unbounded, merge_within},
     settings_strings::{
         SurrogateStandIns, approximate_strings, array_mark, escape_stand_ins, reserve_text, reserve_value,
@@ -64,13 +65,6 @@ fn allowed_sources(options: &ResolveSettingsOptions) -> Vec<String> {
             _ => name,
         })
         .collect()
-}
-
-fn to_map(settings: &Settings) -> Option<SettingsMap> {
-    match crate::deep_json::encode(settings).ok()? {
-        Value::Object(map) => Some(map),
-        _ => None,
-    }
 }
 
 fn entry(
@@ -276,11 +270,17 @@ fn resolve_core<H: SettingsHost>(
     let stack = state.python_c_stack();
     let node = state.node_stack();
     let allowed = allowed_sources(options);
-    let parent = options.managed_settings.as_ref().and_then(to_map).map(|mut parent| {
+    // Upstream takes both as the raw objects the caller passes and reads them key by key below, so a value its
+    // declared `Settings` type would refuse, such as a number for `model`, still reaches that read.
+    let parent = options.managed_settings.clone().map(|parent| {
+        let mut parent = parent.into_object();
         parent.shift_remove("organizationFreeFormSettings");
         parent
     });
-    let remote = options.server_managed_settings.as_ref().and_then(to_map);
+    let remote = options
+        .server_managed_settings
+        .clone()
+        .map(crate::DeepJsonObject::into_object);
     let kind = state.platform(host);
     let reading = state.policy_reading(host);
     let evaluation = reading.evaluation.in_effect(asks_organization(host));
@@ -327,6 +327,14 @@ fn resolve_core<H: SettingsHost>(
     if dialect == SettingsDialect::TypeScript {
         reserve_managed_texts(host, kind);
     }
+    // Upstream reads the managed settings a host passes in and the server-managed settings through the policy
+    // schema, as it reads any managed document handed over as an object (`pm`), and never reads an empty one.
+    let parent = parent
+        .filter(|parent| !parent.is_empty())
+        .and_then(|parent| TierRead::from_pm(parent, dialect, PARENT_MANAGED_FILE).settings);
+    let remote = remote
+        .filter(|remote| !remote.is_empty())
+        .map(|remote| TierRead::from_pm(remote, dialect, REMOTE_MANAGED_FILE));
 
     let parsed = ParsedFiles::default();
     let warmth = Cell::new(MergeWarmth::default());

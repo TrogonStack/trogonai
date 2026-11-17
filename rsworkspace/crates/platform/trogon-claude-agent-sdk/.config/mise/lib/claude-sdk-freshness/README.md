@@ -155,7 +155,12 @@ visited, one undeclared key in each open object) split into per-family groups, a
 `claude-sdk:types-check` fails when the checked-in fixture file drifts.
 
 A target may also list `extern` types (`{"Name": "rust::path"}`) that live in another
-generated module instead of being generated again.
+generated module instead of being generated again, and `untyped_members`
+(`{"Type": ["property"]}`) for optional properties upstream takes as raw caller objects and
+reads key by key later instead of through their declared type. Those hold any JSON object as
+a `DeepJsonObject`: `ResolveSettingsOptions` passes `managedSettings` and
+`serverManagedSettings` through the policy schema read, which drops or keeps each key, so a
+value the declared `Settings` type refuses must still decode.
 
 ```sh
 mise run claude-sdk:types        # regenerate from the pinned upstream package

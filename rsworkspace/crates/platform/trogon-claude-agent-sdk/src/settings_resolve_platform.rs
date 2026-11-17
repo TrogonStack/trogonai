@@ -14,10 +14,10 @@ use crate::{
     },
     constants::{BUSY_ERRNOS, ENTRYPOINT_VARIABLE, MAX_BUFFER_ERRNO, ORGANIZATION_ENTRYPOINTS},
     constants::{
-        LINUX_MANAGED_DIRECTORY, MACOS_MANAGED_DIRECTORY, PLIST_DIRECTORY, PLIST_DOMAIN, PLUTIL_CONVERT_ARGS,
-        PLUTIL_LINT_ARGS, PLUTIL_PATH, POLICY_READ_MAX_BUFFER, POLICY_READ_TIMEOUT, PROC_VERSION_PATH,
-        REGISTRY_MACHINE_KEY, REGISTRY_NOT_FOUND_TEXT, REGISTRY_USER_KEY, REGISTRY_VALUE_NAME,
-        WINDOWS_MANAGED_DIRECTORY, WSL_MANAGED_DIRECTORY, WSL_REGISTRY_TOOL,
+        DEVICE_PLIST_FILE, LINUX_MANAGED_DIRECTORY, MACOS_MANAGED_DIRECTORY, PER_USER_PLIST_FILE, PLIST_DIRECTORY,
+        PLIST_DOMAIN, PLUTIL_CONVERT_ARGS, PLUTIL_LINT_ARGS, PLUTIL_PATH, POLICY_READ_MAX_BUFFER, POLICY_READ_TIMEOUT,
+        PROC_VERSION_PATH, REGISTRY_MACHINE_FILE, REGISTRY_MACHINE_KEY, REGISTRY_NOT_FOUND_TEXT, REGISTRY_USER_FILE,
+        REGISTRY_USER_KEY, REGISTRY_VALUE_NAME, WINDOWS_MANAGED_DIRECTORY, WSL_MANAGED_DIRECTORY, WSL_REGISTRY_TOOL,
     },
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_tier::{LoadState, TierRead, parse_policy_answer},
@@ -563,12 +563,20 @@ pub(crate) fn evaluate_policy<H: SettingsHost>(host: &H, kind: PlatformKind, rea
     }
     let mut held: Vec<TierRead> = Vec::new();
     if let Some(stdout) = &read.hklm_stdout {
-        held.push(TierRead::from_hm(&registry_value(stdout).unwrap_or_default(), false));
+        held.push(TierRead::from_hm(
+            &registry_value(stdout).unwrap_or_default(),
+            false,
+            REGISTRY_MACHINE_FILE,
+        ));
     } else if read.hklm_oversize {
         held.push(TierRead::did_not_load(true));
     }
     if let Some(stdout) = &read.hkcu_stdout {
-        held.push(TierRead::from_hm(&registry_value(stdout).unwrap_or_default(), true));
+        held.push(TierRead::from_hm(
+            &registry_value(stdout).unwrap_or_default(),
+            true,
+            REGISTRY_USER_FILE,
+        ));
     }
     for document in &mut held {
         if document.load_state != LoadState::Loaded {
@@ -592,16 +600,16 @@ fn evaluate_reads<H: SettingsHost>(host: &H, kind: PlatformKind, read: &MdmRead)
     let mut unreadable = false;
     let mut errors = ErrorFacts::default();
     for document in read.plists.iter().flatten() {
+        let (label, file) = if document.per_user {
+            (PlistLabel::PerUser, PER_USER_PLIST_FILE)
+        } else {
+            (PlistLabel::Device, DEVICE_PLIST_FILE)
+        };
         let parsed = match &document.stdout {
             None => TierRead::did_not_load(true),
-            Some(stdout) => TierRead::from_hm(stdout, false),
+            Some(stdout) => TierRead::from_hm(stdout, false, file),
         };
         if parsed.has_policy_content {
-            let label = if document.per_user {
-                PlistLabel::PerUser
-            } else {
-                PlistLabel::Device
-            };
             return errors.evaluation(parsed, SettingsMap::new(), false, Some(label));
         }
         if parsed.load_state == LoadState::DidNotLoad {
@@ -618,7 +626,7 @@ fn evaluate_reads<H: SettingsHost>(host: &H, kind: PlatformKind, read: &MdmRead)
     let mut machine_facts = ErrorFacts::default();
     if let Some(stdout) = &read.hklm_stdout {
         let text = registry_value(stdout).unwrap_or_default();
-        let tier = TierRead::from_hm(&text, false);
+        let tier = TierRead::from_hm(&text, false, REGISTRY_MACHINE_FILE);
         machine_facts.blocking = tier.load_state == LoadState::DidNotLoad;
         machine = Some(tier);
         if let Some(Value::Object(document)) = parse_policy_answer(&text) {
@@ -657,10 +665,9 @@ fn evaluate_reads<H: SettingsHost>(host: &H, kind: PlatformKind, read: &MdmRead)
     let inherits = path_flag != WslFlag::Disarmed;
     let base = || TierRead {
         settings: Some(SettingsMap::new()),
-        has_policy_content: false,
         load_state: state,
-        user_writable: false,
         unreadable,
+        ..TierRead::absent()
     };
     if under_wsl && !inherits {
         return errors.evaluation(base(), SettingsMap::new(), false, None);
@@ -684,7 +691,7 @@ fn evaluate_reads<H: SettingsHost>(host: &H, kind: PlatformKind, read: &MdmRead)
             || directory_holds_managed_settings(host, &managed_directory(kind));
         if !held {
             let text = registry_value(stdout).unwrap_or_default();
-            let user = TierRead::from_hm(&text, true);
+            let user = TierRead::from_hm(&text, true, REGISTRY_USER_FILE);
             let settings = user.settings.clone().unwrap_or_default();
             let opted_in = settings.get("wslInheritsWindowsSettings") == Some(&Value::Bool(true));
             if !under_wsl || opted_in {

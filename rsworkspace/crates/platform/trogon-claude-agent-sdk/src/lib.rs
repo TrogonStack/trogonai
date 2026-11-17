@@ -229,6 +229,7 @@ mod settings_option;
 mod settings_parse;
 mod settings_parse_deep;
 mod settings_policy_content;
+mod settings_policy_marketplace;
 mod settings_policy_parse;
 mod settings_read;
 mod settings_read_hooks;
