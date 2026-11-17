@@ -28,7 +28,7 @@
     "origin_merge": {"axis": "level", "near_level": 1243, "far_level": 1244, "near_margin": 1242, "near_width": 2, "far_margin": 1244, "far_width": 1, "run": "43983618044"},
     "origin_read": {"axis": "level", "near_level": 2220, "far_level": 2221, "near_margin": 2219, "near_width": 8, "far_margin": 2222, "far_width": 8, "run": "43983618044"},
     "origin_read_arrays": {"axis": "level", "near_level": 3271, "far_level": 3272, "near_margin": 3270, "near_width": 8, "far_margin": 3273, "far_width": 8, "run": "43983618044"},
-    "pm_parent_cachedcopy": {"axis": "startup", "near_level": 4394, "far_level": 4395, "near_margin": 4393, "near_width": 8, "far_margin": 4396, "far_width": 8, "run": "43983618044"},
+    "pm_parent_cachedcopy": {"axis": "class", "near_level": 994720, "far_level": 994752, "near_margin": 994688, "near_width": 8, "far_margin": 994784, "far_width": 8, "run": "43995970687"},
     "pm_parent_clone": {"axis": "startup", "near_level": 4394, "far_level": 4395, "near_margin": 4393, "near_width": 8, "far_margin": 4396, "far_width": 8, "run": "43983618044"},
     "pm_parent_walk": {"axis": "startup", "near_level": 4394, "far_level": 4395, "near_margin": 4393, "near_width": 8, "far_margin": 4396, "far_width": 8, "run": "43983618044"},
     "pm_remote_cachedcopy": {"axis": "class", "near_level": 994720, "far_level": 994752, "near_margin": 994656, "near_width": 8, "far_margin": 994784, "far_width": 8, "run": "43987257219"},

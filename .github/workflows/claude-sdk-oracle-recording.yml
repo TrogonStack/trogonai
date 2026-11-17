@@ -13,9 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         host:
-          # darwin: the handed-over managed settings passes, then the default-flag margins of the parent cached copy
-          # pair alone, stepped by class at its own startup, 50 runs a level from L0.
-          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|band8c:)", pairs: pm_parent_cachedcopy }
+          # Unix: the handed-over managed settings passes, then the record of each entry the margin rounds moved,
+          # at its committed margin, every default-flag run giving the side's answer.
+          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|mg8x:)" }
+          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|mg8x:)" }
         shard: [1]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360
@@ -27,7 +28,6 @@ jobs:
       SHARD: ${{ matrix.shard }}
       SHARDS: ${{ matrix.host.shards }}
       R3_ONLY: ${{ matrix.host.only }}
-      R3_BAND8_PAIRS: ${{ matrix.host.pairs }}
       R3_BAND_RUNS: "50"
       R3_ROUND4_PASSES: "60"
       R5_TOPUP_RUNS: "50"
@@ -80,7 +80,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: band8c-${{ matrix.host.label }}-${{ matrix.shard }}
+          name: mg8x-${{ matrix.host.label }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 7
