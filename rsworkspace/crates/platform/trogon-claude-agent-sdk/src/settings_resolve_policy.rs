@@ -528,8 +528,6 @@ struct Selection {
     parent_never_shut_out: bool,
     /// The file tier holds only what the organization withholds, so the parent stays in force (`Ye` upstream).
     held_back: bool,
-    /// The file tier only narrows the admin the other tiers settle, so the composition keeps the file's key order.
-    withheld_only: bool,
     remote_in_sources: bool,
 }
 
@@ -684,7 +682,6 @@ fn select_admin(
         remote_in_sources: remote_candidate.is_some(),
         parent_never_shut_out: never_shut_out,
         held_back,
-        withheld_only,
     }
 }
 
