@@ -29,6 +29,10 @@ status or establish provider support.
 - Review the [federation proposal](./federation.md) for native SPIFFE trust,
   inbound external workload admission, outbound provider exchange, credential
   custody and negative acceptance cases. F01 through F10 organize the work.
+- Review the [federation inventory](./federation-inventory.md) for the first
+  example per direction with owners, subjects, recipients and trust diagrams (F01).
+- Review the [JWT-SVID issuer spike](./jwt-svid-issuer-spike.md) for local SPIRE
+  issuance, discovery and rotation evidence behind the issuer decision (F04).
 - Review the [identity and key-custody adapter roadmap](./adapter-roadmap.md)
   for the source inventory, ADR reconciliation, adapter catalogue, dependencies
   and delivery gates. P00 through P44 are work-package labels; gaps between
