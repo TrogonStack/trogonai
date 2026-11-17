@@ -42,6 +42,23 @@ fn numbers_hold_the_double_javascript_prints() {
 }
 
 #[test]
+fn null_and_booleans_hold_the_values_javascript_prints() {
+    let value = js_exact_value(&json!([null, true, false, {"k": null}]));
+    let mut members = PythonJsonObject::new();
+    members.insert(units(&[0x6B]), PythonJsonValue::Null);
+    assert_eq!(
+        value,
+        PythonJsonValue::Array(vec![
+            PythonJsonValue::Null,
+            PythonJsonValue::Bool(true),
+            PythonJsonValue::Bool(false),
+            PythonJsonValue::Object(members),
+        ])
+    );
+    assert_eq!(js_stringify_exact(&value), r#"[null,true,false,{"k":null}]"#);
+}
+
+#[test]
 fn keys_print_in_javascript_enumeration_order() {
     let value = python_json_loads(r#"{"b":1,"1":2,"01":4,"0":3}"#).unwrap();
     assert_eq!(js_stringify_exact(&value), r#"{"0":3,"1":2,"b":1,"01":4}"#);
