@@ -1946,6 +1946,11 @@ MG8_WINDOW = 30
 MG8_OBSERVE_RUNS = 25
 MG8_OLD_FIELDS = ("files", "effective", "exact", "machine_policy", "error")
 MG8_ANSWERS = ("effective", "exact", "machine_policy", "managed_source", "error")
+# The default-flag margins of every boundary pair, by host (PLAN Update 72 and its note A): each entry is recorded
+# at its margin, never at the pair level where a default-flag run can still flip.
+MG8_MARGINS = os.path.join(HERE, "margins8.json")
+# The old goldens of each host that sit at a boundary move to their margins; the rest stay as committed.
+MG8_OLD_MOVED, MG8_OLD_KEPT = 34, 4
 
 
 def mg8_port():
@@ -2020,22 +2025,83 @@ def mg8_locate(pool, port, key):
     return found
 
 
-def mg8_old_gate(entries):
-    """Every committed golden of this host, present among `entries` with the same files and answers."""
+def mg8_case_key(case, startup):
+    """The files and startup a case or committed entry runs with, comparable across the two."""
+    return json.dumps([[list(file) for file in case], startup])
+
+
+def mg8_old_gate(entries, moves, startup):
+    """Every committed golden of this host among `entries`: one at a pair level as the entry at that side's margin,
+    with the same answers once the depth collapses, and every other one with the same files and answers.
+    `moves` maps the files and startup of each pair-level case to every pair side that holds it, with its margin and
+    the margin entry's name; `startup` is the one an entry without its own runs with. An old entry two sides hold is
+    missing: it has no one margin to move to."""
     with open(os.path.join(HERE, "mg8_previous", MG8_PREVIOUS[HOST]), encoding="utf-8") as handle:
         previous = json.load(handle)
-    missing, matched = [], {}
+    by_name = {entry["name"]: entry for entry in entries}
+    missing, matched, moved = [], {}, {}
     for old in previous["cases"]:
-        want = {field: old.get(field) for field in MG8_OLD_FIELDS}
         own = old.get("startup_bytes")
+        held = moves.get(mg8_case_key(old["files"], own if own is not None else startup), [])
+        if len(held) > 1:
+            missing.append(old["name"])
+            continue
+        if held:
+            move = held[0]
+            entry = by_name.get(move["name"])
+            same = entry is not None and all(
+                mg8_collapse(entry.get(field)) == mg8_collapse(old.get(field)) for field in MG8_OLD_FIELDS[1:])
+            if same:
+                moved[old["name"]] = {**move, "from": old["name"]}
+            else:
+                missing.append(old["name"])
+            continue
+        want = {field: old.get(field) for field in MG8_OLD_FIELDS}
         names = [entry["name"] for entry in entries
                  if {field: entry.get(field) for field in MG8_OLD_FIELDS} == want and entry.get("startup_bytes") == own]
         if names:
             matched[old["name"]] = names
         else:
             missing.append(old["name"])
-    return {"old_entries": len(previous["cases"]), "missing": missing, "matched": matched,
+    return {"old_entries": len(previous["cases"]), "missing": missing, "matched": matched, "moved": moved,
             "old_observed": previous.get("observed", [])}
+
+
+def mg8_margin_cases(port, profile):
+    """The pairs at this host's committed margins: the cases in pair order, the pairs by name, the move of each
+    pair-level case, and the reason when an edge no longer sits where the margins were measured."""
+    with open(MG8_MARGINS, encoding="utf-8") as handle:
+        committed = json.load(handle)[HOST]
+    pairs = band8_pairs(port, profile)
+    built = {pair["id"]: pair for pair in pairs}
+    if set(built) != set(committed):
+        return None, None, None, f"the pairs {sorted(set(built) ^ set(committed))} are not on both sides"
+    drifted = {pid: [[pair["axis"], pair["near_level"], pair["far_level"]],
+                     [committed[pid]["axis"], committed[pid]["near_level"], committed[pid]["far_level"]]]
+               for pid, pair in built.items()
+               if [pair["axis"], pair["near_level"], pair["far_level"]]
+               != [committed[pid]["axis"], committed[pid]["near_level"], committed[pid]["far_level"]]}
+    if drifted:
+        return None, None, None, f"the edge moved: {drifted}"
+    cases, names, moves = [], [], {}
+    for pair in pairs:
+        margins = committed[pair["id"]]
+        if pair.get("limit"):
+            placed = list(pair["both_at"](margins["far_margin"]))
+            sides = [(pair["near"], "near", margins["far_margin"]), (pair["far"], "far", margins["far_margin"])]
+        else:
+            placed, sides = [], []
+            for side in ("near", "far"):
+                margin = margins[f"{side}_margin"]
+                placed.append(pair[side] if margin == pair[f"{side}_level"] else pair[f"{side}_at"](margin))
+                sides.append((pair[side], side, margin))
+        for (level_case, side, margin), case in zip(sides, placed):
+            # Neighbouring pairs can share a pair-level case (one pair's far case is the next one's near case).
+            moves.setdefault(mg8_case_key(level_case[1], port["case_startup"](level_case)), []).append(
+                {"pair": pair["id"], "side": side, "level": pair[f"{side}_level"], "margin": margin, "name": case[0]})
+        cases += placed
+        names.append([case[0] for case in placed])
+    return cases, names, moves, None
 
 
 def mg8_profile(pool, port, out):
@@ -2079,8 +2145,16 @@ def mg8_unit():
         if failed:
             return {"error": failed, **out}
         profile = out["profile"]
-        cases = [case for keys, make in port["GROUPS"] for case in make(*(profile[key] for key in keys.split()))]
-        cases += port["FIXED"] + port["org_cases"]()
+        try:
+            cases, pairs, moves, drifted = mg8_margin_cases(port, profile)
+        except Band8Stop as error:
+            return {"error": str(error), **out}
+        if drifted:
+            return {"error": drifted, **out}
+        partial = next(make for keys, make in port["GROUPS"] if keys == "partial_drop")
+        cases += partial(profile["partial_drop"]) + port["FIXED"] + port["org_cases"]()
+        if len({case[0] for case in cases}) != len(cases):
+            return {"error": "two cases share a name", **out}
         port["CASES"] = cases
         version = subprocess.run([NODE, "--version"], capture_output=True, check=True, env={}).stdout.decode().strip()
         port["LABEL"] = f"{version} {HOST}"
@@ -2100,21 +2174,20 @@ def mg8_unit():
         if unexpected:
             return {"error": "a case rejects with something other than a RangeError", "unexpected": unexpected, **out}
         by_name = {entry["name"]: {key: entry[key] for key in MG8_ANSWERS} for entry in entries}
-        pairs = []
-        for keys, make in port["GROUPS"]:
-            made = [case[0] for case in make(*(profile[key] for key in keys.split()))]
-            # partial_drop records one case, which no pair holds.
-            pairs += [made[index:index + 2] for index in range(0, len(made) - 1, 2)]
         same = [pair for pair in pairs if by_name[pair[0]] == by_name[pair[1]]]
-        split = profile["org_cache_split"]
-        limit_consistent = by_name[f"org_cache_limit_{split + 1}_{port['CACHE_LIMIT'] + 1}"] == by_name[f"org_cache_split_{split + 1}"]
-        out["old"] = mg8_old_gate(entries)
+        # The limit pair sits at one level; the split far case at that level holds the same 8193-unit text.
+        limit_at = next(names for names in pairs if names[0].startswith("org_cache_limit_"))
+        level = int(limit_at[1].split("_")[3])
+        split_far = next(names for names in pairs if names[0].startswith("org_cache_split_"))[1]
+        limit_consistent = split_far == f"org_cache_split_{level}" and by_name[limit_at[1]] == by_name[split_far]
+        out["old"] = mg8_old_gate(entries, moves, port["STARTUP_BYTES"])
         # The recorder observes in a run of its own, so the cases it prepares again need a folder without them.
         shutil.rmtree(port["FOLDER"], ignore_errors=True)
         port["FOLDER"] = tempfile.mkdtemp()
         seen, missed = port["observe"](entries, MG8_OBSERVE_RUNS, MG8_HOSTS[HOST])
         shutil.rmtree(port["FOLDER"], ignore_errors=True)
         out["observed"] = seen
+        # Only the old entries kept as committed carry their committed bands; the moved ones are new placements.
         old_names = {name for names in out["old"]["matched"].values() for name in names}
         new_bands = [band["name"] for band in seen["bands"] if band["name"] not in old_names]
         out["body"] = port["body"](entries, [seen])
@@ -2126,6 +2199,9 @@ def mg8_unit():
             out["error"] = "the 8193-unit limit case answers otherwise than the split case at the same level"
         elif out["old"]["missing"]:
             out["error"] = f"committed goldens are missing: {out['old']['missing']}"
+        elif [len(out["old"]["moved"]), len(out["old"]["matched"])] != [MG8_OLD_MOVED, MG8_OLD_KEPT]:
+            out["error"] = (f"{len(out['old']['moved'])} old entries moved and {len(out['old']['matched'])} stayed, "
+                            f"not {MG8_OLD_MOVED} and {MG8_OLD_KEPT}")
         elif missed:
             out["error"] = f"no default-flag run gave the recorded answer of {missed}"
         elif new_bands:

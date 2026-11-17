@@ -13,9 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         host:
-          # darwin: the handed-over managed settings passes, then the default-flag margins of the remote cached copy
-          # pair alone, stepped by class at its own startup.
-          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|band8:)", pairs: pm_remote_cachedcopy }
+          # Unix: the handed-over managed settings passes, then the managed goldens of each host with every boundary
+          # entry at its committed default-flag margin.
+          - { runner: macos-latest, label: darwin-arm64, shards: 1, only: "^(pm8:|mg8:)" }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64, shards: 1, only: "^(pm8:|mg8:)" }
+          - { runner: ubuntu-latest, label: linux-x64, shards: 1, only: "^(pm8:|mg8:)" }
         shard: [1]
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 360
@@ -27,7 +29,6 @@ jobs:
       SHARD: ${{ matrix.shard }}
       SHARDS: ${{ matrix.host.shards }}
       R3_ONLY: ${{ matrix.host.only }}
-      R3_BAND8_PAIRS: ${{ matrix.host.pairs }}
       R3_BAND_RUNS: "50"
       R3_ROUND4_PASSES: "60"
       R5_TOPUP_RUNS: "50"
@@ -80,7 +81,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: band8-${{ matrix.host.label }}-${{ matrix.shard }}
+          name: mg8e-${{ matrix.host.label }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 7
