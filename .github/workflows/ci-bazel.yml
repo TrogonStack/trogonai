@@ -10,7 +10,9 @@ on:
 
 concurrency:
   group: ci-bazel-${{ github.ref }}
-  cancel-in-progress: true
+  # Runs on main finish so their uploads fill the sunny-go remote cache; a
+  # newer push queues behind the running one instead of cancelling it.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read

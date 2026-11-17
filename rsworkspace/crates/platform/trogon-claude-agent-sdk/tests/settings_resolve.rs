@@ -237,6 +237,26 @@ fn plist_policy_is_read_with_plutil_on_macos() {
 }
 
 #[test]
+fn the_device_level_plist_is_read_when_the_per_user_one_is_absent() {
+    let mut host = FakeHost::linux();
+    host.system = OperatingSystem::Darwin;
+    let plist = "/Library/Managed Preferences/fixture-user/com.anthropic.claudecode.plist";
+    let device = "/Library/Managed Preferences/com.anthropic.claudecode.plist";
+    let host = host.file(device, "bplist").command(
+        &format!("/usr/bin/plutil -convert json -o - -- {device}"),
+        ok(r#"{"model":"device-model"}"#),
+    );
+    let result = resolve(&host, json!({"settingSources": []}));
+    assert_eq!(result["effective"], json!({"model": "device-model"}));
+    assert_eq!(result["provenance"]["model"]["policyOrigin"], "plist");
+    assert!(
+        !host
+            .ran()
+            .contains(&format!("/usr/bin/plutil -convert json -o - -- {plist}"))
+    );
+}
+
+#[test]
 fn a_plist_plutil_cannot_convert_is_linted_and_read_as_empty_when_the_lint_fails() {
     let mut host = FakeHost::linux();
     host.system = OperatingSystem::Darwin;

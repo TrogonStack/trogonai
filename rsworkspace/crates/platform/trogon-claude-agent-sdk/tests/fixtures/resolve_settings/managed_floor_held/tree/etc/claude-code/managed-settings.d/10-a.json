@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "ask": 7,
+    "defaultMode": "acceptEdits"
+  }
+}
