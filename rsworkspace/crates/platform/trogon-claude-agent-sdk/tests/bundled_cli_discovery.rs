@@ -34,26 +34,12 @@ async fn read_result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn Err
 }
 
 /// Reading the result and the disconnect after it both failed; each error is kept for the report.
-#[derive(Debug)]
-struct ReadAndDisconnectFailed {
+#[derive(Debug, thiserror::Error)]
+#[error("reading the result failed: {read}; disconnecting failed: {disconnect}")]
+struct ReadAndDisconnectError {
+    #[source]
     read: Box<dyn Error>,
     disconnect: SdkError,
-}
-
-impl std::fmt::Display for ReadAndDisconnectFailed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "reading the result failed: {}; disconnecting failed: {}",
-            self.read, self.disconnect
-        )
-    }
-}
-
-impl Error for ReadAndDisconnectFailed {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(self.read.as_ref())
-    }
 }
 
 #[cfg_attr(
@@ -84,7 +70,7 @@ async fn only_a_named_bundled_root_is_searched_before_path() -> Result<(), Box<d
     let observed = read_result(&mut client).await;
     let cleanup = client.disconnect().await;
     let text = match (observed, cleanup) {
-        (Err(read), Err(disconnect)) => return Err(ReadAndDisconnectFailed { read, disconnect }.into()),
+        (Err(read), Err(disconnect)) => return Err(ReadAndDisconnectError { read, disconnect }.into()),
         (observed, cleanup) => {
             let text = observed?;
             cleanup?;
