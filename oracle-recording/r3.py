@@ -2220,9 +2220,9 @@ BAND8_ESTABLISHED = os.path.join(HERE, "band8_established.json")
 # How far past a class the next class a pass reaches can be: no model step is wider than this.
 BAND8_CLASS_REACH = 64
 # Pairs a host steps by class with the startup fixed as registered, where one startup byte per level never left
-# the default-flag flips within the cap (PLAN Update 72, note A). A level is the next class the pass reaches on the
-# host, so its size in bytes is a host property the bound line records.
-BAND8_CLASS_AXIS = {"darwin arm64": {"pm_remote_cachedcopy": 4410}}
+# the default-flag flips within the cap (PLAN Update 72, note A; Update 75). A level is the next class the pass
+# reaches on the host, so its size in bytes is a host property the bound line records.
+BAND8_CLASS_AXIS = {"darwin arm64": {"pm_remote_cachedcopy": 4410, "pm_parent_cachedcopy": 4394}}
 # The pairs one job measures, by id; unset measures every pair.
 BAND8_ONLY = set(filter(None, os.environ.get("R3_BAND8_PAIRS", "").split(",")))
 
@@ -2451,12 +2451,18 @@ def band8_level(runs, pool, pair, side, level, answers, write_event, hashes, cou
     return clean
 
 
-def band8_side(runs, pool, pair, side, established, answers, write_event, hashes):
+def band8_side(runs, pool, pair, side, established, answers, write_event, hashes, count=None, strict=False):
     """The margin of one side: 50 consecutive clean default-flag runs inside its reference region. With two levels
-    or more there, the outer of the first two consecutive clean levels in L0 .. L8; with one, L0 at 50 runs."""
+    or more there, the outer of the first two consecutive clean levels in L0 .. L8; with one, L0 at 50 runs.
+    `strict` is the rule from PLAN Update 75: `count` runs at every level from L0, no level taken as clean
+    unmeasured, and a region of one level is a stop."""
     region, width = band8_region(runs, pair, side, answers, write_event)
     if width == 0:
         raise Band8Stop(f"{pair['id']} {side}: the reference answer already differs at L0")
+    if strict:
+        established = False
+        if width == 1:
+            raise Band8Stop(f"{pair['id']} {side}: the region holds one level, so no two levels can be clean")
     if width == 1:
         clean = band8_level(runs, pool, pair, side, region[0], answers, write_event, hashes, BAND8_RUNS_ALONE)
         if not clean:
@@ -2464,7 +2470,7 @@ def band8_side(runs, pool, pair, side, established, answers, write_event, hashes
         return {"margin": region[0], "measured": [[region[0], clean]], "established": established, "width": width}
     streak, measured = (1, []) if established else (0, [])
     for level in region[1 if established else 0:BAND8_STEPS + 1]:
-        clean = band8_level(runs, pool, pair, side, level, answers, write_event, hashes)
+        clean = band8_level(runs, pool, pair, side, level, answers, write_event, hashes, count)
         measured.append([level, clean])
         streak = streak + 1 if clean else 0
         if streak == BAND8_CLEAN_IN_A_ROW:
@@ -2473,7 +2479,8 @@ def band8_side(runs, pool, pair, side, established, answers, write_event, hashes
                     f"by L{BAND8_STEPS}")
 
 
-def band8_unit():
+def band8_unit(strict=False):
+    """The band round; `strict` is the PLAN Update 75 round: its own events folder, BAND8C_RUNS runs a level."""
     def go(pool, quiet):
         port = mg8_port()
         out = {"located": {}, "pm": {}}
@@ -2492,7 +2499,7 @@ def band8_unit():
                 raise Band8Stop(f"no pair for {sorted(BAND8_ONLY - {pair['id'] for pair in pairs})}")
         except Band8Stop as stop:
             return {"error": str(stop), **out}
-        folder = os.path.join(os.path.dirname(OUT), "band8")
+        folder = os.path.join(os.path.dirname(OUT), "band8c" if strict else "band8")
         os.makedirs(folder, exist_ok=True)
         runs = Band8Runs(port)
         out["pairs"], stopped = {}, []
@@ -2517,7 +2524,8 @@ def band8_unit():
                     sides = ["far"] if pair.get("limit") else ["near", "far"]
                     for side in sides:
                         own = pair[side][0] in established and not pair["id"].startswith("org_")
-                        summary[side] = band8_side(runs, band_pool, pair, side, own, answers, write_event, hashes)
+                        summary[side] = band8_side(runs, band_pool, pair, side, own, answers, write_event, hashes,
+                                                   BAND8C_RUNS if strict else None, strict)
                 except Band8Stop as stop:
                     summary["stop"] = str(stop)
                     stopped.append(pair["id"])
@@ -2534,6 +2542,10 @@ def band8_unit():
             out["error"] = f"pairs stopped: {stopped}"
         return out
     return go
+
+
+# ---- band8c: a pair moved to the class axis, measured from L0 under the strengthened rule (PLAN Update 75) ----
+BAND8C_RUNS = 50
 
 
 # ---- band8x: the sides whose margin entry flipped in the margin record, stepped on (PLAN Update 74) ----
@@ -2649,6 +2661,7 @@ def round8_units():
     out += [("band8:goldens", band8_unit())]
     # The sides whose margin entry flipped in the margin record, from their pooled level outward.
     out += [("band8x:goldens", band8x_unit())]
+    out += [("band8c:goldens", band8_unit(True))]
     return out
 
 
