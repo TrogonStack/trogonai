@@ -28,6 +28,11 @@ pub const RELEASE_CACHE_JITTER: Duration = Duration::from_secs(30);
 /// release that finds the cache full is served without being held.
 pub const MAX_CACHED_RELEASES: usize = 4_096;
 
+/// The least time between two warnings that the release cache is full, so a
+/// cache that stays full does not warn on every release. Every release turned
+/// away is still counted.
+pub(crate) const FULL_CACHE_WARNING_INTERVAL: Duration = Duration::from_secs(60);
+
 /// How many of the latest invalidations, and losses and recoveries of the
 /// reader's place, a client remembers to judge a release that was on its way
 /// when they happened. A release asked for before more of them than this is
@@ -47,6 +52,9 @@ pub const INVALIDATION_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// delivered but never received is not missed until a later one shows the
 /// gap.
 pub const INVALIDATION_POSITION_CHECK: Duration = Duration::from_secs(5);
+
+/// The meter the crate's counters are recorded on.
+pub(crate) const METER_NAME: &str = "trogon-secrets-client";
 
 /// The stream release invalidations are published to.
 pub const INVALIDATION_STREAM: &str = "SECRETS_INVALIDATION";

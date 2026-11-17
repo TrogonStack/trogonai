@@ -3,8 +3,8 @@ use std::time::SystemTime;
 
 use trogon_std::time::GetElapsed;
 
-use super::constants::{RECENT_INVALIDATIONS, RELEASE_HOLD_BOUND};
-use super::{CachedRelease, ReleaseCacheKey, ReleaseCacheMode, ReleaseInvalidation, ReleasedValue};
+use super::constants::{FULL_CACHE_WARNING_INTERVAL, RECENT_INVALIDATIONS, RELEASE_HOLD_BOUND};
+use super::{CachedRelease, ReleaseCacheKey, ReleaseCacheMode, ReleaseHold, ReleaseInvalidation, ReleasedValue};
 
 /// The releases one client holds, bounded in count and in time.
 ///
@@ -22,6 +22,11 @@ use super::{CachedRelease, ReleaseCacheKey, ReleaseCacheMode, ReleaseInvalidatio
 /// the epoch its release was asked for in, and it stays current only while
 /// every change since covers other keys. A ticket older than every change
 /// remembered is not current, since what it missed is no longer known.
+///
+/// A release turned away because every slot holds a copy that still serves
+/// is counted toward the next warning that the cache is full, due at the
+/// first one and then at most once every [`FULL_CACHE_WARNING_INTERVAL`] on
+/// `clock`.
 pub(crate) struct ReleaseCache<C: GetElapsed> {
     entries: BTreeMap<ReleaseCacheKey, CachedRelease<C::Instant>>,
     capacity: usize,
@@ -29,6 +34,8 @@ pub(crate) struct ReleaseCache<C: GetElapsed> {
     epoch: u64,
     recent: VecDeque<Option<ReleaseInvalidation>>,
     mode: ReleaseCacheMode,
+    turned_away: u64,
+    warned_at: Option<C::Instant>,
 }
 
 impl<C: GetElapsed> ReleaseCache<C> {
@@ -40,7 +47,14 @@ impl<C: GetElapsed> ReleaseCache<C> {
             epoch: 0,
             recent: VecDeque::new(),
             mode: ReleaseCacheMode::Caching,
+            turned_away: 0,
+            warned_at: None,
         }
+    }
+
+    /// The most releases it holds at once.
+    pub(crate) const fn capacity(&self) -> usize {
+        self.capacity
     }
 
     /// The copy held under `key`, if it still serves at `now`.
@@ -76,15 +90,21 @@ impl<C: GetElapsed> ReleaseCache<C> {
     /// Holds `value` under `key` as it arrived at `now`, unless it is no
     /// longer current for `ticket`, its hold is over, or the cache is full of
     /// copies that still serve.
-    pub(crate) fn put(&mut self, ticket: u64, key: ReleaseCacheKey, value: ReleasedValue, now: SystemTime) {
+    pub(crate) fn put(
+        &mut self,
+        ticket: u64,
+        key: ReleaseCacheKey,
+        value: ReleasedValue,
+        now: SystemTime,
+    ) -> ReleaseHold {
         if self.mode == ReleaseCacheMode::Uncached || !self.is_current(ticket, &key) {
-            return;
+            return ReleaseHold::Declined;
         }
         let Ok(ttl) = value.hold_until().duration_since(now) else {
-            return;
+            return ReleaseHold::Declined;
         };
         if ttl.is_zero() {
-            return;
+            return ReleaseHold::Declined;
         }
         let jitter = key.jitter_within(ttl);
         let expires_at = value.hold_until() - jitter;
@@ -92,11 +112,27 @@ impl<C: GetElapsed> ReleaseCache<C> {
         if !self.entries.contains_key(&key) && self.entries.len() >= self.capacity {
             self.entries.retain(|_, held| held.is_live_at(now, &self.clock));
             if self.entries.len() >= self.capacity {
-                return;
+                self.turned_away += 1;
+                return ReleaseHold::Full;
             }
         }
         let held = CachedRelease::new(value, expires_at, self.clock.now(), lifetime);
         self.entries.insert(key, held);
+        ReleaseHold::Held
+    }
+
+    /// How many releases were turned away for room since the last warning,
+    /// when a warning that the cache is full is due.
+    pub(crate) fn capacity_warning(&mut self) -> Option<u64> {
+        if self.turned_away == 0
+            || self
+                .warned_at
+                .is_some_and(|warned_at| self.clock.elapsed(warned_at) < FULL_CACHE_WARNING_INTERVAL)
+        {
+            return None;
+        }
+        self.warned_at = Some(self.clock.now());
+        Some(std::mem::take(&mut self.turned_away))
     }
 
     /// Drops every copy `notice` covers.

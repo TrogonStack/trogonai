@@ -1,12 +1,15 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
+use opentelemetry::global;
+use opentelemetry::metrics::Meter;
 use trogon_nats::RequestClient;
 use trogon_std::time::{EpochClock, GetElapsed};
 
-use super::constants::MAX_CACHED_RELEASES;
+use super::constants::{MAX_CACHED_RELEASES, METER_NAME};
+use super::telemetry::ReleaseCacheMetrics;
 use super::{
     InvalidationReader, InvalidationStartError, InvalidationStreamSource, ReleaseCache, ReleaseCacheKey,
-    ReleaseCacheMode, ReleaseClient, ReleaseError, ReleaseRequest, ReleasedValue,
+    ReleaseCacheMode, ReleaseClient, ReleaseError, ReleaseHold, ReleaseRequest, ReleasedValue,
 };
 
 /// A [`ReleaseClient`] that holds what it was released and drops it when the
@@ -28,10 +31,16 @@ use super::{
 /// replays on starting and on every return to reading, nothing is held and
 /// every release is asked for again. Clones share the cache and the reader,
 /// which stops when the last clone is dropped.
+///
+/// It counts, on the `trogon-secrets-client` meter, each time its reader
+/// loses its place and each release it serves without holding because the
+/// cache is full, and warns of each loss of place and, at most once every
+/// minute, of a full cache.
 #[derive(Clone)]
 pub struct CachedReleaseClient<N, C: GetElapsed> {
     client: ReleaseClient<N, C>,
     cache: Arc<Mutex<ReleaseCache<C>>>,
+    metrics: ReleaseCacheMetrics,
     _reader: Arc<InvalidationReader>,
 }
 
@@ -54,14 +63,31 @@ where
     where
         J: InvalidationStreamSource,
     {
+        Self::start_with(client, jetstream, MAX_CACHED_RELEASES, &global::meter(METER_NAME)).await
+    }
+
+    /// Starts as [`CachedReleaseClient::start`] does, holding at most
+    /// `capacity` releases and counting on `meter`.
+    pub(crate) async fn start_with<J>(
+        client: ReleaseClient<N, C>,
+        jetstream: J,
+        capacity: usize,
+        meter: &Meter,
+    ) -> Result<Self, InvalidationStartError>
+    where
+        J: InvalidationStreamSource,
+    {
+        let metrics = ReleaseCacheMetrics::new(meter);
         let cache = Arc::new(Mutex::new(ReleaseCache::with_capacity(
-            MAX_CACHED_RELEASES,
+            capacity,
             client.clock().clone(),
         )));
-        let reader = InvalidationReader::start(jetstream, client.clock().clone(), Arc::clone(&cache)).await?;
+        let reader =
+            InvalidationReader::start(jetstream, client.clock().clone(), Arc::clone(&cache), metrics.clone()).await?;
         Ok(Self {
             client,
             cache,
+            metrics,
             _reader: Arc::new(reader),
         })
     }
@@ -103,7 +129,18 @@ where
         if !cache.is_current(ticket, key) {
             return Ok(None);
         }
-        cache.put(ticket, key.clone(), released.clone(), self.client.clock().system_time());
+        let now = self.client.clock().system_time();
+        if cache.put(ticket, key.clone(), released.clone(), now) == ReleaseHold::Full {
+            self.metrics.record_capacity_skip();
+            if let Some(turned_away) = cache.capacity_warning() {
+                let capacity = cache.capacity();
+                tracing::warn!(
+                    capacity,
+                    turned_away,
+                    "release cache is full; releases are served without being held"
+                );
+            }
+        }
         Ok(Some(released))
     }
 

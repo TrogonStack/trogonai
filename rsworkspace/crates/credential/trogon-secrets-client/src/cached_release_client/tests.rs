@@ -3,12 +3,18 @@ use std::time::{Duration, SystemTime};
 use tokio::task::JoinHandle;
 
 use trogon_credential_domain::{CredentialId, CredentialKey};
+use trogon_semconv::metric::{
+    SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES, SECRETS_CLIENT_RELEASE_CACHE_CAPACITY_SKIPS,
+};
 use trogon_std::SecretString;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::CachedReleaseClient;
+use crate::constants::FULL_CACHE_WARNING_INTERVAL;
 use crate::fixtures::{
     BUNDLE_GENERATION, CREDENTIAL_ID, VALUE, invalidation_stream_config, now, request, runtime_service, secret, tenant,
 };
+use crate::telemetry::RecordedMetrics;
 use crate::{
     FakeOutcome, FakeSecretsService, INVALIDATION_POSITION_CHECK, INVALIDATION_RETRY_DELAY, INVALIDATION_STREAM,
     InvalidationStartError, InvalidationStep, InvalidationStreamError, ReleaseCacheMode, ReleaseClient,
@@ -19,6 +25,9 @@ use crate::{
 const OTHER_CREDENTIAL_ID: &str = "1c7e3a4f-8d2b-4a6c-9e01-2f3b4c5d6e7f";
 const REVOKED: &str = "fake-revoked-secret";
 const REPLY_DELAY: Duration = Duration::from_secs(1);
+const LOST_PLACE: &str = "invalidation reader lost its place; releases are not held until it reads again";
+const READS_AGAIN: &str = "invalidation reader reads again; releases are held again";
+const CACHE_FULL: &str = "release cache is full; releases are served without being held";
 
 type Client = CachedReleaseClient<FakeSecretsService, SteppedClock>;
 
@@ -96,6 +105,59 @@ async fn started_on(
         ReleaseClientConfig::new(runtime_service(), fake.service_xkey()),
     );
     CachedReleaseClient::start(client, invalidations.clone()).await
+}
+
+/// Starts a client that holds at most `capacity` releases and records on
+/// `recorded`.
+async fn started_recording(
+    fake: &FakeSecretsService,
+    invalidations: &ScriptedInvalidations,
+    clock: SteppedClock,
+    capacity: usize,
+    recorded: &RecordedMetrics,
+) -> Client {
+    let client = ReleaseClient::new(
+        fake.clone(),
+        clock,
+        ReleaseClientConfig::new(runtime_service(), fake.service_xkey()),
+    );
+    CachedReleaseClient::start_with(client, invalidations.clone(), capacity, &recorded.meter())
+        .await
+        .unwrap()
+}
+
+/// Releases that serve for longer than any test moves its clock.
+fn releasing_for_an_hour(fake: &FakeSecretsService, times: usize) {
+    for _ in 0..times {
+        fake.script(FakeOutcome::release(
+            secret(),
+            now() + Duration::from_secs(3_600),
+            BUNDLE_GENERATION,
+        ));
+    }
+}
+
+/// The reason and detail of every loss of place the reader warned of.
+fn losses_warned(events: &CapturedEvents) -> Vec<(String, String)> {
+    events
+        .events()
+        .iter()
+        .filter(|event| event.message() == Some(LOST_PLACE))
+        .map(|event| {
+            (
+                event.field("reason").unwrap().to_owned(),
+                event.field("detail").unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn reasons_warned(events: &CapturedEvents) -> Vec<String> {
+    losses_warned(events).into_iter().map(|(reason, _)| reason).collect()
+}
+
+fn losses_counted(reason: &str) -> Vec<(Vec<String>, u64)> {
+    vec![(vec![format!("secrets.client.invalidation.loss_reason={reason}")], 1)]
 }
 
 /// Lets the reader act on everything sent to it, without reaching its retry.
@@ -591,6 +653,336 @@ async fn serves_uncached_once_it_cannot_tell_how_far_its_consumer_delivered() {
     settle().await;
 
     assert_eq!(client.mode(), ReleaseCacheMode::Uncached);
+}
+
+#[tokio::test(start_paused = true)]
+async fn records_no_loss_while_notices_arrive_in_order() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::INFO);
+    let recorded = RecordedMetrics::new();
+    let invalidations = ScriptedInvalidations::default();
+    let client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+    let subject = notice_subject(&tenant(), OTHER_CREDENTIAL_ID);
+
+    invalidations.notify(&subject);
+    invalidations.notify(&subject);
+    next_position_check().await;
+    settle().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    assert_eq!(events.events(), []);
+    assert!(recorded.counts(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn warns_and_counts_when_its_consumer_fails() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let invalidations = ScriptedInvalidations::default();
+    let _client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+
+    invalidations.fail();
+    settle().await;
+
+    assert_eq!(reasons_warned(&events), ["failed"]);
+    assert_eq!(
+        recorded.counts(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES),
+        losses_counted("failed")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn warns_and_counts_when_a_notice_is_skipped() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let invalidations = ScriptedInvalidations::default();
+    let _client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+
+    invalidations.skip_one(&notice_subject(&tenant(), OTHER_CREDENTIAL_ID));
+    settle().await;
+
+    assert_eq!(
+        losses_warned(&events),
+        [("gap".to_owned(), "notice 2 arrived where notice 1 was due".to_owned())]
+    );
+    assert_eq!(
+        recorded.counts(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES),
+        losses_counted("gap")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn warns_and_counts_when_a_notice_cannot_be_placed() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let invalidations = ScriptedInvalidations::default();
+    let _client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+
+    invalidations.notify_unplaced(&notice_subject(&tenant(), OTHER_CREDENTIAL_ID));
+    settle().await;
+
+    assert_eq!(
+        losses_warned(&events),
+        [(
+            "unplaced".to_owned(),
+            "a notice arrived without its place in the delivery: fake-no-delivery-info".to_owned()
+        )]
+    );
+    assert_eq!(
+        recorded.counts(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES),
+        losses_counted("unplaced")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn warns_and_counts_when_its_feed_ends() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let invalidations = ScriptedInvalidations::default();
+    let _client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+
+    invalidations.end();
+    settle().await;
+
+    assert_eq!(
+        losses_warned(&events),
+        [(
+            "ended".to_owned(),
+            "the invalidation consumer stopped delivering notices".to_owned()
+        )]
+    );
+    assert_eq!(
+        recorded.counts(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES),
+        losses_counted("ended")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn warns_and_counts_when_a_delivered_notice_never_arrives() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let invalidations = ScriptedInvalidations::default();
+    let _client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+    invalidations.hold_back(&notice_subject(&tenant(), OTHER_CREDENTIAL_ID));
+
+    next_position_check().await;
+    settle().await;
+    assert_eq!(losses_warned(&events), []);
+    next_position_check().await;
+    settle().await;
+
+    assert_eq!(
+        losses_warned(&events),
+        [(
+            "missing".to_owned(),
+            "notices through 1 were delivered, but only through 0 arrived".to_owned()
+        )]
+    );
+    assert_eq!(
+        recorded.counts(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES),
+        losses_counted("missing")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn warns_and_counts_when_it_cannot_tell_how_far_its_consumer_delivered() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let invalidations = ScriptedInvalidations::default();
+    let _client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+    invalidations.refuse(InvalidationStep::Position);
+
+    next_position_check().await;
+    settle().await;
+
+    assert_eq!(reasons_warned(&events), ["position_unknown"]);
+    assert_eq!(
+        recorded.counts(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES),
+        losses_counted("position_unknown")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn warns_once_per_loss_however_long_it_takes_to_read_again() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let invalidations = ScriptedInvalidations::default();
+    let _client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+    invalidations.refuse(InvalidationStep::Stream);
+    invalidations.refuse(InvalidationStep::Consumer);
+
+    invalidations.fail();
+    for _ in 0..3 {
+        retry().await;
+    }
+
+    assert_eq!(events.events().len(), 1);
+    assert_eq!(reasons_warned(&events), ["failed"]);
+    assert_eq!(
+        recorded.counts(SECRETS_CLIENT_INVALIDATION_POSITION_LOSSES),
+        losses_counted("failed")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn says_how_many_attempts_it_took_to_read_again() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::INFO);
+    let invalidations = ScriptedInvalidations::default();
+    let client = started_recording(
+        &FakeSecretsService::new(),
+        &invalidations,
+        SteppedClock::at(now()),
+        1,
+        &RecordedMetrics::new(),
+    )
+    .await;
+    invalidations.refuse(InvalidationStep::Stream);
+
+    invalidations.fail();
+    retry().await;
+    assert!(events.events().iter().all(|event| event.message() != Some(READS_AGAIN)));
+    retry().await;
+
+    assert_eq!(client.mode(), ReleaseCacheMode::Caching);
+    let read_again: Vec<_> = events
+        .events()
+        .into_iter()
+        .filter(|event| event.message() == Some(READS_AGAIN))
+        .collect();
+    assert_eq!(read_again.len(), 1);
+    assert_eq!(read_again[0].field("attempts"), Some("2"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn records_nothing_while_the_cache_has_room() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let fake = FakeSecretsService::new();
+    releasing_for_an_hour(&fake, 1);
+    let client = started_recording(
+        &fake,
+        &ScriptedInvalidations::default(),
+        SteppedClock::at(now()),
+        1,
+        &recorded,
+    )
+    .await;
+    let asked = request(&tenant());
+
+    client.release(&asked).await.unwrap();
+    client.release(&asked).await.unwrap();
+
+    assert_eq!(fake.received().len(), 1);
+    assert_eq!(events.events(), []);
+    assert!(recorded.counts(SECRETS_CLIENT_RELEASE_CACHE_CAPACITY_SKIPS).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn counts_every_release_served_without_being_held_but_warns_once_per_interval() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let recorded = RecordedMetrics::new();
+    let fake = FakeSecretsService::new();
+    releasing_for_an_hour(&fake, 5);
+    let clock = SteppedClock::at(now());
+    let client = started_recording(&fake, &ScriptedInvalidations::default(), clock.clone(), 1, &recorded).await;
+    let held = request(&tenant());
+    let turned_away = of_credential(&held, OTHER_CREDENTIAL_ID);
+    client.release(&held).await.unwrap();
+
+    for _ in 0..3 {
+        client.release(&turned_away).await.unwrap();
+    }
+    let warned_once: Vec<_> = events.events();
+    clock.advance(FULL_CACHE_WARNING_INTERVAL);
+    client.release(&turned_away).await.unwrap();
+
+    assert_eq!(fake.received().len(), 5);
+    assert_eq!(
+        recorded.counts(SECRETS_CLIENT_RELEASE_CACHE_CAPACITY_SKIPS),
+        [(Vec::<String>::new(), 4)]
+    );
+    assert_eq!(warned_once.len(), 1);
+    let warnings: Vec<_> = events
+        .events()
+        .into_iter()
+        .filter(|event| event.message() == Some(CACHE_FULL))
+        .map(|event| {
+            (
+                event.field("capacity").unwrap().to_owned(),
+                event.field("turned_away").unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        warnings,
+        [("1".to_owned(), "1".to_owned()), ("1".to_owned(), "3".to_owned())]
+    );
 }
 
 /// Starts a client in the background, as one whose start has not returned.

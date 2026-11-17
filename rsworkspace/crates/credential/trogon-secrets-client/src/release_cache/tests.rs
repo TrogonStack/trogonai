@@ -4,11 +4,11 @@ use trogon_credential_domain::{CredentialId, CredentialKey};
 use trogon_std::time::MockClock;
 
 use super::ReleaseCache;
-use crate::constants::RECENT_INVALIDATIONS;
+use crate::constants::{FULL_CACHE_WARNING_INTERVAL, RECENT_INVALIDATIONS};
 use crate::fixtures::{CREDENTIAL_ID, VALUE, now, released_until, request, tenant};
 use crate::{
-    RELEASE_CACHE_JITTER, RELEASE_HOLD_BOUND, ReleaseCacheKey, ReleaseCacheMode, ReleaseInvalidation, ReleaseRequest,
-    TenantAccount,
+    RELEASE_CACHE_JITTER, RELEASE_HOLD_BOUND, ReleaseCacheKey, ReleaseCacheMode, ReleaseHold, ReleaseInvalidation,
+    ReleaseRequest, TenantAccount,
 };
 
 const OTHER_CREDENTIAL_ID: &str = "1c7e3a4f-8d2b-4a6c-9e01-2f3b4c5d6e7f";
@@ -29,6 +29,18 @@ fn key_of(tenant: &TenantAccount, credential_id: &str) -> ReleaseCacheKey {
 
 fn in_a_minute() -> SystemTime {
     now() + Duration::from_secs(60)
+}
+
+fn in_an_hour() -> SystemTime {
+    now() + Duration::from_secs(3_600)
+}
+
+/// A cache with room for one release, holding one under `key` that serves
+/// for longer than any test moves its clock.
+fn full_with(key: &ReleaseCacheKey, clock: MockClock) -> ReleaseCache<MockClock> {
+    let mut cache = ReleaseCache::with_capacity(1, clock);
+    cache.put(cache.ticket(), key.clone(), released_until(in_an_hour()), now());
+    cache
 }
 
 fn notice_for(tenant: &TenantAccount, credential_id: &str) -> ReleaseInvalidation {
@@ -210,6 +222,128 @@ fn replaces_a_copy_it_holds_even_when_full() {
     cache.put(cache.ticket(), key.clone(), released_until(longer), now());
 
     assert_eq!(cache.get(&key, now()).unwrap().valid_until(), longer);
+}
+
+#[test]
+fn does_not_report_full_while_it_has_room() {
+    let key = key_of(&tenant(), CREDENTIAL_ID);
+    let mut cache = ReleaseCache::with_capacity(1, MockClock::new());
+
+    let hold = cache.put(cache.ticket(), key, released_until(in_an_hour()), now());
+
+    assert_eq!(hold, ReleaseHold::Held);
+    assert_eq!(cache.capacity_warning(), None);
+}
+
+#[test]
+fn does_not_report_full_when_it_replaces_a_copy_it_holds() {
+    let key = key_of(&tenant(), CREDENTIAL_ID);
+    let mut cache = full_with(&key, MockClock::new());
+
+    let hold = cache.put(cache.ticket(), key, released_until(in_an_hour()), now());
+
+    assert_eq!(hold, ReleaseHold::Held);
+    assert_eq!(cache.capacity_warning(), None);
+}
+
+#[test]
+fn does_not_report_full_when_it_declines_a_release_overtaken_on_its_way() {
+    let tenant = tenant();
+    let mut cache = full_with(&key_of(&tenant, CREDENTIAL_ID), MockClock::new());
+    let ticket = cache.ticket();
+
+    cache.invalidate(&notice_for(&tenant, OTHER_CREDENTIAL_ID));
+    let hold = cache.put(
+        ticket,
+        key_of(&tenant, OTHER_CREDENTIAL_ID),
+        released_until(in_an_hour()),
+        now(),
+    );
+
+    assert_eq!(hold, ReleaseHold::Declined);
+    assert_eq!(cache.capacity_warning(), None);
+}
+
+#[test]
+fn does_not_report_full_once_it_made_room() {
+    let tenant = tenant();
+    let mut cache = ReleaseCache::with_capacity(1, MockClock::new());
+    let later = in_a_minute() + Duration::from_secs(1);
+    cache.put(
+        cache.ticket(),
+        key_of(&tenant, CREDENTIAL_ID),
+        released_until(in_a_minute()),
+        now(),
+    );
+
+    let hold = cache.put(
+        cache.ticket(),
+        key_of(&tenant, OTHER_CREDENTIAL_ID),
+        released_until(later + Duration::from_secs(60)),
+        later,
+    );
+
+    assert_eq!(hold, ReleaseHold::Held);
+}
+
+#[test]
+fn reports_full_when_it_turns_a_release_away_for_room() {
+    let tenant = tenant();
+    let mut cache = full_with(&key_of(&tenant, CREDENTIAL_ID), MockClock::new());
+
+    let hold = cache.put(
+        cache.ticket(),
+        key_of(&tenant, OTHER_CREDENTIAL_ID),
+        released_until(in_an_hour()),
+        now(),
+    );
+
+    assert_eq!(hold, ReleaseHold::Full);
+}
+
+#[test]
+fn warns_of_a_full_cache_at_the_first_release_it_turns_away() {
+    let tenant = tenant();
+    let mut cache = full_with(&key_of(&tenant, CREDENTIAL_ID), MockClock::new());
+    let turned_away = key_of(&tenant, OTHER_CREDENTIAL_ID);
+
+    cache.put(cache.ticket(), turned_away, released_until(in_an_hour()), now());
+
+    assert_eq!(cache.capacity_warning(), Some(1));
+    assert_eq!(cache.capacity(), 1);
+}
+
+#[test]
+fn does_not_warn_again_before_the_warning_interval_passes() {
+    let tenant = tenant();
+    let clock = MockClock::new();
+    let mut cache = full_with(&key_of(&tenant, CREDENTIAL_ID), clock.clone());
+    let turned_away = key_of(&tenant, OTHER_CREDENTIAL_ID);
+    cache.put(cache.ticket(), turned_away.clone(), released_until(in_an_hour()), now());
+    cache.capacity_warning();
+
+    clock.advance(FULL_CACHE_WARNING_INTERVAL - Duration::from_secs(1));
+    let hold = cache.put(cache.ticket(), turned_away, released_until(in_an_hour()), now());
+
+    assert_eq!(hold, ReleaseHold::Full);
+    assert_eq!(cache.capacity_warning(), None);
+}
+
+#[test]
+fn warns_again_once_the_warning_interval_passes_with_every_release_turned_away_since() {
+    let tenant = tenant();
+    let clock = MockClock::new();
+    let mut cache = full_with(&key_of(&tenant, CREDENTIAL_ID), clock.clone());
+    let turned_away = key_of(&tenant, OTHER_CREDENTIAL_ID);
+    cache.put(cache.ticket(), turned_away.clone(), released_until(in_an_hour()), now());
+    cache.capacity_warning();
+    cache.put(cache.ticket(), turned_away.clone(), released_until(in_an_hour()), now());
+    cache.capacity_warning();
+
+    clock.advance(FULL_CACHE_WARNING_INTERVAL);
+    cache.put(cache.ticket(), turned_away, released_until(in_an_hour()), now());
+
+    assert_eq!(cache.capacity_warning(), Some(2));
 }
 
 #[test]

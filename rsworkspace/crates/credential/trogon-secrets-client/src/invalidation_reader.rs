@@ -13,9 +13,10 @@ use super::constants::{
     INVALIDATION_FILTER, INVALIDATION_LOOKBACK, INVALIDATION_POSITION_CHECK, INVALIDATION_RETRY_DELAY,
     INVALIDATION_STREAM,
 };
+use super::telemetry::ReleaseCacheMetrics;
 use super::{
-    InvalidationConsumer, InvalidationNotice, InvalidationStartError, InvalidationStream, InvalidationStreamError,
-    InvalidationStreamSource, ReleaseCache, ReleaseInvalidation,
+    InvalidationConsumer, InvalidationLoss, InvalidationNotice, InvalidationStartError, InvalidationStream,
+    InvalidationStreamError, InvalidationStreamSource, ReleaseCache, ReleaseInvalidation,
 };
 
 type Consumer<J> = <<J as InvalidationStreamSource>::Stream as InvalidationStream>::Consumer;
@@ -41,6 +42,10 @@ type Reading<J> = (Consumer<J>, Notices<J>, u64);
 /// held copy and holds none, retrying every [`INVALIDATION_RETRY_DELAY`]
 /// until it reads again and has caught up. It stops when dropped.
 ///
+/// Each loss of place is counted under why it happened and warned of once,
+/// however long the reader takes to read again; reading again is logged
+/// with how many attempts it took.
+///
 /// It never looks at stream sequences. A notice the stream removed before
 /// delivering it would leave the consumer sequences unbroken, so the reader
 /// refuses, at every subscribe, a stream configured to remove or rewrite a
@@ -65,6 +70,7 @@ impl InvalidationReader {
         jetstream: J,
         clock: C,
         cache: Arc<Mutex<ReleaseCache<C>>>,
+        metrics: ReleaseCacheMetrics,
     ) -> Result<Self, InvalidationStartError>
     where
         J: InvalidationStreamSource,
@@ -73,7 +79,7 @@ impl InvalidationReader {
     {
         let reading = subscribe(&jetstream, &clock).await?;
         let (caught_up, ready) = oneshot::channel();
-        let reader = Self(tokio::spawn(read(jetstream, clock, cache, reading, caught_up)).abort_handle());
+        let reader = Self(tokio::spawn(read(jetstream, clock, cache, metrics, reading, caught_up)).abort_handle());
         let _ = ready.await;
         Ok(reader)
     }
@@ -102,6 +108,7 @@ async fn read<J, C>(
     jetstream: J,
     clock: C,
     cache: Arc<Mutex<ReleaseCache<C>>>,
+    metrics: ReleaseCacheMetrics,
     mut reading: Reading<J>,
     started: oneshot::Sender<()>,
 ) where
@@ -110,19 +117,32 @@ async fn read<J, C>(
     C::Instant: Send,
 {
     let mut started = Some(started);
+    let mut attempts: u64 = 0;
     loop {
         let (consumer, notices, backlog) = &mut reading;
-        drain(&cache, consumer, notices, *backlog, || match started.take() {
+        let loss = drain(&cache, consumer, notices, *backlog, || match started.take() {
             Some(started) => {
                 let _ = started.send(());
             }
-            None => cache.lock().unwrap_or_else(PoisonError::into_inner).resume(),
+            None => {
+                cache.lock().unwrap_or_else(PoisonError::into_inner).resume();
+                tracing::info!(attempts, "invalidation reader reads again; releases are held again");
+            }
         })
         .await;
         cache.lock().unwrap_or_else(PoisonError::into_inner).suspend();
         started = None;
+        metrics.record_position_loss(&loss);
+        let reason = loss.reason().as_str();
+        tracing::warn!(
+            reason,
+            detail = %loss,
+            "invalidation reader lost its place; releases are not held until it reads again"
+        );
+        attempts = 0;
         reading = loop {
             tokio::time::sleep(INVALIDATION_RETRY_DELAY).await;
+            attempts += 1;
             if let Ok(reading) = subscribe(&jetstream, &clock).await {
                 break reading;
             }
@@ -131,7 +151,7 @@ async fn read<J, C>(
 }
 
 /// Drops what each notice covers, until the consumer fails, skips one, ends,
-/// or delivered one that never arrived.
+/// or delivered one that never arrived, and says which.
 ///
 /// Calls `caught_up` once, when `backlog` notices have been received, or at
 /// once when there are none, or when a look after a quiet interval finds the
@@ -149,7 +169,8 @@ async fn drain<K, S, N, C>(
     notices: &mut S,
     backlog: u64,
     caught_up: impl FnOnce(),
-) where
+) -> InvalidationLoss
+where
     K: InvalidationConsumer,
     S: Stream<Item = Result<N, pull::MessagesError>> + Unpin,
     N: InvalidationNotice,
@@ -166,8 +187,11 @@ async fn drain<K, S, N, C>(
     loop {
         match tokio::time::timeout_at(next_look, notices.next()).await {
             Ok(Some(Ok(notice))) => {
-                if !matches!(notice.consumer_sequence(), Ok(sequence) if sequence == received + 1) {
-                    return;
+                let expected = received + 1;
+                match notice.consumer_sequence() {
+                    Ok(sequence) if sequence == expected => {}
+                    Ok(arrived) => return InvalidationLoss::Gap { expected, arrived },
+                    Err(unplaced) => return InvalidationLoss::Unplaced(unplaced),
                 }
                 let notice = ReleaseInvalidation::from_subject(notice.subject());
                 cache.lock().unwrap_or_else(PoisonError::into_inner).invalidate(&notice);
@@ -177,14 +201,16 @@ async fn drain<K, S, N, C>(
                     call_once(&mut caught_up);
                 }
             }
-            Ok(_) => return,
+            Ok(Some(Err(failed))) => return InvalidationLoss::Failed(failed),
+            Ok(None) => return InvalidationLoss::Ended,
             Err(_) => {
-                if owed.take().is_some_and(|owed| received < owed) {
-                    return;
+                if let Some(delivered) = owed.take().filter(|&delivered| received < delivered) {
+                    return InvalidationLoss::Missing { received, delivered };
                 }
                 if !std::mem::take(&mut arrived) {
-                    let Ok(delivered) = consumer.delivered().await else {
-                        return;
+                    let delivered = match consumer.delivered().await {
+                        Ok(delivered) => delivered,
+                        Err(unknown) => return InvalidationLoss::PositionUnknown(unknown),
                     };
                     owed = (delivered > received).then_some(delivered);
                     if owed.is_none() {
