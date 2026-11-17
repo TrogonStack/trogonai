@@ -2,7 +2,8 @@
 //! `SECRETS_INVALIDATION` drops every copy of the credential it names, even
 //! when its payload is not a notice, and leaves every other credential held.
 //! Without the stream the client refuses to start, and while the stream is
-//! gone it holds nothing until it reads again.
+//! gone it holds nothing until it reads again. A consumer reports how far the
+//! server has delivered, which the reader checks after a quiet interval.
 
 #![cfg(feature = "test-support")]
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
@@ -11,7 +12,9 @@ use std::future::Future;
 use std::num::NonZeroU16;
 use std::time::{Duration, SystemTime};
 
+use async_nats::jetstream::consumer::{AckPolicy, pull};
 use async_nats::jetstream::{self, stream};
+use futures::StreamExt;
 use nkeys::KeyPair;
 use trogon_credential_domain::{
     AuditCorrelationId, CredentialId, CredentialKey, CredentialOwnerId, InjectionLocation, ReleaseHost,
@@ -19,9 +22,9 @@ use trogon_credential_domain::{
 };
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_secrets_client::{
-    CachedReleaseClient, FakeOutcome, FakeSecretsService, INVALIDATION_STREAM, InvalidationStartError,
-    ReleaseCacheMode, ReleaseClient, ReleaseClientConfig, ReleaseDestination, ReleaseRequest, RuntimeService,
-    TenantAccount,
+    CachedReleaseClient, FakeOutcome, FakeSecretsService, INVALIDATION_STREAM, InvalidationConsumer,
+    InvalidationStartError, ReleaseCacheMode, ReleaseClient, ReleaseClientConfig, ReleaseDestination, ReleaseRequest,
+    RuntimeService, TenantAccount,
 };
 use trogon_std::SecretString;
 use trogon_std::time::SystemClock;
@@ -182,4 +185,37 @@ async fn holds_nothing_while_the_stream_is_gone_and_again_once_it_is_back() {
     client.release(&asked).await.unwrap();
 
     assert_eq!(fake.received().len(), 4);
+}
+
+#[tokio::test]
+async fn a_consumer_reports_the_last_notice_the_server_delivered_to_it() {
+    let server = JetStreamTestServer::start().await;
+    let jetstream = server.jetstream().await;
+    let tenant = tenant();
+    create_stream(&jetstream).await;
+    let consumer = jetstream
+        .get_stream(INVALIDATION_STREAM)
+        .await
+        .unwrap()
+        .create_consumer(pull::Config {
+            ack_policy: AckPolicy::None,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(consumer.delivered().await.unwrap(), 0);
+
+    jetstream
+        .publish(
+            format!("secrets.invalidation.v1.{tenant}.{OWNER_TOKEN}.{NAMED}"),
+            "fake-notice".into(),
+        )
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    let mut notices = InvalidationConsumer::messages(&consumer).await.unwrap();
+    notices.next().await.unwrap().unwrap();
+
+    assert_eq!(consumer.delivered().await.unwrap(), 1);
 }
