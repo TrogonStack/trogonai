@@ -63,8 +63,10 @@
 //! decides whether it calls for an [`InvalidationNotice`]: a completed
 //! rotation, a revocation, or a destruction does, on the subject of the one
 //! tenant [`OwnerTenants`] names as holding the credential's owner, and every
-//! other event does not. The notice's `Nats-Msg-Id` is the event's sequence,
-//! so a redelivered event is stored once. A message it cannot read is an
+//! other event does not. The notice's `Nats-Msg-Id` is the name of
+//! the stream the event was read from and the event's sequence, so a
+//! redelivered event is stored once and two credential streams never share an
+//! ID. A message it cannot read is an
 //! [`InvalidationSourceError`] for the caller to settle, never a skip.
 //!
 //! [`InvalidationPublisher`] is that caller: it reads the credential stream
@@ -179,7 +181,7 @@ pub use constants::{
     INVALIDATION_PUBLISHER_DURABLE, INVALIDATION_REPLAY_WINDOW, INVALIDATION_STREAM, INVALIDATION_SUBJECTS,
     RELEASE_DEADLINE, RELEASE_SUBSCRIPTION, RELEASE_TTL_BOUND, THROTTLED_RETRY_AFTER, UNBUNDLED_GENERATION,
 };
-pub use credential_event_delivery::CredentialEventDelivery;
+pub use credential_event_delivery::{CredentialEventDelivery, StoredCredentialEvent};
 pub use credential_release::CredentialRelease;
 pub use credential_release_error::CredentialReleaseError;
 pub use credential_state_read::CredentialStateRead;

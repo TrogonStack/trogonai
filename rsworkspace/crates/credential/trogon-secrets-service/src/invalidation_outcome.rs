@@ -28,11 +28,11 @@ pub enum InvalidationOutcome {
 }
 
 impl InvalidationOutcome {
-    /// Reads `message`, as the credential stream stored it, and decides
+    /// Reads `message`, as the stream named `source_stream` stored it, and decides
     /// whether it calls for a notice and to which tenant, asking `owners`.
     ///
     /// The notice is timed when the stream appended the event and carries its
-    /// sequence, so a redelivered message builds the same notice. An event
+    /// stream and sequence, so a redelivered message builds the same notice. An event
     /// that changes nothing a release hands out is never checked further: it
     /// publishes nothing whatever it names.
     ///
@@ -42,7 +42,11 @@ impl InvalidationOutcome {
     /// credential event this build can read, when an event that ends a release
     /// names no credential or another credential than its subject's, or when
     /// it was appended no later than the Unix epoch.
-    pub fn of(message: StreamMessage, owners: &impl OwnerTenants) -> Result<Self, InvalidationSourceError> {
+    pub fn of(
+        source_stream: &str,
+        message: StreamMessage,
+        owners: &impl OwnerTenants,
+    ) -> Result<Self, InvalidationSourceError> {
         let subject = message.subject.to_string();
         let event = record_stream_message(message, subject.as_str()).map_err(InvalidationSourceError::Unrecorded)?;
         let decoded = match event
@@ -76,6 +80,7 @@ impl InvalidationOutcome {
             &tenant,
             &credential,
             reason,
+            source_stream,
             SystemTime::from(event.recorded_at),
             event.stream_position,
         )

@@ -11,7 +11,7 @@ use async_nats::HeaderMap;
 use async_nats::header::NATS_MESSAGE_ID;
 use async_nats::jetstream::consumer::pull::MessagesError;
 use async_nats::jetstream::consumer::{Consumer, DeliverPolicy, StreamError, pull};
-use async_nats::jetstream::message::{AckKind, StreamMessage};
+use async_nats::jetstream::message::AckKind;
 use async_nats::jetstream::stream::{self, ConsumerError, Stream};
 use async_nats::jetstream::{Context, Message};
 use async_nats::subject::ToSubject;
@@ -35,6 +35,7 @@ use crate::fixtures::credential_events::{activated, message, revoked, rotated};
 use crate::fixtures::{OWNER, identity};
 use crate::{
     CredentialEventDelivery, DeliveryInfoError, InvalidationPublisher, InvalidationPublisherError, InvalidationStream,
+    StoredCredentialEvent,
 };
 
 const SETTLED_WITHIN: Duration = Duration::from_secs(10);
@@ -301,7 +302,7 @@ impl JsAckWith for RedeliverFirstDelivery {
 }
 
 impl CredentialEventDelivery for RedeliverFirstDelivery {
-    fn stored(&self) -> Result<StreamMessage, DeliveryInfoError> {
+    fn stored(&self) -> Result<StoredCredentialEvent, DeliveryInfoError> {
         self.delivery.stored()
     }
 }

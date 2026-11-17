@@ -222,13 +222,17 @@ fn invalidation_stream_replicas(
     file: Option<usize>,
 ) -> Result<NonZeroUsize, ServiceConfigError> {
     let setting = ConfigSetting::InvalidationStreamReplicas;
-    let from_env = env_value(env, setting)?
-        .map(|raw| {
-            raw.parse()
-                .map_err(|source| ServiceConfigError::NotANumber { setting, source })
-        })
-        .transpose()?;
-    match args.invalidation_stream_replicas.or(from_env).or(file) {
+    let chosen = match args.invalidation_stream_replicas {
+        Some(from_flag) => Some(from_flag),
+        None => env_value(env, setting)?
+            .map(|raw| {
+                raw.parse()
+                    .map_err(|source| ServiceConfigError::NotANumber { setting, source })
+            })
+            .transpose()?
+            .or(file),
+    };
+    match chosen {
         Some(replicas) => NonZeroUsize::new(replicas).ok_or(ServiceConfigError::Zero { setting }),
         None => Ok(DEFAULT_INVALIDATION_STREAM_REPLICAS),
     }

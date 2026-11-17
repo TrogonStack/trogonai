@@ -1,20 +1,21 @@
 use std::ffi::OsStr;
 use std::future::Future;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::{Map, Value};
 
-use crate::adapters::{CurrentDirectory, EnvironmentVariable, HttpExecute, SystemEnvironment};
+use crate::adapters::{CurrentDirectory, EnvironmentVariable, GetAddrInfoResolver, HttpExecute, SystemEnvironment};
 use crate::bridge_git::{DefaultGitProbe, GitContextProbe, git_entries};
-use crate::bridge_js::{js_number, js_trim, plain_detail, safe_integer};
+use crate::bridge_js::{js_number, plain_detail, safe_integer};
 use crate::bridge_types::{
     CreateCodeSessionOptions, CreateSessionFailure, CreateSessionOutcome, CredentialsFailure, CredentialsRejection,
     DeviceRefusal, FailureSource, FetchRemoteCredentialsOptions, RemoteCredentials, RemoteCredentialsOutcome,
     RemoteMcpConfig,
 };
+use crate::session_prompt::js_trim;
 use crate::settings_json::js_stringify;
 use crate::settings_numbers::js_value;
 use crate::settings_parse::parse_json;
@@ -43,17 +44,27 @@ pub struct BridgeClient<H = reqwest::Client, E = SystemEnvironment, G = DefaultG
 }
 
 impl BridgeClient {
-    /// A client over the system network, environment and working directory that follows up to 21 redirects.
+    /// A client over the system network, environment and working directory that follows up to 21 redirects and
+    /// resolves host names with [`GetAddrInfoResolver`].
     pub fn native() -> reqwest::Result<Self> {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::limited(21))
             .referer(false)
+            .dns_resolver(Arc::new(GetAddrInfoResolver))
             .build()?;
         Ok(Self::new(http, SystemEnvironment, DefaultGitProbe::new()))
     }
 }
 
 impl<H, E, G> BridgeClient<H, E, G> {
+    /// A client over the given HTTP client, environment and git probe.
+    ///
+    /// Passing your own HTTP client is a Rust-only extension: the upstream parity surface is the client
+    /// [`BridgeClient::native`] builds. A `reqwest::Client` passed here reports a failed request with the upstream
+    /// error codes only when it resolves host names with [`GetAddrInfoResolver`] (installed through
+    /// `reqwest::ClientBuilder::dns_resolver`) or with a resolver that reports its failures as
+    /// [`crate::adapters::NameLookupError`]; otherwise a host that cannot be found is reported as a generic network
+    /// error instead of `ENOTFOUND`.
     pub fn new(http: H, environment: E, git: G) -> Self {
         Self { http, environment, git }
     }

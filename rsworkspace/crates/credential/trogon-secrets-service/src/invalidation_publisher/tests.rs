@@ -14,7 +14,7 @@ use futures::future::BoxFuture;
 use futures::stream::{self, BoxStream, StreamExt as _};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
-use trogon_credential_aggregate::CredentialEventSubjectResolverError;
+use trogon_credential_aggregate::{CREDENTIAL_STREAM, CredentialEventSubjectResolverError};
 use trogon_credential_domain::{CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use trogon_decider_runtime::{EventEncode, EventType};
 use trogon_nats::jetstream::{JetStreamConsumer, JetStreamCreateConsumer, JetStreamPublisher, JsAck, JsAckWith};
@@ -29,7 +29,7 @@ use crate::fixtures::{OWNER, identity, tenant};
 use crate::listening_invalidation_publisher::retried;
 use crate::{
     CredentialEventDelivery, DeliveryInfoError, InvalidationNotice, InvalidationOutcome, InvalidationPublisherError,
-    InvalidationSourceError, StaticTenantOwners, TenantAccount,
+    InvalidationSourceError, StaticTenantOwners, StoredCredentialEvent, TenantAccount,
 };
 
 const APPENDED_SECONDS: i64 = 1_700_000_000;
@@ -110,9 +110,13 @@ impl JsAckWith for TestDelivery {
 }
 
 impl CredentialEventDelivery for TestDelivery {
-    fn stored(&self) -> Result<StreamMessage, DeliveryInfoError> {
+    fn stored(&self) -> Result<StoredCredentialEvent, DeliveryInfoError> {
         self.stored
             .clone()
+            .map(|message| StoredCredentialEvent {
+                stream: CREDENTIAL_STREAM.to_owned(),
+                message,
+            })
             .ok_or_else(|| DeliveryInfoError(Box::new(MockError("fake-unparsable-reply".to_owned()))))
     }
 }
@@ -260,7 +264,7 @@ fn other_identity() -> CredentialIdentity {
 /// The notice the contract builds for `message`, which is what the publisher
 /// must hand to the invalidation stream unchanged.
 fn notice_for(message: &StreamMessage, owners: &StaticTenantOwners) -> InvalidationNotice {
-    match InvalidationOutcome::of(message.clone(), owners) {
+    match InvalidationOutcome::of(CREDENTIAL_STREAM, message.clone(), owners) {
         Ok(InvalidationOutcome::Publish(notice)) => notice,
         other => panic!("expected a notice, got {other:?}"),
     }
@@ -438,7 +442,7 @@ async fn an_unreadable_event_is_terminated_unless_its_type_is_unknown_to_this_bu
     for unreadable in unreadable_events() {
         let run = Run::new();
         let sequence = unreadable.message.sequence;
-        let read = InvalidationOutcome::of(unreadable.message.clone(), &holding_owner());
+        let read = InvalidationOutcome::of(CREDENTIAL_STREAM, unreadable.message.clone(), &holding_owner());
         assert!(
             read.as_ref().is_err_and(unreadable.reads_as),
             "{}: {read:?}",

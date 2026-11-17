@@ -731,6 +731,9 @@ fn the_invalidation_stream_replica_count_is_read_from_the_file_then_the_environm
     assert_eq!(replicas(&[], &env), 2);
 
     assert_eq!(replicas(&["--invalidation-stream-replicas", "1"], &env), 1);
+
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "many");
+    assert_eq!(replicas(&["--invalidation-stream-replicas", "1"], &env), 1);
 }
 
 #[test]

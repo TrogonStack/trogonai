@@ -108,9 +108,10 @@ class GenerateTypesTests(unittest.TestCase):
         self.assertIn("pub struct Empty {", output)
         mirrors = output.count("#[serde(remote = ")
         self.assertGreater(mirrors, 0)
-        self.assertEqual(output.count("#[serde(flatten)]"), mirrors)
+        self.assertEqual(output.count("#[serde(flatten"), mirrors)
         self.assertEqual(output.count("#[serde(skip)]"), mirrors)
-        self.assertIn("pub extra: serde_json::Map<String, serde_json::Value>,", output)
+        self.assertIn("pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,", output)
+        self.assertIn('#[serde(flatten, serialize_with = "super::support::shallow_members")]', output)
         self.assertIn("pub const KNOWN_KEYS: &'static [&'static str] = &[];", output)
         self.assertIn("decoded.key_order = super::support::KeyOrder::of(&value);", output)
 
@@ -166,6 +167,22 @@ class GenerateTypesTests(unittest.TestCase):
         output = (Path(out.name) / "generated.rs").read_text(encoding="utf-8")
         self.assertIn("pub enum All {", output)
         self.assertNotIn("pub enum Result", output)
+
+    def test_untyped_members_hold_any_object_and_must_name_an_optional_property(self):
+        result = self.generate_from(DECLARATIONS, ["Sample"], untyped_members={"Sample": ["open"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pub open: Option<crate::DeepJsonObject>,", result.output)
+        self.assertIn('serialize_with = "super::support::optional_shallow_object"', result.output)
+        self.assertNotIn("pub struct SampleOpen", result.output)
+        for members, message in (
+            ({"Sample": ["name"]}, "Sample.name, which is not an optional, non-nullable property"),
+            ({"Sample": ["tri"]}, "Sample.tri, which is not an optional, non-nullable property"),
+            ({"Sample": ["missing"]}, "Sample.missing, which is not a property emitted"),
+            ({"Absent": ["open"]}, "Absent, which is not declared"),
+        ):
+            failed = self.generate_from(DECLARATIONS, ["Sample"], untyped_members=members)
+            self.assertEqual(failed.returncode, 2, members)
+            self.assertIn(message, failed.stderr)
 
     def generate_from(self, declarations: str, roots: list[str], **extra) -> subprocess.CompletedProcess:
         out = tempfile.TemporaryDirectory()
