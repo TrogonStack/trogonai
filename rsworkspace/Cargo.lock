@@ -7657,6 +7657,7 @@ dependencies = [
  "thiserror 2.0.21",
  "trogon-decider-runtime",
  "trogon-std",
+ "trogonai-proto",
 ]
 
 [[package]]
