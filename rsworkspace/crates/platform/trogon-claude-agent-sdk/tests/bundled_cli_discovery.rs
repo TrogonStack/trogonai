@@ -33,6 +33,29 @@ async fn read_result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn Err
     .await?
 }
 
+/// Reading the result and the disconnect after it both failed; each error is kept for the report.
+#[derive(Debug)]
+struct ReadAndDisconnectFailed {
+    read: Box<dyn Error>,
+    disconnect: SdkError,
+}
+
+impl std::fmt::Display for ReadAndDisconnectFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "reading the result failed: {}; disconnecting failed: {}",
+            self.read, self.disconnect
+        )
+    }
+}
+
+impl Error for ReadAndDisconnectFailed {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.read.as_ref())
+    }
+}
+
 #[cfg_attr(
     dylint_lib = "trogon_dylint_lints",
     allow(
@@ -60,11 +83,14 @@ async fn only_a_named_bundled_root_is_searched_before_path() -> Result<(), Box<d
     client.send_prompt(Prompt::from("from path")).await?;
     let observed = read_result(&mut client).await;
     let cleanup = client.disconnect().await;
-    if let (Err(read), Err(disconnect)) = (&observed, &cleanup) {
-        return Err(format!("reading the result failed: {read}; disconnecting failed: {disconnect}").into());
-    }
-    let text = observed?;
-    cleanup?;
+    let text = match (observed, cleanup) {
+        (Err(read), Err(disconnect)) => return Err(ReadAndDisconnectFailed { read, disconnect }.into()),
+        (observed, cleanup) => {
+            let text = observed?;
+            cleanup?;
+            text
+        }
+    };
     assert_eq!(text, "from path");
 
     let error = ClaudeSdkClient::connect(options(Some(package))).await.err();

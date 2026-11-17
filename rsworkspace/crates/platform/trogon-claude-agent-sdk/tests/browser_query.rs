@@ -30,8 +30,6 @@ type TestResult = Result<(), Box<dyn StdError>>;
 
 const FIXTURE: &str = include_str!("fixtures/browser_query/cases.json");
 const WAIT: Duration = Duration::from_secs(5);
-/// How long the recorder lets a query run before it takes the frames the socket was sent.
-const RECORDED_WAIT: Duration = Duration::from_millis(30);
 
 fn line(value: &Value) -> Frame {
     Frame::text(format!("{value}\n"))
@@ -218,10 +216,12 @@ async fn every_recorded_query_sends_the_recorded_initialize_request() -> TestRes
             serde_json::to_string(&case["frames"][0])?,
             "{name}"
         );
-        tokio::time::sleep(RECORDED_WAIT).await;
-        assert!(seen.try_recv().is_err(), "{name}");
         assert_eq!(case["frames"].as_array().map(Vec::len), Some(1), "{name}");
+        // Once the initialize response was handled, closing the query closes the socket behind every frame it
+        // sent, and the fake CLI stops reporting when the socket closes: the initialize request was the only one.
+        timeout(WAIT, query.handle().ok_or("a query handle")?.initialization_result()).await??;
         query.close();
+        assert_eq!(timeout(WAIT, seen.recv()).await?, None, "{name}");
     }
     Ok(())
 }
