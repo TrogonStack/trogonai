@@ -97,7 +97,7 @@ const connections: Array<{ protocol: Protocol; path: string }> = [
       </div>
 
       <div :class="['protocol-map__node', 'protocol-map__peer', { 'is-muted': !isActive('A2A') }]">
-        <span class="protocol-map__node-icon is-a2a"><Icon name="users" :size="24" /></span>
+        <span class="protocol-map__node-icon is-a2a"><Icon name="bot" :size="24" /></span>
         <strong>Another agent</strong>
         <span>Delegate and collaborate</span>
         <span class="protocol-map__node-note">Tasks · Progress · Artifacts</span>

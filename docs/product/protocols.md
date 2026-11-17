@@ -12,7 +12,7 @@ product:
 protocols:
   - name: A2A
     fullName: Agent2Agent
-    icon: users
+    icon: bot
     from: Agent
     to: Agent
     purpose: Send work to another agent and follow its task updates.
