@@ -411,6 +411,11 @@ const resolveFrom = async (options) => {
 // object parsed anew from the spec (`fresh`). A list of none is a second call with no prime. What each prime did is
 // written beside the report, in `<spec>.primes.json`: whether it threw, and the length of the effective settings it
 // answered.
+// `phaseMarker` (diagnostic runs only): a function no other code calls, run once between the primes and the recorded cases, so
+// a V8 function-event log names it at that point and splits what the primes compiled from what the cases compiled.
+function phaseMarker43c() {
+  return 43;
+}
 const primeEffectiveLength = (result) => {
   try {
     return JSON.stringify(result.effective).length;
@@ -447,6 +452,7 @@ if (report.call === 'second' && spec.primes !== undefined) {
   }
   report.cases.push(snapshot('prime'));
 }
+if (spec.phaseMarker) phaseMarker43c();
 if (process.env.TRACE_LOG) fs.appendFileSync(process.env.TRACE_LOG, '{"marker":"cases"}\n');
 const out = [];
 for (const entry of spec.cases) {

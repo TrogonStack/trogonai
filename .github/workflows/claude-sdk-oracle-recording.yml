@@ -263,7 +263,7 @@ jobs:
   goldens:
     # Every golden recorder natively, through record.py, starting from the committed golden of the host so each
     # change shows as a diff.
-    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -370,7 +370,7 @@ jobs:
 
   wsl-goldens:
     # The managed organization goldens under a real WSL 2 kernel, starting from the committed linux x64 golden.
-    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1092,7 +1092,8 @@ jobs:
     # edge of each merge family after primes of different depth and family, forced collections, V8 flags and function
     # event logs, as registered in registration_b.md before the run. Its output is evidence for the process-history
     # model and never becomes a golden.
-    if: contains(github.event.head_commit.message, '[hist43b]')
+    # Disabled: hist43b ran and is superseded by hist43c.
+    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix:
@@ -1157,7 +1158,7 @@ jobs:
         run: |
           "$PY" -I "$FETCH_LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
 
-      - name: Measure the history variants (second run)
+      - name: Measure the history variants (third run)
         run: |
           "$PY" -I oracle-recording/hist43b.py "$NATIVE_LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/hist43b-${{ matrix.host.label }}.json" 2> >(tee "$OUT/hist43b.log" >&2)
 
@@ -1166,6 +1167,90 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-hist43b-${{ matrix.host.label }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 14
+
+  hist43c:
+    # Runs only when the head commit asks for it with `[hist43c]`: the third process-history run (ruling 44),
+    # discovery only (R43-6), on the three native hosts. One job per host runs oracle-recording/hist43c.py, which names the
+    # functions behind the lazy-compile gain of a second call, walks the caught distance of the prime level by level and
+    # replays the prime of job 54, as registered in registration_c.md before the run. Its output is evidence for the process-history
+    # model and never becomes a golden.
+    if: contains(github.event.head_commit.message, '[hist43c]')
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - { runner: macos-latest, label: darwin-arm64 }
+          - { runner: ubuntu-latest, label: linux-x64 }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64 }
+    runs-on: ${{ matrix.host.runner }}
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The driver sets the call position of each run itself, through the gate.
+      R3_CALL: first
+      R3_CONTEXT: toplevel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.13.1
+
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install: false
+          cache: false
+
+      - name: Locate tools
+        run: |
+          # Outside the checkout, so mise reads no repository config.
+          cd "$RUNNER_TEMP"
+          mise install "python@$R3_PYTHON"
+          py="$(mise exec "python@$R3_PYTHON" -- python3 -c 'import sys; print(sys.executable)' 2>/dev/null \
+            || mise exec "python@$R3_PYTHON" -- python -c 'import sys; print(sys.executable)')"
+          {
+            echo "PY=$py"
+            echo "NODE_BIN=$(node -p 'process.execPath')"
+            echo "OUT=$RUNNER_TEMP/out"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/out"
+
+      - name: Check the fixture bytes
+        run: |
+          bash oracle-recording/check_fixture_bytes.sh "$GITHUB_WORKSPACE" "$OUT"
+
+      - name: Describe the host and the V8 flags
+        run: |
+          {
+            node -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8, now: Date.now()})'
+            "$PY" --version
+            uname -a || true
+          } | tee "$OUT/host.txt"
+          # The flags the variants add, as this Node's V8 lists them (the driver parses the same list and fails the job when a registered variant is skipped).
+          node --v8-options > "$OUT/v8-options.txt"
+          grep -n -E -A1 '^ +--(no-)?(lazy|flush-bytecode|expose-gc|log-function-events|trace-lazy|logfile-per-isolate)( |$)' "$OUT/v8-options.txt" | tee "$OUT/v8-flags.txt" || true
+
+      - name: Fetch the pinned package
+        run: |
+          "$PY" -I "$FETCH_LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
+
+      - name: Measure the history variants (third run)
+        run: |
+          "$PY" -I oracle-recording/hist43c.py "$NATIVE_LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/hist43c-${{ matrix.host.label }}.json" 2> >(tee "$OUT/hist43c.log" >&2)
+
+      - name: Keep the oracle output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-hist43c-${{ matrix.host.label }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 14
