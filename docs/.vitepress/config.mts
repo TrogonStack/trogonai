@@ -149,7 +149,10 @@ export default async () => {
               },
               {
                 text: "Reference",
-                items: [{ text: "Container Images", link: "/reference/container-images" }],
+                items: [
+                  { text: "Container Images", link: "/reference/container-images" },
+                  { text: "Gateway Webhooks", link: "/reference/gateway-webhooks" },
+                ],
               },
               {
                 text: "Explanation",

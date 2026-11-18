@@ -11,6 +11,12 @@ runtime acceptance evidence.
 - Check the detailed [ACP conformance matrix](./architecture/acp-conformance.md).
 - Browse the [protocols product showcase](./product/protocols.md).
 
+## Generic webhooks
+
+The [gateway webhook reference](./reference/gateway-webhooks.md) describes
+dynamic endpoint registration, request authentication, and the durable delivery
+contract that other systems consume.
+
 ## Scheduler
 
 Browse the [scheduler product showcase](./product/scheduler.md) for what a

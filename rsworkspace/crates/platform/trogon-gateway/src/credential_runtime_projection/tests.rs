@@ -1249,6 +1249,117 @@ async fn restricted_resolver(
     (RuntimeCredentialResolver::new(projections, store), credential)
 }
 
+#[derive(Clone)]
+struct OwnerBoundSecretStore {
+    inner: MockOpenBaoSecretStore,
+    reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl SecretStoreGet for OwnerBoundSecretStore {
+    type Error = SecretStoreError;
+
+    async fn get(&self, credential: &CredentialRef) -> Result<SecretMaterial, Self::Error> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.get(credential).await
+    }
+}
+
+#[tokio::test]
+async fn generic_webhooks_owner_bound_resolution_accepts_the_project_owner() {
+    let (resolver, credential) = restricted_resolver(RuntimeReleasePolicy::default()).await;
+
+    let material = resolver
+        .resolve_plaintext_for_owner(
+            &key(),
+            CredentialKind::BotToken,
+            credential.owner_id(),
+            &RuntimeReleaseRequest::new(),
+        )
+        .await
+        .expect("the matching owner must be able to resolve its credential");
+
+    assert!(!material.as_str().is_empty());
+}
+
+#[tokio::test]
+async fn generic_webhooks_owner_mismatch_never_reads_the_store_or_returns_a_cached_secret() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "test-owner-bound-value").await;
+    let projections = InMemoryRuntimeProjectionRepository::default();
+    projections
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential.clone()))
+        .await;
+    let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let resolver = RuntimeCredentialResolver::new(
+        projections,
+        OwnerBoundSecretStore {
+            inner: store,
+            reads: reads.clone(),
+        },
+    );
+    let foreign_owner = CredentialOwnerId::new("foreign-project").unwrap();
+
+    assert!(matches!(
+        resolver
+            .resolve_plaintext_for_owner(
+                &key(),
+                CredentialKind::BotToken,
+                &foreign_owner,
+                &RuntimeReleaseRequest::new(),
+            )
+            .await,
+        Err(RuntimeCredentialError::OwnerMismatch {
+            key: actual_key,
+            kind: CredentialKind::BotToken,
+        }) if actual_key == key()
+    ));
+    assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(resolver.cache().get(&credential).await.is_none());
+
+    resolver
+        .resolve_plaintext(&key(), CredentialKind::BotToken)
+        .await
+        .unwrap();
+    assert!(resolver.cache().get(&credential).await.is_some());
+    assert!(matches!(
+        resolver
+            .resolve_plaintext_for_owner(
+                &key(),
+                CredentialKind::BotToken,
+                &foreign_owner,
+                &RuntimeReleaseRequest::new(),
+            )
+            .await,
+        Err(RuntimeCredentialError::OwnerMismatch {
+            key: actual_key,
+            kind: CredentialKind::BotToken,
+        }) if actual_key == key()
+    ));
+    assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn generic_webhooks_owner_bound_resolution_preserves_runtime_release_policy() {
+    let (resolver, credential) = restricted_resolver(
+        RuntimeReleasePolicy::default()
+            .with_allowed_runtime_services(AllowedRuntimeServices::only(["approved-worker"]).unwrap()),
+    )
+    .await;
+
+    let denied = resolver
+        .resolve_plaintext_for_owner(
+            &key(),
+            CredentialKind::BotToken,
+            credential.owner_id(),
+            &RuntimeReleaseRequest::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(denied.is_delivery_denied());
+    assert!(resolver.cache().get(&credential).await.is_none());
+}
+
 #[test]
 fn a_wildcard_host_covers_one_label_and_not_the_apex() {
     let hosts = AllowedHosts::only(["*.example.com", "trogonai.dev"]).unwrap();
@@ -2306,6 +2417,36 @@ async fn resolve_plaintext_rejects_a_credential_that_only_has_a_verifier() {
 
     let error = resolver
         .resolve_plaintext(&key(), CredentialKind::BotToken)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeCredentialError::VerifierOnly {
+            kind: CredentialKind::BotToken,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn generic_webhooks_owner_bound_resolution_cannot_release_a_stored_verifier_as_plaintext() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "test-verifier-reference").await;
+    let expected_owner = credential.owner_id().clone();
+    let projections = InMemoryRuntimeProjectionRepository::default();
+    projections
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential))
+        .await;
+    let resolver = RuntimeCredentialResolver::new(projections, VerifierOnlySecretStore);
+
+    let error = resolver
+        .resolve_plaintext_for_owner(
+            &key(),
+            CredentialKind::BotToken,
+            &expected_owner,
+            &RuntimeReleaseRequest::new(),
+        )
         .await
         .unwrap_err();
 

@@ -7560,6 +7560,7 @@ dependencies = [
  "trogon-service-config",
  "trogon-std",
  "trogon-telemetry",
+ "trogon-webhooks",
  "trogonai-proto",
  "twilight-gateway",
  "twilight-model",
@@ -7901,6 +7902,30 @@ dependencies = [
  "tracing-subscriber",
  "trogon-semconv",
  "trogon-std",
+]
+
+[[package]]
+name = "trogon-webhooks"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
+ "base64 0.22.1",
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "futures-util",
+ "hmac 0.13.0",
+ "http-body-util",
+ "sha2 0.11.1",
+ "subtle",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "trogon-nats",
+ "trogon-std",
+ "trogonai-proto",
+ "uuid",
 ]
 
 [[package]]

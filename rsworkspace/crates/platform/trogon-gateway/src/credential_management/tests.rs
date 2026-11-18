@@ -338,6 +338,136 @@ async fn put_rejects_missing_admin_token_before_mutating_state() {
 }
 
 #[tokio::test]
+async fn generic_webhooks_secret_management_requires_admin_authentication() {
+    let events = ManagementTestStreamStore::default();
+    let route = "/webhook/3cc8a622-fcdd-42c2-b4ad-88d638053814/webhook-secret";
+    let response = app(
+        events.clone(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    )
+    .oneshot(request(
+        Method::PUT,
+        route,
+        r#"{"owner_id":"project-one","secret":"test-fixture"}"#,
+        None,
+    ))
+    .await
+    .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(events.decoded_events().await.is_empty());
+}
+
+#[tokio::test]
+async fn generic_webhooks_secret_management_uses_the_endpoint_and_project_scope() {
+    let events = ManagementTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let route = "/webhook/3cc8a622-fcdd-42c2-b4ad-88d638053814/webhook-secret";
+    let response = app(events.clone(), secrets.clone(), registry.clone())
+        .oneshot(request(
+            Method::PUT,
+            route,
+            r#"{"owner_id":"project-one","secret":"test-fixture"}"#,
+            Some("admin-token"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["credential_ref"]["source"], "webhook");
+    assert_eq!(body["credential_ref"]["kind"], "webhook_secret");
+    assert_eq!(
+        body["credential_ref"]["id"],
+        "project-one:webhook/3cc8a622-fcdd-42c2-b4ad-88d638053814:webhook_secret",
+    );
+    assert!(!body.to_string().contains("test-fixture"));
+    let source = SourceKind::parse("webhook").expect("generic webhook source must be supported");
+    let credential = registry
+        .resolver(secrets)
+        .active_credential_ref(
+            &runtime_key(source, "3cc8a622-fcdd-42c2-b4ad-88d638053814"),
+            CredentialKind::WebhookSecret,
+        )
+        .await
+        .expect("credential must be projected for the endpoint");
+    assert_eq!(credential.owner_id().as_str(), "project-one");
+    assert_eq!(events.decoded_events().await.len(), 2);
+}
+
+#[tokio::test]
+async fn generic_webhooks_secret_management_supports_rotation_revocation_and_destruction() {
+    let events = ManagementTestStreamStore::default();
+    let secrets = MockOpenBaoSecretStore::default();
+    let registry = RuntimeCredentialRegistry::default();
+    let app = app(events, secrets, registry);
+    let route = "/webhook/3cc8a622-fcdd-42c2-b4ad-88d638053814/webhook-secret";
+    for (method, suffix, input, expected_state) in [
+        (
+            Method::PUT,
+            "",
+            r#"{"owner_id":"project-one","secret":"test-initial"}"#,
+            "active",
+        ),
+        (
+            Method::POST,
+            "/rotations",
+            r#"{"owner_id":"project-one","version":1,"secret":"test-rotated"}"#,
+            "active",
+        ),
+        (
+            Method::DELETE,
+            "",
+            r#"{"owner_id":"project-one","version":2}"#,
+            "revoked",
+        ),
+        (
+            Method::POST,
+            "/destructions",
+            r#"{"owner_id":"project-one","version":2,"reason":"test cleanup"}"#,
+            "destroyed",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(request(method, &format!("{route}{suffix}"), input, Some("admin-token")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["state"], expected_state);
+        assert!(!body.to_string().contains("test-initial"));
+        assert!(!body.to_string().contains("test-rotated"));
+    }
+}
+
+#[tokio::test]
+async fn generic_webhooks_secret_management_refuses_noncanonical_endpoint_ids() {
+    let events = ManagementTestStreamStore::default();
+    let app = app(
+        events.clone(),
+        MockOpenBaoSecretStore::default(),
+        RuntimeCredentialRegistry::default(),
+    );
+    for endpoint in ["not-a-uuid", "3CC8A622-FCDD-42C2-B4AD-88D638053814"] {
+        let response = app
+            .clone()
+            .oneshot(request(
+                Method::PUT,
+                &format!("/webhook/{endpoint}/webhook-secret"),
+                r#"{"owner_id":"project-one","secret":"test-fixture"}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    assert!(events.decoded_events().await.is_empty());
+}
+
+#[tokio::test]
 async fn put_rejects_missing_idempotency_key_before_mutating_state() {
     let events = ManagementTestStreamStore::default();
     let secrets = MockOpenBaoSecretStore::default();

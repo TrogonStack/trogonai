@@ -15,6 +15,7 @@ mod source_status;
 mod static_config_secret_store;
 mod streams;
 mod supervision;
+mod webhooks;
 
 use std::error::Error;
 use std::io::Write;
@@ -147,6 +148,21 @@ async fn serve_with_env(
     let shutdown = shutdown.shared();
 
     let publisher = ClaimCheckPublisher::new(client.clone(), claim_binding, nats.clone());
+    let generic_webhooks = match resolved.webhooks.as_ref() {
+        Some(config) => {
+            let secrets = openbao_secret_store_from_env(env, "webhooks")?;
+            let registry = webhooks::open_registry(client.context(), config).await?;
+            let verifier = trogon_webhooks::SecretWebhookVerifier::new(webhooks::RuntimeWebhookSecrets::new(
+                runtime_credentials.resolver(secrets),
+            ));
+            Some((
+                config.clone(),
+                trogon_webhooks::NatsEndpointRegistry::new(registry),
+                verifier,
+            ))
+        }
+        None => None,
+    };
     {
         let projection_runtime_credentials = runtime_credentials.clone();
         let projection_event_stream = credential_store.events_stream().clone();
@@ -226,9 +242,13 @@ async fn serve_with_env(
 
     let app = match source_runtime_credentials {
         Some(runtime_credentials) => {
-            http::mount_sources_with_runtime_credentials(resolved, publisher, &nats, runtime_credentials)
+            http::mount_sources_with_runtime_credentials(resolved, publisher.clone(), &nats, runtime_credentials)
         }
-        None => http::mount_sources(resolved, publisher, &nats),
+        None => http::mount_sources(resolved, publisher.clone(), &nats),
+    };
+    let app = match generic_webhooks {
+        Some((config, registry, verifier)) => http::mount_generic_webhooks(app, config, registry, verifier, publisher),
+        None => app,
     };
     let app = match credential_management_admin_token_from_env(env)? {
         Some(admin_token) => {
