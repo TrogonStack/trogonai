@@ -445,3 +445,29 @@ fn replacement_replay_requires_the_next_generation_and_monotonic_observation() {
     expected.attachment = MessageField::some(next.clone());
     assert_eq!(evolve(before, &attached(next)), Ok(expected));
 }
+
+#[test]
+fn replacement_clears_the_previous_connectors_condition_and_preserves_progress() {
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let now = start + chrono::Duration::seconds(10);
+    let mut before = state(start);
+    before.condition = Some(proto::PeerCondition::PEER_CONDITION_AUTHENTICATION.into());
+    before.active_at = MessageField::some(timestamp_from_datetime(&start));
+    let next = attachment(&identity(), "new_connector", 2, now);
+    let mut expected = before.clone();
+    expected.attachment = MessageField::some(next.clone());
+    expected.availability = Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into());
+    expected.condition = None;
+    TestCase::<Attach>::new()
+        .given_state(before)
+        .when(command("new_connector", "collaboration", now))
+        .then([proto::PeerEvent {
+            event: Some(
+                proto::PeerAttached {
+                    attachment: MessageField::some(next),
+                }
+                .into(),
+            ),
+        }])
+        .then_state(expected);
+}
