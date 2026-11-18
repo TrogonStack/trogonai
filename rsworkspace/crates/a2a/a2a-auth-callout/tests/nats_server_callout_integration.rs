@@ -1146,11 +1146,14 @@ impl NatsCalloutStack {
 const INVALIDATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Sends a JetStream API request or a JetStream publish and parses the JSON reply.
+///
+/// The failure message names no subject, since a notice subject is built from a
+/// generated account key; the caller's line says which request failed.
 async fn js_api(client: &async_nats::Client, subject: &str, payload: &str) -> serde_json::Value {
     let reply = client
         .request(subject.to_owned(), payload.to_owned().into())
         .await
-        .unwrap_or_else(|err| panic!("{subject} got no reply: {err:?}"));
+        .unwrap_or_else(|err| panic!("a jetstream request got no reply: {err:?}"));
     serde_json::from_slice(&reply.payload).expect("jetstream replies with json")
 }
 
