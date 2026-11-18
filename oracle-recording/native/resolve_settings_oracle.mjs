@@ -92,6 +92,7 @@ const report = {
   ignored: [],
   refused: null,
   cases: [],
+  primes: [],
 };
 if (process.platform === 'linux') {
   try {
@@ -111,6 +112,10 @@ if (spec.platform && spec.platform !== process.platform) refuse(`platform ${spec
 if (spec.call !== undefined && spec.call !== 'first' && spec.call !== 'second') refuse(`call ${spec.call}`);
 if (!CONTEXTS.includes(report.context)) refuse(`context ${report.context}`);
 if (spec.prime !== undefined && spec.prime !== 'fresh') refuse(`prime ${spec.prime}`);
+if (spec.primes !== undefined && !Array.isArray(spec.primes)) refuse('primes is not a list');
+for (const entry of spec.primes ?? []) {
+  if (entry.options !== undefined && entry.options !== 'same' && entry.options !== 'fresh') refuse(`prime options ${entry.options}`);
+}
 // A /proc stand-in the WSL kernel already answers the same way (it names WSL) is dropped; anything else is refused.
 const kernelAnswers = (text) => report.wsl_kernel && typeof text === 'string' && namesWsl(text.toLowerCase());
 const procRoot = path.join(root, 'proc');
@@ -399,7 +404,34 @@ const resolveFrom = async (options) => {
   });
   return settle(started.promise);
 };
-if (report.call === 'second' && spec.cases.length > 0) {
+// `primes` (diagnostic runs only; never a golden): the resolves a second call runs, in order, before the recorded cases,
+// each after writing its own `files` and with the first case's own options object (`same`, the default) or an equal
+// object parsed anew from the spec (`fresh`). A list of none is a second call with no prime. What each prime did is
+// written beside the report, in `<spec>.primes.json`: whether it threw, and the length of the effective settings it
+// answered.
+const primeEffectiveLength = (result) => {
+  try {
+    return JSON.stringify(result.effective).length;
+  } catch {
+    return -1;
+  }
+};
+if (report.call === 'second' && spec.primes !== undefined) {
+  for (const [index, entry] of spec.primes.entries()) {
+    const options =
+      entry.options === 'fresh' ? JSON.parse(fs.readFileSync(specPath, 'utf8')).cases[0].options : spec.cases[0].options;
+    apply(entry);
+    const record = { index, thrown: null, effective_length: null };
+    try {
+      record.effective_length = primeEffectiveLength(await resolveFrom(options));
+    } catch (error) {
+      record.thrown = error instanceof Error ? error.name : typeof error;
+    }
+    report.primes.push(record);
+    report.cases.push(snapshot('prime'));
+  }
+  fs.writeFileSync(`${specPath}.primes.json`, JSON.stringify(report.primes));
+} else if (report.call === 'second' && spec.cases.length > 0) {
   const first = spec.cases[0];
   const options = report.prime === 'fresh' ? JSON.parse(fs.readFileSync(specPath, 'utf8')).cases[0].options : first.options;
   apply(first);

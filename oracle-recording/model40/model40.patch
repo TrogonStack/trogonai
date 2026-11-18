@@ -1717,10 +1717,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..4396d82208
+index 0000000000..8452dd916e
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,527 @@
+@@ -0,0 +1,547 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -1734,7 +1734,10 @@ index 0000000000..4396d82208
 +//! frames. The answer the reference run gave is the row labeled `ref`: the model must give it exactly at the frozen
 +//! offset of its context, which is 0 for the top level and a nested chain and the one offset of a timer, an immediate
 +//! or an I/O callback. Every other answer the runs gave is a row labeled `alt`: the model must give it at some offset of
-+//! the context's grid, which the row names. A child process exit has no frozen offset, so both labels name an offset.
++//! the context's grid, which the row names. A child process exit is not deterministic, since its room is a sample of
++//! each process: the reference run and the cross-check run of one event answer differently in some events, so every
++//! answer a child exit gave is an `alt` row, never a `ref` one, and the model must give it at some offset inside the
++//! interval of child exits. The fixture labels record that ruling and those events.
 +
 +use std::{collections::BTreeSet, thread};
 +
@@ -1772,6 +1775,9 @@ index 0000000000..4396d82208
 +
 +/// The grid the offsets of a caller sit on: V8 keeps its frames 16-byte aligned.
 +const STEP: isize = 16;
++
++/// The context whose room is a per-process sample, so no answer of it is the reference.
++const CHILD_EXIT: &str = "child_exit";
 +
 +/// The offset of the callers that run straight from the module, the top level and a chain nested in another.
 +const MODULE_OFFSET: isize = 0;
@@ -2178,6 +2184,9 @@ index 0000000000..4396d82208
 +    let expected = index(5)
 +        .and_then(|at| recorded.get(at))
 +        .ok_or("a row names no answer")?;
++    if context == CHILD_EXIT && is_reference(row)? {
++        return Err("a child exit row is a ref, but a child exit answer is always an alt".into());
++    }
 +    let at = checked_offset(answers, row, host, call, context)?;
 +    let completion = offset(&answers["offsets"][host][call]["io"])?;
 +    let stack = profile.with_startup_bytes(startup);
@@ -2195,6 +2204,17 @@ index 0000000000..4396d82208
 +fn each_answer_a_caller_context_gives_is_the_engine_at_its_offset() -> TestResult {
 +    let answers: Value = serde_json::from_str(ANSWERS)?;
 +    assert_eq!((&answers["node"], &answers["step"]), (&json!("v24.13.1"), &json!(STEP)));
++    let labels = &answers["labels"];
++    assert_eq!(labels["ruling"], json!("43a"));
++    let differing = labels["child_exit_ref_cross_differ"]
++        .as_array()
++        .ok_or("the fixture lists no child exit events whose reference and cross-check answers differ")?;
++    assert!(
++        differing.iter().all(|event| event
++            .as_array()
++            .is_some_and(|event| event.len() == 6 && event[3] == json!(CHILD_EXIT))),
++        "a labeled event is not a child exit event of six members"
++    );
 +    let rows = answers["rows"].as_array().ok_or("the fixture has no rows")?;
 +    let mut references = BTreeSet::new();
 +    for row in rows {
