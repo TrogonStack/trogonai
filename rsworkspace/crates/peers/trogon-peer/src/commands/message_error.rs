@@ -2,6 +2,10 @@ use super::{HeartbeatError, state::EvolveError};
 use trogonai_proto::peers::v1alpha1 as proto;
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum MessageError {
+    #[error("oldest prepared batch awaits application acknowledgment")]
+    AlreadyPrepared(Box<proto::PeerBatch>),
+    #[error("batch selection or rendered budget is invalid")]
+    InvalidPlan,
     #[error("recipient mismatch")]
     RecipientMismatch,
     #[error("tenant mismatch")]
