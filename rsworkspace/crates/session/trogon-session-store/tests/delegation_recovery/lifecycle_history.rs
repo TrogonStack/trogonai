@@ -281,79 +281,80 @@ async fn broken_attempt_lineage_and_invalid_claims_are_refused_before_target_adm
 #[tokio::test]
 async fn terminal_reasons_and_child_reservation_source_invariants_are_enforced_on_replay() {
     let parent = started("parent", b"original parent plan");
-    let mut cases = Vec::new();
-    cases.push((
-        vec![encoded(wire::SessionCancelled {
-            session_id: "parent".to_owned(),
-            reason: wire::SessionCancellationReason::SESSION_CANCELLATION_REASON_POLICY.into(),
-            ..Default::default()
-        })],
-        true,
-    ));
-    cases.push((
-        vec![encoded(wire::SessionCancelled {
-            session_id: "parent".to_owned(),
-            reason: wire::SessionCancellationReason::SESSION_CANCELLATION_REASON_UNSPECIFIED.into(),
-            ..Default::default()
-        })],
-        false,
-    ));
-    cases.push((
-        vec![encoded(wire::SessionCancelled {
-            session_id: "foreign".to_owned(),
-            reason: wire::SessionCancellationReason::SESSION_CANCELLATION_REASON_POLICY.into(),
-            ..Default::default()
-        })],
-        false,
-    ));
-    cases.push((
-        vec![encoded(wire::SessionFailed {
-            session_id: "parent".to_owned(),
-            reason: wire::SessionFailureReason::SESSION_FAILURE_REASON_EXECUTION_ERROR.into(),
-            ..Default::default()
-        })],
-        true,
-    ));
-    cases.push((
-        vec![encoded(wire::SessionFailed {
-            session_id: "parent".to_owned(),
-            reason: wire::SessionFailureReason::SESSION_FAILURE_REASON_UNSPECIFIED.into(),
-            ..Default::default()
-        })],
-        false,
-    ));
-    cases.push((
-        vec![encoded(wire::SessionFailed {
-            session_id: "foreign".to_owned(),
-            reason: wire::SessionFailureReason::SESSION_FAILURE_REASON_EXECUTION_ERROR.into(),
-            ..Default::default()
-        })],
-        false,
-    ));
-    cases.push((
-        vec![encoded(wire::SessionClosed {
-            session_id: "foreign".to_owned(),
-            ..Default::default()
-        })],
-        false,
-    ));
-    cases.push((
-        vec![
-            encoded(wire::SessionClosed {
+    let mut cases = vec![
+        (
+            vec![encoded(wire::SessionCancelled {
                 session_id: "parent".to_owned(),
+                reason: wire::SessionCancellationReason::SESSION_CANCELLATION_REASON_POLICY.into(),
                 ..Default::default()
-            }),
-            encoded(reservation("parent", "later")),
-        ],
-        false,
-    ));
-    cases.push((
-        vec![
-            encoded(reservation("parent", "same")),
-            encoded(reservation("parent", "same")),
-        ],
-        false,
-    ));
+            })],
+            true,
+        ),
+        (
+            vec![encoded(wire::SessionCancelled {
+                session_id: "parent".to_owned(),
+                reason: wire::SessionCancellationReason::SESSION_CANCELLATION_REASON_UNSPECIFIED.into(),
+                ..Default::default()
+            })],
+            false,
+        ),
+        (
+            vec![encoded(wire::SessionCancelled {
+                session_id: "foreign".to_owned(),
+                reason: wire::SessionCancellationReason::SESSION_CANCELLATION_REASON_POLICY.into(),
+                ..Default::default()
+            })],
+            false,
+        ),
+        (
+            vec![encoded(wire::SessionFailed {
+                session_id: "parent".to_owned(),
+                reason: wire::SessionFailureReason::SESSION_FAILURE_REASON_EXECUTION_ERROR.into(),
+                ..Default::default()
+            })],
+            true,
+        ),
+        (
+            vec![encoded(wire::SessionFailed {
+                session_id: "parent".to_owned(),
+                reason: wire::SessionFailureReason::SESSION_FAILURE_REASON_UNSPECIFIED.into(),
+                ..Default::default()
+            })],
+            false,
+        ),
+        (
+            vec![encoded(wire::SessionFailed {
+                session_id: "foreign".to_owned(),
+                reason: wire::SessionFailureReason::SESSION_FAILURE_REASON_EXECUTION_ERROR.into(),
+                ..Default::default()
+            })],
+            false,
+        ),
+        (
+            vec![encoded(wire::SessionClosed {
+                session_id: "foreign".to_owned(),
+                ..Default::default()
+            })],
+            false,
+        ),
+        (
+            vec![
+                encoded(wire::SessionClosed {
+                    session_id: "parent".to_owned(),
+                    ..Default::default()
+                }),
+                encoded(reservation("parent", "later")),
+            ],
+            false,
+        ),
+        (
+            vec![
+                encoded(reservation("parent", "same")),
+                encoded(reservation("parent", "same")),
+            ],
+            false,
+        ),
+    ];
     let mut wrong_kind = reservation("parent", "delegate-operation");
     wrong_kind.operation_kind = wire::OperationKind::OPERATION_KIND_TOOL.into();
     cases.push((vec![encoded(wrong_kind)], false));

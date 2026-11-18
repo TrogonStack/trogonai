@@ -264,19 +264,17 @@ fn immutable_plan_references_and_declared_collection_bounds_are_checked() {
         decoder.decode(&stored_bytes(value.encode_to_vec())).unwrap_err(),
         PlanError::InvalidPlan
     );
-    for uri in ["x".repeat(2049)] {
-        let mut value = valid_plan();
-        value
-            .working_directory
-            .get_or_insert_default()
-            .checkout
-            .get_or_insert_default()
-            .uri = uri;
-        assert_eq!(
-            decoder.decode(&stored_bytes(value.encode_to_vec())).unwrap_err(),
-            PlanError::Limit
-        );
-    }
+    let mut value = valid_plan();
+    value
+        .working_directory
+        .get_or_insert_default()
+        .checkout
+        .get_or_insert_default()
+        .uri = "x".repeat(2049);
+    assert_eq!(
+        decoder.decode(&stored_bytes(value.encode_to_vec())).unwrap_err(),
+        PlanError::Limit
+    );
     for path in ["folder\\outside", "folder%2Foutside", "C:folder", "folder\0outside"] {
         let mut value = valid_plan();
         value.working_directory.get_or_insert_default().relative_path = Some(path.into());
