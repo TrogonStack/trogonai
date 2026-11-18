@@ -960,7 +960,7 @@ index 0000000000..561c647178
 +    Tool,
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
-index f01219da74..606721b2f0 100644
+index f01219da74..7f26a7a3f6 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 @@ -29,9 +29,11 @@
@@ -994,14 +994,14 @@ index f01219da74..606721b2f0 100644
      walk: PathCost,
      clone: PathCost,
      copy: PathCost,
-@@ -172,13 +177,65 @@ enum StartupShare {
+@@ -172,13 +177,82 @@ enum StartupShare {
  }
  
  /// The budgets a managed settings document's passes have, out of the same stack, in each evaluation of the managed
 -/// settings that reads it, and the budget of the merge of the admin settings.
 +/// settings that reads it, the budget of the merge of the admin settings, the budgets of the check of whether a
-+/// managed folder keeps the user registry out, and the budgets of the parse of a registry or managed preferences
-+/// document.
++/// managed folder keeps the user registry out, the budgets of the parse of a registry or managed preferences
++/// document, and the budgets of the policy cache's read of the server-managed settings the caller hands over.
 +///
 +/// The evaluation for the effective settings has only a copy budget of its own: it reads every document from the
 +/// file cache the evaluation for the sources filled, and its merges into the folder run out at the same documents as
@@ -1015,6 +1015,23 @@ index f01219da74..606721b2f0 100644
      admin_merge: usize,
 +    held_check: HeldCheckBudgets,
 +    registry: RegistryBudgets,
++    handed_over: CacheBudgets,
++}
++
++/// How much deeper the policy cache (`pm`) reads the managed settings a host passes in than the server-managed
++/// settings. `$u` upstream reads both on the same chain, the server-managed settings through `WP` and the host's
++/// through `G7e`, and the frame `G7e` leaves under `pm` takes 16 bytes more than the one `WP` leaves, for the walk, the
++/// clone and the copy alike, on every platform measured.
++const PARENT_MANAGED_FRAME: usize = 16;
++
++/// A managed settings document the caller hands over as an object, which the policy cache (`pm` upstream) reads on
++/// the stack of the resolve.
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub(crate) enum HandedOver {
++    /// The server-managed settings, read through `WP`.
++    Remote,
++    /// The managed settings a host passes in, read through `G7e`.
++    Parent,
 +}
 +
 +/// The budgets of the reader's walk and clone in the check of whether a managed folder keeps the user registry out
@@ -1061,7 +1078,7 @@ index f01219da74..606721b2f0 100644
  }
  
  /// The budgets of the reader's walk and clone, the file cache copy and the merge into the folder in one evaluation of
-@@ -191,12 +248,47 @@ struct PassBudgets {
+@@ -191,12 +265,59 @@ struct PassBudgets {
      folder_merge: usize,
  }
  
@@ -1076,11 +1093,20 @@ index f01219da74..606721b2f0 100644
 +
  impl PolicyBudgets {
 -    fn of(self, pass: ManagedPass) -> PassBudgets {
++    fn handed_over(self, source: HandedOver) -> CacheBudgets {
++        let frame = match source {
++            HandedOver::Remote => 0,
++            HandedOver::Parent => PARENT_MANAGED_FRAME,
++        };
++        CacheBudgets {
++            walk: self.handed_over.walk.saturating_sub(frame),
++            clone: self.handed_over.clone.saturating_sub(frame),
++            copy: self.handed_over.copy.saturating_sub(frame),
++        }
++    }
++
 +    fn copy(self, pass: ManagedPass) -> usize {
-         match pass {
--            ManagedPass::Sources => self.sources,
--            ManagedPass::Origin => self.origin,
--            ManagedPass::MachinePolicy => self.machine_policy,
++        match pass {
 +            ManagedPass::Sources => self.sources.copy,
 +            ManagedPass::Effective => self.effective_copy,
 +            ManagedPass::Origin => self.origin.copy,
@@ -1089,7 +1115,10 @@ index f01219da74..606721b2f0 100644
 +    }
 +
 +    fn folder_merge(self, pass: ManagedPass) -> usize {
-+        match pass {
+         match pass {
+-            ManagedPass::Sources => self.sources,
+-            ManagedPass::Origin => self.origin,
+-            ManagedPass::MachinePolicy => self.machine_policy,
 +            ManagedPass::Sources | ManagedPass::Effective => self.sources.folder_merge,
 +            ManagedPass::Origin => self.origin.folder_merge,
 +            ManagedPass::MachinePolicy => self.machine_policy.folder_merge,
@@ -1113,7 +1142,7 @@ index f01219da74..606721b2f0 100644
          }
      }
  }
-@@ -207,9 +299,8 @@ impl NodeStack {
+@@ -207,9 +328,8 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 448 bytes per object and 240
      /// per array out of 1000451, and 288 per object and 304 per array out of 1000724. The file cache copy then takes
      /// 288 per object and 512 per array out of 1000884. At the object or array that ends a path, the walk takes 144
@@ -1125,7 +1154,7 @@ index f01219da74..606721b2f0 100644
      ///
      /// A merge takes 768 per array or object it enters out of 960611. Assigning a member takes 416 more while no merge
      /// of the process assigned one before. An array takes 1339 more when it holds members and lodash `isIndex`
-@@ -222,15 +313,27 @@ impl NodeStack {
+@@ -222,15 +342,32 @@ impl NodeStack {
      /// nested arrays for the copy, and 1244 levels around `null` for a merge.
      ///
      /// A managed settings document's reader has 997859 and 998160 for the same two passes when the sources are
@@ -1152,6 +1181,11 @@ index f01219da74..606721b2f0 100644
 +    /// and none past the roomier, and between them its answer changes from run to run. The profile takes the most
 +    /// the tighter state may have while the shape one level past its last always-read one still fails: 966927 and
 +    /// 967135, 2148 objects or 3165 arrays, an answer Node gives on some runs for anything between the two states.
++    ///
++    /// The managed settings the caller hands over as an object go through the policy cache (`pm`) on the chain of the
++    /// evaluation for the sources, outside any guard: the server-managed settings (`WP`) clone with 999274, walk with
++    /// 999002 and copy the settings the schema kept with 999130, and the managed settings a host passes in (`G7e`) have
++    /// 16 bytes less for each.
      pub const NODE_24_DARWIN_ARM64: Self = Self {
          startup: StartupShare::FromStack,
          startup_bytes: 4384,
@@ -1159,7 +1193,7 @@ index f01219da74..606721b2f0 100644
          walk: PathCost {
              object: 448,
              array: 240,
-@@ -238,7 +341,7 @@ impl NodeStack {
+@@ -238,7 +375,7 @@ impl NodeStack {
                  empty_object: 144,
                  scalar_object: 448,
                  empty_array: 176,
@@ -1168,7 +1202,7 @@ index f01219da74..606721b2f0 100644
              },
              budget: 1_000_451,
          },
-@@ -257,8 +360,8 @@ impl NodeStack {
+@@ -257,8 +394,8 @@ impl NodeStack {
              object: 288,
              array: 512,
              leaves: LeafCost {
@@ -1179,7 +1213,7 @@ index f01219da74..606721b2f0 100644
                  empty_array: 512,
                  scalar_array: 512,
              },
-@@ -277,22 +380,45 @@ impl NodeStack {
+@@ -277,22 +414,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 997_859,
                  clone: 998_160,
@@ -1225,10 +1259,15 @@ index f01219da74..606721b2f0 100644
 +                    copy: 966_368,
 +                },
 +            },
++            handed_over: CacheBudgets {
++                walk: 999_002,
++                clone: 999_274,
++                copy: 999_130,
++            },
          },
      };
  
-@@ -310,17 +436,28 @@ impl NodeStack {
+@@ -310,17 +475,34 @@ impl NodeStack {
      /// merge.
      ///
      /// A managed settings document's reader has 999552 and 999840 for the same two passes when the sources are
@@ -1252,6 +1291,12 @@ index f01219da74..606721b2f0 100644
 +    /// resumed from a tool completion, Node runs the check in one of two stack states 23040 bytes apart from one
 +    /// process to the next, and the profile takes the most the tighter may have, as on macOS, in steps of 16 bytes:
 +    /// 980224 and 980464, 1914 objects or 3062 arrays.
++    ///
++    /// The managed settings the caller hands over as an object go through the policy cache (`pm`) on the chain of the
++    /// evaluation for the sources, outside any guard: the server-managed settings (`WP`) clone with 1000976, walk with
++    /// 1000720 and copy the settings the schema kept with 1000368, and the managed settings a host passes in (`G7e`)
++    /// have 16 bytes less for each. Every clone between 1000960 and 1001279 gives the same answers, and 1000976 is the
++    /// least that leaves the host's settings that range.
      ///
      /// The command line and environment take nothing from these budgets, so [`NodeStack::with_startup_bytes`] changes
      /// nothing here; the goldens were recorded with the same 4384 bytes as on macOS.
@@ -1262,7 +1307,7 @@ index f01219da74..606721b2f0 100644
          walk: PathCost {
              object: 512,
              array: 272,
-@@ -367,22 +504,45 @@ impl NodeStack {
+@@ -367,22 +549,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 999_552,
                  clone: 999_840,
@@ -1308,10 +1353,15 @@ index f01219da74..606721b2f0 100644
 +                    copy: 980_320,
 +                },
 +            },
++            handed_over: CacheBudgets {
++                walk: 1_000_720,
++                clone: 1_000_976,
++                copy: 1_000_368,
++            },
          },
      };
  
-@@ -391,19 +551,28 @@ impl NodeStack {
+@@ -391,19 +601,34 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 608 bytes per object and 272
      /// per array out of 1002688, and 304 per object and per array out of 1002760. The file cache copy then takes 608
      /// per object and 640 per array out of 1002496. At the object or array that ends a path, the walk and the copy
@@ -1344,10 +1394,16 @@ index f01219da74..606721b2f0 100644
 +    /// resumed from a tool completion, Node runs the check in one of two stack states 17632 bytes apart from one
 +    /// process to the next, and the profile takes the most the tighter may have, as on macOS, in steps of 16 bytes:
 +    /// 985824 and 986160, 1621 objects or 3242 arrays.
++    ///
++    /// The managed settings the caller hands over as an object go through the policy cache (`pm`) on the chain of the
++    /// evaluation for the sources, outside any guard: the server-managed settings (`WP`) clone with 1001088, walk with
++    /// 1001104 and copy the settings the schema kept with 1000720, and the managed settings a host passes in (`G7e`)
++    /// have 16 bytes less for each. Every clone between 1001072 and 1001375 gives the same answers, and 1001088 is the
++    /// least that leaves the host's settings that range.
      ///
      /// When a background compile lands while a merge runs, a merge after the one that compiled the `isIndex` pattern
      /// to bytecode can run out at 1362 levels instead of compiling the pattern there, and any `later_compile` from 337
-@@ -413,6 +582,7 @@ impl NodeStack {
+@@ -413,6 +638,7 @@ impl NodeStack {
      pub const NODE_24_LINUX_X64: Self = Self {
          startup: StartupShare::BesideStack,
          startup_bytes: 4384,
@@ -1355,7 +1411,7 @@ index f01219da74..606721b2f0 100644
          walk: PathCost {
              object: 608,
              array: 272,
-@@ -441,7 +611,7 @@ impl NodeStack {
+@@ -441,7 +667,7 @@ impl NodeStack {
              leaves: LeafCost {
                  empty_object: 144,
                  scalar_object: 608,
@@ -1364,7 +1420,7 @@ index f01219da74..606721b2f0 100644
                  scalar_array: 640,
              },
              budget: 1_002_496,
-@@ -459,22 +629,45 @@ impl NodeStack {
+@@ -459,22 +685,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 999_992,
                  clone: 1_000_312,
@@ -1411,10 +1467,15 @@ index f01219da74..606721b2f0 100644
 +                    copy: 985_712,
 +                },
 +            },
++            handed_over: CacheBudgets {
++                walk: 1_001_104,
++                clone: 1_001_088,
++                copy: 1_000_720,
++            },
          },
      };
  
-@@ -513,7 +706,21 @@ impl NodeStack {
+@@ -513,7 +767,18 @@ impl NodeStack {
          }
      }
  
@@ -1425,10 +1486,7 @@ index f01219da74..606721b2f0 100644
 +    #[cfg(test)]
 +    #[must_use]
 +    pub(crate) const fn resumed_by(self, offset: isize) -> Self {
-+        Self {
-+            caller: offset,
-+            ..self
-+        }
++        Self { caller: offset, ..self }
 +    }
 +
      fn available(self, budget: usize) -> usize {
@@ -1436,7 +1494,7 @@ index f01219da74..606721b2f0 100644
          match self.startup {
              StartupShare::FromStack => budget.saturating_sub(self.startup_bytes),
              StartupShare::BesideStack => budget,
-@@ -527,9 +734,9 @@ impl NodeStack {
+@@ -527,9 +792,9 @@ impl NodeStack {
              .min(self.clone.deepest(self.available(self.clone.budget)))
      }
  
@@ -1449,7 +1507,7 @@ index f01219da74..606721b2f0 100644
          self.walk
              .deepest(self.available(budgets.walk))
              .min(self.clone.deepest(self.available(budgets.clone)))
-@@ -541,9 +748,9 @@ impl NodeStack {
+@@ -541,31 +806,54 @@ impl NodeStack {
              && self.clone.fits(self.available(self.clone.budget), document)
      }
  
@@ -1459,10 +1517,28 @@ index f01219da74..606721b2f0 100644
 +    /// Whether `reader` walks and copies `document` without running out of stack.
 +    pub(crate) fn reads_policy(self, reader: PolicyReader, document: &Map<String, Value>) -> bool {
 +        let budgets = self.policy.reader(reader);
++        self.walk.fits_object(self.available(budgets.walk), document)
++            && self.clone.fits_object(self.available(budgets.clone), document)
++    }
++
++    /// Whether the policy cache clones and walks `document`, which the caller handed over as `source`, without running
++    /// out of stack (`j7e` upstream, which clones the document with `structuredClone` and walks the clone).
++    pub(crate) fn reads_handed_over(self, source: HandedOver, document: &Map<String, Value>) -> bool {
++        let budgets = self.policy.handed_over(source);
          self.walk.fits_object(self.available(budgets.walk), document)
              && self.clone.fits_object(self.available(budgets.clone), document)
      }
-@@ -553,19 +760,26 @@ impl NodeStack {
+ 
++    /// Whether the policy cache runs out of stack copying `settings`, which it kept from a document the caller handed
++    /// over as `source` (`oX` upstream).
++    pub(crate) fn handed_over_copy_overflows(self, source: HandedOver, settings: &Map<String, Value>) -> bool {
++        !self
++            .copy
++            .fits_object(self.available(self.policy.handed_over(source).copy), settings)
++    }
++
+     /// Whether the file cache runs out of stack copying `settings`, which the reader kept from a settings file.
+     pub(crate) fn copy_overflows(self, settings: &Map<String, Value>) -> bool {
          !self.copy.fits_object(self.available(self.copy.budget), settings)
      }
  
@@ -1493,7 +1569,7 @@ index f01219da74..606721b2f0 100644
      pub(crate) fn merge_within(
          self,
          call: NodeMergeCall,
-@@ -576,7 +790,7 @@ impl NodeStack {
+@@ -576,7 +864,7 @@ impl NodeStack {
      ) -> NodeMerge {
          let budget = match call {
              NodeMergeCall::Source => self.merge_budget,
@@ -1502,7 +1578,7 @@ index f01219da74..606721b2f0 100644
              NodeMergeCall::Admin => self.policy.admin_merge,
          };
          let room = MergeRoom {
-@@ -618,3 +832,7 @@ fn is_container(value: &Value) -> bool {
+@@ -618,3 +906,7 @@ fn is_container(value: &Value) -> bool {
  #[cfg(test)]
  #[path = "node_stack_tests.rs"]
  mod tests;
@@ -1573,10 +1649,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..e9d94e2790
+index 0000000000..03bad317ff
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,324 @@
+@@ -0,0 +1,451 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -1591,7 +1667,7 @@ index 0000000000..e9d94e2790
 +use serde_json::{Map, Value, json};
 +
 +use crate::{
-+    DeepJsonValue, NodeStack, ResolveSettingsError, ResolveSettingsOptions, ResolverState, js_stringify,
++    DeepJsonValue, NodeStack, PolicyRereads, ResolveSettingsError, ResolveSettingsOptions, ResolverState, js_stringify,
 +    node_stack_catch::{self, StackCatch},
 +    resolve_settings_with_state,
 +};
@@ -1599,7 +1675,7 @@ index 0000000000..e9d94e2790
 +#[path = "../tests/support/fake_settings_host.rs"]
 +mod fake_settings_host;
 +
-+use fake_settings_host::FakeHost;
++use fake_settings_host::{FakeHost, exited, ok};
 +
 +type Failure = Box<dyn std::error::Error + Send + Sync>;
 +type TestResult = Result<(), Failure>;
@@ -1627,6 +1703,31 @@ index 0000000000..e9d94e2790
 +const DEEP_STACK_BYTES: usize = 256 * 1024 * 1024;
 +
 +const DROP_INS: &str = "/etc/claude-code/managed-settings.d";
++
++/// The entry point an organization case starts the session as.
++const ORGANIZATION_ENTRYPOINT: (&str, &str) = ("CLAUDE_CODE_ENTRYPOINT", "remote_cowork");
++
++/// What the model runs to read the machine and the user registry policy under WSL, as the fake host keys a command.
++const MACHINE_QUERY: &str = "/mnt/c/Windows/System32/reg.exe query HKLM\\SOFTWARE\\Policies\\ClaudeCode /v Settings";
++const USER_QUERY: &str = "/mnt/c/Windows/System32/reg.exe query HKCU\\SOFTWARE\\Policies\\ClaudeCode /v Settings";
++
++/// What the recorder's stand-in for `reg.exe` prints for a key it holds no value for, before it exits with 1.
++const REGISTRY_ABSENT: &str = "ERROR: The system was unable to find the specified registry key or value.\n";
++
++/// The kernel the second resolve of an organization case finds, and how long after the first it starts.
++const WSL_KERNEL: (&str, &str) = ("/proc/version", "Linux version 5.15.153.1-microsoft-standard-WSL2\n");
++const WSL_AT_MS: u64 = 1_800_000;
++
++/// How the held registry document of the recorder's `org_cache_kept` cases starts: objects under a member of a server
++/// entry, where every other organization case holds arrays or nothing. Only those cases find the drop-in
++/// `KEPT_DROP_IN` at their second resolve.
++const KEPT_HELD_START: &str =
++    r#"{"permissions":{"deny":["Bash(curl:*)"]},"allowedMcpServers":[{"serverName":"h","z":{"#;
++const KEPT_DROP_IN: (&str, &str, &str) = (
++    "/etc/claude-code/managed-settings.d/k.json",
++    "k.json",
++    r#"{"permissions":{"deny":["Bash(dd:*)"]}}"#,
++);
 +
 +/// Where the fake host keeps the file each place of a case names, and the drop-in name it lists for it.
 +fn place_path(place: &str) -> Option<(&'static str, Option<&'static str>)> {
@@ -1685,17 +1786,57 @@ index 0000000000..e9d94e2790
 +    }
 +}
 +
++/// What `reg.exe` prints for the `Settings` value holding `document`, as the recorder writes it for its stand-in.
++fn registry_text(document: &str) -> String {
++    format!("\n    Settings    REG_SZ    {document}\n\n")
++}
++
++/// One case as the model runs it: its host and options, the drop-ins its host lists, and, for an organization case,
++/// the steps it runs after its first resolve.
++struct Case {
++    host: FakeHost,
++    options: ResolveSettingsOptions,
++    drop_ins: Vec<&'static str>,
++    organization: Option<Organization>,
++}
++
++/// The steps of an organization case after its first resolve, which differ only in the drop-in its second resolve
++/// finds.
++#[derive(Clone, Copy, Eq, PartialEq)]
++enum Organization {
++    Plain,
++    Kept,
++}
++
 +/// The host and options of one case: the files it puts on disk, and the managed settings it hands over as options.
-+fn case(files: &Value) -> Result<(FakeHost, ResolveSettingsOptions), Failure> {
++/// A case holding a machine registry policy (`hklm`) is an organization case, which the recorder runs as root in an
++/// organization session with no settings sources, its stand-in for `reg.exe` answering that policy and no user one.
++fn case(files: &Value) -> Result<Case, Failure> {
 +    let mut host = FakeHost::linux();
 +    let mut drop_ins = Vec::new();
 +    let mut options = Map::new();
++    let mut organization = None;
 +    for file in files.as_array().ok_or("a case has no files")? {
 +        let place = file[0].as_str().ok_or("a settings file has no place")?;
 +        if let Some(name) = option_name(place) {
 +            let option =
 +                crate::deep_json::parse_value(&content(file)?).ok_or("a managed settings option is not JSON")?;
 +            options.insert(name.to_owned(), option);
++            continue;
++        }
++        if place == "hklm" {
++            let document = content(file)?;
++            organization = Some(if document.starts_with(KEPT_HELD_START) {
++                Organization::Kept
++            } else {
++                Organization::Plain
++            });
++            host = host
++                .variable(ORGANIZATION_ENTRYPOINT.0, ORGANIZATION_ENTRYPOINT.1)
++                .command(MACHINE_QUERY, ok(&registry_text(&document)))
++                .command(USER_QUERY, exited(1, REGISTRY_ABSENT));
++            host.root = true;
++            options.insert("settingSources".to_owned(), json!([]));
 +            continue;
 +        }
 +        let (path, drop_in) = place_path(place).ok_or("a settings file has an unknown place")?;
@@ -1705,7 +1846,12 @@ index 0000000000..e9d94e2790
 +    if !drop_ins.is_empty() {
 +        host = host.directory(DROP_INS, &drop_ins);
 +    }
-+    Ok((host, serde_json::from_value(Value::Object(options))?))
++    Ok(Case {
++        host,
++        options: serde_json::from_value(Value::Object(options))?,
++        drop_ins,
++        organization,
++    })
 +}
 +
 +/// What one resolve answers, as the recorder prints it: the effective settings, the machine policy and the managed
@@ -1776,19 +1922,76 @@ index 0000000000..e9d94e2790
 +/// What `stack` answers for a recorded case at its call position, and its causal stage: a second call runs one
 +/// resolve with the same options first, as a long-lived process does, and answers with the one after it.
 +fn answer_at(files: &Value, call: &str, stack: NodeStack) -> Result<(Value, String), Failure> {
-+    let (host, options) = case(files)?;
-+    let state = ResolverState::new().with_node_stack(stack);
++    let Case {
++        host,
++        options,
++        drop_ins,
++        organization,
++    } = case(files)?;
 +    let _ = node_stack_catch::take();
-+    let answered = match call {
-+        "first" => answer(&host, &options, &state)?,
-+        "second" => {
-+            answer(&host, &options, &state)?;
-+            answer(&host, &options, &state)?
++    let answered = match organization {
++        Some(organization) => organization_answer(host, &options, drop_ins, organization, call, stack)?,
++        None => {
++            let state = ResolverState::new().with_node_stack(stack);
++            match call {
++                "first" => answer(&host, &options, &state)?,
++                "second" => {
++                    answer(&host, &options, &state)?;
++                    answer(&host, &options, &state)?
++                }
++                _ => return Err("an answer names an unknown call position".into()),
++            }
 +        }
-+        _ => return Err("an answer names an unknown call position".into()),
 +    };
 +    let stage = stage(&node_stack_catch::take(), &answered);
 +    Ok((answered, stage))
++}
++
++/// What an organization case answers. The recorder resolves it twice in one process, sharing every cache: once as the
++/// process starts, and once more `WSL_AT_MS` later under the WSL kernel, when the machine policy is read again and its
++/// held registry document re-read. It prints one answer per resolve, each member listing them in order, or the
++/// `RangeError` alone once a resolve rejects, since nothing catches it there and the process ends. A second call first
++/// resolves with the same options before the first step and lets whatever that answers go, as the oracle's prime does.
++/// The machine policy re-reads run inline, so the fake clock alone decides when each one ends.
++fn organization_answer(
++    host: FakeHost,
++    options: &ResolveSettingsOptions,
++    mut drop_ins: Vec<&'static str>,
++    organization: Organization,
++    call: &str,
++    stack: NodeStack,
++) -> Result<Value, Failure> {
++    let state = ResolverState::with_rereads(PolicyRereads::Inline).with_node_stack(stack);
++    match call {
++        "first" => {}
++        "second" => {
++            let _primed = answer(&host, options, &state);
++        }
++        _ => return Err("an answer names an unknown call position".into()),
++    }
++    let first = answer(&host, options, &state)?;
++    if !first["error"].is_null() {
++        return Ok(first);
++    }
++    let mut later = host.file(WSL_KERNEL.0, WSL_KERNEL.1).at(WSL_AT_MS);
++    if organization == Organization::Kept {
++        drop_ins.push(KEPT_DROP_IN.1);
++        later = later
++            .file(KEPT_DROP_IN.0, KEPT_DROP_IN.2)
++            .directory(DROP_INS, &drop_ins);
++    }
++    let second = answer(&later, options, &state)?;
++    if !second["error"].is_null() {
++        return Ok(second);
++    }
++    let each = |member: &str| json!([first[member].clone(), second[member].clone()]);
++    Ok(json!({
++        "effective": each("effective"),
++        "exact": each("exact"),
++        "machine_policy": each("machine_policy"),
++        "managed_source": each("managed_source"),
++        "error": null,
++    }))
 +}
 +
 +fn offset(value: &Value) -> Result<isize, &'static str> {
@@ -2043,11 +2246,15 @@ index 0000000000..1517a24b18
 +    })
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_tests.rs
-index f1e0862073..eb52f1f8a6 100644
+index f1e0862073..a37761c280 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_tests.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_tests.rs
-@@ -5,8 +5,8 @@ use serde_json::{Map, Value, json};
- use super::NodeStack;
+@@ -2,11 +2,11 @@ use std::cell::Cell;
+ 
+ use serde_json::{Map, Value, json};
+ 
+-use super::NodeStack;
++use super::{HandedOver, NodeStack};
  use crate::{
      node_managed_pass::ManagedPass, node_merge::NodeMerge, node_merge_call::NodeMergeCall,
 -    node_merge_warmth::MergeWarmth, settings_merge_spec::MergeSpec, settings_resolve::on_engine_stack,
@@ -2232,7 +2439,7 @@ index f1e0862073..eb52f1f8a6 100644
              (NodeMergeCall::Folder(ManagedPass::Origin), 1243),
              (NodeMergeCall::Folder(ManagedPass::MachinePolicy), 1244),
              (NodeMergeCall::Admin, 1244),
-@@ -400,3 +540,113 @@ fn the_default_profile_is_the_one_for_the_platform_the_crate_is_built_for() {
+@@ -400,3 +540,152 @@ fn the_default_profile_is_the_one_for_the_platform_the_crate_is_built_for() {
          (expected, expected)
      );
  }
@@ -2310,6 +2517,45 @@ index f1e0862073..eb52f1f8a6 100644
 +        }
 +    }
 +    Ok(())
++}
++
++#[test]
++fn the_policy_cache_reads_and_copies_handed_over_settings_within_their_budgets() -> Result<(), ResolveSettingsError> {
++    on_engine_stack(|| {
++        for (stack, objects, arrays, copied) in [
++            (NodeStack::NODE_24_DARWIN_ARM64, 2220, 3271, 1942),
++            (NodeStack::NODE_24_LINUX_ARM64, 1954, 3127, 1785),
++            (NodeStack::NODE_24_LINUX_X64, 1646, 3292, 1562),
++        ] {
++            for source in [HandedOver::Remote, HandedOver::Parent] {
++                assert!(
++                    stack.reads_handed_over(source, &nested(objects, 0)),
++                    "{stack:?} {source:?}"
++                );
++                assert!(
++                    !stack.reads_handed_over(source, &nested(objects + 1, 0)),
++                    "{stack:?} {source:?}"
++                );
++                assert!(
++                    stack.reads_handed_over(source, &nested(1, arrays)),
++                    "{stack:?} {source:?}"
++                );
++                assert!(
++                    !stack.reads_handed_over(source, &nested(1, arrays + 1)),
++                    "{stack:?} {source:?}"
++                );
++                assert!(
++                    !stack.handed_over_copy_overflows(source, &nested(1, copied)),
++                    "{stack:?} {source:?}"
++                );
++                assert!(
++                    stack.handed_over_copy_overflows(source, &nested(1, copied + 1)),
++                    "{stack:?} {source:?}"
++                );
++            }
++        }
++        Ok(())
++    })
 +}
 +
 +#[test]
@@ -2807,18 +3053,28 @@ index 609b2a8241..3680aaf3a0 100644
              }
              parsed
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
-index a915357f75..1bd81be1d8 100644
+index a915357f75..03b0b5fd5c 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
-@@ -11,6 +11,7 @@ use crate::{
+@@ -11,6 +11,8 @@ use crate::{
      js_array::{StringTooLong, settle},
      node_merge_call::NodeMergeCall,
      node_merge_warmth::MergeWarmth,
++    node_stack::{HandedOver, NodeStack},
 +    node_stack_catch::Noted,
      python_json_value::PythonJsonValue,
      settings_dialect::SettingsDialect,
      settings_json::js_stringify,
-@@ -217,7 +218,8 @@ pub fn resolve_python_settings_with_state<H: SettingsHost>(
+@@ -27,7 +29,7 @@ use crate::{
+         local_settings_path, project_settings_path, read_settings_text, resolve_cwd, user_settings_path,
+     },
+     settings_resolve_state::ResolverState,
+-    settings_resolve_tier::TierRead,
++    settings_resolve_tier::{LoadState, TierRead},
+     settings_resolve_values::{SettingsMap, in_schema_order, merge_unbounded, merge_within},
+     settings_strings::{
+         SurrogateStandIns, approximate_strings, array_mark, escape_stand_ins, reserve_text, reserve_value,
+@@ -217,7 +219,8 @@ pub fn resolve_python_settings_with_state<H: SettingsHost>(
  
  /// Runs `work` on a thread with [`SETTINGS_ENGINE_STACK_BYTES`] of stack. The engine walks a settings document
  /// recursively, once per level at several steps, the Python dialect reads documents nested almost as deep as
@@ -2828,7 +3084,7 @@ index a915357f75..1bd81be1d8 100644
  pub(crate) fn on_engine_stack<T: Send>(
      work: impl FnOnce() -> Result<T, ResolveSettingsError> + Send,
  ) -> Result<T, ResolveSettingsError> {
-@@ -225,10 +227,13 @@ pub(crate) fn on_engine_stack<T: Send>(
+@@ -225,10 +228,13 @@ pub(crate) fn on_engine_stack<T: Send>(
          let engine = thread::Builder::new()
              .name("settings-engine".to_owned())
              .stack_size(SETTINGS_ENGINE_STACK_BYTES)
@@ -2844,7 +3100,38 @@ index a915357f75..1bd81be1d8 100644
              Err(payload) => panic::resume_unwind(payload),
          }
      })
-@@ -266,6 +271,9 @@ fn resolve_core<H: SettingsHost>(
+@@ -260,12 +266,40 @@ fn decode(mut result: Value) -> Result<ResolvedSettings, ResolveSettingsError> {
+     serde_json::from_value(result).map_err(ResolveSettingsError::Decode)
+ }
+ 
++/// `pm` upstream for a managed document the caller hands over as `source`, read the way `file` is read. In the
++/// TypeScript dialect the policy cache first clones the document with `structuredClone` and walks the clone (`j7e`),
++/// then hands out another `structuredClone` of the settings the schema kept (`oX`), on the stack of the evaluation of
++/// the sources (`$u`), and nothing catches the `RangeError` when one of them runs out of it.
++fn read_handed_over(
++    node: NodeStack,
++    dialect: SettingsDialect,
++    source: HandedOver,
++    document: SettingsMap,
++    file: &str,
++) -> Result<TierRead, ResolveSettingsError> {
++    let on_node = dialect == SettingsDialect::TypeScript;
++    if on_node && !node.reads_handed_over(source, &document) {
++        return Err(ResolveSettingsError::MaximumCallStack);
++    }
++    let read = TierRead::from_pm(document, dialect, file);
++    if on_node
++        && let Some(settings) = read.settings.as_ref().filter(|_| read.load_state == LoadState::Loaded)
++        && node.handed_over_copy_overflows(source, settings)
++    {
++        return Err(ResolveSettingsError::MaximumCallStack);
++    }
++    Ok(read)
++}
++
+ fn resolve_core<H: SettingsHost>(
+     host: &H,
+     options: &ResolveSettingsOptions,
      dialect: SettingsDialect,
      state: &ResolverState,
  ) -> Result<Value, ResolveSettingsError> {
@@ -2854,7 +3141,7 @@ index a915357f75..1bd81be1d8 100644
      let cwd = resolve_cwd(host, options.cwd.as_deref()).map_err(ResolveSettingsError::CurrentDirectory)?;
      let stack = state.python_c_stack();
      let node = state.node_stack();
-@@ -282,7 +290,6 @@ fn resolve_core<H: SettingsHost>(
+@@ -282,7 +316,6 @@ fn resolve_core<H: SettingsHost>(
          .clone()
          .map(crate::DeepJsonObject::into_object);
      let kind = state.platform(host);
@@ -2862,7 +3149,26 @@ index a915357f75..1bd81be1d8 100644
      let evaluation = reading.evaluation.in_effect(asks_organization(host));
      let outcome_lost = reading.hklm.as_ref().map(|outcome| outcome.lost_the_answer());
      let mut texts: Vec<(&str, Option<PathBuf>, Option<String>)> = Vec::new();
-@@ -338,6 +345,7 @@ fn resolve_core<H: SettingsHost>(
+@@ -328,16 +361,21 @@ fn resolve_core<H: SettingsHost>(
+         reserve_managed_texts(host, kind);
+     }
+     // Upstream reads the managed settings a host passes in and the server-managed settings through the policy
+-    // schema, as it reads any managed document handed over as an object (`pm`), and never reads an empty one.
+-    let parent = parent
+-        .filter(|parent| !parent.is_empty())
+-        .and_then(|parent| TierRead::from_pm(parent, dialect, PARENT_MANAGED_FILE).settings);
++    // schema, as it reads any managed document handed over as an object (`pm`), and never reads an empty one. `$u`
++    // reads the server-managed settings (`WP`) before the host's (`G7e`).
+     let remote = remote
+         .filter(|remote| !remote.is_empty())
+-        .map(|remote| TierRead::from_pm(remote, dialect, REMOTE_MANAGED_FILE));
++        .map(|remote| read_handed_over(node, dialect, HandedOver::Remote, remote, REMOTE_MANAGED_FILE))
++        .transpose()?;
++    let parent = parent
++        .filter(|parent| !parent.is_empty())
++        .map(|parent| read_handed_over(node, dialect, HandedOver::Parent, parent, PARENT_MANAGED_FILE))
++        .transpose()?
++        .and_then(|parent| parent.settings);
  
      let parsed = ParsedFiles::default();
      let warmth = Cell::new(MergeWarmth::default());
@@ -2870,7 +3176,7 @@ index a915357f75..1bd81be1d8 100644
      let PolicyResolution {
          settings: policy_settings,
          origin: settings_origin,
-@@ -389,8 +397,42 @@ fn resolve_core<H: SettingsHost>(
+@@ -389,8 +427,42 @@ fn resolve_core<H: SettingsHost>(
          per_source.push((name, path, settings));
      }
  
@@ -2914,7 +3220,7 @@ index a915357f75..1bd81be1d8 100644
          if let Some(settings) = settings {
              let merged = match dialect {
                  SettingsDialect::Python => merge_unbounded(&mut effective, settings),
-@@ -423,14 +465,14 @@ fn resolve_core<H: SettingsHost>(
+@@ -423,14 +495,14 @@ fn resolve_core<H: SettingsHost>(
          (settings_origin, file_did_not_load)
      };
      let origin = origin.map(|origin| origin.as_str());
@@ -4979,35 +5285,84 @@ index 7ba697ec66..889e01b55b 100644
 +    assert_eq!(machine_reads(&host), 1);
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/tests/support/fake_settings_host.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/tests/support/fake_settings_host.rs
-index 8439fb2299..4e201b1cad 100644
+index 8439fb2299..c6edbae7d7 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/tests/support/fake_settings_host.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/tests/support/fake_settings_host.rs
-@@ -43,6 +43,8 @@ pub struct FakeHost {
+@@ -43,6 +43,11 @@ pub struct FakeHost {
      pub held: Arc<(Mutex<bool>, Condvar)>,
      /// Whether running a command fails the read the way a host that throws does.
      pub throws: bool,
 +    /// Whether asking for the process working directory fails, as `process.cwd()` throws once it was removed.
 +    pub cwd_unavailable: bool,
++    /// Whether the process runs as root, with every user and group id 0, as an organization session the recorder
++    /// starts does; otherwise the platform has no process ids.
++    pub root: bool,
  }
  
  /// A copy sees the files and commands as they are now and the clock where it stands now, and records its runs
-@@ -64,6 +66,7 @@ impl Clone for FakeHost {
+@@ -64,6 +69,8 @@ impl Clone for FakeHost {
              clock_ms: AtomicU64::new(self.clock_ms.load(Ordering::SeqCst)),
              held: Arc::clone(&self.held),
              throws: self.throws,
 +            cwd_unavailable: self.cwd_unavailable,
++            root: self.root,
          }
      }
  }
-@@ -85,6 +88,7 @@ impl FakeHost {
+@@ -85,6 +92,8 @@ impl FakeHost {
              clock_ms: AtomicU64::new(0),
              held: Arc::new((Mutex::new(false), Condvar::new())),
              throws: false,
 +            cwd_unavailable: false,
++            root: false,
          }
      }
  
-@@ -407,6 +411,9 @@ impl CurrentDirectory for FakeHost {
+@@ -305,28 +314,29 @@ impl CheckWritable for FakeHost {
+     }
+ }
+ 
+-/// The process ids of a platform without them, so nothing asks the maps for ownership.
++/// The process ids of a platform without them, so nothing asks the maps for ownership, unless the process runs as
++/// root, whose ids settle every write check before any owner is asked.
+ impl EffectiveUserId for FakeHost {
+     fn effective_user_id(&self) -> Option<u32> {
+-        None
++        self.root.then_some(0)
+     }
+ }
+ 
+ impl RealUserId for FakeHost {
+     fn real_user_id(&self) -> Option<u32> {
+-        None
++        self.root.then_some(0)
+     }
+ }
+ 
+ impl EffectiveGroupId for FakeHost {
+     fn effective_group_id(&self) -> Option<u32> {
+-        None
++        self.root.then_some(0)
+     }
+ }
+ 
+ impl RealGroupId for FakeHost {
+     fn real_group_id(&self) -> Option<u32> {
+-        None
++        self.root.then_some(0)
+     }
+ }
+ 
+@@ -334,7 +344,7 @@ impl SupplementaryGroupIds for FakeHost {
+     type Error = io::Error;
+ 
+     fn supplementary_group_ids(&self) -> Option<Result<Vec<u32>, io::Error>> {
+-        None
++        self.root.then(|| Ok(vec![0]))
+     }
+ }
+ 
+@@ -407,6 +417,9 @@ impl CurrentDirectory for FakeHost {
      type Error = io::Error;
  
      fn current_dir(&self) -> Result<PathBuf, io::Error> {
