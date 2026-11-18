@@ -4037,3 +4037,114 @@ signing_secret = "slack-secret"
         vec!["github/primary and slack/primary both use stream_name `EVENTS`"]
     );
 }
+
+#[test]
+fn generic_webhooks_enable_an_independent_source_without_provider_integrations() {
+    let file = write_toml("[webhooks]\n");
+    let config = load(Some(file.path())).expect("generic webhook config must load");
+
+    assert!(config.has_any_source());
+    assert_eq!(
+        config.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(604_800).unwrap())
+    );
+}
+
+#[test]
+fn generic_webhooks_retention_contributes_to_claim_check_lifetime() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 1209600\n");
+    let config = load(Some(file.path())).expect("generic webhook config must load");
+
+    assert_eq!(
+        config.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(1_209_600).unwrap())
+    );
+}
+
+#[test]
+fn generic_webhooks_can_be_disabled_without_requiring_infrastructure() {
+    let file = write_toml("[webhooks]\nstatus = 'disabled'\n");
+    let config = load(Some(file.path())).expect("disabled webhook configuration must load");
+
+    assert!(config.webhooks.is_none());
+    assert!(!config.has_any_source());
+    assert_eq!(config.max_stream_max_age(), None);
+}
+
+#[test]
+fn generic_webhooks_reject_zero_retention_and_report_the_setting() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 0\n");
+
+    let Err(ConfigError::Validation(errors)) = load(Some(file.path())) else {
+        panic!("zero webhook retention must be a configuration error");
+    };
+    assert!(matches!(
+        errors.as_ref(),
+        [ConfigValidationError::InvalidField {
+            source_name: "webhooks",
+            field: "configuration",
+            error,
+        }] if matches!(
+            error.downcast_ref::<crate::webhooks::config::WebhookConfigError>(),
+            Some(crate::webhooks::config::WebhookConfigError::ZeroDuration {
+                field: "stream_max_age_secs",
+                source: ZeroDurationError,
+            })
+        )
+    ));
+    assert!(errors.iter().any(|error| error.contains("stream_max_age_secs")));
+}
+
+#[test]
+fn generic_webhooks_cannot_deduplicate_beyond_the_retained_delivery_history() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 60\nduplicate_window_secs = 61\n");
+
+    assert!(matches!(load(Some(file.path())), Err(ConfigError::Validation(_))));
+}
+
+#[test]
+fn generic_webhooks_reject_invalid_infrastructure_configuration() {
+    for setting in [
+        "registry_bucket = 'bad.bucket'",
+        "subject_prefix = 'webhooks.*'",
+        "stream_name = 'WEBHOOKS.*'",
+        "admission_timeout_secs = 0",
+        "duplicate_window_secs = 0",
+        "duplicate_window_secs = 604801",
+        "unknown_setting = 'refuse'",
+    ] {
+        let file = write_toml(&format!("[webhooks]\n{setting}\n"));
+        assert!(load(Some(file.path())).is_err(), "accepted {setting}");
+    }
+}
+
+#[test]
+fn generic_webhooks_refuse_subjects_over_the_credential_stream() {
+    let file = write_toml(&format!(
+        "[webhooks]\nsubject_prefix = '{}'\n",
+        crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX
+    ));
+
+    assert!(load(Some(file.path())).is_err());
+}
+
+#[test]
+fn generic_webhooks_refuse_overlapping_provider_subjects() {
+    let file = write_toml(
+        "[webhooks]\nsubject_prefix = 'github'\n\
+         [sources.github.integrations.primary]\nsubject_prefix = 'github.primary'\n\
+         [sources.github.integrations.primary.webhook]\nwebhook_secret = 'test-fixture'\n",
+    );
+
+    assert!(load(Some(file.path())).is_err());
+}
+
+#[test]
+fn generic_webhooks_refuse_duplicate_stream_names() {
+    let file = write_toml(&format!(
+        "[webhooks]\nstream_name = '{}'\n",
+        crate::credential::constants::CREDENTIAL_STREAM
+    ));
+
+    assert!(load(Some(file.path())).is_err());
+}

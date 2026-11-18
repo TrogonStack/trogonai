@@ -16,11 +16,12 @@ pub enum SourceKind {
     Slack,
     Telegram,
     Twitter,
+    Webhook,
     Zoom,
 }
 
 impl SourceKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Datadog,
         Self::Discord,
         Self::GitHub,
@@ -35,6 +36,7 @@ impl SourceKind {
         Self::Slack,
         Self::Telegram,
         Self::Twitter,
+        Self::Webhook,
         Self::Zoom,
     ];
 
@@ -58,6 +60,7 @@ impl SourceKind {
             Self::Slack => "slack",
             Self::Telegram => "telegram",
             Self::Twitter => "twitter",
+            Self::Webhook => "webhook",
             Self::Zoom => "zoom",
         }
     }
