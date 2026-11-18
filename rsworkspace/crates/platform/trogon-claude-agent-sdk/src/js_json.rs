@@ -56,10 +56,6 @@ impl serde_json::ser::Formatter for JsFormatter {
         }
     }
 
-    fn write_f32<W: ?Sized + Write>(&mut self, writer: &mut W, value: f32) -> io::Result<()> {
-        self.write_f64(writer, f64::from(value))
-    }
-
     fn write_f64<W: ?Sized + Write>(&mut self, writer: &mut W, value: f64) -> io::Result<()> {
         writer.write_all(js_float(value).as_bytes())
     }
