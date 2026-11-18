@@ -42,6 +42,18 @@ def run_context():
     return getattr(RUN, "context", None) or CONTEXT
 
 
+def in_call(call):
+    """Sets the call position of the runs this thread starts from now on; None goes back to R3_CALL. A driver that runs
+    both positions on several threads sets it per thread, so one thread's runs never take another thread's position."""
+    if call is not None and call not in ("first", "second"):
+        raise NativeViolation(f"no call position {call!r}")
+    RUN.call = call
+
+
+def run_call():
+    return getattr(RUN, "call", None) or CALL
+
+
 class NativeRefusal(RuntimeError):
     """The native oracle refused a run whose spec needs another platform, a fake /proc or a simulated clock."""
 
@@ -82,8 +94,8 @@ def before(command):
         return None
     with open(spec, encoding="utf-8") as handle:
         text = handle.read()
-    context = run_context()
-    head = '{"call":' + json.dumps(CALL) + ',"context":' + json.dumps(context)
+    context, call = run_context(), run_call()
+    head = '{"call":' + json.dumps(call) + ',"context":' + json.dumps(context)
     if not text.startswith(head):
         if not text.startswith("{"):
             raise NativeViolation(f"{spec}: a spec that is not a JSON object")
@@ -95,8 +107,9 @@ def before(command):
         os.remove(report)
     # A spec for another platform is refused before the load, so it predicts no reg.exe run.
     parsed = json.loads(text)
-    pairs = windows_pairs(parsed) if sys.platform == "win32" and parsed.get("platform") in (None, "win32") else None
-    return {"spec": spec, "report": report, "started": int(time.time() * 1000), "pairs": pairs, "context": context}
+    pairs = windows_pairs(parsed, call) if sys.platform == "win32" and parsed.get("platform") in (None, "win32") else None
+    return {"spec": spec, "report": report, "started": int(time.time() * 1000), "pairs": pairs, "context": context,
+            "call": call}
 
 
 # The reg.exe stdout limit (Sy, sdk.mjs line 136, passed to every query by Aq): a longer answer fails the query, which
@@ -115,7 +128,7 @@ def o8_rereads(unanswered, seen_loss, since):
     return not 0 <= since < wait
 
 
-def windows_pairs(spec):
+def windows_pairs(spec, call=None):
     """How many times a native Windows run of `spec` spawns reg.exe for each hive: the load's pair, plus one per resolve
     whose o8 re-reads.
 
@@ -136,7 +149,7 @@ def windows_pairs(spec):
     size = os.path.getsize(answer) if os.path.isfile(answer) else None
     cases = spec.get("cases") or []
     # The prime writes the first case's files but keeps the real clock.
-    calls = ([{"files": cases[0].get("files")}] if CALL == "second" and cases else []) + cases
+    calls = ([{"files": cases[0].get("files")}] if (call or run_call()) == "second" and cases else []) + cases
     states, last_read, offset, pairs = None, 0, 0, 1
     for call in calls:
         if isinstance(call.get("at"), (int, float)):
@@ -189,8 +202,8 @@ def after(context):
     start = clock.get("start")
     if not isinstance(start, int) or not context["started"] <= start <= ended:
         problems.append(f"clock start {start!r} outside the run [{context['started']}, {ended}]")
-    if report.get("call") != CALL:
-        problems.append(f"call {report.get('call')!r}, not {CALL!r}")
+    if report.get("call") != context["call"]:
+        problems.append(f"call {report.get('call')!r}, not {context['call']!r}")
     if report.get("context") != context["context"]:
         problems.append(f"context {report.get('context')!r}, not {context['context']!r}")
     if report.get("spawns") != report.get("exits"):

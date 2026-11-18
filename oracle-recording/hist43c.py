@@ -232,7 +232,7 @@ def execute(root, spec_text, flags, call, extras, log):
             handle.write(spec_text)
         command = [NODE, *flags, ORACLE, PACKAGE, spec_path]
         env = padded_env(MANAGED["pad"], command, STARTUP)
-        GATE["CALL"] = call
+        GATE["in_call"](call)
         with tempfile.TemporaryFile() as errors:
             try:
                 process = spawn(command, env, stdout=subprocess.PIPE, stderr=errors, timeout=600)

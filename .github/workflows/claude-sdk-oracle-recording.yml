@@ -263,7 +263,7 @@ jobs:
   goldens:
     # Every golden recorder natively, through record.py, starting from the committed golden of the host so each
     # change shows as a diff.
-    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -370,7 +370,7 @@ jobs:
 
   wsl-goldens:
     # The managed organization goldens under a real WSL 2 kernel, starting from the committed linux x64 golden.
-    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1177,7 +1177,8 @@ jobs:
     # functions behind the lazy-compile gain of a second call, walks the caught distance of the prime level by level and
     # replays the prime of job 54, as registered in registration_c.md before the run. Its output is evidence for the process-history
     # model and never becomes a golden.
-    if: contains(github.event.head_commit.message, '[hist43c]')
+    # Disabled: hist43c ran and is superseded by replay54.
+    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix:
@@ -1255,10 +1256,136 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  replay54:
+    # Runs only when the head commit asks for it with `[replay54]`: the byte-exact replay of job 54's native band40 process
+    # for the drop_merge pair (ruling 45 step 2), as registered in registration.md before the run. One job per host and call
+    # position takes the driver from this commit, then checks out cbe37448cc (the commit job 54 ran) in the same workspace and
+    # runs job 54's own steps and r3.py code from it, adding only the V8 function event log flags. Its output is evidence for
+    # the process-history model and never becomes a golden.
+    if: contains(github.event.head_commit.message, '[replay54]')
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - { runner: macos-latest, label: darwin-arm64 }
+          - { runner: ubuntu-latest, label: linux-x64 }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64 }
+        call: [first, second]
+    runs-on: ${{ matrix.host.runner }}
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Job 54's environment (band40 job, cbe37448cc workflow lines 736-742), one call position per job as there.
+      R3_CALL: ${{ matrix.call }}
+      R3_CONTEXT: toplevel
+      R3_ONLY: "^(pm8:|band40:)"
+      R3_EVERY_SHARD: "1"
+      # Job 54 ran the drop_merge pair in shard 5 of 16 on every host and call (run log, "SHARD: 5").
+      SHARD: "5"
+      SHARDS: "16"
+    steps:
+      # The driver comes from this commit; the tree the process runs from is job 54's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Keep the driver outside the tree
+        run: |
+          mkdir -p "$RUNNER_TEMP/replay-driver"
+          cp oracle-recording/replay54.py oracle-recording/analyze_r.py "$RUNNER_TEMP/replay-driver/"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: cbe37448ccda150826db4a536e6c825386620ded
+          persist-credentials: false
+
+      - name: Check the tree is job 54's
+        run: |
+          test "$(git rev-parse HEAD)" = cbe37448ccda150826db4a536e6c825386620ded
+          test ! -e oracle-recording/replay54.py
+
+      # The steps below are job 54's band40 steps (cbe37448cc workflow lines 744-799), unchanged.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.13.1
+
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install: false
+          cache: false
+
+      - name: Locate tools
+        run: |
+          # Outside the checkout, so mise reads no repository config.
+          cd "$RUNNER_TEMP"
+          mise install "python@$R3_PYTHON"
+          py="$(mise exec "python@$R3_PYTHON" -- python3 -c 'import sys; print(sys.executable)' 2>/dev/null \
+            || mise exec "python@$R3_PYTHON" -- python -c 'import sys; print(sys.executable)')"
+          {
+            echo "PY=$py"
+            echo "NODE_BIN=$(node -p 'process.execPath')"
+            echo "OUT=$RUNNER_TEMP/out"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/out"
+
+      - name: Install reg.exe at the WSL path
+        if: runner.os == 'Linux'
+        run: |
+          command -v rustc >/dev/null || { sudo apt-get update && sudo apt-get install -y rustc; }
+          rustc --edition 2021 -O -o "$RUNNER_TEMP/reg.exe" "$NATIVE_LIB/registry_stand_in.rs"
+          sudo install -D -m 0755 "$RUNNER_TEMP/reg.exe" /mnt/c/Windows/System32/reg.exe
+
+      - name: Check the fixture bytes
+        run: |
+          bash oracle-recording/check_fixture_bytes.sh "$GITHUB_WORKSPACE" "$OUT"
+
+      - name: Describe the host
+        run: |
+          {
+            node -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8, now: Date.now()})'
+            "$PY" --version
+            uname -a || true
+            ls -l /mnt/c/Windows/System32/reg.exe /usr/bin/plutil 2>/dev/null || true
+          } | tee "$OUT/host.txt"
+
+      - name: Fetch the pinned package
+        run: |
+          "$PY" -I "$FETCH_LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
+
+      # Job 54's r3 step, the same command line (run log), from job 54's tree: the exact leg for P-R1.
+      - name: Run job 54's band step
+        run: |
+          "$PY" -I oracle-recording/r3.py "$NATIVE_LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/r3.json" "$SHARD" "$SHARDS" 2> >(tee "$OUT/r3.log" >&2)
+
+      - name: Describe the logging flags
+        run: |
+          # The V8 flags the logged leg adds, as this Node lists them (the job fails when Node does not list one).
+          node --v8-options > "$OUT/v8-options.txt"
+          grep -n -E -A1 '^ +--(log-function-events|logfile|logfile-per-isolate)( |$)' "$OUT/v8-options.txt" | tee "$OUT/v8-flags.txt"
+          test "$(grep -c -E '^ +--(log-function-events|logfile|logfile-per-isolate)( |$)' "$OUT/v8-options.txt")" = 3
+
+      - name: Replay the band process
+        run: |
+          "$PY" -I "$RUNNER_TEMP/replay-driver/replay54.py" "$NATIVE_LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/replay54.json" "$GITHUB_WORKSPACE" 2> >(tee "$OUT/replay54.log" >&2)
+
+      - name: Keep the oracle output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-replay54-${{ matrix.host.label }}-${{ matrix.call }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 14
+
   model40:
     # Runs only when the head commit asks for it with `[model40]`: what the crate's stage model answers, with the catches
     # it notes, at every offset on the 16-byte grid of each context's interval (PLAN Update 106), for the groups in
     # oracle-recording/model40/scan.jsonl, on the main commit the goldens branch starts from with its patch applied.
+    # It also scans the job 47 and job 53 second-call rows (val45.jsonl) and the hist43b and hist43c process-history
+    # cells (cells45.jsonl), the validation sets registered for R43-3a (ruling 45 step 1).
     if: contains(github.event.head_commit.message, '[model40]')
     strategy:
       fail-fast: false
@@ -1298,6 +1425,30 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/out"
           cargo test --release -p trogon-claude-agent-sdk --lib scan40 -- --nocapture 2> >(tee "$RUNNER_TEMP/out/scan.log" >&2)
+
+      - name: Scan the job 47 and job 53 second-call rows
+        if: always()
+        working-directory: rsworkspace
+        env:
+          SCAN40_ROWS: ${{ github.workspace }}/scratch/oracle-recording/model40/val45.jsonl
+          SCAN40_OUT: ${{ runner.temp }}/out/val-${{ matrix.shard }}.jsonl
+          SCAN40_SHARD: ${{ matrix.shard }}
+          SCAN40_SHARDS: "4"
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cargo test --release -p trogon-claude-agent-sdk --lib scan40 -- --nocapture 2> >(tee "$RUNNER_TEMP/out/val.log" >&2)
+
+      - name: Scan the process-history cells
+        if: always()
+        working-directory: rsworkspace
+        env:
+          SCAN45_ROWS: ${{ github.workspace }}/scratch/oracle-recording/model40/cells45.jsonl
+          SCAN45_OUT: ${{ runner.temp }}/out/cells-${{ matrix.shard }}.jsonl
+          SCAN45_SHARD: ${{ matrix.shard }}
+          SCAN45_SHARDS: "4"
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cargo test --release -p trogon-claude-agent-sdk --lib scan45 -- --nocapture 2> >(tee "$RUNNER_TEMP/out/cells.log" >&2)
 
       - name: Run the crate's own tests
         if: always()
