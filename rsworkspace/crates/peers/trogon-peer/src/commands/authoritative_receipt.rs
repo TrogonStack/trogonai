@@ -1,6 +1,6 @@
 use super::domain::{MessageId, PeerId, TenantId};
-use super::{evolve_error::EvolveError, message_error::MessageError, message_rules, state_values};
-use crate::commands::state::PeerState;
+use super::state::PeerState;
+use super::{evolve_error::EvolveError, message_error::MessageError, message_values, state_values};
 use trogonai_proto::peers::v1alpha1 as proto;
 #[derive(Debug, Clone)]
 pub struct AuthoritativeReceipt {
@@ -17,7 +17,7 @@ impl AuthoritativeReceipt {
             .ok_or(MessageError::InvalidTransition)?;
         let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
         state_values::parse_enrollment(enrollment)?;
-        message_rules::validate_receipt(receipt)?;
+        message_values::validate_receipt(receipt)?;
         let position = state
             .dispositions
             .iter()
@@ -31,7 +31,7 @@ impl AuthoritativeReceipt {
             if entry.disposition.as_option() != Some(receipt) {
                 return Err(MessageError::InvalidTransition);
             }
-            message_rules::receipt_matches_message(receipt, &entry.message)?;
+            message_values::receipt_matches_message(receipt, &entry.message)?;
         }
         if receipt.outcome.and_then(|o| o.as_known())
             == Some(proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED)

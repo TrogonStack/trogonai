@@ -8,6 +8,15 @@ pub struct TrustedContent {
 }
 
 impl TrustedContent {
+    pub fn reference(&self) -> &SealedContentRef {
+        &self.reference
+    }
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+    pub fn semantic_fingerprint(&self) -> &[u8] {
+        self.semantic_fingerprint.as_bytes()
+    }
     pub fn from_sealed_port(
         reference: SealedContentRef,
         size: u32,

@@ -1,4 +1,6 @@
 use buffa::MessageField;
+use std::ops::{Deref, DerefMut};
+use trogon_decider::{Evolve, StateSnapshot};
 use trogonai_proto::peers::{PeerEventCase, state_v1alpha1, v1alpha1 as proto};
 
 pub use super::evolve_error::EvolveError;
@@ -19,15 +21,15 @@ impl Default for PeerState {
     }
 }
 
-impl trogon_decider::Evolve<proto::PeerEvent> for PeerState {
+impl Evolve<proto::PeerEvent> for PeerState {
     type Error = EvolveError;
 
     fn evolve(self, event: &proto::PeerEvent) -> Result<Self, Self::Error> {
-        evolve(self, event)
+        transition(self, event).map(|transition| transition.state)
     }
 }
 
-impl std::ops::Deref for PeerState {
+impl Deref for PeerState {
     type Target = state_v1alpha1::PeerState;
 
     fn deref(&self) -> &Self::Target {
@@ -35,7 +37,7 @@ impl std::ops::Deref for PeerState {
     }
 }
 
-impl std::ops::DerefMut for PeerState {
+impl DerefMut for PeerState {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -59,7 +61,7 @@ impl AsRef<state_v1alpha1::PeerState> for PeerState {
     }
 }
 
-impl trogon_decider::StateSnapshot for PeerState {
+impl StateSnapshot for PeerState {
     type Payload = state_v1alpha1::PeerState;
 }
 
@@ -67,15 +69,31 @@ pub fn initial_state() -> PeerState {
     PeerState::default()
 }
 
-pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerState, EvolveError> {
+pub fn evolve(state: PeerState, event: &proto::PeerEvent) -> Result<PeerState, EvolveError> {
+    transition(state, event).map(|transition| transition.state)
+}
+
+pub(super) struct Transition {
+    pub(super) state: PeerState,
+    pub(super) update: Option<ProjectionUpdate>,
+}
+
+pub(super) enum ProjectionUpdate {
+    Enrolled(super::EnrollmentFacts),
+    Accepted(Box<super::accepted_outbox::AcceptedOutbox>),
+}
+
+pub(super) fn transition(mut state: PeerState, event: &proto::PeerEvent) -> Result<Transition, EvolveError> {
+    let mut update = None;
     match event.event.as_ref().ok_or(EvolveError::MissingEvent)? {
         PeerEventCase::PeerEnrolled(event) => {
             if state.enrollment.is_set() {
                 return Err(EvolveError::AlreadyEnrolled);
             }
             let enrollment = event.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
-            parse_enrollment(enrollment)?;
+            let facts = super::state_values::parse_enrollment_facts(enrollment)?;
             state.enrollment = MessageField::some(enrollment.clone());
+            update = Some(ProjectionUpdate::Enrolled(facts));
         }
         PeerEventCase::PeerAttached(event) => {
             let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
@@ -187,7 +205,9 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
             });
         }
         PeerEventCase::PeerMessageAccepted(event) => {
-            super::message_rules::fold_accepted(&mut state, event)?;
+            update = Some(ProjectionUpdate::Accepted(Box::new(
+                super::message_rules::fold_accepted(&mut state, event)?,
+            )));
         }
         PeerEventCase::PeerMessageIntakeRecorded(event) => super::message_rules::fold_intake(&mut state, event)?,
         PeerEventCase::PeerMessageDisposed(event) => super::message_rules::fold_disposed(&mut state, event)?,
@@ -195,5 +215,5 @@ pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerStat
         PeerEventCase::PeerBatchAcknowledged(event) => super::message_rules::fold_acknowledged(&mut state, event)?,
         PeerEventCase::PeerMessageSettled(event) => super::message_rules::fold_settled(&mut state, event)?,
     }
-    Ok(state)
+    Ok(Transition { state, update })
 }
