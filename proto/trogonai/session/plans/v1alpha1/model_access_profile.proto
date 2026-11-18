@@ -1,0 +1,62 @@
+edition = "2024";
+
+package trogonai.session.plans.v1alpha1;
+
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/model_selection.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/configuration.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/identity.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/protocol.proto";
+
+// No managed access does not mean no models. Native settings retain their
+// semantics; only a proven adapter may claim the managed profile. Live grants
+// and credential material are never part of this immutable value.
+message ModelAccessProfile {
+  oneof profile {
+    google.protobuf.Empty no_managed_access = 1;
+    ManagedModels managed = 2;
+  }
+}
+
+message ManagedModels {
+  ResolvedModel primary = 1;
+  repeated AuxiliaryModel auxiliary = 2;
+}
+
+message AuxiliaryModel {
+  trogonai.agents.agents.v1alpha1.ModelRole role = 1;
+  ResolvedModel model = 2;
+}
+
+message ResolvedModel {
+  trogonai.agents.agents.v1alpha1.ModelSelection selection = 1;
+  ResolvedModelRoute route = 2;
+}
+
+// A driver release commits to code and exact translation semantics. The
+// actual registered owner proves the release and support, not this reference.
+message ModelDriverRef {
+  string driver_id = 1;
+  string version = 2;
+  trogonai.agents.agents.v1alpha1.Digest definition_digest = 3;
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef translation_contract = 4;
+}
+
+// Exact nonsecret route facts; live connection/binding standing and original
+// provider validation remain mandatory at the actual model-access boundary.
+message ResolvedModelRoute {
+  uint32 contract_version = 1;
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef contract = 2;
+  trogonai.agents.agents.v1alpha1.Digest model_selection_digest = 3;
+  trogonai.model_access.provider_connections.v1alpha1.ProviderModelIdentifier provider_model = 4;
+  trogonai.model_access.provider_connections.v1alpha1.ProviderProtocol protocol = 5;
+  ModelDriverRef driver = 6;
+  trogonai.model_access.provider_connections.v1alpha1.ProviderConnectionId connection_id = 7;
+  trogonai.agents.agents.v1alpha1.Digest connection_configuration_digest = 8;
+  trogonai.model_access.provider_connections.v1alpha1.CredentialBindingId credential_binding_id = 9;
+  trogonai.agents.agents.v1alpha1.Digest credential_configuration_digest = 10;
+  trogonai.model_access.provider_connections.v1alpha1.ProviderSubjectFingerprint provider_subject = 11;
+  trogonai.model_access.provider_connections.v1alpha1.CatalogModelPin catalog_pin = 12;
+}

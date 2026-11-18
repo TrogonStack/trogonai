@@ -1,0 +1,57 @@
+edition = "2024";
+
+package trogonai.session.plans.v1alpha1;
+
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/session/sessions/v1alpha1/compacted.proto";
+
+// Absence of the platform capability does not reinterpret native compaction.
+// The platform harness requires its exact registered policy, even if disabled.
+message CompactionProfile {
+  oneof profile {
+    google.protobuf.Empty no_platform_compaction = 1;
+    PlatformCompaction platform = 2;
+  }
+}
+
+message PlatformCompaction {
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef contract = 1;
+  CompactionTriggerPolicy trigger = 2;
+  uint64 input_token_limit = 3;
+  uint64 summary_token_limit = 4;
+  uint64 guidance_utf8_limit = 5;
+  uint64 retained_tail_token_limit = 6;
+  uint32 max_passes = 7;
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef covered_input_contract = 8;
+  trogonai.session.sessions.v1alpha1.CompactionModelRole producer_role = 9;
+  CompactionEncodingBounds encoding_bounds = 10;
+}
+
+message CompactionTriggerPolicy {
+  oneof trigger {
+    google.protobuf.Empty disabled = 1;
+    uint64 token_threshold = 2;
+    google.protobuf.Empty context_overflow = 3;
+    uint64 token_or_overflow = 4;
+  }
+}
+
+// Limits are checked with the exact registered encoder before admission;
+// token budgets alone cannot bound the stored summary, envelope or headers.
+message CompactionEncodingBounds {
+  uint64 summary_id_utf8_limit = 1;
+  uint64 guidance_utf8_limit = 2;
+  uint64 model_utf8_limit = 3;
+  uint64 execution_attempt_id_utf8_limit = 4;
+  uint64 session_id_utf8_limit = 5;
+  uint64 source_session_id_utf8_limit = 6;
+  uint64 digest_bytes_limit = 7;
+  uint64 token_usage_bytes_limit = 8;
+  uint64 event_type_utf8_limit = 9;
+  uint64 event_id_utf8_limit = 10;
+  uint64 headers_encoded_limit = 11;
+  uint64 envelope_encoded_limit = 12;
+  uint64 maximum_record_encoded_limit = 13;
+  uint64 summary_content_utf8_limit = 14;
+}

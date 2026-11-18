@@ -1,0 +1,56 @@
+edition = "2024";
+
+package trogonai.session.plans.v1alpha1;
+
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/implementation.proto";
+import "trogonai/agents/agents/v1alpha1/variables.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+import "trogonai/session/plans/v1alpha1/compaction_profile.proto";
+import "trogonai/session/plans/v1alpha1/model_access_profile.proto";
+import "trogonai/session/plans/v1alpha1/resolved_dependency.proto";
+import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
+import "trogonai/session/sessions/v1alpha1/checkout.proto";
+import "trogonai/session/sessions/v1alpha1/claim_check.proto";
+
+// Concrete content of the opaque StoredSessionExecutionPlan bytes. A protected
+// registered contract selects its descriptor and interpreter before decoding;
+// the contract inside these bytes is a consistency check, never authority.
+// Native settings remain owned by the selected runtime. Original artifacts,
+// source lineage and current authorization require separate admission proof.
+message SessionExecutionPlan {
+  uint32 contract_version = 1;
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef contract = 2;
+  string session_id = 3;
+  trogonai.projects.projects.v1alpha1.ProjectId project_id = 4;
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef agent_revision = 5;
+  trogonai.agents.agents.v1alpha1.AgentConfigurationRef effective_configuration = 6;
+  trogonai.agents.agents.v1alpha1.AgentImplementation implementation = 7;
+  trogonai.agents.agents.v1alpha1.NativeConfiguration runtime_settings = 8;
+  trogonai.agents.agents.v1alpha1.NativeConfiguration effective_runtime_configuration = 9;
+  trogonai.session.sessions.v1alpha1.CandidateRef candidate = 10;
+  repeated ResolvedDependency dependencies = 11;
+  trogonai.agents.agents.v1alpha1.VariableBindings variables = 12;
+  WorkInput work = 13;
+  ModelAccessProfile model_access = 14;
+  CompactionProfile compaction = 15;
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef execution_contract = 16;
+  WorkingDirectory working_directory = 17;
+}
+
+// The exact registered work contract owns input and result semantics. Ordinary
+// conversational Sessions may omit this capability. It is not caller variables.
+message WorkInput {
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef contract = 1;
+  repeated trogonai.session.sessions.v1alpha1.ClaimCheck inputs = 2;
+}
+
+// The actual checkout owner verifies root containment and symlink behavior;
+// neither a relative path nor the checkout URI proves filesystem authority.
+message WorkingDirectory {
+  trogonai.session.sessions.v1alpha1.CheckoutRef checkout = 1;
+  // Empty means the checkout root. Other values name root-relative segments.
+  string relative_path = 2;
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef filesystem_contract = 3;
+}

@@ -1,0 +1,65 @@
+edition = "2024";
+
+package trogonai.session.plans.v1alpha1;
+
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/dependencies.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/connections/admission/v1alpha1/resolution.proto";
+import "trogonai/library/memories/v1alpha1/claim_check.proto";
+import "trogonai/library/memories/v1alpha1/memory_id.proto";
+import "trogonai/library/memories/v1alpha1/memory_kind.proto";
+
+// Retains each complete declaration beside its typed resolution. Admission
+// joins it to the original declaring resource, validates exact closure and
+// current authority, and refuses unsupported or undeclared integrations.
+message ResolvedDependency {
+  DependencyDeclarer declaring_resource = 1;
+  string binding_name = 2;
+  oneof declaration {
+    trogonai.agents.agents.v1alpha1.SkillDeclaration skill_declaration = 3;
+    trogonai.agents.agents.v1alpha1.ToolDeclaration tool_declaration = 4;
+    trogonai.agents.agents.v1alpha1.DelegateDeclaration delegate_declaration = 5;
+    trogonai.agents.agents.v1alpha1.MemoryDeclaration memory_declaration = 6;
+    trogonai.agents.agents.v1alpha1.ConnectionDeclaration connection_declaration = 7;
+  }
+  oneof resolution {
+    ResolvedSkill skill = 8;
+    trogonai.agents.agents.v1alpha1.ExactToolVersionPin tool = 9;
+    trogonai.agents.agents.v1alpha1.ExactDelegateRevisionPin delegate = 10;
+    ResolvedMemorySet memory = 11;
+    trogonai.connections.admission.v1alpha1.ResolvedConnectionUse connection = 12;
+    // Only an unavailable eligible optional resource permits this outcome.
+    google.protobuf.Empty unavailable = 13;
+  }
+}
+
+// Actual immutable resource identity defines closure nodes and cycle checks;
+// request-supplied graph node IDs are not accepted as declaring identities.
+message DependencyDeclarer {
+  oneof resource {
+    trogonai.agents.agents.v1alpha1.AgentRevisionRef agent = 1;
+    trogonai.agents.agents.v1alpha1.ExactToolVersionPin tool = 2;
+    trogonai.agents.agents.v1alpha1.ExactDelegateRevisionPin delegate = 3;
+    ResolvedSkill skill = 4;
+  }
+}
+
+message ResolvedSkill {
+  trogonai.agents.agents.v1alpha1.SkillVersionRef version_ref = 1;
+  trogonai.agents.agents.v1alpha1.Digest content_digest = 2;
+}
+
+// A declared kind may resolve to several exact entries. Source owners verify
+// the retained content and supersede history; a tuple is not snapshot authority.
+message ResolvedMemorySet {
+  repeated ResolvedMemory instances = 1;
+}
+
+message ResolvedMemory {
+  trogonai.library.memories.v1alpha1.MemoryId memory_id = 1;
+  uint64 source_revision = 2;
+  trogonai.library.memories.v1alpha1.MemoryKind kind = 3;
+  trogonai.library.memories.v1alpha1.ClaimCheck content = 4;
+}
