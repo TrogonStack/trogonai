@@ -2,6 +2,9 @@
 #[serde(rename_all = "snake_case")]
 pub enum PeerMcpErrorCode {
     EnrollmentUncertain,
+    Detached,
+    Detach,
+    DetachDeadline,
     PromptDeadline,
     Unbound,
     NativeSessionChanged,
