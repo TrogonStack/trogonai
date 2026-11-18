@@ -31,9 +31,10 @@ pub const RELEASE_DEADLINE: Duration = Duration::from_millis(1500);
 
 /// The subscription the release endpoint answers on: the literal principal
 /// kind `service`, with the tenant account and the service id as wildcards, so
-/// every tenant's runtime services reach one queue group. The PLATFORM export
-/// of `*.secrets.v1.>` pins the first token to the importing account, so the
-/// tenant a subject names is the caller's own (ADR#0082 Decision 2).
+/// every tenant's runtime services reach one queue group. No export gives a
+/// tenant account this subject: the caller is a registered PLATFORM trusted
+/// caller that names the tenant, and the service authorizes that tenant from
+/// its own state (ADR#0095 Decision 5).
 pub const RELEASE_SUBSCRIPTION: &str = "*.secrets.v1.service.*.SecretExchangeService.ResolveForRelease";
 
 /// The delay a `THROTTLED` answer asks its caller to wait. Every release in
@@ -83,10 +84,9 @@ pub const INVALIDATION_REPLAY_WINDOW: Duration = RELEASE_TTL_BOUND.saturating_ad
 pub const INVALIDATION_STREAM: &str = "SECRETS_INVALIDATION";
 
 /// The subjects of [`INVALIDATION_STREAM`]: every tenant's notices, the tenant
-/// account in the fourth token so each account imports only its own. The
-/// literal prefix comes first because the server refuses a stream subject
-/// that starts with a wildcard unless it drops publish acks (ADR#0081
-/// Decision 3 amendment).
+/// account in the fourth token. The literal prefix comes first because the
+/// server refuses a stream subject that starts with a wildcard unless it drops
+/// publish acks (ADR#0081 Decision 3 amendment).
 pub const INVALIDATION_SUBJECTS: &str = "secrets.invalidation.v1.*.>";
 
 /// What precedes the tenant account in a notice subject, which the owner
