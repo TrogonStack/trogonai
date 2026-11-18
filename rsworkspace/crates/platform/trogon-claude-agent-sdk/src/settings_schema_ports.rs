@@ -307,26 +307,7 @@ pub(crate) fn to_number(value: &Value) -> Option<f64> {
 
 /// `Number(text)`, `None` standing for `NaN`.
 pub(crate) fn string_to_number(text: &str) -> Option<f64> {
-    let trimmed = crate::session_prompt::js_trim(text);
-    if trimmed.is_empty() {
-        return Some(0.0);
-    }
-    for (prefix, radix) in [("0x", 16), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)] {
-        if let Some(digits) = trimmed.strip_prefix(prefix) {
-            return u64::from_str_radix(digits, radix).ok().map(|value| value as f64);
-        }
-    }
-    match trimmed {
-        "Infinity" | "+Infinity" => Some(f64::INFINITY),
-        "-Infinity" => Some(f64::NEG_INFINITY),
-        _ if trimmed
-            .chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-')) =>
-        {
-            trimmed.parse::<f64>().ok()
-        }
-        _ => None,
-    }
+    Some(crate::js_string_number::js_string_to_number(text)).filter(|number| !number.is_nan())
 }
 
 /// A JavaScript number as a settings value: integral values stay integers, the infinities stay infinite until

@@ -84,6 +84,7 @@ mod js_json;
 mod js_object_order;
 mod js_regex;
 mod js_runtime;
+mod js_string_number;
 mod js_text;
 mod json_scan;
 mod jsonrpc_message;

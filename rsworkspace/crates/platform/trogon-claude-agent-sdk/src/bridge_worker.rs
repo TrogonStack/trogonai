@@ -39,7 +39,7 @@ use serde_json::{Map, Value};
 use crate::SensitiveString;
 use crate::adapters::HttpExecute;
 use crate::bridge_client::{USER_AGENT, client_platform, header_text};
-use crate::bridge_js::{js_number, js_parse_int, plain_detail, safe_integer};
+use crate::bridge_js::{js_parse_int, plain_detail, safe_integer};
 use crate::bridge_types::SessionState;
 use crate::bridge_worker_delivery::{DeliveryAck, DeliveryNext, DeliveryQueue, DeliveryStatus, delivery_body};
 use crate::bridge_worker_events::{ClientEvent, EventNext, EventQueue, refused_for_good, upload_body, upload_timeout};
@@ -49,6 +49,7 @@ use crate::bridge_worker_types::{
     InitError, InitFailureError, MismatchReason, RegisterFailureError, RequestFailure, RequestOutcome,
     RequiresActionDetails,
 };
+use crate::js_string_number::js_string_to_number;
 use crate::settings_json::js_stringify;
 use crate::settings_parse::parse_json;
 use crate::transport_cause::{TransportCause, transport_cause};
@@ -413,7 +414,7 @@ fn decode(bytes: &[u8]) -> Value {
 fn worker_epoch(data: &Value) -> Result<i64, RegisterFailureError> {
     let number = match data.get("worker_epoch") {
         Some(Value::Number(number)) => number.as_f64(),
-        Some(Value::String(text)) => Some(js_number(text)),
+        Some(Value::String(text)) => Some(js_string_to_number(text)),
         _ => None,
     };
     number

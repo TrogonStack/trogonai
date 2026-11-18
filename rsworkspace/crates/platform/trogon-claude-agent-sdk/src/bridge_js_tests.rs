@@ -8,23 +8,6 @@ fn trims_the_javascript_white_space_set() {
 }
 
 #[test]
-fn reads_numbers_like_the_number_function() {
-    assert_eq!(js_number(""), 0.0);
-    assert_eq!(js_number("  12 "), 12.0);
-    assert_eq!(js_number("1e3"), 1000.0);
-    assert_eq!(js_number(".5"), 0.5);
-    assert_eq!(js_number("0x1f"), 31.0);
-    assert_eq!(js_number("0O17"), 15.0);
-    assert_eq!(js_number("0b11"), 3.0);
-    assert_eq!(js_number("Infinity"), f64::INFINITY);
-    assert_eq!(js_number("+Infinity"), f64::INFINITY);
-    assert_eq!(js_number("-Infinity"), f64::NEG_INFINITY);
-    for text in ["0x", "0xg", "abc", "1_0", "--1", "infinity", "1e"] {
-        assert!(js_number(text).is_nan(), "{text}");
-    }
-}
-
-#[test]
 fn accepts_only_safe_integers() {
     assert_eq!(safe_integer(7.0), Some(7));
     assert_eq!(safe_integer(-0.0), Some(0));
