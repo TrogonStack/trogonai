@@ -3637,10 +3637,10 @@ index d1442711cf..65eeeafc71 100644
      }
  }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader_tests.rs
-index 2930d5c7f5..9287ffc4e6 100644
+index 2930d5c7f5..db198ff816 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader_tests.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader_tests.rs
-@@ -1,9 +1,17 @@
+@@ -1,20 +1,30 @@
  use std::{cell::Cell, path::Path};
  
 -use super::{ManagedReader, ParsedFiles};
@@ -3661,15 +3661,20 @@ index 2930d5c7f5..9287ffc4e6 100644
  };
  
  #[test]
-@@ -15,6 +23,7 @@ fn the_typescript_dialect_reads_a_blank_managed_document_as_empty_settings() {
+ fn the_typescript_dialect_reads_a_blank_managed_document_as_empty_settings() {
+     let parsed = ParsedFiles::default();
+     let warmth = Cell::new(MergeWarmth::default());
++    let compiled = CompiledFunctions::default();
+     let reader = ManagedReader::new(
+         SettingsDialect::TypeScript,
          NodeStack::NODE_24_DARWIN_ARM64,
          &parsed,
          &warmth,
-+        &CompiledFunctions::default(),
++        &compiled,
      );
      let read = reader.read(b" \n\t\r\n", Path::new(MANAGED_SETTINGS_FILE));
      assert_eq!(
-@@ -22,3 +31,60 @@ fn the_typescript_dialect_reads_a_blank_managed_document_as_empty_settings() {
+@@ -22,3 +32,60 @@ fn the_typescript_dialect_reads_a_blank_managed_document_as_empty_settings() {
          (LoadState::Loaded, Some(SettingsMap::new()), false, false)
      );
  }
