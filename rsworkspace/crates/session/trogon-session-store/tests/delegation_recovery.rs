@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-#[path = "delegation_recovery/lifecycle_history.rs"]
-mod lifecycle_history;
+#[path = "delegation_recovery/lifecycle_history_tests.rs"]
+mod lifecycle_history_tests;
 
 use std::{
     sync::{

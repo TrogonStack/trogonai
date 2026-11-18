@@ -1078,7 +1078,7 @@ async fn duplicate_dispatch_refuses_parent_terminal_change_during_current_author
 
 #[derive(Debug, thiserror::Error)]
 #[error("backend reported a write conflict without an observable occurrence")]
-struct UnprovenWriteConflict;
+struct UnprovenWriteConflictError;
 
 struct UnprovenConflictWriter {
     native: Arc<NativeStore>,
@@ -1103,13 +1103,13 @@ impl StreamRead<SessionKey> for UnprovenConflictWriter {
 }
 
 impl StreamAppend<SessionKey> for UnprovenConflictWriter {
-    type Error = UnprovenWriteConflict;
+    type Error = UnprovenWriteConflictError;
     async fn append_stream(
         &self,
         _request: AppendStreamRequest<'_, SessionKey>,
     ) -> Result<trogon_decider_runtime::AppendStreamResponse, Self::Error> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
-        Err(UnprovenWriteConflict)
+        Err(UnprovenWriteConflictError)
     }
     fn classify_append_failure(&self, _error: &Self::Error) -> trogon_decider_runtime::AppendFailure {
         trogon_decider_runtime::AppendFailure::WriteConflict

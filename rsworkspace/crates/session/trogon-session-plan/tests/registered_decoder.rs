@@ -4,6 +4,7 @@ use buffa::Message;
 use sha2::{Digest as _, Sha256};
 mod support;
 use support::{contract, stored_bytes, valid_plan};
+use trogon_session_plan::wire::plan;
 use trogon_session_plan::{PlanError, RegisteredPlanDecoder};
 use trogonai_proto::session_contracts::trogonai::{
     agents::agents::v1alpha1 as agent, session::sessions::v1alpha1 as session,
@@ -180,7 +181,6 @@ fn decoder_bounds_original_artifacts_and_redacts_decoded_plan_diagnostics() {
 
 #[test]
 fn immutable_plan_references_and_declared_collection_bounds_are_checked() {
-    use trogon_session_plan::wire::plan;
     let decoder = RegisteredPlanDecoder::new(contract()).unwrap();
     let mut value = valid_plan();
     value.agent_revision.get_or_insert_default().revision_number = 0;
@@ -287,7 +287,6 @@ fn immutable_plan_references_and_declared_collection_bounds_are_checked() {
 
 #[test]
 fn candidate_and_work_values_remain_structural_data_until_their_owners_admit_them() {
-    use trogon_session_plan::wire::plan;
     let decoder = RegisteredPlanDecoder::new(contract()).unwrap();
     let mut value = valid_plan();
     value.candidate = serde_json::from_value::<session::CandidateRef>(
