@@ -868,33 +868,69 @@ index d2a8d04898..43396d5d49 100644
  mod options;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_compiled.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_compiled.rs
 new file mode 100644
-index 0000000000..3f6b82b27a
+index 0000000000..15dc77e219
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_compiled.rs
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,116 @@
 +//! The functions of the bundled lodash that V8 already compiled in a Node process, and so no longer first-compiles on
 +//! whatever stack the next call to them has.
 +//!
 +//! V8 compiles a function lazily the first time it is called, and `Runtime_CompileLazy` throws a stack overflow where
 +//! less than the 40,960 bytes of its reserve are left (`JsHasOverflowed(kStackSpaceRequiredForCompilation)`,
 +//! `runtime-compiler.cc:59-63`, `globals.h:207`). A function that ran once stays compiled for the isolate, so the
-+//! frame that would have first-compiled it spends none of that reserve in a later call of the same process.
++//! frame that would have first-compiled it spends none of that reserve in a later call of the same process. Every frame
++//! of the merge model whose cost comes from a first execution or compile has its own flag here, and one rule decides
++//! each of them: a frame whose function is not compiled yet needs the reserve on top of its level
++//! ([`MergeRoom::fits`](crate::node_merge_room::MergeRoom::fits)), and once it is compiled it needs only the stack
++//! itself ([`MergeRoom::reaches`](crate::node_merge_room::MergeRoom::reaches)).
++//!
++//! Each flag names the function of the bundle by its byte offsets in `sdk.mjs` of
++//! `@anthropic-ai/claude-agent-sdk` 0.3.323 (start of `function` to its closing brace, end exclusive).
 +
 +use std::sync::atomic::{AtomicU8, Ordering};
 +
 +/// A function of the bundle whose first compile on a deep stack decides where a merge stops.
 +#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 +pub(crate) enum CompiledFunction {
-+    /// lodash `mapCacheDelete` (`BWe`, aliased `qq`), which `Stack.delete` runs once `Stack.set` converted the list
-+    /// cache to a map cache at its 200th pair. The first container of a merge that returns from a depth past that
-+    /// conversion compiles it.
++    /// lodash `mapCacheDelete` (`BWe`, bytes 813430..813499, aliased `qq`), which `Stack.delete` runs once
++    /// `Stack.set` converted the list cache to a map cache at its 200th pair. The first container of a merge that
++    /// returns from a depth past that conversion compiles it. The model returns from a level through this frame.
 +    MapCacheDelete,
++    /// lodash `assignMergeValue` (`e4e`, bytes 868193..868273, aliased `Mf`), which `baseMerge` and `baseMergeDeep`
++    /// run for every member they write. The first member a merge of the process assigns compiles it, which
++    /// [`MergeCost::cold_assign`](crate::node_merge_cost::MergeCost::cold_assign) prices.
++    AssignMergeValue,
++    /// lodash `baseMergeDeep` (`y4e`, bytes 869866..870290, aliased `Y4`), which runs for every array or object the
++    /// merge enters below the root. The first nested array or object a merge of the process enters compiles it.
++    BaseMergeDeep,
++    /// lodash `arrayLikeKeys` (`y2e`, bytes 819119..819417, aliased `Iy`), the branch of `keysIn` that lists the
++    /// keys of an array, which only an array the merge enters runs. The first array of the process compiles it, which
++    /// [`MergeCost::first_array`](crate::node_merge_cost::MergeCost::first_array) prices.
++    ArrayLikeKeys,
++    /// The regular expression `reIsUint` (`UVe`, bytes 817570..817588) that lodash `isIndex` (`FVe`, bytes
++    /// 817589..817711, aliased `$i`) tests array keys with, compiled to bytecode on its first test.
++    IndexPatternBytecode,
++    /// The same regular expression compiled to machine code on its second test.
++    IndexPatternMachineCode,
++    /// The arrow `(t)=>!Qi.includes(t)` (bytes 1271177..1271197) that `zu` (bytes 1271135..1271199) hands
++    /// `Object.keys(...).some`, which `rX` runs on the merged folder once a document of it merged. The merge
++    /// prime of a second call compiles it with `BWe`, and the process has it compiled from the first folder `rX`
++    /// finishes on. It runs on the frame of `rX`, which calls the merge of the folder and so sits above every frame
++    /// of that merge on the same stack: no merge of the folder reached its root without the reserve the arrow needs
++    /// being there above it, so its flag never decides where a merge stops and no frame of the model reads it.
++    PolicyKeysCheck,
 +}
 +
 +impl CompiledFunction {
 +    const fn bit(self) -> u8 {
 +        match self {
 +            Self::MapCacheDelete => 1,
++            Self::AssignMergeValue => 1 << 1,
++            Self::BaseMergeDeep => 1 << 2,
++            Self::ArrayLikeKeys => 1 << 3,
++            Self::IndexPatternBytecode => 1 << 4,
++            Self::IndexPatternMachineCode => 1 << 5,
++            Self::PolicyKeysCheck => 1 << 6,
 +        }
 +    }
 +}
@@ -917,6 +953,18 @@ index 0000000000..3f6b82b27a
 +    pub(crate) fn insert(&mut self, function: CompiledFunction) {
 +        self.0 |= function.bit();
 +    }
++
++    /// Adds `function` where `compiled` says it is compiled.
++    pub(crate) fn insert_if(&mut self, function: CompiledFunction, compiled: bool) {
++        if compiled {
++            self.insert(function);
++        }
++    }
++
++    /// Every function either set holds.
++    pub(crate) const fn union(self, other: Self) -> Self {
++        Self(self.0 | other.0)
++    }
 +}
 +
 +/// What the Node process compiled across every resolve it ran, the prime of a second call included. It starts empty
@@ -933,6 +981,11 @@ index 0000000000..3f6b82b27a
 +    /// Adds what a merge compiled.
 +    pub(crate) fn absorb(&self, set: CompiledSet) {
 +        self.0.fetch_or(set.0, Ordering::Relaxed);
++    }
++
++    /// Adds `function`, which the process just ran.
++    pub(crate) fn ran(&self, function: CompiledFunction) {
++        self.0.fetch_or(function.bit(), Ordering::Relaxed);
 +    }
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_managed_pass.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_managed_pass.rs
@@ -973,7 +1026,7 @@ index a370b0b0af..ae67b6f6d0 100644
 +    Login,
  }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge.rs
-index d1373390ee..cb52f57337 100644
+index d1373390ee..a5ffd1501e 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge.rs
 @@ -20,6 +20,7 @@ use crate::{
@@ -984,6 +1037,18 @@ index d1373390ee..cb52f57337 100644
      node_merge_room::MergeRoom,
      node_merge_warmth::MergeWarmth,
      settings_merge_spec::MergeSpec,
+@@ -70,9 +71,9 @@ enum Stop {
+ enum Level {
+     /// The level fits the stack.
+     Fits,
+-    /// The level does not fit, but lodash still enters it, as
++    /// The level does not fit, but lodash still enters it with `baseMergeDeep` compiled, as
+     /// [`MergeCost::descent_reach`](crate::node_merge_cost::MergeCost::descent_reach) describes: it merges its
+-    /// members and runs out of stack as it returns from it.
++    /// members and runs out of stack as it returns from it unless the process compiled `mapCacheDelete`.
+     Doomed,
+ }
+ 
 @@ -184,8 +185,19 @@ enum Step<'a> {
      Assign(usize),
      /// Finish merging an array.
@@ -1006,56 +1071,56 @@ index d1373390ee..cb52f57337 100644
  }
  
  fn container(value: &Value) -> Option<Source<'_>> {
-@@ -245,8 +257,18 @@ pub(crate) fn merge_within(
- }
+@@ -253,18 +265,34 @@ impl Merge<'_, '_> {
+         }
+     }
  
- impl Merge<'_, '_> {
-+    /// The room the merge has now: the one it started with, and once the process compiled lodash `mapCacheDelete`
-+    /// the reserve V8 keeps for compiling it as well.
-+    fn room(&self) -> MergeRoom {
-+        if self.warmth.compiled.has(CompiledFunction::MapCacheDelete) {
-+            self.room.compiled()
+-    /// Assigns a member into the array or object at `depth`.
++    /// Whether a frame at `depth` that spends `extra` on top of its levels runs, as
++    /// [`node_compiled`](crate::node_compiled) describes: where it first-compiles its function it needs the reserve
++    /// V8 keeps for the compile as well, and where the process already `compiled` it only the stack.
++    fn runs(&self, compiled: bool, depth: usize, extra: usize) -> bool {
++        if compiled {
++            self.room.reaches_past(depth, extra)
 +        } else {
-+            self.room
++            self.room.fits(depth, extra)
 +        }
 +    }
 +
-     fn check(&self, depth: usize, extra: usize) -> Result<(), Stop> {
--        if self.room.fits(depth, extra) {
-+        if self.room().fits(depth, extra) {
-             Ok(())
-         } else {
-             Err(Stop::Overflow)
-@@ -255,16 +277,17 @@ impl Merge<'_, '_> {
- 
-     /// Assigns a member into the array or object at `depth`.
++    /// Assigns a member into the array or object at `depth`, which runs lodash `assignMergeValue`.
      fn assign(&mut self, depth: usize) -> Result<(), Stop> {
 -        self.check(depth, self.room.cost.assign(*self.warmth))?;
-+        self.check(depth, self.room().cost.assign(*self.warmth))?;
++        let compiled = self.warmth.assigned;
++        if !self.runs(compiled, depth, self.room.cost.assign(*self.warmth)) {
++            return Err(Stop::Overflow);
++        }
          self.warmth.assigned = true;
          Ok(())
      }
  
-     /// Enters an array or object at `depth` that spends nothing on top of its level.
-     fn enter_level(&self, depth: usize) -> Result<Level, Stop> {
--        if self.room.fits(depth, 0) {
-+        let room = self.room();
-+        if room.fits(depth, 0) {
+-    /// Enters an array or object at `depth` that spends nothing on top of its level.
+-    fn enter_level(&self, depth: usize) -> Result<Level, Stop> {
++    /// Enters an array or object at `depth` that spends nothing on top of its level, which runs lodash
++    /// `baseMergeDeep`.
++    fn enter_level(&mut self, depth: usize) -> Result<Level, Stop> {
+         if self.room.fits(depth, 0) {
++            self.warmth.compiled.insert(CompiledFunction::BaseMergeDeep);
              Ok(Level::Fits)
 -        } else if self.room.reaches(depth) {
-+        } else if room.reaches(depth) {
++        } else if self.runs(self.warmth.merges_deep(), depth, 0) {
              Ok(Level::Doomed)
          } else {
              Err(Stop::Overflow)
-@@ -279,16 +302,17 @@ impl Merge<'_, '_> {
+@@ -279,16 +307,18 @@ impl Merge<'_, '_> {
      /// [`MergeCost::first_array`](crate::node_merge_cost::MergeCost::first_array), and the machine code compile
      /// where lodash still reaches the level and what the compile spends there.
      fn enter_array(&mut self, depth: usize, position: usize, items: &[Value]) -> Result<Level, Stop> {
 -        let extra = self.room.cost.array(position, !items.is_empty(), *self.warmth);
 -        if self.room.fits(depth, extra) {
-+        let room = self.room();
++        let room = self.room;
 +        let extra = room.cost.array(position, !items.is_empty(), *self.warmth);
 +        if room.fits(depth, extra) {
++            self.warmth.compiled.insert(CompiledFunction::BaseMergeDeep);
              self.warmth.test_index_keys(items.len());
              return Ok(Level::Fits);
          }
@@ -1069,7 +1134,7 @@ index d1373390ee..cb52f57337 100644
              };
              return Err(if compiles { Stop::IndexCompile } else { Stop::Overflow });
          }
-@@ -299,12 +323,19 @@ impl Merge<'_, '_> {
+@@ -299,12 +329,21 @@ impl Merge<'_, '_> {
          }
      }
  
@@ -1080,11 +1145,13 @@ index d1373390ee..cb52f57337 100644
 -            Level::Doomed => Err(Stop::Overflow),
 +    /// Returns from the array or object the merge entered at `depth` as `level`, where lodash `Stack.delete` runs.
 +    ///
-+    /// A [`Level::Doomed`] level runs out of stack there, because `mapCacheDelete` has to first-compile without the
-+    /// reserve. A level below the 200th pair of the stack returns through that function once `Stack.set` converted
-+    /// the stack to a map, which compiles it for the rest of the process.
++    /// A [`Level::Doomed`] level runs out of stack there where `mapCacheDelete` has to first-compile without the
++    /// reserve, and returns where the process already compiled it. A level below the 200th pair of the stack returns
++    /// through that function once `Stack.set` converted the stack to a map, which compiles it for the rest of the
++    /// process.
 +    fn leave(&mut self, level: Level, depth: usize) -> Result<(), Stop> {
-+        if level == Level::Doomed {
++        let compiled = self.warmth.compiled.has(CompiledFunction::MapCacheDelete);
++        if level == Level::Doomed && !self.runs(compiled, depth, 0) {
 +            return Err(Stop::Overflow);
 +        }
 +        if converts_stack(depth) {
@@ -1094,7 +1161,7 @@ index d1373390ee..cb52f57337 100644
      }
  
      /// Merges the members of `source`, an array or object the merge entered at `depth` below `arrays` arrays of its
-@@ -364,7 +395,7 @@ impl Merge<'_, '_> {
+@@ -364,7 +403,7 @@ impl Merge<'_, '_> {
                  position,
              )?;
              self.warmth.finished_array = true;
@@ -1103,7 +1170,7 @@ index d1373390ee..cb52f57337 100644
              self.assign(depth)?;
              return target.write(key, Value::Array(copied), mark);
          }
-@@ -388,14 +419,14 @@ impl Merge<'_, '_> {
+@@ -388,14 +427,14 @@ impl Merge<'_, '_> {
              (Some(Value::Object(held)), Source::Object(_)) => {
                  let level = self.enter_level(next)?;
                  self.merge_members(&mut Target::Object(held), child, next, arrays)?;
@@ -1120,7 +1187,7 @@ index d1373390ee..cb52f57337 100644
                  self.assign(depth)?;
                  false
              }
-@@ -424,7 +455,10 @@ impl Merge<'_, '_> {
+@@ -424,7 +463,10 @@ impl Merge<'_, '_> {
                      self.warmth.finished_array = true;
                      continue;
                  }
@@ -1132,7 +1199,7 @@ index d1373390ee..cb52f57337 100644
                  Step::Enter { entered, depth, arrays } => (entered, depth, arrays),
              };
              let (level, arrays) = match entered {
-@@ -434,8 +468,8 @@ impl Merge<'_, '_> {
+@@ -434,8 +476,8 @@ impl Merge<'_, '_> {
                      (self.enter_array(depth, position, items)?, position)
                  }
              };
@@ -1143,62 +1210,125 @@ index d1373390ee..cb52f57337 100644
              }
              if matches!(entered, Source::Array(_)) {
                  steps.push(Step::FinishArray);
+diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_cost.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_cost.rs
+index 1f8ede3622..5dc66f4efc 100644
+--- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_cost.rs
++++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_cost.rs
+@@ -18,8 +18,9 @@ pub(crate) struct MergeCost {
+     /// wherever the array sits in its path.
+     pub(crate) shallow_array: usize,
+     /// How many bytes past the `level`s the stack holds lodash still enters an array or object: it merges the
+-    /// members of such a level, which run out of stack where they enter or assign anything, and runs out itself as
+-    /// it returns from the level, when lodash `Stack.delete` runs. A compile of the `isIndex` regular expression to
++    /// members of such a level, which run out of stack where they first-compile a function of the bundle (an assign
++    /// before any merge of the process assigned included), and runs out itself as it returns from the level, when
++    /// lodash `Stack.delete` runs, unless the process already compiled `mapCacheDelete`. A compile of the `isIndex` regular expression to
+     /// machine code in such an array throws `SyntaxError` instead.
+     pub(crate) descent_reach: usize,
+     /// What the compile of the lodash `isIndex` regular expression to machine code at the end of the descent reach
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_room.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_room.rs
-index 87219bc878..8d6562e919 100644
+index 87219bc878..00da907653 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_room.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_room.rs
-@@ -10,6 +10,19 @@ pub(crate) struct MergeRoom {
+@@ -10,13 +10,14 @@ pub(crate) struct MergeRoom {
  }
  
  impl MergeRoom {
-+    /// The room where the process already compiled the function a frame would otherwise first-compile at the end of
-+    /// the descent: the reserve V8 keeps for that compile is stack the merge can spend, so no level is merely
-+    /// entered past what fits.
-+    pub(crate) fn compiled(self) -> Self {
-+        Self {
-+            cost: MergeCost {
-+                descent_reach: 0,
-+                ..self.cost
-+            },
-+            available: self.available.saturating_add(self.cost.descent_reach),
-+        }
-+    }
-+
-     /// Whether `depth` nested arrays and objects, and `extra` bytes on top of them, fit.
+-    /// Whether `depth` nested arrays and objects, and `extra` bytes on top of them, fit.
++    /// Whether `depth` nested arrays and objects, and `extra` bytes on top of them, fit with the 40,960 bytes V8 keeps
++    /// for a compile left over: what a frame that first-compiles its function needs.
      pub(crate) fn fits(self, depth: usize, extra: usize) -> bool {
          depth.saturating_mul(self.cost.level).saturating_add(extra) <= self.available
+     }
+ 
+     /// Whether lodash still enters an array or object at `depth` where its level does not fit, as
+-    /// [`MergeCost::descent_reach`] describes.
++    /// [`MergeCost::descent_reach`] describes: what a frame whose function the process already compiled needs.
+     pub(crate) fn reaches(self, depth: usize) -> bool {
+         self.reaches_past(depth, 0)
+     }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs
-index b6c772bc80..6f53594297 100644
+index b6c772bc80..d9b1da2790 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs
-@@ -3,6 +3,8 @@
+@@ -2,20 +2,30 @@
+ //! deeper stack than later runs take, so a merge spends more stack where it runs some code for the first time. It
  //! compiles the regular expression lodash `isIndex` tests keys with twice: to bytecode on its first test, and to
  //! machine code on its second.
- 
-+use crate::node_compiled::CompiledSet;
++//!
++//! Each of these is one flag of the per-process compiled set
++//! ([`CompiledFunctions`](crate::node_compiled::CompiledFunctions)): a process starts with none, and
++//! the first resolve of a later call starts from what the earlier ones compiled ([`MergeWarmth::of_process`]).
 +
++use crate::node_compiled::{CompiledFunction, CompiledSet};
+ 
  /// Whether a merge of the process already assigned a member and already finished merging an array, and how many
  /// keys lodash `isIndex` tested.
  #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-@@ -16,6 +18,9 @@ pub(crate) struct MergeWarmth {
+ pub(crate) struct MergeWarmth {
+-    /// lodash `assignMergeValue` ran: a merge assigned a string, number, boolean or `null`, what the settings
+-    /// customizer answered, or an array or object it finished.
++    /// lodash `assignMergeValue` ran ([`CompiledFunction::AssignMergeValue`]): a merge assigned a string, number,
++    /// boolean or `null`, what the settings customizer answered, or an array or object it finished.
+     pub(crate) assigned: bool,
+-    /// A merge finished an array.
++    /// A merge finished an array ([`CompiledFunction::ArrayLikeKeys`]).
+     pub(crate) finished_array: bool,
+     /// How many keys lodash `isIndex` tested, counted up to [`MergeWarmth::INDEX_COMPILES`]: lodash `keysIn` tests
      /// each index of an array the merges enter onto a fresh or copied array. An array the settings customizer
-     /// unions onto a held one is not entered.
+-    /// unions onto a held one is not entered.
++    /// unions onto a held one is not entered. One test compiled [`CompiledFunction::IndexPatternBytecode`], two
++    /// [`CompiledFunction::IndexPatternMachineCode`] as well.
      pub(crate) index_tests: usize,
-+    /// What the process compiled, which the merge reads from and adds to the process-wide set
++    /// The other functions the process compiled, which the merge reads from and adds to the process-wide set
 +    /// ([`CompiledFunctions`](crate::node_compiled::CompiledFunctions)) rather than from the resolve that ran it.
 +    pub(crate) compiled: CompiledSet,
  }
  
  impl MergeWarmth {
-@@ -28,6 +33,7 @@ impl MergeWarmth {
+@@ -28,13 +38,58 @@ impl MergeWarmth {
          assigned: true,
          finished_array: true,
          index_tests: 0,
 +        compiled: CompiledSet::EMPTY,
      };
  
++    /// What the merges of a process that compiled `compiled` in the resolves it ran before start from.
++    pub(crate) fn of_process(compiled: CompiledSet) -> Self {
++        let index_tests = if compiled.has(CompiledFunction::IndexPatternMachineCode) {
++            Self::INDEX_COMPILES
++        } else {
++            usize::from(compiled.has(CompiledFunction::IndexPatternBytecode))
++        };
++        Self {
++            assigned: compiled.has(CompiledFunction::AssignMergeValue),
++            finished_array: compiled.has(CompiledFunction::ArrayLikeKeys),
++            index_tests,
++            compiled,
++        }
++    }
++
++    /// Every function the merges that left V8 this warm compiled, for the process-wide set.
++    pub(crate) fn process_set(self) -> CompiledSet {
++        let mut set = self.compiled;
++        set.insert_if(CompiledFunction::AssignMergeValue, self.assigned);
++        set.insert_if(CompiledFunction::ArrayLikeKeys, self.finished_array);
++        set.insert_if(CompiledFunction::IndexPatternBytecode, self.index_tests > 0);
++        set.insert_if(
++            CompiledFunction::IndexPatternMachineCode,
++            self.index_tests >= Self::INDEX_COMPILES,
++        );
++        set
++    }
++
++    /// Whether lodash `baseMergeDeep` is compiled ([`CompiledFunction::BaseMergeDeep`]). A merge that finished an
++    /// array or tested an array index entered that array below the root, so it ran `baseMergeDeep` as well.
++    pub(crate) fn merges_deep(self) -> bool {
++        self.compiled.has(CompiledFunction::BaseMergeDeep) || self.finished_array || self.index_tests > 0
++    }
++
      /// Counts the `keys` lodash `isIndex` tested where a merge entered an array holding that many members.
-@@ -35,6 +41,15 @@ impl MergeWarmth {
+     pub(crate) fn test_index_keys(&mut self, keys: usize) {
          self.index_tests = self.index_tests.saturating_add(keys).min(Self::INDEX_COMPILES);
      }
  
@@ -1209,6 +1339,7 @@ index b6c772bc80..6f53594297 100644
 +        self.assigned |= end.assigned;
 +        self.finished_array |= end.finished_array;
 +        self.test_index_keys(end.index_tests.saturating_sub(start.index_tests));
++        self.compiled = self.compiled.union(end.compiled);
 +    }
 +
      /// Whether lodash `isIndex` compiles its regular expression on its next test.
@@ -1266,7 +1397,7 @@ index 0000000000..561c647178
 +    Tool,
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
-index f01219da74..610a967f8b 100644
+index f01219da74..69dff8a6a9 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 @@ -29,21 +29,26 @@
@@ -1878,7 +2009,7 @@ index f01219da74..610a967f8b 100644
      }
  
      /// Whether the settings file reader walks and copies `document` without running out of stack.
-@@ -541,31 +855,56 @@ impl NodeStack {
+@@ -541,31 +855,58 @@ impl NodeStack {
              && self.clone.fits(self.available(self.clone.budget), document)
      }
  
@@ -1939,10 +2070,12 @@ index f01219da74..610a967f8b 100644
 -    /// evaluations of the policy origin and of the machine policy. This merge adds what it ran.
 +    /// evaluations of the policy origin and of the machine policy. The merges in the evaluation of the effective
 +    /// settings go on from what V8 had run when the evaluation of the sources started. This merge adds what it ran.
++    /// `compiled` is what every resolve of the process compiled, the prime of a second call included, which the
++    /// resolve seeds `warmth` from: the merge also reads it as it is now and adds every function it compiled to it.
      pub(crate) fn merge_within(
          self,
          call: NodeMergeCall,
-@@ -573,10 +912,11 @@ impl NodeStack {
+@@ -573,10 +914,11 @@ impl NodeStack {
          destination: &mut Map<String, Value>,
          source: &Map<String, Value>,
          warmth: &Cell<MergeWarmth>,
@@ -1955,17 +2088,17 @@ index f01219da74..610a967f8b 100644
              NodeMergeCall::Admin => self.policy.admin_merge,
          };
          let room = MergeRoom {
-@@ -584,7 +924,9 @@ impl NodeStack {
+@@ -584,7 +926,9 @@ impl NodeStack {
              available: self.available(budget),
          };
          let mut ran = warmth.get();
-+        ran.compiled = compiled.get();
++        ran.compiled = ran.compiled.union(compiled.get());
          let merged = merge_within(rules, destination, source, room, &mut ran);
-+        compiled.absorb(ran.compiled);
++        compiled.absorb(ran.process_set());
          warmth.set(ran);
          merged
      }
-@@ -618,3 +960,7 @@ fn is_container(value: &Value) -> bool {
+@@ -618,3 +962,7 @@ fn is_container(value: &Value) -> bool {
  #[cfg(test)]
  #[path = "node_stack_tests.rs"]
  mod tests;
@@ -3275,14 +3408,14 @@ index f1e0862073..69d99c9371 100644
 +    })
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader.rs
-index d1442711cf..65eeeafc71 100644
+index d1442711cf..522ba4b91d 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader.rs
 @@ -9,26 +9,49 @@ use std::{
  use serde_json::Value;
  
  use crate::{
-+    node_compiled::CompiledFunctions,
++    node_compiled::{CompiledFunction, CompiledFunctions},
      node_managed_pass::ManagedPass,
      node_merge::NodeMerge,
      node_merge_call::NodeMergeCall,
@@ -3489,12 +3622,15 @@ index d1442711cf..65eeeafc71 100644
              node,
              pass: ManagedPass::Sources,
 +            reader: PolicyReader::Sources,
-+            parsed,
-+            warmth,
+             parsed,
+             warmth,
 +            compiled,
-+        }
-+    }
-+
+         }
+     }
+ 
+-    /// The same reader in the evaluation `pass`, sharing what the others parsed.
+-    pub(crate) fn in_pass(self, pass: ManagedPass) -> Self {
+-        Self { pass, ..self }
 +    /// The same reader in the evaluation for the effective settings, which runs right after the one for the sources
 +    /// and finds every document it reads in the file cache that one filled.
 +    pub(crate) fn for_effective(self) -> Self {
@@ -3532,15 +3668,12 @@ index d1442711cf..65eeeafc71 100644
 +        ManagedReader {
 +            pass: ManagedPass::Login,
 +            reader: PolicyReader::Login,
-             parsed,
-             warmth,
++            parsed,
++            warmth,
 +            ..self
-         }
-     }
- 
--    /// The same reader in the evaluation `pass`, sharing what the others parsed.
--    pub(crate) fn in_pass(self, pass: ManagedPass) -> Self {
--        Self { pass, ..self }
++        }
++    }
++
 +    /// What the merges of the resolve left V8 having run so far.
 +    pub(crate) fn warmth(self) -> MergeWarmth {
 +        self.warmth.get()
@@ -3606,7 +3739,20 @@ index d1442711cf..65eeeafc71 100644
      }
  
      /// Whether the file cache (`Fu` upstream) runs out of stack copying the settings read from a managed document.
-@@ -152,6 +308,13 @@ impl<'p> ManagedReader<'p> {
+@@ -146,12 +302,26 @@ impl<'p> ManagedReader<'p> {
+         }
+     }
+ 
++    /// Notes that the TypeScript dialect ran `function` outside a merge, which compiles it in the Node process.
++    pub(crate) fn ran(self, function: CompiledFunction) {
++        if matches!(self.decoder, Decoder::Node) {
++            self.compiled.ran(function);
++        }
++    }
++
+     /// Merges the settings a document kept into its folder (`UP` upstream), keeping what merged before the merge ran
+     /// out of stack.
+     pub(crate) fn merge_into_folder(self, destination: &mut SettingsMap, source: &SettingsMap) -> NodeMerge {
          self.merge(NodeMergeCall::Folder, destination, source)
      }
  
@@ -3620,7 +3766,7 @@ index d1442711cf..65eeeafc71 100644
      /// Merges part of the admin settings into the policy tier (`QP` upstream).
      pub(crate) fn merge_admin(self, destination: &mut SettingsMap, source: &SettingsMap) -> NodeMerge {
          self.merge(|_| NodeMergeCall::Admin, destination, source)
-@@ -165,7 +328,14 @@ impl<'p> ManagedReader<'p> {
+@@ -165,7 +335,14 @@ impl<'p> ManagedReader<'p> {
      ) -> NodeMerge {
          match self.decoder {
              Decoder::Lossy => merge_unbounded(destination, source),
@@ -3848,7 +3994,7 @@ index 609b2a8241..3680aaf3a0 100644
              }
              parsed
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
-index a915357f75..711040b2e0 100644
+index a915357f75..8fe6e0037f 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
 @@ -11,6 +11,8 @@ use crate::{
@@ -3966,7 +4112,8 @@ index a915357f75..711040b2e0 100644
 +        .and_then(|parent| parent.settings);
  
      let parsed = ParsedFiles::default();
-     let warmth = Cell::new(MergeWarmth::default());
+-    let warmth = Cell::new(MergeWarmth::default());
++    let warmth = Cell::new(MergeWarmth::of_process(state.compiled().get()));
 +    let sources_start = warmth.get();
      let PolicyResolution {
          settings: policy_settings,
@@ -4375,7 +4522,7 @@ index cf31f0b4e4..1418b590d6 100644
 +    Ok(errors.evaluation(base(), SettingsMap::new(), inherits, None))
  }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy.rs
-index a3d2ccead8..21464d65f0 100644
+index a3d2ccead8..d73d7a4b2a 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy.rs
 @@ -1,6 +1,8 @@
@@ -4387,11 +4534,12 @@ index a3d2ccead8..21464d65f0 100644
      io,
      path::{Path, PathBuf},
  };
-@@ -16,10 +18,10 @@ use crate::{
+@@ -16,10 +18,11 @@ use crate::{
          OTEL_EXACT, OTEL_PREFIXES, PARENT_RESTRICT_FALSE_KEYS, PARENT_RESTRICT_TRUE_KEYS, PARENT_SETTINGS_BEHAVIOR_KEY,
          POLICY_META_KEYS, SETTINGS_FILE_MAX_BYTES,
      },
 -    node_managed_pass::ManagedPass,
++    node_compiled::CompiledFunction,
      node_merge::NodeMerge,
 +    node_stack_catch::{self, StackCatch},
      node_text_file::read_node_text,
@@ -4400,7 +4548,7 @@ index a3d2ccead8..21464d65f0 100644
      settings_policy_content::{has_authored_value, has_policy_content},
      settings_resolve_admin::build_admin,
      settings_resolve_error::ResolveSettingsError,
-@@ -28,7 +30,7 @@ use crate::{
+@@ -28,7 +31,7 @@ use crate::{
          MdmEvaluation, asks_organization, kernel_reports_wsl, managed_directory, wsl_managed_directory,
      },
      settings_resolve_platform_kind::PlatformKind,
@@ -4409,7 +4557,7 @@ index a3d2ccead8..21464d65f0 100644
      settings_resolve_state::ResolverState,
      settings_resolve_tier::{LoadState, TierRead},
      settings_resolve_values::{SettingsMap, in_schema_order, omit, pick},
-@@ -108,20 +110,160 @@ fn is_drop_in(name: &str) -> bool {
+@@ -108,20 +111,160 @@ fn is_drop_in(name: &str) -> bool {
      name.ends_with(".json") && !name.starts_with('.')
  }
  
@@ -4576,7 +4724,7 @@ index a3d2ccead8..21464d65f0 100644
  
  /// The documents of one managed folder merged so far (`s` in `um` upstream).
  struct Folder {
-@@ -149,9 +291,14 @@ impl Folder {
+@@ -149,9 +292,14 @@ impl Folder {
          }
      }
  
@@ -4594,7 +4742,7 @@ index a3d2ccead8..21464d65f0 100644
          if let Some(mut settings) = settings
              && !settings.is_empty()
          {
-@@ -166,10 +313,32 @@ impl Folder {
+@@ -166,10 +314,32 @@ impl Folder {
              self.found = true;
              self.authored |= has_authored_value(&settings) && !document.only_substitutes;
          }
@@ -4628,7 +4776,22 @@ index a3d2ccead8..21464d65f0 100644
      }
  
      /// The `catch` around the drop-ins in `um` upstream: the folder did not load, and keeps what merged before.
-@@ -193,44 +362,31 @@ impl Folder {
+@@ -178,8 +348,12 @@ impl Folder {
+         self.unreadable = true;
+     }
+ 
+-    /// `rX` upstream: the tier the merged documents make.
+-    fn finish(self) -> TierRead {
++    /// `rX` upstream: the tier the merged documents make. `zu` runs its arrow on the first key of a folder a
++    /// document merged into, which compiles it in the process.
++    fn finish(self, reader: ManagedReader<'_>) -> TierRead {
++        if self.found && !self.merged.is_empty() {
++            reader.ran(CompiledFunction::PolicyKeysCheck);
++        }
+         let settings = (self.found && has_policy_content(&self.merged)).then_some(self.merged);
+         TierRead {
+             only_substitutes: !self.authored && settings.as_ref().is_some_and(has_authored_value),
+@@ -193,44 +367,31 @@ impl Folder {
  }
  
  /// `um` upstream: the held registry documents, then the managed settings file of `directory` plus its sorted
@@ -4656,7 +4819,8 @@ index a3d2ccead8..21464d65f0 100644
 +        pass.held(&mut folder, document, reader);
      }
      let Some(directory) = directory else {
-         return Ok(folder.finish());
+-        return Ok(folder.finish());
++        return Ok(folder.finish(reader));
      };
      let (document, opened) = read_policy_file(host, &directory.join(MANAGED_SETTINGS_FILE), reader);
 -    if document
@@ -4681,7 +4845,7 @@ index a3d2ccead8..21464d65f0 100644
      let drop_ins = directory.join(MANAGED_SETTINGS_DROP_IN_DIRECTORY);
      match host.read_directory(&drop_ins) {
          Ok(entries) => {
-@@ -248,6 +404,7 @@ fn read_managed_directory<H: SettingsHost>(
+@@ -248,6 +409,7 @@ fn read_managed_directory<H: SettingsHost>(
                      .as_ref()
                      .is_some_and(|settings| reader.copy_overflows(settings))
                  {
@@ -4689,7 +4853,7 @@ index a3d2ccead8..21464d65f0 100644
                      folder.abandon();
                      break;
                  }
-@@ -257,8 +414,12 @@ fn read_managed_directory<H: SettingsHost>(
+@@ -257,8 +419,12 @@ fn read_managed_directory<H: SettingsHost>(
                      last_is_link: Some(linked),
                      opened,
                  });
@@ -4704,7 +4868,13 @@ index a3d2ccead8..21464d65f0 100644
                      folder.abandon();
                      break;
                  }
-@@ -272,18 +433,18 @@ fn read_managed_directory<H: SettingsHost>(
+@@ -267,23 +433,23 @@ fn read_managed_directory<H: SettingsHost>(
+         Err(error) if is_absent(&error) => {}
+         Err(_) => folder.abandon(),
+     }
+-    Ok(folder.finish())
++    Ok(folder.finish(reader))
+ }
  
  /// `Q5` upstream: the managed file tier for this platform, with the held registry documents ahead of the managed
  /// files. A session that asks its organization reads the Windows side of WSL only when the kernel says WSL.
@@ -4727,7 +4897,7 @@ index a3d2ccead8..21464d65f0 100644
      }
      let machine_holds = mdm.mdm.has_policy_content || mdm.mdm.load_state == LoadState::DidNotLoad;
      if mdm.wsl_inherits {
-@@ -291,18 +452,18 @@ fn read_file_tier<H: SettingsHost>(
+@@ -291,18 +457,18 @@ fn read_file_tier<H: SettingsHost>(
          // inherits the Windows settings holds any: an organization session inherits them only while the kernel says
          // WSL (`Gc`), and in that same evaluation `GP` settles the WSL registry tool as writable by nobody (`_X(!0)`),
          // so `_E` holds no registry document; a re-read replaces the whole evaluation, never one of the two.
@@ -4750,7 +4920,7 @@ index a3d2ccead8..21464d65f0 100644
  }
  
  /// What reading the managed file for an organization (`pE` upstream) tells the admin selection.
-@@ -340,7 +501,6 @@ struct Rewrites<'h, H> {
+@@ -340,7 +506,6 @@ struct Rewrites<'h, H> {
  impl<H: SettingsHost> Rewrites<'_, H> {
      fn allowed(&mut self, rewritable: Rewritable<'_>) -> bool {
          match rewritable {
@@ -4758,7 +4928,7 @@ index a3d2ccead8..21464d65f0 100644
              Rewritable::Never => false,
              Rewritable::Ask(probe) => {
                  self.organization
-@@ -375,44 +535,26 @@ fn read_managed_file<H: SettingsHost>(
+@@ -375,44 +540,26 @@ fn read_managed_file<H: SettingsHost>(
          wsl_organization: organization && kind == PlatformKind::Wsl && kernel_reports_wsl(host),
          certain: HashMap::new(),
      };
@@ -4815,7 +4985,7 @@ index a3d2ccead8..21464d65f0 100644
      let kept = held.settings.clone().unwrap_or_default();
      let added = restricted.settings.clone().unwrap_or_default();
      let mut flags = Held {
-@@ -775,15 +917,36 @@ fn restrictive_union_env(tiers: &[SettingsMap], first_trusted_tier: usize) -> Op
+@@ -775,15 +922,36 @@ fn restrictive_union_env(tiers: &[SettingsMap], first_trusted_tier: usize) -> Op
      (!result.is_empty()).then_some(result)
  }
  
@@ -4856,7 +5026,7 @@ index a3d2ccead8..21464d65f0 100644
      let machine_mdm = if mdm.user_writable {
          TierRead {
              settings: Some(SettingsMap::new()),
-@@ -793,18 +956,19 @@ fn pin_machine_login(
+@@ -793,18 +961,19 @@ fn pin_machine_login(
      } else {
          mdm.clone()
      };
@@ -4881,7 +5051,7 @@ index a3d2ccead8..21464d65f0 100644
  }
  
  /// What the admin selection of one evaluation of the managed settings composes from what it read.
-@@ -1010,7 +1174,9 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
+@@ -1010,7 +1179,9 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
              merged.insert("forceRemoteSettingsRefresh".to_owned(), Value::Bool(true));
          }
          if selection.remote_in_sources || evaluation.mdm.user_writable {
@@ -4892,7 +5062,7 @@ index a3d2ccead8..21464d65f0 100644
          }
          let union_disabled = crate::settings_resolve_env::flag_is_true(host, DISABLE_ADMIN_ENV_UNION_VARIABLE);
          if !union_disabled {
-@@ -1063,16 +1229,9 @@ pub(crate) fn reevaluate_policy<H: SettingsHost>(
+@@ -1063,16 +1234,9 @@ pub(crate) fn reevaluate_policy<H: SettingsHost>(
      reader: ManagedReader<'_>,
  ) -> Result<PolicyReevaluation, ResolveSettingsError> {
      let parent_managed = parent_managed.filter(|parent| !parent.is_empty());
