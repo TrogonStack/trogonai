@@ -77,7 +77,17 @@ rust|rust-session)
 
   if [[ "$check" == "rust-session" ]]; then
     (cd "$ws" && "$buf" generate --template buf.session.gen.yaml)
-    (cd "$ws" && "$buf" build --as-file-descriptor-set --exclude-source-info -o "$out/contracts.json")
+    session_paths=()
+    while IFS= read -r line; do
+      case "$line" in
+        "      - proto/"*) session_paths+=(--path "${line#      - }") ;;
+      esac
+    done <"$ws/buf.session.gen.yaml"
+    if [[ ${#session_paths[@]} -eq 0 ]]; then
+      echo "Session generation requires explicit protobuf input paths" >&2
+      exit 1
+    fi
+    (cd "$ws" && "$buf" build --as-file-descriptor-set --exclude-source-info "${session_paths[@]}" -o "$out/contracts.json")
     (cd "$ws" && "$buf" build --as-file-descriptor-set --exclude-source-info \
       --path proto/trogonai/session/plans \
       --path proto/trogonai/agents/agents/v1alpha1/agent.proto \
