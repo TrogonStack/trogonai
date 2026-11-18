@@ -1573,10 +1573,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..c8451aa468
+index 0000000000..e9d94e2790
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,324 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -1693,7 +1693,9 @@ index 0000000000..c8451aa468
 +    for file in files.as_array().ok_or("a case has no files")? {
 +        let place = file[0].as_str().ok_or("a settings file has no place")?;
 +        if let Some(name) = option_name(place) {
-+            options.insert(name.to_owned(), serde_json::from_str(&content(file)?)?);
++            let option =
++                crate::deep_json::parse_value(&content(file)?).ok_or("a managed settings option is not JSON")?;
++            options.insert(name.to_owned(), option);
 +            continue;
 +        }
 +        let (path, drop_in) = place_path(place).ok_or("a settings file has an unknown place")?;
@@ -1839,7 +1841,9 @@ index 0000000000..c8451aa468
 +    let index = |at: usize| row[at].as_u64().and_then(|index| usize::try_from(index).ok());
 +    let files = index(3).and_then(|at| cases.get(at)).ok_or("a row names no case")?;
 +    let startup = index(4).ok_or("a row names no startup")?;
-+    let expected = index(5).and_then(|at| recorded.get(at)).ok_or("a row names no answer")?;
++    let expected = index(5)
++        .and_then(|at| recorded.get(at))
++        .ok_or("a row names no answer")?;
 +    let at = checked_offset(answers, row, host, call, context)?;
 +    let (answered, stage) = answer_at(files, call, profile.with_startup_bytes(startup).resumed_by(at))?;
 +    let stage_matches = row[6].as_str().is_none_or(|named| named == stage);
@@ -1872,13 +1876,24 @@ index 0000000000..c8451aa468
 +            .collect::<Result<Vec<_>, _>>()?;
 +        let mut checked = Vec::new();
 +        for worker in running {
-+            checked.extend(worker.join().map_err(|_| "a caller context answers worker panicked")??);
++            checked.extend(
++                worker
++                    .join()
++                    .map_err(|_| "a caller context answers worker panicked")??,
++            );
 +        }
 +        Ok(checked)
 +    })?;
 +    let contexts: BTreeSet<_> = checked.iter().map(|(_, covered)| covered).collect();
-+    assert_eq!(contexts.len(), HOSTS.len() * 2 * CONTEXTS.len(), "a host, call or context has no rows");
-+    let unexplained: Vec<&String> = checked.iter().filter_map(|(unexplained, _)| unexplained.as_ref()).collect();
++    assert_eq!(
++        contexts.len(),
++        HOSTS.len() * 2 * CONTEXTS.len(),
++        "a host, call or context has no rows"
++    );
++    let unexplained: Vec<&String> = checked
++        .iter()
++        .filter_map(|(unexplained, _)| unexplained.as_ref())
++        .collect();
 +    assert_eq!(unexplained, Vec::<&String>::new());
 +    Ok(())
 +}
@@ -1888,10 +1903,10 @@ index 0000000000..c8451aa468
 +mod scan40;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
 new file mode 100644
-index 0000000000..be62131148
+index 0000000000..1517a24b18
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,135 @@
 +//! Scratch scan for the model40 job, never committed: for each group of a case, host, call position and startup,
 +//! the offsets of each context's interval on the 16-byte grid where the engine gives each recorded answer with its
 +//! stage. A context run in full lists every offset that gives each answer, with the runs of what the engine gives;
@@ -1913,7 +1928,10 @@ index 0000000000..be62131148
 +use super::{DEEP_STACK_BYTES, Failure, HOSTS, STEP, TestResult, answer_at};
 +
 +fn whole(value: &Value, what: &'static str) -> Result<isize, Failure> {
-+    Ok(value.as_i64().and_then(|value| isize::try_from(value).ok()).ok_or(what)?)
++    Ok(value
++        .as_i64()
++        .and_then(|value| isize::try_from(value).ok())
++        .ok_or(what)?)
 +}
 +
 +fn context(files: &Value, call: &str, stack: crate::NodeStack, scan: &Value) -> Result<Value, Failure> {
