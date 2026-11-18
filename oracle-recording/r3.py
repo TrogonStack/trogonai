@@ -3506,6 +3506,344 @@ def band39_unit():
     return go
 
 
+# ---- band40: ruling 40 (PLAN Updates 105 and 106): pairs located per call position, placed on toplevel with nested as
+# the zero-offset control, and every case of every measured level run in full in every caller context, each answer
+# kept with the catches the traced package logged for it, for the committed model check ----
+BAND40_CONTEXTS = ("toplevel", "nested", "timer", "immediate", "io", "child_exit")
+assert sorted(BAND40_CONTEXTS) == sorted(GATE["CONTEXTS"]) and BAND40_CONTEXTS[0] == BAND37_DEFAULT
+# A level is clean when both of these give the side's own answer with REF, CROSS and every default-flag run.
+BAND40_PLACEMENT = ("toplevel", "nested")
+# Traced default-flag runs at most per case and context, to label the answers its traced REF run did not give.
+BAND40_LABEL_RUNS = 20
+# Traced io runs of each control case (ruling 40 item 6).
+BAND40_CONTROL_RUNS = 100
+
+
+def band40_stage(records, answered):
+    """The causal stage of one traced process (PLAN Update 106): `read` for a stack overflow RangeError logged at q7e,
+    `drop_in` for one logged at um, `other` for any other RangeError logged there, sorted and joined with `+`, then
+    `rejected` when the answer is an error; `successful` when there is none of them. Errors other than RangeError at
+    q7e are the reader's ordinary paths (a missing file) and name no stage."""
+    kinds = set()
+    for record in records:
+        if record.get("catch") not in ("q7e", "um") or record.get("error") != "RangeError":
+            continue
+        if str(record.get("message", "")).startswith(BAND39_OVERFLOW):
+            kinds.add("read" if record["catch"] == "q7e" else "drop_in")
+        else:
+            kinds.add("other")
+    named = sorted(kinds)
+    if isinstance(answered, dict) and answered.get("error") is not None:
+        named.append("rejected")
+    return "+".join(named) or "successful"
+
+
+class Band40Store:
+    """The distinct case files and answers of one unit, each written once, so events name them by sha256."""
+
+    def __init__(self, folder):
+        self.lock = __import__("threading").Lock()
+        self.cases_path = os.path.join(folder, "cases.jsonl")
+        self.answers_path = os.path.join(folder, "answers.jsonl")
+        self.cases, self.answers = set(), set()
+
+    def case(self, case, startup):
+        sha = band39_files_sha256(case, startup)
+        with self.lock:
+            if sha not in self.cases:
+                self.cases.add(sha)
+                with open(self.cases_path, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps({"files_sha256": sha, "case": case[0], "startup": startup,
+                                             "files": [list(file) for file in case[1]]}) + "\n")
+        return sha
+
+    def answer(self, raw):
+        five = {key: raw.get(key) for key in MG8_ANSWERS}
+        text = json.dumps(five, sort_keys=True)
+        sha = __import__("hashlib").sha256(text.encode()).hexdigest()
+        with self.lock:
+            if sha not in self.answers:
+                self.answers.add(sha)
+                with open(self.answers_path, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps({"sha256": sha, "answer": five}) + "\n")
+        return sha
+
+
+def band40_context(runs, pool, traced, store, case, own, other, context):
+    """One case in one context, never cut short: REF, CROSS and BAND37_RUNS default-flag runs, then one traced REF run
+    and, while an answer has no stage, traced default-flag runs up to BAND40_LABEL_RUNS. The counts by outcome, each
+    distinct answer with how often each flag set gave it and the stages traced runs gave it with, and the traced
+    non-own answers that logged no catch (rule (b), F40-4)."""
+    untraced = [runs.once_full(case, probe_flags(REF), context), runs.once_full(case, probe_flags(CROSS), context)]
+    untraced += list(pool.map(lambda _: runs.once_full(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), context),
+                              range(BAND37_RUNS)))
+    kinds = [band39_kind(collapsed, own, other) for collapsed, _raw, _records in untraced]
+    answers = {}
+    for at, (_collapsed, raw, _records) in enumerate(untraced):
+        if raw is None:
+            continue
+        entry = answers.setdefault(store.answer(raw), {"ref": False, "cross": False, "runs": 0, "stages": set(),
+                                                       "traced": 0})
+        if at == 0:
+            entry["ref"] = True
+        elif at == 1:
+            entry["cross"] = True
+        else:
+            entry["runs"] += 1
+    uncaught, traced_runs, traced_other = [], 0, {}
+
+    def label(results):
+        nonlocal traced_runs
+        for collapsed, raw, records in results:
+            traced_runs += 1
+            if raw is None:
+                continue
+            stage = band40_stage(records, raw)
+            sha = store.answer(raw)
+            if band39_kind(collapsed, own, other) != "own" and stage == "successful":
+                uncaught.append(sha)
+            if sha in answers:
+                answers[sha]["stages"].add(stage)
+                answers[sha]["traced"] += 1
+            else:
+                traced_other.setdefault(sha, set()).add(stage)
+
+    label([runs.once_full(case, probe_flags(REF), context, traced["package"])])
+    while traced_runs <= BAND40_LABEL_RUNS and any(not entry["stages"] for entry in answers.values()):
+        size = min(pool._max_workers, BAND40_LABEL_RUNS + 1 - traced_runs)
+        label(list(pool.map(lambda _: runs.once_full(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), context,
+                                                     traced["package"]), range(size))))
+    rest = kinds[2:]
+    counts = {"ref": kinds[0], "cross": kinds[1], "runs": len(rest), "own": rest.count("own"),
+              "opposite": rest.count("opposite"), "other_answer": rest.count("third"),
+              "no_answer": rest.count("no_answer"), "traced_runs": traced_runs}
+    complete = counts["ref"] == "own" and counts["cross"] == "own" and counts["own"] == counts["runs"]
+    listed = [{"sha256": sha, "ref": entry["ref"], "cross": entry["cross"], "runs": entry["runs"],
+               "traced": entry["traced"], "stages": sorted(entry["stages"])} for sha, entry in answers.items()]
+    seen_traced = [{"sha256": sha, "stages": sorted(stages)} for sha, stages in traced_other.items()]
+    return counts, complete, listed, seen_traced, uncaught, untraced
+
+
+def band40_control(runs, pool, traced, store, case, untraced_io, toplevel_ref):
+    """Whether a case is a control case (PLAN Update 106, ruling 40 item 6): its io REF answer is not an error, differs
+    from its toplevel REF answer, and every untraced io run gave it. Then BAND40_CONTROL_RUNS traced io default-flag
+    runs, each of which must give that answer with its catch logged."""
+    raws = [raw for _collapsed, raw, _records in untraced_io]
+    if any(raw is None for raw in raws) or raws[0].get("error") is not None:
+        return None
+    if store.answer(raws[0]) == toplevel_ref or any(store.answer(raw) != store.answer(raws[0]) for raw in raws):
+        return None
+    expected = store.answer(raws[0])
+    results = list(pool.map(lambda _: runs.once_full(case, probe_flags(DEFAULT_FLAGS, DEFAULT_FLAGS), "io",
+                                                     traced["package"]), range(BAND40_CONTROL_RUNS)))
+    matched, caught, stages = 0, 0, {}
+    for _collapsed, raw, records in results:
+        stage = band40_stage(records, raw) if raw is not None else "no_answer"
+        stages[stage] = stages.get(stage, 0) + 1
+        if raw is not None and store.answer(raw) == expected:
+            matched += 1
+            caught += stage != "successful"
+    return {"answer": expected, "runs": len(results), "matched": matched, "caught": caught, "stages": stages,
+            "held": matched == caught == len(results)}
+
+
+def band40_level(runs, pool, traced, store, pair, side, level, answers, write_event, hashes, controls):
+    """One level of a side: every case in every context in full. Clean when every case is clean in toplevel and
+    nested. The first case of the side that qualifies is its control case."""
+    clean, stops = True, []
+    for case, own, other, which in band8_cases(pair, side, level, answers):
+        startup = runs.port["case_startup"](case)
+        event = {"host": HOST, "wsl": bool(GATE["WSL"]), "call": GATE["CALL"], "pair": pair["id"], "side": which,
+                 "axis": pair["axis"], "level": level, "case": case[0], "startup": startup,
+                 "files_sha256": store.case(case, startup), "flags": list(DEFAULT_FLAGS), **hashes}
+        refs = {}
+        for context in BAND40_CONTEXTS:
+            counts, complete, listed, seen_traced, uncaught, untraced = band40_context(
+                runs, pool, traced, store, case, own, other, context)
+            refs[context] = untraced
+            write_event({**event, "context": context, **counts, "complete": complete, "answers": listed,
+                         "traced_only": seen_traced, "uncaught": uncaught})
+            if context in BAND40_PLACEMENT:
+                clean = clean and complete
+            if uncaught:
+                stops.append(f"F40-4: {case[0]} ({context}) level {level}: {len(uncaught)} traced non-own answers "
+                             f"logged no catch")
+            if counts["no_answer"] or "no_answer" in (counts["ref"], counts["cross"]):
+                stops.append(f"F40-5: {case[0]} ({context}) level {level}: a run gave no answer: {counts}")
+        key = (pair["id"], side)
+        if key not in controls and refs["toplevel"][0][1] is not None:
+            control = band40_control(runs, pool, traced, store, case, refs["io"], store.answer(refs["toplevel"][0][1]))
+            if control is not None:
+                controls[key] = control
+                write_event({"control": {**event, **control}})
+                if not control["held"]:
+                    stops.append(f"F40-4: control {case[0]} level {level}: {control['matched']} of {control['runs']} "
+                                 f"traced io runs gave the untraced answer, {control['caught']} with their catch")
+    if stops:
+        raise Band8Stop("; ".join(stops))
+    return clean
+
+
+def band40_walk(runs, pool, traced, store, pair, side, region, answers, write_event, hashes, others, controls,
+                fallback=False):
+    """The margin inside `region`: the outer of the first two consecutive clean levels; on the class fallback also at
+    least BAND39_FALLBACK_CLEAN clean steps in all."""
+    streak, measured, margin, clean_steps = 0, [], None, 0
+    for level in region[:BAND37_STEPS + 1]:
+        clean = band40_level(runs, pool, traced, store, pair, side, level, answers, write_event, hashes, controls)
+        measured.append([level, clean])
+        clean_steps += clean
+        streak = streak + 1 if clean else 0
+        if margin is None and streak == BAND8_CLEAN_IN_A_ROW:
+            named = [case[0] for case, _own, _other, _which in band8_cases(pair, side, level, answers)]
+            shared = sorted(others.intersection(named))
+            if shared:
+                raise Band8Stop(f"{pair['id']} {side}: the margin level {level} is another pair's edge case {shared}")
+            margin = level
+        if margin is not None and (not fallback or clean_steps >= BAND39_FALLBACK_CLEAN):
+            return {"margin": margin, "measured": measured, "region": region, "clean_steps": clean_steps}
+    if margin is not None:
+        raise Band8Stop(f"OWNER: {pair['id']} {side}: the class fallback found {clean_steps} clean steps, fewer than "
+                        f"{BAND39_FALLBACK_CLEAN}")
+    raise Band8Stop(f"{pair['id']} {side}: no two levels in a row clean in toplevel and nested inside the region of "
+                    f"{len(region)} levels, by L{BAND37_STEPS}")
+
+
+def band40_side(runs, pool, traced, store, pair, side, answers, write_event, hashes, others, controls, memo):
+    """One side's margin under ruling 40: the reference region in the default context through L60; a region of one
+    level is a stop, except origin_copy, which re-locates on its class axis and needs BAND39_FALLBACK_CLEAN clean
+    class steps there."""
+    region, width = band8_region(runs, pair, side, answers, write_event, BAND37_STEPS)
+    if width == 0:
+        raise Band8Stop(f"{pair['id']} {side}: the reference answer already differs at L0")
+    if width > 1:
+        return {"axis": pair["axis"], "width": width,
+                **band40_walk(runs, pool, traced, store, pair, side, region, answers, write_event, hashes, others,
+                              controls)}
+    if pair["id"] != BAND39_FALLBACK:
+        raise Band8Stop(f"{pair['id']} {side}: the region holds one level, so no two levels can be clean")
+    stepped = band39_locate(runs, band39_class_pair(runs.port, pair), memo)
+    stepped_answers = {"near": band8_answer(runs, stepped["near"]), "far": band8_answer(runs, stepped["far"])}
+    if stepped_answers != answers:
+        raise Band8Stop(f"OWNER: {pair['id']} {side}: the class-axis pair answers otherwise than the level pair")
+    write_event({"fallback": {"host": HOST, "call": GATE["CALL"], "pair": pair["id"], "side": side,
+                              "edge": band39_edge(runs, stepped, hashes)}})
+    region, width = band8_region(runs, stepped, side, stepped_answers, write_event, BAND37_STEPS)
+    if width < BAND39_FALLBACK_CLEAN:
+        raise Band8Stop(f"OWNER: {pair['id']} {side}: the class-axis region holds {width} steps, fewer than "
+                        f"{BAND39_FALLBACK_CLEAN}")
+    found = band40_walk(runs, pool, traced, store, stepped, side, region, stepped_answers, write_event, hashes, others,
+                        controls, True)
+    return {"axis": "class", "width": width, "fallback": band39_edge(runs, stepped, hashes), **found}
+
+
+def band40_unit():
+    """The band round of ruling 40 for this host and call position: every pair of this kernel located for this call
+    position, then this shard's pairs placed on toplevel and nested with every context run in full."""
+    def go(pool, quiet):
+        if not GATE["NATIVE"] or GATE["CONTEXT"] != BAND37_DEFAULT:
+            return {"error": f"band40 runs natively from the {BAND37_DEFAULT} context, not {GATE['CONTEXT']!r}"}
+        port = mg8_port()
+        out = {"located": {}, "pm": {}, "call": GATE["CALL"], "contexts": list(BAND40_CONTEXTS),
+               "placement": list(BAND40_PLACEMENT), "runs_per_level": BAND37_RUNS, "steps": BAND37_STEPS,
+               "reach": LOCATE39_REACH, "label_runs": BAND40_LABEL_RUNS, "control_runs": BAND40_CONTROL_RUNS}
+        failed = mg8_profile(pool, port, out)
+        if failed:
+            return {"error": failed, **out}
+        traced8, traced39 = r8_traced(), band39_traced()
+        if "error" in traced39:
+            return {"error": traced39["error"], **out}
+        hashes = {"pinned_sha256": r7_sha256(os.path.join(PACKAGE, "sdk.mjs")),
+                  "traced_sha256": traced8.get("traced_sha256"), "traced39_sha256": traced39["traced39_sha256"]}
+        out["hashes"] = hashes
+        runs = Band39Runs(port)
+        folder = os.path.join(os.path.dirname(OUT), "band40")
+        os.makedirs(folder, exist_ok=True)
+        store = Band40Store(folder)
+        try:
+            profile_pairs = band8_pairs(port, out["profile"])
+        except Band8Stop as stop:
+            return {"error": str(stop), **out}
+        # Organization cases need a WSL kernel (Gc, sdk.mjs 136 col 4257); no stand-in may fake it.
+        mine = [pair for pair in profile_pairs if pair["id"].startswith("org_") == bool(GATE["WSL"])]
+        memo, located, out["edges"], locate_stops = {}, [], {}, {}
+        for pair in mine:
+            try:
+                moved = band39_locate(runs, pair, memo)
+                located.append(moved)
+                out["edges"][pair["id"]] = band39_edge(runs, moved, hashes)
+            except Band8Stop as stop:
+                locate_stops[pair["id"]] = str(stop)
+                out["edges"][pair["id"]] = {"stop": str(stop)}
+        with open(os.path.join(folder, "edges.json"), "w", encoding="utf-8") as handle:
+            json.dump({"host": HOST, "wsl": bool(GATE["WSL"]), "call": GATE["CALL"], "shard": SHARD,
+                       "edges": out["edges"]}, handle)
+        runs.pairs = located
+        pairs = mine[SHARD - 1::SHARDS]
+        out["shard_pairs"] = [pair["id"] for pair in pairs]
+        by_id = {pair["id"]: pair for pair in located}
+        out["pairs"], stopped, falsified, controls = {}, [], [], {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2 * (os.cpu_count() or 1)) as band_pool:
+            for profile_pair in pairs:
+                events = os.path.join(folder, f"{profile_pair['id']}.events.jsonl")
+                lock = __import__("threading").Lock()
+
+                def write_event(event, events=events, lock=lock):
+                    with lock, open(events, "a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(event) + "\n")
+
+                pair = by_id.get(profile_pair["id"])
+                summary = {"host": HOST, "wsl": bool(GATE["WSL"]), "pair": profile_pair["id"], "call": GATE["CALL"],
+                           "flags": list(DEFAULT_FLAGS), **hashes, "stops": []}
+                if pair is None:
+                    summary["stops"].append(locate_stops[profile_pair["id"]])
+                else:
+                    summary.update({"axis": pair["axis"], "near": pair["near"][0], "far": pair["far"][0],
+                                    "near_level": pair["near_level"], "far_level": pair["far_level"],
+                                    "shift": pair["shift"], "edge": out["edges"][pair["id"]]})
+                    others = {case[0] for other in located if other["id"] != pair["id"]
+                              for case in (other["near"], other["far"])}
+                    try:
+                        if pair["near_level"] >= pair["far_level"] and not pair.get("limit"):
+                            raise Band8Stop(f"{pair['id']}: the near level is not below the far level")
+                        answers = {"near": band8_answer(runs, pair["near"]), "far": band8_answer(runs, pair["far"])}
+                        if answers["near"] == answers["far"]:
+                            raise Band8Stop(f"{pair['id']}: the pair answers the same")
+                        for side in ["far"] if pair.get("limit") else ["near", "far"]:
+                            try:
+                                summary[side] = band40_side(runs, band_pool, traced39, store, pair, side, answers,
+                                                            write_event, hashes, others, controls, memo)
+                            except Band8Stop as stop:
+                                summary["stops"].append(str(stop))
+                    except Band8Stop as stop:
+                        summary["stops"].append(str(stop))
+                    summary["controls"] = {side: controls[(pair["id"], side)] for side in ("near", "far")
+                                           if (pair["id"], side) in controls}
+                for stop in summary["stops"]:
+                    falsified += [part for part in stop.split("; ") if part.startswith("F40-")]
+                if summary["stops"]:
+                    stopped.append(profile_pair["id"])
+                summary["folder_assertion"] = runs.tally()
+                write_event({"summary": summary})
+                out["pairs"][profile_pair["id"]] = summary
+        out["locate_stops"] = locate_stops
+        out["folder_assertion"] = runs.tally()
+        out["stopped"] = stopped
+        out["falsified"] = falsified
+        assertion = out["folder_assertion"]
+        if (assertion["refusals"] or assertion["failed_probe_checks"] or assertion["running_after"]
+                or assertion["gate_failures"] or assertion["distinct_folders"] != assertion["runs"]):
+            out["error"] = f"the folder check did not hold: {assertion}"
+        elif falsified:
+            out["error"] = f"falsifiers fired: {falsified[:5]}"
+        elif stopped:
+            out["error"] = f"pairs stopped: {stopped}"
+        elif not pairs:
+            out["error"] = "no pair for this shard"
+        return out
+    return go
+
+
 # ---- mg37: the strict re-record at the union margins of every caller context (ruling 37 B, PLAN Update 96) ----
 # margins37.json: host -> pair -> the band37 union margins, the outer of the two call positions.
 MG37_MARGINS = os.path.join(HERE, "margins37.json")
@@ -3770,6 +4108,9 @@ def round8_units():
     # Each pair located per call position and its margins in the five-context union, child_exit verified (ruling 39,
     # PLAN Update 99).
     out += [("band39:goldens", band39_unit())]
+    # Each pair located per call position, placed on toplevel with nested as control, every context run in full with
+    # each answer's causal stage for the committed model check (ruling 40, PLAN Updates 105 and 106).
+    out += [("band40:goldens", band40_unit())]
     # Every golden at its band37 union margin, observed from every caller context (ruling 37 B, PLAN Update 96).
     out += [("mg37:goldens", mg37_unit())]
     return out
