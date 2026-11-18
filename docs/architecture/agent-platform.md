@@ -72,10 +72,10 @@ blocks.
 Several edge and bridge implementations also exist, but they do not yet
 form one Session-integrated gateway layer:
 
-- `a2a-gateway` contains a live dispatch path, served and policy-enforced in
-  the default build, that authenticates, policy-screens, and forwards A2A
-  gateway ingress to mapped agent RPC subjects. Platform audit publishing is
-  opt in through configuration, and only the SpiceDB relational tier needs the
+- `a2a-gateway` serves live A2A ingress in the default build. It authenticates
+  callers, applies the policy layers enabled in the deployment, and forwards
+  allowed requests to mapped agent RPC subjects. Platform audit publishing
+  requires explicit configuration. The SpiceDB relational tier requires the
   `spicedb` Cargo feature;
 - `mcp-nats-server` and `mcp-nats-stdio` bridge remote HTTP or local stdio MCP
   traffic onto the NATS MCP binding; and
@@ -100,7 +100,8 @@ Several platform security building blocks also exist as crates:
   [workload identity and portable trust](./workload-identity.md) and the
   [runtime reference](../reference/workload-identity.md);
 - `rsworkspace/crates/platform/trogon-audit` provides platform audit records and
-  a writer that refuses an action it cannot record; and
+  a writer that refuses actions when it cannot store their required audit
+  records; and
 - `rsworkspace/crates/policy/trogon-policy-eval` evaluates policy bindings
   (permits, ceilings, holds, and request-rule narrowing) as pure functions,
   with `trogon-policy-cel` adding request rules that can only narrow. The
