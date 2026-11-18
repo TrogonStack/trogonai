@@ -960,7 +960,7 @@ index 0000000000..561c647178
 +    Tool,
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
-index f01219da74..7f26a7a3f6 100644
+index f01219da74..d7c5d70501 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 @@ -29,9 +29,11 @@
@@ -1361,7 +1361,7 @@ index f01219da74..7f26a7a3f6 100644
          },
      };
  
-@@ -391,19 +601,34 @@ impl NodeStack {
+@@ -391,19 +601,43 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 608 bytes per object and 272
      /// per array out of 1002688, and 304 per object and per array out of 1002760. The file cache copy then takes 608
      /// per object and 640 per array out of 1002496. At the object or array that ends a path, the walk and the copy
@@ -1395,6 +1395,15 @@ index f01219da74..7f26a7a3f6 100644
 +    /// process to the next, and the profile takes the most the tighter may have, as on macOS, in steps of 16 bytes:
 +    /// 985824 and 986160, 1621 objects or 3242 arrays.
 +    ///
++    /// The policy cache parses a registry document read after the stats of the registry tool (the machine registry
++    /// under WSL) walking with 985728, cloning with 985872 and copying with 985712: 1621 nested objects, a root object
++    /// holding 3242 nested arrays, and 1539 nested arrays for the copy. The recorder's WSL organization cases bound
++    /// them in every caller context: a server entry member holding 1619 nested objects walks and 1620 does not
++    /// ([985232, 985840)), one holding 3240 nested arrays clones and 3241 does not ([985872, 986176)), and a member
++    /// holding 1538 nested arrays is copied and 1539 is not ([985536, 986176)). The clone is the least of its
++    /// interval, the walk the room the stats frame measured on its own, and the copy stays inside its interval with
++    /// no edge of its own.
++    ///
 +    /// The managed settings the caller hands over as an object go through the policy cache (`pm`) on the chain of the
 +    /// evaluation for the sources, outside any guard: the server-managed settings (`WP`) clone with 1001088, walk with
 +    /// 1001104 and copy the settings the schema kept with 1000720, and the managed settings a host passes in (`G7e`)
@@ -1403,7 +1412,7 @@ index f01219da74..7f26a7a3f6 100644
      ///
      /// When a background compile lands while a merge runs, a merge after the one that compiled the `isIndex` pattern
      /// to bytecode can run out at 1362 levels instead of compiling the pattern there, and any `later_compile` from 337
-@@ -413,6 +638,7 @@ impl NodeStack {
+@@ -413,6 +647,7 @@ impl NodeStack {
      pub const NODE_24_LINUX_X64: Self = Self {
          startup: StartupShare::BesideStack,
          startup_bytes: 4384,
@@ -1411,7 +1420,7 @@ index f01219da74..7f26a7a3f6 100644
          walk: PathCost {
              object: 608,
              array: 272,
-@@ -441,7 +667,7 @@ impl NodeStack {
+@@ -441,7 +676,7 @@ impl NodeStack {
              leaves: LeafCost {
                  empty_object: 144,
                  scalar_object: 608,
@@ -1420,7 +1429,7 @@ index f01219da74..7f26a7a3f6 100644
                  scalar_array: 640,
              },
              budget: 1_002_496,
-@@ -459,22 +685,50 @@ impl NodeStack {
+@@ -459,22 +694,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 999_992,
                  clone: 1_000_312,
@@ -1457,8 +1466,8 @@ index f01219da74..7f26a7a3f6 100644
 +            },
 +            registry: RegistryBudgets {
 +                fs: CacheBudgets {
-+                    walk: 985_872,
-+                    clone: 985_712,
++                    walk: 985_728,
++                    clone: 985_872,
 +                    copy: 985_712,
 +                },
 +                tool: CacheBudgets {
@@ -1475,14 +1484,16 @@ index f01219da74..7f26a7a3f6 100644
          },
      };
  
-@@ -513,7 +767,18 @@ impl NodeStack {
+@@ -513,13 +776,42 @@ impl NodeStack {
          }
      }
  
 +    /// The same stack for a resolve whose caller resumes its chain of microtasks `offset` bytes off the top level of
 +    /// a module: below it (a negative offset) in the callback of a timer, an immediate, an I/O completion or a child
-+    /// process exit, where every read, copy and merge of the resolve has that much less room, on every platform. The
-+    /// caller's frames are no input of the resolve, so this stays internal to the checks of what each depth answers.
++    /// process exit, where every read, copy and merge of the resolve has that much less room, on every platform, but
++    /// the passes that run once a completion of the registry tool or the file system resumed their chain (see
++    /// [`NodeStack::resumed`]). The caller's frames are no input of the resolve, so this stays internal to the checks
++    /// of what each depth answers.
 +    #[cfg(test)]
 +    #[must_use]
 +    pub(crate) const fn resumed_by(self, offset: isize) -> Self {
@@ -1490,11 +1501,33 @@ index f01219da74..7f26a7a3f6 100644
 +    }
 +
      fn available(self, budget: usize) -> usize {
-+        let budget = budget.saturating_add_signed(self.caller);
++        self.resumed(budget.saturating_add_signed(self.caller))
++    }
++
++    /// The room of a pass that runs on the stack of a completion of the registry tool or the file system: the parse
++    /// of a registry or managed preferences document (`hm` upstream, after `by` awaits the tool and `_E` awaits
++    /// `Promise.all([Mi,ZQe(Mi)].map(...YQe...))`) and the check of a managed folder (`nD`, after its reads). The
++    /// chain those resume is the completion's own, with none of the caller's frames under it, so the budget is the
++    /// room measured there.
++    fn resumed(self, budget: usize) -> usize {
          match self.startup {
              StartupShare::FromStack => budget.saturating_sub(self.startup_bytes),
              StartupShare::BesideStack => budget,
-@@ -527,9 +792,9 @@ impl NodeStack {
+         }
+     }
+ 
++    /// The room `reader` has for a pass with `budget`.
++    fn reader_room(self, reader: PolicyReader, budget: usize) -> usize {
++        match reader {
++            PolicyReader::HeldCheck(_) | PolicyReader::Registry(_) => self.resumed(budget),
++            PolicyReader::Sources | PolicyReader::Origin | PolicyReader::MachinePolicy => self.available(budget),
++        }
++    }
++
+     /// The most nested arrays and objects a settings file the reader reads may hold.
+     pub(crate) fn max_depth(self) -> usize {
+         self.walk
+@@ -527,12 +819,12 @@ impl NodeStack {
              .min(self.clone.deepest(self.available(self.clone.budget)))
      }
  
@@ -1505,9 +1538,14 @@ index f01219da74..7f26a7a3f6 100644
 +    pub(crate) fn policy_max_depth(self, reader: PolicyReader) -> usize {
 +        let budgets = self.policy.reader(reader);
          self.walk
-             .deepest(self.available(budgets.walk))
-             .min(self.clone.deepest(self.available(budgets.clone)))
-@@ -541,31 +806,54 @@ impl NodeStack {
+-            .deepest(self.available(budgets.walk))
+-            .min(self.clone.deepest(self.available(budgets.clone)))
++            .deepest(self.reader_room(reader, budgets.walk))
++            .min(self.clone.deepest(self.reader_room(reader, budgets.clone)))
+     }
+ 
+     /// Whether the settings file reader walks and copies `document` without running out of stack.
+@@ -541,31 +833,56 @@ impl NodeStack {
              && self.clone.fits(self.available(self.clone.budget), document)
      }
  
@@ -1517,8 +1555,10 @@ index f01219da74..7f26a7a3f6 100644
 +    /// Whether `reader` walks and copies `document` without running out of stack.
 +    pub(crate) fn reads_policy(self, reader: PolicyReader, document: &Map<String, Value>) -> bool {
 +        let budgets = self.policy.reader(reader);
-+        self.walk.fits_object(self.available(budgets.walk), document)
-+            && self.clone.fits_object(self.available(budgets.clone), document)
++        self.walk.fits_object(self.reader_room(reader, budgets.walk), document)
++            && self
++                .clone
++                .fits_object(self.reader_room(reader, budgets.clone), document)
 +    }
 +
 +    /// Whether the policy cache clones and walks `document`, which the caller handed over as `source`, without running
@@ -1547,7 +1587,7 @@ index f01219da74..7f26a7a3f6 100644
 +    pub(crate) fn registry_copy_overflows(self, base: ResumeBase, settings: &Map<String, Value>) -> bool {
 +        !self
 +            .copy
-+            .fits_object(self.available(self.policy.registry.at(base).copy), settings)
++            .fits_object(self.resumed(self.policy.registry.at(base).copy), settings)
 +    }
 +
      /// Whether the file cache runs out of stack in `pass` copying `settings`, which the reader kept from a managed
@@ -1569,7 +1609,7 @@ index f01219da74..7f26a7a3f6 100644
      pub(crate) fn merge_within(
          self,
          call: NodeMergeCall,
-@@ -576,7 +864,7 @@ impl NodeStack {
+@@ -576,7 +893,7 @@ impl NodeStack {
      ) -> NodeMerge {
          let budget = match call {
              NodeMergeCall::Source => self.merge_budget,
@@ -1578,7 +1618,7 @@ index f01219da74..7f26a7a3f6 100644
              NodeMergeCall::Admin => self.policy.admin_merge,
          };
          let room = MergeRoom {
-@@ -618,3 +906,7 @@ fn is_container(value: &Value) -> bool {
+@@ -618,3 +935,7 @@ fn is_container(value: &Value) -> bool {
  #[cfg(test)]
  #[path = "node_stack_tests.rs"]
  mod tests;
@@ -1649,10 +1689,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..8117df8572
+index 0000000000..9bd9a51fde
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,476 @@
+@@ -0,0 +1,496 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -1714,7 +1754,9 @@ index 0000000000..8117df8572
 +/// What the recorder's stand-in for `reg.exe` prints for a key it holds no value for, before it exits with 1.
 +const REGISTRY_ABSENT: &str = "ERROR: The system was unable to find the specified registry key or value.\n";
 +
-+/// The kernel the second resolve of an organization case finds, and how long after the first it starts.
++/// The kernel every resolve of an organization case finds, and how long after the first the second starts. The
++/// recorder runs those cases on a real WSL 2 kernel, so `Gc` upstream reads WSL from `/proc/version` at both
++/// resolves, and the oracle drops the `/proc/version` stand-in of the case instead of serving it.
 +const WSL_KERNEL: (&str, &str) = ("/proc/version", "Linux version 5.15.153.1-microsoft-standard-WSL2\n");
 +const WSL_AT_MS: u64 = 1_800_000;
 +
@@ -1821,7 +1863,8 @@ index 0000000000..8117df8572
 +
 +/// The host and options of one case: the files it puts on disk, and the managed settings it hands over as options.
 +/// A case holding a machine registry policy (`hklm`) is an organization case, which the recorder runs as root in an
-+/// organization session with no settings sources, its stand-in for `reg.exe` answering that policy and no user one.
++/// organization session with no settings sources, its stand-in for `reg.exe` answering that policy and no user one,
++/// under the WSL kernel from its first resolve on.
 +///
 +/// The recorder also runs its `effective_*` cases as an organization session (`CLAUDE_CODE_ENTRYPOINT` is
 +/// `remote_cowork`), with the settings sources left as they are, one resolve per call, as a user who owns the managed
@@ -1853,7 +1896,8 @@ index 0000000000..8117df8572
 +            host = host
 +                .variable(ORGANIZATION_ENTRYPOINT.0, ORGANIZATION_ENTRYPOINT.1)
 +                .command(MACHINE_QUERY, ok(&registry_text(&document)))
-+                .command(USER_QUERY, exited(1, REGISTRY_ABSENT));
++                .command(USER_QUERY, exited(1, REGISTRY_ABSENT))
++                .file(WSL_KERNEL.0, WSL_KERNEL.1);
 +            host.root = true;
 +            options.insert("settingSources".to_owned(), json!([]));
 +            continue;
@@ -1945,8 +1989,10 @@ index 0000000000..8117df8572
 +}
 +
 +/// What `stack` answers for a recorded case at its call position, and its causal stage: a second call runs one
-+/// resolve with the same options first, as a long-lived process does, and answers with the one after it.
-+fn answer_at(files: &Value, call: &str, stack: NodeStack) -> Result<(Value, String), Failure> {
++/// resolve with the same options first, as a long-lived process does, and answers with the one after it. A resolve of
++/// an organization case that awaited a read of the machine policy goes on with `completion`, the stack of the I/O
++/// completion that read ended on, whatever its caller was.
++fn answer_at(files: &Value, call: &str, stack: NodeStack, completion: NodeStack) -> Result<(Value, String), Failure> {
 +    let Case {
 +        host,
 +        options,
@@ -1955,7 +2001,7 @@ index 0000000000..8117df8572
 +    } = case(files)?;
 +    let _ = node_stack_catch::take();
 +    let answered = match organization {
-+        Some(organization) => organization_answer(host, &options, drop_ins, organization, call, stack)?,
++        Some(organization) => organization_answer(host, &options, drop_ins, organization, call, (stack, completion))?,
 +        None => {
 +            let state = ResolverState::new().with_node_stack(stack);
 +            match call {
@@ -1973,39 +2019,51 @@ index 0000000000..8117df8572
 +}
 +
 +/// What an organization case answers. The recorder resolves it twice in one process, sharing every cache: once as the
-+/// process starts, and once more `WSL_AT_MS` later under the WSL kernel, when the machine policy is read again and its
-+/// held registry document re-read. It prints one answer per resolve, each member listing them in order, or the
-+/// `RangeError` alone once a resolve rejects, since nothing catches it there and the process ends. A second call first
++/// process starts, and once more `WSL_AT_MS` later, when the machine policy is read again. Both run under the WSL
++/// kernel, so the first read (`startLoad` upstream, `await(wq()??by())`) already runs the registry tool and parses
++/// the registry document outside any `catch`, where running out of stack rejects the resolve; the re-read of the
++/// second resolve (`o8`) catches the same failure and keeps the reading in force. Under WSL `_E` sets the registry
++/// policy aside unless the Windows side arms inheriting, so the managed file is the policy at both resolves. It
++/// prints one answer per resolve, each member listing them in order, or the `RangeError` alone once a resolve
++/// rejects, since nothing catches it there and the process ends. A second call first
 +/// resolves with the same options before the first step and lets whatever that answers go, as the oracle's prime does.
 +/// The machine policy re-reads run inline, so the fake clock alone decides when each one ends.
++///
++/// `resolveSettings` (`c8`) starts with `await o8()`, and `o8` awaits `net()`, the load `startLoad` keeps, then the
++/// re-read it starts when the reading in force is `ret` (1800000 ms) old. Under WSL that read runs `reg.exe` and
++/// `_E` awaits the stats of the registry tool (`await Promise.all([Mi,ZQe(Mi)].map(...YQe...))`) before it parses
++/// anything, so a resolve that read goes on from that I/O completion and not from its caller: the load of the first
++/// resolve of a process (the prime of a second call) and the re-read of the resolve `WSL_AT_MS` later. The resolve
++/// right after a prime finds the load settled and the reading fresh, reads nothing, and goes on from its caller.
 +fn organization_answer(
 +    host: FakeHost,
 +    options: &ResolveSettingsOptions,
 +    mut drop_ins: Vec<&'static str>,
 +    organization: Organization,
 +    call: &str,
-+    stack: NodeStack,
++    (stack, completion): (NodeStack, NodeStack),
 +) -> Result<Value, Failure> {
-+    let state = ResolverState::with_rereads(PolicyRereads::Inline).with_node_stack(stack);
-+    match call {
-+        "first" => {}
++    let state = ResolverState::with_rereads(PolicyRereads::Inline).with_node_stack(completion);
++    let state = match call {
++        "first" => state,
 +        "second" => {
 +            let _primed = answer(&host, options, &state);
++            state.with_node_stack(stack)
 +        }
 +        _ => return Err("an answer names an unknown call position".into()),
-+    }
++    };
 +    let first = answer(&host, options, &state)?;
 +    if !first["error"].is_null() {
 +        return Ok(first);
 +    }
-+    let mut later = host.file(WSL_KERNEL.0, WSL_KERNEL.1).at(WSL_AT_MS);
++    let mut later = host.at(WSL_AT_MS);
 +    if organization == Organization::Kept {
 +        drop_ins.push(KEPT_DROP_IN.1);
 +        later = later
 +            .file(KEPT_DROP_IN.0, KEPT_DROP_IN.2)
 +            .directory(DROP_INS, &drop_ins);
 +    }
-+    let second = answer(&later, options, &state)?;
++    let second = answer(&later, options, &state.with_node_stack(completion))?;
 +    if !second["error"].is_null() {
 +        return Ok(second);
 +    }
@@ -2073,7 +2131,9 @@ index 0000000000..8117df8572
 +        .and_then(|at| recorded.get(at))
 +        .ok_or("a row names no answer")?;
 +    let at = checked_offset(answers, row, host, call, context)?;
-+    let (answered, stage) = answer_at(files, call, profile.with_startup_bytes(startup).resumed_by(at))?;
++    let completion = offset(&answers["offsets"][host][call]["io"])?;
++    let stack = profile.with_startup_bytes(startup);
++    let (answered, stage) = answer_at(files, call, stack.resumed_by(at), stack.resumed_by(completion))?;
 +    let stage_matches = row[6].as_str().is_none_or(|named| named == stage);
 +    let unexplained = (answered != *expected || !stage_matches)
 +        .then(|| format!("{host} {call} {context} case {} at {at}: {stage}", row[3]));
@@ -2131,10 +2191,10 @@ index 0000000000..8117df8572
 +mod scan40;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
 new file mode 100644
-index 0000000000..1517a24b18
+index 0000000000..4f24b3c468
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,139 @@
 +//! Scratch scan for the model40 job, never committed: for each group of a case, host, call position and startup,
 +//! the offsets of each context's interval on the 16-byte grid where the engine gives each recorded answer with its
 +//! stage. A context run in full lists every offset that gives each answer, with the runs of what the engine gives;
@@ -2162,7 +2222,7 @@ index 0000000000..1517a24b18
 +        .ok_or(what)?)
 +}
 +
-+fn context(files: &Value, call: &str, stack: crate::NodeStack, scan: &Value) -> Result<Value, Failure> {
++fn context(files: &Value, call: &str, stack: crate::NodeStack, io: isize, scan: &Value) -> Result<Value, Failure> {
 +    let (low, high) = (whole(&scan["low"], "no low")?, whole(&scan["high"], "no high")?);
 +    let every = scan["all"].as_bool().ok_or("no all")?;
 +    let targets = scan["targets"].as_array().ok_or("no targets")?;
@@ -2172,7 +2232,7 @@ index 0000000000..1517a24b18
 +    let mut at = high;
 +    let mut scanned = 0usize;
 +    while at >= low {
-+        let (answered, stage) = match answer_at(files, call, stack.resumed_by(at)) {
++        let (answered, stage) = match answer_at(files, call, stack.resumed_by(at), stack.resumed_by(io)) {
 +            Ok(given) => given,
 +            Err(error) => (json!({"scan_error": error.to_string()}), "scan_error".to_owned()),
 +        };
@@ -2214,11 +2274,15 @@ index 0000000000..1517a24b18
 +    let startup = usize::try_from(whole(&group["startup"], "no startup")?)?;
 +    let stack = profile.with_startup_bytes(startup);
 +    let started = Instant::now();
-+    let scans = group["scans"]
-+        .as_array()
-+        .ok_or("no scans")?
++    let scans = group["scans"].as_array().ok_or("no scans")?;
++    // Every organization answer is the same at each offset of the I/O interval, so its top stands for the completion.
++    let io = whole(
++        &scans.iter().find(|scan| scan["context"] == "io").ok_or("no io scan")?["high"],
++        "no io high",
++    )?;
++    let scans = scans
 +        .iter()
-+        .map(|scan| context(&group["files"], call, stack, scan))
++        .map(|scan| context(&group["files"], call, stack, io, scan))
 +        .collect::<Result<Vec<_>, _>>()?;
 +    Ok(json!({"key": group["key"], "scans": scans, "seconds": started.elapsed().as_secs_f64()}))
 +}
@@ -2271,7 +2335,7 @@ index 0000000000..1517a24b18
 +    })
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_tests.rs
-index f1e0862073..a37761c280 100644
+index f1e0862073..7d4fb7d1b8 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_tests.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_tests.rs
 @@ -2,11 +2,11 @@ use std::cell::Cell;
@@ -2464,7 +2528,7 @@ index f1e0862073..a37761c280 100644
              (NodeMergeCall::Folder(ManagedPass::Origin), 1243),
              (NodeMergeCall::Folder(ManagedPass::MachinePolicy), 1244),
              (NodeMergeCall::Admin, 1244),
-@@ -400,3 +540,152 @@ fn the_default_profile_is_the_one_for_the_platform_the_crate_is_built_for() {
+@@ -400,3 +540,163 @@ fn the_default_profile_is_the_one_for_the_platform_the_crate_is_built_for() {
          (expected, expected)
      );
  }
@@ -2586,12 +2650,23 @@ index f1e0862073..a37761c280 100644
 +#[test]
 +fn the_policy_cache_reads_and_copies_a_registry_document_within_its_budgets() -> Result<(), ResolveSettingsError> {
 +    on_engine_stack(|| {
-+        for (stack, objects, arrays, copied, deepest) in [
-+            (NodeStack::NODE_24_DARWIN_ARM64, 2146, 3163, 1878, 3340),
-+            (NodeStack::NODE_24_LINUX_ARM64, 1914, 3062, 1749, 3063),
-+            (NodeStack::NODE_24_LINUX_X64, 1621, 3241, 1539, 3242),
++        for (stack, base, objects, arrays, copied, deepest) in [
++            (NodeStack::NODE_24_DARWIN_ARM64, ResumeBase::Fs, 2146, 3163, 1878, 3340),
++            (
++                NodeStack::NODE_24_DARWIN_ARM64,
++                ResumeBase::Tool,
++                2146,
++                3163,
++                1878,
++                3340,
++            ),
++            (NodeStack::NODE_24_LINUX_ARM64, ResumeBase::Fs, 1914, 3062, 1749, 3063),
++            (NodeStack::NODE_24_LINUX_ARM64, ResumeBase::Tool, 1914, 3062, 1749, 3063),
++            (NodeStack::NODE_24_LINUX_X64, ResumeBase::Fs, 1621, 3242, 1539, 3243),
++            (NodeStack::NODE_24_LINUX_X64, ResumeBase::Tool, 1621, 3241, 1539, 3242),
 +        ] {
-+            for base in [ResumeBase::Fs, ResumeBase::Tool] {
++            // The parse runs on the stack of the completion it resumed from, so no caller moves its edges.
++            for stack in [stack, stack.resumed_by(-17_424)] {
 +                let reader = PolicyReader::Registry(base);
 +                assert!(stack.reads_policy(reader, &nested(objects, 0)), "{stack:?} {base:?}");
 +                assert!(
