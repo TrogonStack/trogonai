@@ -2,7 +2,7 @@
 
 use std::{error::Error as StdError, ffi::OsStr, sync::Arc, time::Duration};
 
-use tokio::time::{sleep, timeout};
+use tokio::time::{error::Elapsed, sleep, timeout};
 use trogon_claude_agent_sdk::{
     BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, EndWithoutResult, Error,
     FeatureSupport, FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages,
@@ -917,6 +917,34 @@ async fn cancelling_connect_reaps_the_started_process() -> TestResult {
     Ok(())
 }
 
+/// Reading the run and the disconnect after it both failed; each error is kept for the report.
+#[derive(Debug, thiserror::Error)]
+#[error("reading the run failed: {read}; disconnecting failed: {disconnect}")]
+struct ReadAndDisconnectError {
+    #[source]
+    read: Box<dyn StdError>,
+    disconnect: Error,
+}
+
+/// What the run read, after the disconnect that follows it; when both fail, the report carries both errors.
+fn read_then_disconnect<T>(
+    observed: Result<Result<T, Error>, Elapsed>,
+    cleanup: Result<(), Error>,
+) -> Result<T, Box<dyn StdError>> {
+    let observed = match observed {
+        Ok(read) => read.map_err(Box::<dyn StdError>::from),
+        Err(elapsed) => Err(elapsed.into()),
+    };
+    match (observed, cleanup) {
+        (Err(read), Err(disconnect)) => Err(ReadAndDisconnectError { read, disconnect }.into()),
+        (observed, cleanup) => {
+            let value = observed?;
+            cleanup?;
+            Ok(value)
+        }
+    }
+}
+
 async fn compatibility_tool_result_frames(mode: &str) -> Result<Vec<Option<serde_json::Value>>, Box<dyn StdError>> {
     let mut client = ClaudeSdkClient::connect(options(mode)?).await?;
     client.send_prompt(Prompt::from("tool output")).await?;
@@ -938,9 +966,7 @@ async fn compatibility_tool_result_frames(mode: &str) -> Result<Vec<Option<serde
     })
     .await;
     let cleanup = client.disconnect().await;
-    let values = observed??;
-    cleanup?;
-    Ok(values)
+    read_then_disconnect(observed, cleanup)
 }
 
 #[tokio::test]
@@ -988,8 +1014,7 @@ async fn compatibility_stream_event_retains_outer_metadata_separately() -> TestR
     })
     .await;
     let cleanup = client.disconnect().await;
-    let events = observed??;
-    cleanup?;
+    let events = read_then_disconnect(observed, cleanup)?;
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].uuid, "event-id");
     assert_eq!(events[0].session_id.as_str(), "fixture-session");
