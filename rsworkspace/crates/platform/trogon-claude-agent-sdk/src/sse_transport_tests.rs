@@ -701,21 +701,21 @@ async fn a_silent_stream_is_reconnected() -> TestResult {
 /// wait itself, each only once the stream task is waiting on it, so neither wait races the machine's speed.
 #[tokio::test(start_paused = true)]
 async fn a_stream_that_never_answers_is_reconnected() -> TestResult {
-    const BOUND: Duration = Duration::from_secs(3_600);
     let name = "connect_timeout_reconnects";
     // While a blocking task runs, a paused clock does not auto-advance, so it stays put while the test waits on the
-    // loopback sockets. The wall-clock bound only turns a lost signal into a failure instead of a hang: the clock
-    // auto-advances again and the virtual bounds below fire.
+    // loopback sockets. Only the test lets it go, once the case is recorded or by returning early, so no wall-clock
+    // bound can free it on a loaded machine and let the liveness timeout end the second stream and open a third.
     let (release, held) = std::sync::mpsc::channel::<()>();
-    let clock_hold = tokio::task::spawn_blocking(move || held.recv_timeout(Duration::from_secs(10)));
+    // Nothing is ever sent: `recv` returns once the sender is gone.
+    let clock_hold = tokio::task::spawn_blocking(move || {
+        let _ = held.recv();
+    });
     let mut started = start(name).await?;
     let shared = Arc::clone(&started.transport.shared);
     let mut ready = shared.first_ready.subscribe();
 
     // Each wait is reduced to a flag at once, so the `watch::Ref` it returns does not keep `started` borrowed.
-    let first_seen = timeout(BOUND, started.server.gets_seen.wait_for(|gets| *gets >= 1))
-        .await
-        .is_ok_and(|seen| seen.is_ok());
+    let first_seen = started.server.gets_seen.wait_for(|gets| *gets >= 1).await.is_ok();
     // The first request hangs, so only the connect timeout ends it.
     tokio::time::advance(shared.scaled(CONNECT_TIMEOUT)).await;
     // The stream task arms the reconnect wait in the same poll that sees the connect timeout fire, so once the attempt
@@ -729,12 +729,10 @@ async fn a_stream_that_never_answers_is_reconnected() -> TestResult {
         tokio::task::yield_now().await;
     }
     tokio::time::advance(shared.scaled(reconnect_delay(1))).await;
-    let second_seen = timeout(BOUND, started.server.gets_seen.wait_for(|gets| *gets >= 2))
-        .await
-        .is_ok_and(|seen| seen.is_ok());
+    let second_seen = started.server.gets_seen.wait_for(|gets| *gets >= 2).await.is_ok();
     let wait_gets = json!({"reached": first_seen && second_seen});
-    let settled = timeout(BOUND, ready.wait_for(Option::is_some)).await;
-    let opened = settled.is_ok_and(|value| value.is_ok_and(|value| value.as_ref().is_some_and(Result::is_ok)));
+    let settled = ready.wait_for(Option::is_some).await;
+    let opened = settled.is_ok_and(|value| value.as_ref().is_some_and(Result::is_ok));
     let wait_ready = json!({"reached": opened && started.transport.is_ready()});
     let results = vec![
         json!(["waitGets", wait_gets]),
@@ -742,10 +740,8 @@ async fn a_stream_that_never_answers_is_reconnected() -> TestResult {
         json!(["snapshot", snapshot(&started)]),
     ];
     let replay = finish(&started, results)?;
-    release
-        .send(())
-        .map_err(|_| "the paused clock was released before the case finished")?;
-    clock_hold.await??;
+    drop(release);
+    clock_hold.await?;
     let actions: Vec<&str> = replay.golden["spec"]["actions"]
         .as_array()
         .into_iter()
