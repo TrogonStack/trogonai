@@ -60,7 +60,11 @@ describe('generic webhook management preview', () => {
     ).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Create endpoint' }));
     expect(await screen.findByRole('heading', { name: 'Billing events' })).toBeInTheDocument();
-    expect(screen.getByText(/https:\/\/gateway\.example\.com\/webhooks\//)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /^https:\/\/gateway\.example\.com\/webhooks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/not connected to a running gateway/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Switch project/ }));
     await user.click(await screen.findByRole('button', { name: 'Beacon' }));
