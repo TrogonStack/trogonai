@@ -2959,7 +2959,7 @@ index d1442711cf..d00e3c7b78 100644
      pub(crate) fn merge_admin(self, destination: &mut SettingsMap, source: &SettingsMap) -> NodeMerge {
          self.merge(|_| NodeMergeCall::Admin, destination, source)
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader_tests.rs
-index 2930d5c7f5..e0da3e76a1 100644
+index 2930d5c7f5..c1db07691d 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader_tests.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader_tests.rs
 @@ -1,9 +1,16 @@
@@ -2982,20 +2982,23 @@ index 2930d5c7f5..e0da3e76a1 100644
  };
  
  #[test]
-@@ -22,3 +29,57 @@ fn the_typescript_dialect_reads_a_blank_managed_document_as_empty_settings() {
+@@ -22,3 +29,60 @@ fn the_typescript_dialect_reads_a_blank_managed_document_as_empty_settings() {
          (LoadState::Loaded, Some(SettingsMap::new()), false, false)
      );
  }
 +
 +/// A registry document holding a model and, under `x`, `objects - 1` nested objects under `x`, then `arrays` nested
-+/// arrays around `null`.
++/// arrays around `null`: `objects` objects in all with the root, the shape of the budget checks in `node_stack`. The
++/// root closes on its own brace, so the nested objects close `objects - 1` more; one brace past that is text
++/// `JSON.parse` rejects, which reads as no document at all.
 +fn registry_text(objects: usize, arrays: usize) -> String {
++    let nested = objects.saturating_sub(1);
 +    format!(
 +        "{{\"model\":\"m\",\"x\":{}{}null{}{}}}",
-+        "{\"x\":".repeat(objects.saturating_sub(1)),
++        "{\"x\":".repeat(nested),
 +        "[".repeat(arrays),
 +        "]".repeat(arrays),
-+        "}".repeat(objects)
++        "}".repeat(nested)
 +    )
 +}
 +
