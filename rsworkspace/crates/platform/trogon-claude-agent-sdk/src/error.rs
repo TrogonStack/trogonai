@@ -407,7 +407,7 @@ impl Error {
             return None;
         };
         let tail = String::from_utf8_lossy(stderr.as_bytes());
-        let tail = tail.trim_matches(crate::js_regex::is_whitespace);
+        let tail = crate::session_prompt::js_trim(&tail);
         let tail = if tail.is_empty() {
             String::new()
         } else {

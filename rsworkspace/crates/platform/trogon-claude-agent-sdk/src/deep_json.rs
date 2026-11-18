@@ -4,7 +4,7 @@
 
 use crate::JsonObject;
 use crate::constants::{PARSE_STACK, PYTHON_INT_MAX_STR_DIGITS, PYTHON_READER_DEPTH, SHALLOW};
-use crate::js_object_order::array_index;
+use crate::js_object_order::js_reorder;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -447,13 +447,7 @@ pub(crate) fn javascript_object(object: &mut JsonObject) {
 
 /// Puts the array-index keys of `object` first, as V8 orders them, and queues its values.
 fn javascript_members<'a>(object: &'a mut JsonObject, pending: &mut Vec<&'a mut Value>) {
-    if object.keys().any(|key| array_index(key).is_some()) {
-        let (mut indexed, named): (Vec<_>, Vec<_>) = std::mem::take(object)
-            .into_iter()
-            .partition(|(key, _)| array_index(key).is_some());
-        indexed.sort_by_key(|(key, _)| array_index(key));
-        object.extend(indexed.into_iter().chain(named));
-    }
+    js_reorder(object);
     pending.extend(object.values_mut());
 }
 
