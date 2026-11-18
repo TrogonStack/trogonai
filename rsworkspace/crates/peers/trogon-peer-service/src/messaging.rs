@@ -45,18 +45,23 @@ where
         if binding.tenant() != owner.tenant() || binding.content().size() as usize != text.as_str().len() {
             return Err(PeerApplicationError::Scope);
         }
-        let command = SendMessage::new(
-            owner.clone(),
-            reference,
-            key.clone(),
-            self.ids.message_id()?,
-            recipient,
-            collaboration.clone(),
-            binding.content().clone(),
-            reply,
-            self.clock.now(),
-        );
-        let message = match self.execute_message(owner, &command).await {
+        let message_id = self.ids.message_id()?;
+        let message = match self
+            .execute_message_with_builder(owner, self.clock.now(), |accepted_at| {
+                SendMessage::new(
+                    owner.clone(),
+                    reference.clone(),
+                    key.clone(),
+                    message_id.clone(),
+                    recipient.clone(),
+                    collaboration.clone(),
+                    binding.content().clone(),
+                    reply.clone(),
+                    accepted_at,
+                )
+            })
+            .await
+        {
             Ok(state) => state
                 .outbox
                 .iter()
