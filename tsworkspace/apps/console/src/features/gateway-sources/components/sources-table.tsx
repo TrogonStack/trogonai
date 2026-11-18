@@ -27,16 +27,16 @@ import { custodyTierLabels, type CustodyTier } from '@/features/custody/domain/c
 import { RelativeTime } from '@/features/secrets/components/relative-time';
 
 import { statusLabels, statusTones } from '../domain/labels';
-import { sourceKindLabels, type SourceKind } from '../domain/source-kind';
-import type { IntegrationStatus, SourceView } from '../domain/view';
+import { sourceListKindLabels, type SourceListKind, type SourceListRow } from '../domain/source-list';
+import type { IntegrationStatus } from '../domain/view';
 import { Sparkline } from './activity-chart';
 import { SourceKindIcon } from './source-kind-icon';
 import { SourceStatusBadge } from './status-badges';
 
-const columnHelper = createColumnHelper<SourceView>();
+const columnHelper = createColumnHelper<SourceListRow>();
 
-const matchesText: TextMatcher<SourceView> = (source, needle) =>
-  [source.displayName, source.id, sourceKindLabels[source.kind], source.subjectPrefix]
+const matchesText: TextMatcher<SourceListRow> = (source, needle) =>
+  [source.displayName, source.id, sourceListKindLabels[source.kind], source.subjectPrefix]
     .join(' ')
     .toLowerCase()
     .includes(needle);
@@ -50,8 +50,15 @@ const columns = [
         <SourceKindIcon kind={row.original.kind} />
         <div className="flex min-w-0 flex-col">
           <Link
-            to="/sources/$integrationId"
-            params={{ integrationId: row.original.id }}
+            {...(row.original.family === 'webhook'
+              ? {
+                  to: '/sources/webhooks/$endpointId' as const,
+                  params: { endpointId: row.original.id },
+                }
+              : {
+                  to: '/sources/$integrationId' as const,
+                  params: { integrationId: row.original.id },
+                })}
             className="block max-w-56 truncate text-[13px] leading-5 font-medium outline-none hover:underline focus-visible:underline"
           >
             {row.original.displayName}
@@ -60,6 +67,10 @@ const columns = [
         </div>
       </div>
     ),
+  }),
+  columnHelper.accessor('kind', {
+    header: 'Kind',
+    cell: ({ getValue }) => <span className="text-[13px]">{sourceListKindLabels[getValue()]}</span>,
   }),
   columnHelper.accessor('status', {
     header: 'Status',
@@ -71,9 +82,7 @@ const columns = [
     cell: ({ row }) => (
       <span className="flex flex-col">
         <span className="text-[13px] leading-5">{row.original.credentialSummary}</span>
-        <span className="text-muted-foreground text-xs leading-4">
-          {row.original.slots.length} {row.original.slots.length === 1 ? 'slot' : 'slots'}
-        </span>
+        <span className="text-muted-foreground text-xs leading-4">{row.original.credentialDetail}</span>
       </span>
     ),
   }),
@@ -107,14 +116,14 @@ const columns = [
   }),
 ];
 
-function buildFacets(sources: readonly SourceView[]): FilterFacet<SourceView>[] {
+function buildFacets(sources: readonly SourceListRow[]): FilterFacet<SourceListRow>[] {
   const kind = facetFromRows({
     key: 'kind',
     label: 'Kind',
     icon: <ShapesIcon aria-hidden="true" />,
     rows: sources,
     accessor: (row) => row.kind,
-    describe: (value) => ({ label: sourceKindLabels[value as SourceKind] }),
+    describe: (value) => ({ label: sourceListKindLabels[value as SourceListKind] }),
   });
   const status = facetFromRows({
     key: 'status',
@@ -142,7 +151,7 @@ export function SourcesTableSkeleton() {
   return <TableSkeleton label="Loading sources" />;
 }
 
-export function SourcesTable({ sources }: { sources: readonly SourceView[] }) {
+export function SourcesTable({ sources }: { sources: readonly SourceListRow[] }) {
   const navigate = useNavigate();
   const [filters, setFilters] = useState<FilterState>(emptyFilterState);
   const facets = useMemo(() => buildFacets(sources), [sources]);
@@ -178,7 +187,11 @@ export function SourcesTable({ sources }: { sources: readonly SourceView[] }) {
       }
       footer={<TableFooter shown={visible.length} total={sources.length} noun="integration" />}
       muted={(source) => source.status === 'paused'}
-      onOpen={(source) => void navigate({ to: '/sources/$integrationId', params: { integrationId: source.id } })}
+      onOpen={(source) => {
+        if (source.family === 'webhook')
+          void navigate({ to: '/sources/webhooks/$endpointId', params: { endpointId: source.id } });
+        else void navigate({ to: '/sources/$integrationId', params: { integrationId: source.id } });
+      }}
     />
   );
 }

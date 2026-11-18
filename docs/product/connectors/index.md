@@ -32,6 +32,12 @@ guarantees:
     title: One process to run
     text: One HTTP port for every webhook, plus the long-lived connections some providers need, with health probes.
 progress:
+  - name: Generic webhook receiver
+    status: built
+    note: Your own systems send authenticated HTTP events. The gateway keeps the original body in a durable delivery for your consumers.
+  - name: Generic webhook management in the console
+    status: partial
+    note: Endpoint setup and delivery inspection have a local preview. Live project-scoped management is still pending.
   - name: Webhook gateway with checks for each provider
     status: built
     note: Signatures, tokens, timestamp windows and signed keys, verified before anything is published.
@@ -61,17 +67,45 @@ progress:
 <ProductHeader />
 
 A connector lets agents hear what happens in a tool your team already uses, act
-in it, or talk with people through it. The gateway is the front door: it checks
-every request, gives each one a stable address and hands it to any agent that
-subscribes.
+in it, or talk with people through it. Your own systems can send events through
+generic webhooks, too. The gateway checks incoming requests and keeps accepted
+events for the consumers that subscribe.
 
-::: info Events work today. Actions and most channels are designed.
-Every connector on this page already delivers events. Telegram also works as a
+::: info Event delivery works today. Actions and most channels are designed.
+Provider events and generic webhook receipt are built. Telegram also works as a
 channel. Calling provider APIs and chatting in Slack or Discord are designed.
 [Where it stands](#where-it-stands) has the detail.
 :::
 
-## From webhook to agent
+## Events from your own systems {#generic-webhooks}
+
+Send an order update, a completed build or an internal alert to an endpoint your
+project owns. Generic webhooks accept your original request body, so your system
+does not need a provider-specific connector.
+
+Choose a signed request using HMAC-SHA256 with Standard Webhooks v1, or a bearer
+token. The gateway checks the endpoint and its credential before keeping the
+event. A `202 Accepted` means the delivery is stored, ready for a separate consumer
+to process.
+
+<GenericWebhook />
+
+Retries use the same delivery ID and unchanged body. The gateway authenticates
+each request and suppresses another stored event within the configured duplicate
+window. Your consumer still handles repeated processing safely and chooses the
+business action; receiving a webhook does not start an agent or workflow by
+itself.
+
+::: info Receiver built. Console management in preview.
+The receiver supports endpoint updates, request limits and credential rotation
+and revocation. Endpoint setup and delivery inspection are available as a local
+console preview. Live console management and the first downstream business
+integration still need wiring.
+:::
+
+[See the authentication, delivery and setup reference](/reference/gateway-webhooks).
+
+## Provider webhooks, ready for subscribers
 
 The provider calls one URL. The gateway checks it, publishes it to a subject
 that names the account and the event, and keeps it in a stream so a busy or
@@ -97,7 +131,10 @@ people through it. Each card says what works today.
 
 <ConnectorGallery />
 
-## What we promise
+## Provider connector guarantees
+
+These guarantees describe the named provider integrations. Generic endpoints use
+the separate [gateway webhook delivery contract](/reference/gateway-webhooks#delivery-contract).
 
 <FeatureGrid :items="$frontmatter.guarantees" />
 
@@ -109,7 +146,7 @@ people through it. Each card says what works today.
 
 Create `docs/product/connectors/<slug>.md` with a `connector` block in its frontmatter
 and `<ConnectorHeader />` at the top of its body. The page appears in the
-gallery and the sidebar on the next build.
+gallery on the next build.
 
 ```yaml
 ---
@@ -139,6 +176,7 @@ never ships a broken card. To build a connector rather than list one, see
 
 **Build and operate**
 
+- [Generic Gateway Webhooks](/reference/gateway-webhooks)
 - [Add a Connector Provider](/how-to/add-a-connector-provider)
 - [Integrate Connector HTTP Use](/how-to/integrate-connector-http)
 - [Operate Connector Recovery and Erasure](/how-to/operate-connectors)

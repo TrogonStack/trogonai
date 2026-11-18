@@ -2,11 +2,9 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
 import {
   readAdrRecords,
-  readConnectorRecords,
   readGlossaryRecords,
   readProductAreaRecords,
   toAdrSidebarItem,
-  toConnectorSidebarItem,
   toGlossarySidebarGroups,
   toProductNavItem,
 } from "./helpers";
@@ -17,7 +15,6 @@ export default async () => {
   const rootDir = fileURLToPath(new URL("..", import.meta.url));
   const adrRecords = await readAdrRecords(rootDir);
   const glossaryRecords = await readGlossaryRecords(rootDir);
-  const connectorRecords = await readConnectorRecords(rootDir);
   const productItems = [
     { text: "Overview", link: "/product/" },
     ...(await readProductAreaRecords(rootDir)).map(toProductNavItem),
@@ -53,16 +50,7 @@ export default async () => {
         { text: "GitHub", link: "https://github.com/TrogonStack/trogonai" },
       ],
       sidebar: {
-        "/product/": [
-          { text: "Product", items: productItems },
-          {
-            text: "Connectors",
-            items: [
-              { text: "All connectors", link: "/product/connectors/" },
-              ...connectorRecords.map(toConnectorSidebarItem),
-            ],
-          },
-        ],
+        "/product/": [{ text: "Product", items: productItems }],
         "/releases/": [
           {
             text: "Releases",
