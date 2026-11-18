@@ -235,7 +235,7 @@ export interface SourcesOverview {
   readonly rejected24h: number;
 }
 
-export function summarizeSources(sources: readonly SourceView[]): SourcesOverview {
+export function summarizeSources(sources: readonly Pick<SourceView, 'status' | 'rejected24h'>[]): SourcesOverview {
   return {
     total: sources.length,
     receiving: sources.filter((source) => source.status === 'receiving').length,

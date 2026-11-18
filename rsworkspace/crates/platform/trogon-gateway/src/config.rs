@@ -55,6 +55,7 @@ use crate::constants::{
     SENTRY_MAX_ACK_TIMEOUT_SECS,
 };
 use crate::source_status::SourceStatus;
+use crate::webhooks::WebhookConfig;
 
 #[derive(Debug, thiserror::Error)]
 enum DurationTooLongError {
@@ -450,6 +451,7 @@ struct GatewayConfig {
     nats: NatsConfigSection,
     #[config(nested)]
     sources: SourcesConfig,
+    webhooks: Option<crate::webhooks::WebhookConfigInput>,
 }
 
 #[derive(Config)]
@@ -793,6 +795,7 @@ pub struct ResolvedConfig {
     pub datadog: Vec<SourceIntegration<crate::source::datadog::DatadogConfig>>,
     pub zoom: Vec<SourceIntegration<crate::source::zoom::ZoomConfig>>,
     pub plaid: Vec<SourceIntegration<crate::source::plaid::PlaidConfig>>,
+    pub webhooks: Option<WebhookConfig>,
 }
 
 impl ResolvedConfig {
@@ -823,6 +826,7 @@ impl ResolvedConfig {
             .chain(self.datadog.iter().map(|i| i.config.stream_max_age))
             .chain(self.zoom.iter().map(|i| i.config.stream_max_age))
             .chain(self.plaid.iter().map(|i| i.config.stream_max_age))
+            .chain(self.webhooks.iter().map(|config| config.stream_max_age))
     }
 
     pub fn has_any_source(&self) -> bool {
@@ -841,6 +845,7 @@ impl ResolvedConfig {
             || !self.datadog.is_empty()
             || !self.zoom.is_empty()
             || !self.plaid.is_empty()
+            || self.webhooks.is_some()
     }
 }
 
@@ -907,8 +912,13 @@ impl ResolvedConfig {
             .discord
             .iter()
             .map(|c| StreamBinding::new("discord".to_string(), &c.subject_prefix, &c.stream_name));
+        let webhooks = self
+            .webhooks
+            .iter()
+            .map(|config| StreamBinding::new("webhooks".to_string(), &config.subject_prefix, &config.stream_name));
         std::iter::once(credential)
             .chain(discord)
+            .chain(webhooks)
             .chain(integration_bindings("github", &self.github, |c| {
                 (&c.subject_prefix, &c.stream_name)
             }))
@@ -1000,6 +1010,14 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
     let nats = resolve_nats(&cfg.nats, nats_overrides, env).map_err(ConfigError::Nats)?;
     let mut errors = Vec::new();
 
+    let webhooks = cfg.webhooks.and_then(|input| match input.resolve() {
+        Ok(config) => config,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid("webhooks", "configuration", error));
+            None
+        }
+    });
+
     let github = resolve_github_integrations(cfg.sources.github, env, &mut errors);
     let discord = resolve_discord(cfg.sources.discord, env, &mut errors);
     let slack = resolve_slack_integrations(cfg.sources.slack, env, &mut errors);
@@ -1040,6 +1058,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
         datadog,
         zoom,
         plaid,
+        webhooks,
     };
 
     let errors = validate_stream_bindings(&config);

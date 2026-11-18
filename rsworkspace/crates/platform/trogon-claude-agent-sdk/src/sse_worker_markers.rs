@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::{JsonObject, js_text::is_js_whitespace};
+use crate::{JsonObject, session_prompt::js_space};
 
 mod constants;
 
@@ -40,7 +40,7 @@ fn holds_tick_element(text: &str) -> bool {
             && text[at + 5..]
                 .chars()
                 .next()
-                .is_some_and(|ch| ch == '>' || is_js_whitespace(ch))
+                .is_some_and(|ch| ch == '>' || js_space(ch))
     });
     opens && bytes.windows(7).any(|window| window.eq_ignore_ascii_case(b"</tick>"))
 }

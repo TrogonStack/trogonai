@@ -1,37 +1,62 @@
 //! The secrets service started against a real NATS server and a stand-in for
-//! OpenBao's AppRole login: what it refuses to start on, and that it serves
-//! releases until it is told to stop.
+//! OpenBao's AppRole login: what it refuses to start on, that it serves
+//! releases until it is told to stop, and that it announces a revocation to the
+//! credential's holder while it does.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use std::num::NonZeroUsize;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::RequestErrorKind;
+use async_nats::header::NATS_MESSAGE_ID;
 use async_nats::jetstream::stream;
+use async_nats::{HeaderMap, RequestErrorKind};
 use axum::Router;
 use axum::http::StatusCode;
 use axum::http::header::CONTENT_TYPE;
+use axum::response::IntoResponse;
 use axum::routing::post;
+use buffa::Message as _;
 use bytes::Bytes;
 use nkeys::{KeyPair, XKey};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use trogon_credential_aggregate::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
+use trogon_credential_aggregate::proto::revoked_to_proto;
+use trogon_credential_aggregate::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM, credential_event_subject};
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion,
+    SourceKind,
+};
+use trogon_decider_nats::TROGON_EVENT_TYPE;
+use trogon_decider_runtime::{EventEncode, EventType as _};
 use trogon_nats::ConnectError;
+use trogon_nats::jetstream::is_get_stream_not_found;
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_secrets_service::{
-    AdmissionLimit, ConfigSetting, ReleaseSources, SecretsService, SecretsServiceError, ServiceArgs, ServiceConfig,
+    AdmissionLimit, ConfigSetting, INVALIDATION_PUBLISHER_DURABLE, INVALIDATION_STREAM, InvalidationStream,
+    InvalidationStreamMismatchError, ReleaseSources, SecretsService, SecretsServiceError, ServiceArgs, ServiceConfig,
 };
 use trogon_std::env::InMemoryEnv;
 use trogon_std::fs::MemFs;
 use trogon_std::log_capture::{CapturedEvents, LevelFilter};
+use trogonai_proto::gateway::credentials::v1;
+use trogonai_proto::secrets::exchange::v1alpha1::{CredentialAddress, ReleaseInvalidated, ReleaseInvalidationReason};
+use uuid::Uuid;
 
 const TENANT_OWNERS_FILE: &str = "/etc/trogon/tenant-owners.toml";
 const RELEASE_POLICIES_FILE: &str = "/etc/trogon/release-policies.toml";
 const SECRET_ID_FILE: &str = "/run/secrets/fake-secret-id";
+const SECRET_ID: &str = "fake-secret-id";
+const ROTATED_SECRET_ID: &str = "fake-rotated-secret-id";
+/// What OpenBao answers a login whose secret id it does not know.
+const INVALID_SECRET_ID: &str = "fake-invalid-secret-id";
+const SECRET_ID_RETRYING: &str = "could not read the OpenBao AppRole secret id; retrying";
+/// The credential owner every test tenant holds.
+const OWNER: &str = "project-1";
 const SEED_VARIABLE: &str = "FAKE_SERVICE_XKEY_SEED";
 const APPROLE_LOGIN: &str = "/v1/auth/approle/login";
 const LOGIN_ANSWER: &str = r#"{"auth":{"client_token":"fake-login-token","lease_duration":3600,"renewable":true}}"#;
@@ -72,6 +97,22 @@ async fn fake_openbao() -> (String, JoinHandle<()>) {
     .await
 }
 
+/// Accepts an AppRole login only with `secret_id`, refusing any other the way
+/// OpenBao refuses a destroyed one.
+async fn openbao_accepting(secret_id: &'static str) -> (String, JoinHandle<()>) {
+    serve_openbao(Router::new().route(
+        APPROLE_LOGIN,
+        post(move |login: axum::Json<serde_json::Value>| async move {
+            if login["secret_id"] == secret_id {
+                ([(CONTENT_TYPE, "application/json")], LOGIN_ANSWER).into_response()
+            } else {
+                (StatusCode::BAD_REQUEST, INVALID_SECRET_ID).into_response()
+            }
+        }),
+    ))
+    .await
+}
+
 /// Refuses every AppRole login the way a sealed OpenBao does, and signals
 /// each attempt on the returned [`Notify`].
 async fn sealed_openbao() -> (String, Arc<Notify>, JoinHandle<()>) {
@@ -101,8 +142,21 @@ async fn create_credential_stream(server: &JetStreamTestServer) {
         .unwrap();
 }
 
+/// Provisions the invalidation stream the way an operator would, since the
+/// service only checks it.
+async fn create_invalidation_stream(server: &JetStreamTestServer, config: stream::Config) {
+    server.jetstream().await.create_stream(config).await.unwrap();
+}
+
+/// The streams a service needs before it takes a release.
+async fn create_streams(server: &JetStreamTestServer) {
+    create_credential_stream(server).await;
+    create_invalidation_stream(server, InvalidationStream::config(NonZeroUsize::MIN)).await;
+}
+
 /// The environment the service is deployed with: NATS at `nats` without TLS,
-/// OpenBao at `openbao` without TLS, and the sealing key seed in a variable.
+/// OpenBao at `openbao` without TLS, the sealing key seed in a variable, and
+/// the single replica a one-node test server can give the invalidation stream.
 fn environment(nats: &str, openbao: &str) -> InMemoryEnv {
     let env = InMemoryEnv::new();
     for (setting, value) in [
@@ -121,6 +175,7 @@ fn environment(nats: &str, openbao: &str) -> InMemoryEnv {
         (ConfigSetting::AuditTenant, "acme"),
         (ConfigSetting::AuditProject, "platform"),
         (ConfigSetting::AuditInstance, "secrets-0"),
+        (ConfigSetting::InvalidationStreamReplicas, "1"),
     ] {
         env.set(setting.env(), value);
     }
@@ -128,17 +183,11 @@ fn environment(nats: &str, openbao: &str) -> InMemoryEnv {
     env
 }
 
-fn files() -> MemFs {
-    let fs = MemFs::new();
-    fs.insert(
-        TENANT_OWNERS_FILE,
-        format!(
-            "[tenants]\n\"{}\" = [\"project-1\"]\n",
-            KeyPair::new_account().public_key()
-        ),
-    );
+fn files(tenant: &str) -> Arc<MemFs> {
+    let fs = Arc::new(MemFs::new());
+    fs.insert(TENANT_OWNERS_FILE, format!("[tenants]\n\"{tenant}\" = [\"{OWNER}\"]\n"));
     fs.insert(RELEASE_POLICIES_FILE, RELEASE_POLICIES);
-    fs.insert(SECRET_ID_FILE, "fake-secret-id\n");
+    fs.insert(SECRET_ID_FILE, format!("{SECRET_ID}\n"));
     fs
 }
 
@@ -155,10 +204,39 @@ fn service(nats: &str, openbao: &str) -> SecretsService {
 }
 
 fn service_in(env: &InMemoryEnv) -> SecretsService {
-    let fs = files();
-    let config = ServiceConfig::resolve(&ServiceArgs::default(), env, &fs).unwrap();
-    let sources = ReleaseSources::load(&config, env, &fs).unwrap();
+    service_for(env, &KeyPair::new_account().public_key())
+}
+
+/// The service deployed with `tenant` holding [`OWNER`].
+fn service_for(env: &InMemoryEnv, tenant: &str) -> SecretsService {
+    service_reading(env, &files(tenant))
+}
+
+/// The service started on `fs`, which the test keeps so it can change the
+/// files the service reads after it started.
+fn service_reading(env: &InMemoryEnv, fs: &Arc<MemFs>) -> SecretsService {
+    let config = ServiceConfig::resolve(&ServiceArgs::default(), env, fs.as_ref()).unwrap();
+    let sources = ReleaseSources::load(&config, env, fs).unwrap();
     SecretsService::new(config, sources)
+}
+
+/// Waits until a release request reaches the service, failing the test if it
+/// does not serve within [`SERVING_WITHIN`].
+async fn until_serving(caller: &async_nats::Client) {
+    let subject = release_subject();
+    tokio::time::timeout(SERVING_WITHIN, async {
+        loop {
+            match caller.request(subject.clone(), Bytes::new()).await {
+                Ok(_) => return,
+                Err(error) if error.kind() == RequestErrorKind::NoResponders => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("the release endpoint did not answer: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("the service did not start serving releases");
 }
 
 /// Runs the service until it returns, failing the test if it is still running
@@ -225,9 +303,72 @@ async fn a_credential_stream_that_does_not_exist_refuses_to_start() {
 }
 
 #[tokio::test]
-async fn an_openbao_that_refuses_the_login_keeps_the_service_out_of_the_queue_group_until_it_stops() {
+async fn an_invalidation_stream_that_does_not_exist_refuses_to_start_without_creating_it() {
     let server = JetStreamTestServer::start().await;
     create_credential_stream(&server).await;
+    let (openbao, _openbao) = fake_openbao().await;
+
+    let refused = refusal(service(server.address(), &openbao)).await;
+
+    let SecretsServiceError::InvalidationStream(source) = refused else {
+        panic!("a missing invalidation stream was refused as {refused:?}");
+    };
+    assert!(is_get_stream_not_found(&source), "{source:?}");
+    let lookup = server.jetstream().await.get_stream(INVALIDATION_STREAM).await;
+    assert!(
+        lookup.as_ref().is_err_and(is_get_stream_not_found),
+        "the service created the invalidation stream it only checks"
+    );
+}
+
+#[tokio::test]
+async fn an_invalidation_stream_that_lets_a_notice_be_deleted_refuses_to_start() {
+    let server = JetStreamTestServer::start().await;
+    create_credential_stream(&server).await;
+    create_invalidation_stream(
+        &server,
+        stream::Config {
+            deny_delete: false,
+            ..InvalidationStream::config(NonZeroUsize::MIN)
+        },
+    )
+    .await;
+    let (openbao, _openbao) = fake_openbao().await;
+
+    let refused = refusal(service(server.address(), &openbao)).await;
+
+    assert!(
+        matches!(
+            refused,
+            SecretsServiceError::InvalidationStreamMismatch(InvalidationStreamMismatchError::DenyDelete)
+        ),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_invalidation_stream_with_fewer_replicas_than_configured_refuses_to_start() {
+    let server = JetStreamTestServer::start().await;
+    create_streams(&server).await;
+    let (openbao, _openbao) = fake_openbao().await;
+    let env = environment(server.address(), &openbao);
+    env.set(ConfigSetting::InvalidationStreamReplicas.env(), "3");
+
+    let refused = refusal(service_in(&env)).await;
+
+    assert!(
+        matches!(
+            refused,
+            SecretsServiceError::InvalidationStreamMismatch(InvalidationStreamMismatchError::Replicas)
+        ),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_openbao_that_refuses_the_login_keeps_the_service_out_of_the_queue_group_until_it_stops() {
+    let server = JetStreamTestServer::start().await;
+    create_streams(&server).await;
     let (openbao, attempted, _openbao) = sealed_openbao().await;
     let shutdown = CancellationToken::new();
     let running = tokio::spawn(service(server.address(), &openbao).run(shutdown.clone()));
@@ -256,30 +397,78 @@ async fn an_openbao_that_refuses_the_login_keeps_the_service_out_of_the_queue_gr
 }
 
 #[tokio::test]
+async fn a_secret_id_file_removed_after_startup_keeps_the_service_out_of_the_queue_group_until_it_is_provisioned() {
+    let events = CapturedEvents::new();
+    let _capture = events.install(LevelFilter::WARN);
+    let server = JetStreamTestServer::start().await;
+    create_streams(&server).await;
+    let (openbao, _openbao) = openbao_accepting(ROTATED_SECRET_ID).await;
+    let fs = files(&KeyPair::new_account().public_key());
+    let service = service_reading(&environment(server.address(), &openbao), &fs);
+    fs.remove(Path::new(SECRET_ID_FILE));
+    let shutdown = CancellationToken::new();
+    let running = tokio::spawn(service.run(shutdown.clone()));
+    let caller = server.client().await;
+
+    tokio::time::timeout(SERVING_WITHIN, async {
+        while !events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some(SECRET_ID_RETRYING))
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the service never tried to read the secret id file again");
+    let unanswered = caller
+        .request(release_subject(), Bytes::new())
+        .await
+        .expect_err("the service joined the queue group without a login");
+    assert_eq!(unanswered.kind(), RequestErrorKind::NoResponders);
+    fs.insert(SECRET_ID_FILE, format!("{ROTATED_SECRET_ID}\n"));
+    until_serving(&caller).await;
+    shutdown.cancel();
+
+    tokio::time::timeout(STOPPED_WITHIN, running)
+        .await
+        .expect("the service did not stop when told to")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_service_logs_in_with_the_secret_id_its_file_holds_when_it_logs_in() {
+    let server = JetStreamTestServer::start().await;
+    create_streams(&server).await;
+    let (openbao, _openbao) = openbao_accepting(ROTATED_SECRET_ID).await;
+    let fs = files(&KeyPair::new_account().public_key());
+    let service = service_reading(&environment(server.address(), &openbao), &fs);
+    fs.insert(SECRET_ID_FILE, format!("{ROTATED_SECRET_ID}\n"));
+    let shutdown = CancellationToken::new();
+    let running = tokio::spawn(service.run(shutdown.clone()));
+
+    until_serving(&server.client().await).await;
+    shutdown.cancel();
+
+    tokio::time::timeout(STOPPED_WITHIN, running)
+        .await
+        .expect("the service did not stop when told to")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn the_service_serves_releases_until_it_is_told_to_stop() {
     let events = CapturedEvents::new();
     let _capture = events.install(LevelFilter::INFO);
     let server = JetStreamTestServer::start().await;
-    create_credential_stream(&server).await;
+    create_streams(&server).await;
     let (openbao, _openbao) = fake_openbao().await;
     let shutdown = CancellationToken::new();
     let running = tokio::spawn(service(server.address(), &openbao).run(shutdown.clone()));
-    let caller = server.client().await;
-    let subject = release_subject();
 
-    tokio::time::timeout(SERVING_WITHIN, async {
-        loop {
-            match caller.request(subject.clone(), Bytes::new()).await {
-                Ok(_) => return,
-                Err(error) if error.kind() == RequestErrorKind::NoResponders => {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                Err(error) => panic!("the release endpoint did not answer: {error}"),
-            }
-        }
-    })
-    .await
-    .expect("the service did not start serving releases");
+    until_serving(&server.client().await).await;
     shutdown.cancel();
 
     tokio::time::timeout(STOPPED_WITHIN, running)
@@ -302,7 +491,7 @@ async fn the_service_serves_releases_until_it_is_told_to_stop() {
 #[tokio::test]
 async fn a_service_told_to_stop_before_it_serves_stops_cleanly() {
     let server = JetStreamTestServer::start().await;
-    create_credential_stream(&server).await;
+    create_streams(&server).await;
     let (openbao, _openbao) = fake_openbao().await;
     let shutdown = CancellationToken::new();
     shutdown.cancel();
@@ -311,4 +500,102 @@ async fn a_service_told_to_stop_before_it_serves_stops_cleanly() {
         .await
         .expect("the service did not stop when told to")
         .unwrap();
+}
+
+#[tokio::test]
+async fn a_revocation_appended_while_the_service_runs_reaches_its_holder_as_one_notice() {
+    let server = JetStreamTestServer::start().await;
+    create_streams(&server).await;
+    let (openbao, _openbao) = fake_openbao().await;
+    let tenant = KeyPair::new_account().public_key();
+    let shutdown = CancellationToken::new();
+    let running = tokio::spawn(service_for(&environment(server.address(), &openbao), &tenant).run(shutdown.clone()));
+    let jetstream = server.jetstream().await;
+    let credentials = jetstream.get_stream(CREDENTIAL_STREAM).await.unwrap();
+    // The publisher reads only the events appended after its durable exists.
+    tokio::time::timeout(SERVING_WITHIN, async {
+        while credentials.consumer_info(INVALIDATION_PUBLISHER_DURABLE).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the service never started reading the credential stream");
+    let identity = CredentialIdentity::derive(
+        CredentialScope::source(CredentialOwnerId::new(OWNER).unwrap(), SourceKind::GitHub),
+        CredentialKind::WebhookSecret,
+    );
+    let revoked = v1::CredentialEvent {
+        event: Some(
+            revoked_to_proto(&CredentialRef::new(
+                identity.clone(),
+                CredentialVersion::new(1).unwrap(),
+            ))
+            .into(),
+        ),
+    };
+    // Appended the way the credential store appends, which every event it
+    // records carries.
+    let mut headers = HeaderMap::new();
+    headers.insert(NATS_MESSAGE_ID, Uuid::new_v4().to_string());
+    headers.insert(TROGON_EVENT_TYPE, revoked.event_type().unwrap());
+    let event_subject = credential_event_subject(&identity.key()).unwrap();
+    let appended = jetstream
+        .publish_with_headers(
+            event_subject.as_str().to_owned(),
+            headers,
+            EventEncode::encode(&revoked).unwrap().into(),
+        )
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+    let mut invalidations = jetstream.get_stream(INVALIDATION_STREAM).await.unwrap();
+    let notice_subject = format!("secrets.invalidation.v1.{tenant}.{OWNER}.{}", identity.id());
+
+    let notice = tokio::time::timeout(SERVING_WITHIN, async {
+        loop {
+            match invalidations.get_last_raw_message_by_subject(&notice_subject).await {
+                Ok(notice) => return notice,
+                Err(_) => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        }
+    })
+    .await
+    .expect("the revocation never reached its holder");
+    shutdown.cancel();
+    tokio::time::timeout(STOPPED_WITHIN, running)
+        .await
+        .expect("the service did not stop when told to")
+        .unwrap()
+        .unwrap();
+
+    // Destructured without `..`, so a field added to the contract stops this
+    // test compiling until someone decides whether it could hold a value.
+    let ReleaseInvalidated {
+        credential,
+        reason,
+        occurred_at,
+        source_sequence,
+    } = ReleaseInvalidated::decode_from_slice(&notice.payload).unwrap();
+    let CredentialAddress {
+        credential_id,
+        owner_id,
+    } = credential.into_option().unwrap();
+    assert_eq!(credential_id, identity.id().to_string());
+    assert_eq!(owner_id, OWNER);
+    assert_eq!(
+        reason.as_known(),
+        Some(ReleaseInvalidationReason::RELEASE_INVALIDATION_REASON_REVOKED)
+    );
+    let stored = credentials.get_raw_message(appended.sequence).await.unwrap();
+    let occurred_at = occurred_at.into_option().unwrap();
+    assert_eq!(
+        (occurred_at.seconds, occurred_at.nanos),
+        (
+            stored.time.unix_timestamp(),
+            i32::try_from(stored.time.nanosecond()).unwrap()
+        )
+    );
+    assert_eq!(source_sequence, appended.sequence);
+    assert_eq!(invalidations.info().await.unwrap().state.messages, 1);
 }

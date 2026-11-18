@@ -153,6 +153,7 @@ version = "0.1.0"
 dependencies = [
  "a2a-identity-types",
  "a2a-lf",
+ "a2a-nats",
  "a2a-pack",
  "async-nats",
  "async-trait",
@@ -7219,6 +7220,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "http",
+ "hyper",
  "icu_collator",
  "indexmap 2.14.0",
  "jsonschema",
@@ -7558,6 +7560,7 @@ dependencies = [
  "trogon-service-config",
  "trogon-std",
  "trogon-telemetry",
+ "trogon-webhooks",
  "trogonai-proto",
  "twilight-gateway",
  "twilight-model",
@@ -7655,6 +7658,7 @@ dependencies = [
  "thiserror 2.0.21",
  "trogon-decider-runtime",
  "trogon-std",
+ "trogonai-proto",
 ]
 
 [[package]]
@@ -7776,6 +7780,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-secrets-client"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "futures",
+ "grpc-nats-micro",
+ "nkeys",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-credential-aggregate",
+ "trogon-credential-domain",
+ "trogon-identity-types",
+ "trogon-nats",
+ "trogon-secret-store",
+ "trogon-secrets-service",
+ "trogon-semconv",
+ "trogon-std",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogon-secrets-service"
 version = "0.1.0"
 dependencies = [
@@ -7869,6 +7902,30 @@ dependencies = [
  "tracing-subscriber",
  "trogon-semconv",
  "trogon-std",
+]
+
+[[package]]
+name = "trogon-webhooks"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum",
+ "base64 0.22.1",
+ "buffa",
+ "buffa-types",
+ "bytes",
+ "futures-util",
+ "hmac 0.13.0",
+ "http-body-util",
+ "sha2 0.11.1",
+ "subtle",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "trogon-nats",
+ "trogon-std",
+ "trogonai-proto",
+ "uuid",
 ]
 
 [[package]]

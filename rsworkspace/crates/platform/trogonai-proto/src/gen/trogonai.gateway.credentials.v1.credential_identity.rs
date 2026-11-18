@@ -21,6 +21,7 @@ pub enum CredentialSource {
     CREDENTIAL_SOURCE_GOOGLE_PUBSUB = 13i32,
     CREDENTIAL_SOURCE_ZOOM = 14i32,
     CREDENTIAL_SOURCE_PLAID = 15i32,
+    CREDENTIAL_SOURCE_WEBHOOK = 16i32,
 }
 impl CredentialSource {
     ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -71,6 +72,9 @@ impl CredentialSource {
     ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_PLAID`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Plaid: Self = Self::CREDENTIAL_SOURCE_PLAID;
+    ///Idiomatic alias for [`Self::CREDENTIAL_SOURCE_WEBHOOK`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Webhook: Self = Self::CREDENTIAL_SOURCE_WEBHOOK;
 }
 impl ::core::default::Default for CredentialSource {
     fn default() -> Self {
@@ -184,6 +188,7 @@ impl ::buffa::Enumeration for CredentialSource {
             13i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB),
             14i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_ZOOM),
             15i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_PLAID),
+            16i32 => ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_WEBHOOK),
             _ => ::core::option::Option::None,
         }
     }
@@ -210,6 +215,7 @@ impl ::buffa::Enumeration for CredentialSource {
             Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB => "CREDENTIAL_SOURCE_GOOGLE_PUBSUB",
             Self::CREDENTIAL_SOURCE_ZOOM => "CREDENTIAL_SOURCE_ZOOM",
             Self::CREDENTIAL_SOURCE_PLAID => "CREDENTIAL_SOURCE_PLAID",
+            Self::CREDENTIAL_SOURCE_WEBHOOK => "CREDENTIAL_SOURCE_WEBHOOK",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -262,6 +268,9 @@ impl ::buffa::Enumeration for CredentialSource {
             "CREDENTIAL_SOURCE_PLAID" => {
                 ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_PLAID)
             }
+            "CREDENTIAL_SOURCE_WEBHOOK" => {
+                ::core::option::Option::Some(Self::CREDENTIAL_SOURCE_WEBHOOK)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -283,6 +292,7 @@ impl ::buffa::Enumeration for CredentialSource {
             Self::CREDENTIAL_SOURCE_GOOGLE_PUBSUB,
             Self::CREDENTIAL_SOURCE_ZOOM,
             Self::CREDENTIAL_SOURCE_PLAID,
+            Self::CREDENTIAL_SOURCE_WEBHOOK,
         ]
     }
 }

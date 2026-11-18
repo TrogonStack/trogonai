@@ -558,6 +558,35 @@ pub mod trogonai {
                 include!("trogonai.gateway.credentials.v1.mod.rs");
             }
         }
+        #[allow(
+            non_camel_case_types,
+            dead_code,
+            unused_imports,
+            unused_qualifications,
+            clippy::derivable_impls,
+            clippy::match_single_binding,
+            clippy::uninlined_format_args,
+            clippy::doc_lazy_continuation,
+            clippy::module_inception
+        )]
+        pub mod webhooks {
+            use super::*;
+            #[allow(
+                non_camel_case_types,
+                dead_code,
+                unused_imports,
+                unused_qualifications,
+                clippy::derivable_impls,
+                clippy::match_single_binding,
+                clippy::uninlined_format_args,
+                clippy::doc_lazy_continuation,
+                clippy::module_inception
+            )]
+            pub mod v1 {
+                use super::*;
+                include!("trogonai.gateway.webhooks.v1.mod.rs");
+            }
+        }
     }
     #[allow(
         non_camel_case_types,

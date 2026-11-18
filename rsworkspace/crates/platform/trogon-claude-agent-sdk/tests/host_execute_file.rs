@@ -20,7 +20,7 @@ fn native_host_times_out_a_running_executable() -> Result<(), Box<dyn Error>> {
     assert_eq!(outcome.status, ExecuteFileStatus::Timeout);
     assert_eq!(outcome.exit_code, None);
     assert_eq!(outcome.errno, None);
-    assert_eq!(outcome.signal.as_deref(), Some("SIGTERM"));
+    assert_eq!(outcome.signal.as_deref(), Some("SIGKILL"));
     assert!(outcome.stdout.is_empty());
     assert!(outcome.stderr.is_empty());
     assert!(outcome.duration_ms >= timeout.as_millis());

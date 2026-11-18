@@ -2,12 +2,13 @@
 
 use std::{error::Error as StdError, ffi::OsStr, sync::Arc, time::Duration};
 
-use tokio::time::{sleep, timeout};
+use tokio::time::{error::Elapsed, sleep, timeout};
 use trogon_claude_agent_sdk::{
     BuiltinToolName, ClaudeAgentOptions, ClaudeSdkClient, ContentBlock, ControlOperation, EndWithoutResult, Error,
     FeatureSupport, FileCheckpointing, InMemorySessionStore, Message, MessageDecoding, PartialMessages,
     PermissionDecision, Prompt, QueueCapacity, RunEndTimeout, SessionId, SessionStore, SessionStoreOptions,
-    SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet, adapters::SystemClock, query,
+    StderrDelivery, StderrHandler, SystemPrompt, Timeout, ToolPermissionRequest, ToolRule, ToolSet,
+    adapters::SystemClock, query,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -37,6 +38,33 @@ async fn read_result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn Std
         Err(std::io::Error::other("fixture ended without a result").into())
     })
     .await?
+}
+
+/// Keeps a paused clock still for as long as it lives: Tokio does not auto-advance a paused clock while a blocking
+/// task runs, so no SDK deadline fires before the fixture event it guards, however slowly the fixture starts or
+/// exits. Only the test lets the clock go, by ending the hold or dropping it on an early return, so no wall-clock
+/// bound can release it while a loaded machine is still starting the fixture.
+struct ClockHold {
+    release: std::sync::mpsc::Sender<()>,
+    hold: tokio::task::JoinHandle<()>,
+}
+
+impl ClockHold {
+    fn start() -> Self {
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        // Nothing is ever sent: `recv` returns once the sender is gone.
+        let hold = tokio::task::spawn_blocking(move || {
+            let _ = held.recv();
+        });
+        Self { release, hold }
+    }
+
+    /// Lets the clock go, and returns once it may auto-advance again.
+    async fn end(self) -> TestResult {
+        drop(self.release);
+        self.hold.await?;
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -284,8 +312,11 @@ async fn an_unconnected_client_spawns_the_cli_and_writes_its_prompt() -> TestRes
     Ok(())
 }
 
-#[tokio::test]
+/// The turns, the exit after stdin closes and the stderr close are fixture events; the clock stays still so the
+/// result wait and the shutdown deadlines cannot run out before them on a loaded runner.
+#[tokio::test(start_paused = true)]
 async fn interactive_client_reuses_one_process_for_multiple_turns() -> TestResult {
+    let clock = ClockHold::start();
     let mut client = ClaudeSdkClient::connect(options("normal")?).await?;
     let process_id = client.process_id();
     client.send_prompt(Prompt::from("one")).await?;
@@ -294,7 +325,7 @@ async fn interactive_client_reuses_one_process_for_multiple_turns() -> TestResul
     assert_eq!(read_result(&mut client).await?, "two");
     assert_eq!(client.process_id(), process_id);
     client.disconnect().await?;
-    Ok(())
+    clock.end().await
 }
 
 /// Python's `_find_cli` takes `<package>/_bundled/claude` before anything else; `bundled_cli_root` names that
@@ -315,8 +346,11 @@ async fn connect_spawns_the_bundled_cli_under_the_configured_root() -> TestResul
     Ok(())
 }
 
-#[tokio::test]
+/// The init frame, the exit after stdin closes and the stderr close are fixture events; the clock stays still so
+/// the shutdown deadlines cannot run out before them on a loaded runner.
+#[tokio::test(start_paused = true)]
 async fn argv_binds_values_and_forwards_cwd() -> TestResult {
+    let clock = ClockHold::start();
     let directory = tempfile::tempdir()?;
     let mut options = options("argv")?;
     options.setting_sources = Some(Vec::new());
@@ -352,7 +386,7 @@ async fn argv_binds_values_and_forwards_cwd() -> TestResult {
         directory.path().canonicalize()?
     );
     client.disconnect().await?;
-    Ok(())
+    clock.end().await
 }
 
 #[tokio::test]
@@ -806,18 +840,40 @@ async fn python_style_reports_the_terminated_process_for_a_handle_that_outlived_
     Ok(())
 }
 
+/// The initialize timeout starts when `connect` sends initialize, and the fixture writes its pid only after it reads
+/// that request, so a slow start could time out before the marker exists. The clock stays still until the fixture
+/// says the marker is written, then moves by exactly the timeout; the kill and the exit are events from there.
 #[cfg(unix)]
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn initialization_timeout_reaps_process() -> TestResult {
+    const INITIALIZE_TIMEOUT: Duration = Duration::from_millis(100);
+    let clock = ClockHold::start();
     let directory = tempfile::tempdir()?;
     let marker = directory.path().join("pid");
     let mut options = options("init-timeout")?;
     options.system_prompt = SystemPrompt::Custom(marker.to_string_lossy().into_owned());
     options.limits.initialize_timeout =
-        trogon_claude_agent_sdk::InitializeTimeout::Fixed(Timeout::new(Duration::from_millis(100)));
+        trogon_claude_agent_sdk::InitializeTimeout::Fixed(Timeout::new(INITIALIZE_TIMEOUT));
+    let (stderr, mut lines) = tokio::sync::mpsc::unbounded_channel::<String>();
+    options.stderr_handler = Some(StderrHandler {
+        delivery: StderrDelivery::Lines,
+        callback: Arc::new(move |line: &str| {
+            let _ = stderr.send(line.to_owned());
+        }),
+    });
     // TypeScript hands the client out before initialize is answered, so the timeout rejects the initialization
     // result and ends the run.
     let client = ClaudeSdkClient::connect(options).await?;
+    timeout(Duration::from_secs(3_600), async {
+        while let Some(line) = lines.recv().await {
+            if line == "pid marker written" {
+                return Ok(());
+            }
+        }
+        Err(std::io::Error::other("the fixture ended before writing its pid"))
+    })
+    .await??;
+    tokio::time::advance(INITIALIZE_TIMEOUT).await;
     let rejected = client.handle().initialization_result().await;
     assert!(matches!(
         &rejected,
@@ -830,6 +886,9 @@ async fn initialization_timeout_reaps_process() -> TestResult {
             operation: ControlOperation::Initialize
         })
     ));
+    clock.end().await?;
+    // The reap check polls on the wall clock, as it did before the hold.
+    tokio::time::resume();
     let pid: u32 = std::fs::read_to_string(marker)?.parse()?;
     assert_reaped(pid).await?;
     Ok(())
@@ -858,6 +917,34 @@ async fn cancelling_connect_reaps_the_started_process() -> TestResult {
     Ok(())
 }
 
+/// Reading the run and the disconnect after it both failed; each error is kept for the report.
+#[derive(Debug, thiserror::Error)]
+#[error("reading the run failed: {read}; disconnecting failed: {disconnect}")]
+struct ReadAndDisconnectError {
+    #[source]
+    read: Box<dyn StdError>,
+    disconnect: Error,
+}
+
+/// What the run read, after the disconnect that follows it; when both fail, the report carries both errors.
+fn read_then_disconnect<T>(
+    observed: Result<Result<T, Error>, Elapsed>,
+    cleanup: Result<(), Error>,
+) -> Result<T, Box<dyn StdError>> {
+    let observed = match observed {
+        Ok(read) => read.map_err(Box::<dyn StdError>::from),
+        Err(elapsed) => Err(elapsed.into()),
+    };
+    match (observed, cleanup) {
+        (Err(read), Err(disconnect)) => Err(ReadAndDisconnectError { read, disconnect }.into()),
+        (observed, cleanup) => {
+            let value = observed?;
+            cleanup?;
+            Ok(value)
+        }
+    }
+}
+
 async fn compatibility_tool_result_frames(mode: &str) -> Result<Vec<Option<serde_json::Value>>, Box<dyn StdError>> {
     let mut client = ClaudeSdkClient::connect(options(mode)?).await?;
     client.send_prompt(Prompt::from("tool output")).await?;
@@ -879,9 +966,7 @@ async fn compatibility_tool_result_frames(mode: &str) -> Result<Vec<Option<serde
     })
     .await;
     let cleanup = client.disconnect().await;
-    let values = observed??;
-    cleanup?;
-    Ok(values)
+    read_then_disconnect(observed, cleanup)
 }
 
 #[tokio::test]
@@ -929,8 +1014,7 @@ async fn compatibility_stream_event_retains_outer_metadata_separately() -> TestR
     })
     .await;
     let cleanup = client.disconnect().await;
-    let events = observed??;
-    cleanup?;
+    let events = read_then_disconnect(observed, cleanup)?;
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].uuid, "event-id");
     assert_eq!(events[0].session_id.as_str(), "fixture-session");

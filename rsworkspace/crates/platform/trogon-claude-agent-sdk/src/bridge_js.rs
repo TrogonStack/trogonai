@@ -1,5 +1,5 @@
-//! The JavaScript text rules the bridge client reads a service reply by: `Number(string)`, `String.prototype.trim`
-//! and the check that keeps a service message out of an error unless it is one plain line.
+//! The JavaScript text rules the bridge client reads a service reply by: `parseInt`, `String.prototype.trim` and
+//! the check that keeps a service message out of an error unless it is one plain line.
 
 use std::sync::LazyLock;
 
@@ -7,7 +7,8 @@ use regex::Regex;
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::bridge_unicode::{is_forbidden, is_mark, is_punctuation, is_space};
+use crate::bridge_unicode::{is_forbidden, is_mark, is_punctuation};
+use crate::session_prompt::{js_space, js_trim};
 
 mod constants;
 
@@ -22,55 +23,10 @@ static WHOLE_CSI: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]").ok());
 static WHOLE_STRING_ESCAPE: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^\x1b[\]PX^_][^\x1b\x07]*(?:\x07|\x1b\\)").ok());
-static DECIMAL: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$").ok());
-
-/// A character the JavaScript `\s` class and `trim` treat as white space.
-pub(crate) fn is_js_space(c: char) -> bool {
-    is_space(c)
-}
-
-/// `text.trim()`.
-pub(crate) fn js_trim(text: &str) -> &str {
-    text.trim_matches(is_js_space)
-}
-
-/// `Number(text)`: `NaN` for text that is not a number.
-pub(crate) fn js_number(text: &str) -> f64 {
-    let text = js_trim(text);
-    if text.is_empty() {
-        return 0.0;
-    }
-    for (prefixes, radix) in [(["0x", "0X"], 16), (["0o", "0O"], 8), (["0b", "0B"], 2)] {
-        if let Some(digits) = prefixes.iter().find_map(|prefix| text.strip_prefix(prefix)) {
-            return radix_number(digits, radix);
-        }
-    }
-    match text {
-        "Infinity" | "+Infinity" => f64::INFINITY,
-        "-Infinity" => f64::NEG_INFINITY,
-        _ if DECIMAL.as_ref().is_some_and(|decimal| decimal.is_match(text)) => text.parse().unwrap_or(f64::NAN),
-        _ => f64::NAN,
-    }
-}
-
-fn radix_number(digits: &str, radix: u32) -> f64 {
-    if digits.is_empty() {
-        return f64::NAN;
-    }
-    digits
-        .chars()
-        .try_fold(0.0, |value, digit| {
-            digit
-                .to_digit(radix)
-                .map(|digit| value * f64::from(radix) + f64::from(digit))
-        })
-        .unwrap_or(f64::NAN)
-}
 
 /// `parseInt(text, 10)`: the leading run of decimal digits after white space and an optional sign, `None` for `NaN`.
 pub(crate) fn js_parse_int(text: &str) -> Option<f64> {
-    let text = text.trim_start_matches(is_js_space);
+    let text = text.trim_start_matches(js_space);
     let (negative, digits) = match text.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, text.strip_prefix('+').unwrap_or(text)),
@@ -264,7 +220,7 @@ fn strip_leading_marks(text: &str) -> String {
     let mut previous: Option<char> = None;
     let mut removing = false;
     for c in text.chars() {
-        if is_mark(c) && (removing || previous.is_none_or(|before| is_js_space(before) || is_punctuation(before))) {
+        if is_mark(c) && (removing || previous.is_none_or(|before| js_space(before) || is_punctuation(before))) {
             removing = true;
         } else {
             removing = false;

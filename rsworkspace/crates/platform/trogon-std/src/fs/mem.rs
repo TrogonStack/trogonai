@@ -1,6 +1,4 @@
 #[cfg(any(test, feature = "test-support"))]
-use std::cell::RefCell;
-#[cfg(any(test, feature = "test-support"))]
 use std::collections::{HashMap, HashSet};
 #[cfg(any(test, feature = "test-support"))]
 use std::io;
@@ -12,7 +10,8 @@ use std::sync::{Arc, Mutex};
 #[cfg(any(test, feature = "test-support"))]
 use super::{CreateDirAll, ExistsFile, OpenAppendFile, ReadFile, WriteFile};
 
-/// Uses `RefCell` for interior mutability — all methods take `&self`.
+/// Uses `Mutex` for interior mutability, so all methods take `&self` and one
+/// `MemFs` behind an `Arc` can be shared with code running on other threads.
 ///
 /// # Path Semantics
 ///
@@ -31,8 +30,8 @@ use super::{CreateDirAll, ExistsFile, OpenAppendFile, ReadFile, WriteFile};
 #[cfg(any(test, feature = "test-support"))]
 pub struct MemFs {
     files: Arc<Mutex<HashMap<PathBuf, String>>>,
-    dirs: RefCell<HashSet<PathBuf>>,
-    opened_files: RefCell<HashSet<PathBuf>>,
+    dirs: Mutex<HashSet<PathBuf>>,
+    opened_files: Mutex<HashSet<PathBuf>>,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -46,8 +45,8 @@ impl MemFs {
     pub fn new() -> Self {
         Self {
             files: Arc::new(Mutex::new(HashMap::new())),
-            dirs: RefCell::new(HashSet::new()),
-            opened_files: RefCell::new(HashSet::new()),
+            dirs: Mutex::new(HashSet::new()),
+            opened_files: Mutex::new(HashSet::new()),
         }
     }
 
@@ -56,6 +55,12 @@ impl MemFs {
             .lock()
             .unwrap()
             .insert(path.as_ref().to_path_buf(), content.into());
+    }
+
+    /// Removes the file at `path`, if there is one, so reading it fails with
+    /// [`io::ErrorKind::NotFound`].
+    pub fn remove(&self, path: &Path) {
+        self.files.lock().unwrap().remove(path);
     }
 
     pub fn paths(&self) -> Vec<PathBuf> {
@@ -71,11 +76,11 @@ impl MemFs {
     }
 
     pub fn dir_exists(&self, path: &Path) -> bool {
-        self.dirs.borrow().contains(path)
+        self.dirs.lock().unwrap().contains(path)
     }
 
     pub fn was_opened(&self, path: &Path) -> bool {
-        self.opened_files.borrow().contains(path)
+        self.opened_files.lock().unwrap().contains(path)
     }
 }
 
@@ -139,7 +144,7 @@ impl OpenAppendFile for MemFs {
     type Writer = MemAppendWriter;
 
     fn open_append(&self, path: &Path) -> io::Result<Self::Writer> {
-        self.opened_files.borrow_mut().insert(path.to_path_buf());
+        self.opened_files.lock().unwrap().insert(path.to_path_buf());
         Ok(MemAppendWriter {
             path: path.to_path_buf(),
             files: Arc::clone(&self.files),
@@ -151,7 +156,7 @@ impl OpenAppendFile for MemFs {
 impl CreateDirAll for MemFs {
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         let files = self.files.lock().unwrap();
-        let mut dirs = self.dirs.borrow_mut();
+        let mut dirs = self.dirs.lock().unwrap();
         for ancestor in path.ancestors() {
             if ancestor.as_os_str().is_empty() {
                 break;

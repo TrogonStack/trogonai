@@ -10,7 +10,7 @@ pub struct ResolvedSettingsSourcesItem {
     pub path: Option<String>,
     pub policy_origin: Option<PolicySettingsOrigin>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -24,8 +24,8 @@ struct ResolvedSettingsSourcesItemWire {
     pub path: Option<String>,
     #[serde(rename = "policyOrigin", default, skip_serializing_if = "Option::is_none")]
     pub policy_origin: Option<PolicySettingsOrigin>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -42,7 +42,7 @@ impl ResolvedSettingsSourcesItem {
 
 impl Serialize for ResolvedSettingsSourcesItem {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ResolvedSettingsSourcesItemWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ResolvedSettingsSourcesItemWire::serialize(self, serde_json::value::Serializer), |text| ResolvedSettingsSourcesItemWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -154,7 +154,7 @@ pub struct ResolvedSettingsMachinePolicy {
     /// named.
     pub did_not_load: ResolvedSettingsMachinePolicyDidNotLoad,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -164,8 +164,8 @@ pub struct ResolvedSettingsMachinePolicy {
 struct ResolvedSettingsMachinePolicyWire {
     #[serde(rename = "didNotLoad")]
     pub did_not_load: ResolvedSettingsMachinePolicyDidNotLoad,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -182,7 +182,7 @@ impl ResolvedSettingsMachinePolicy {
 
 impl Serialize for ResolvedSettingsMachinePolicy {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ResolvedSettingsMachinePolicyWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ResolvedSettingsMachinePolicyWire::serialize(self, serde_json::value::Serializer), |text| ResolvedSettingsMachinePolicyWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -212,7 +212,7 @@ pub struct ResolvedSettings {
     /// which says nothing either way.
     pub machine_policy: Option<ResolvedSettingsMachinePolicy>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -225,8 +225,8 @@ struct ResolvedSettingsWire {
     pub sources: Vec<ResolvedSettingsSourcesItem>,
     #[serde(rename = "machinePolicy", default, skip_serializing_if = "Option::is_none")]
     pub machine_policy: Option<ResolvedSettingsMachinePolicy>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -243,7 +243,7 @@ impl ResolvedSettings {
 
 impl Serialize for ResolvedSettings {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ResolvedSettingsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ResolvedSettingsWire::serialize(self, serde_json::value::Serializer), |text| ResolvedSettingsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -265,7 +265,7 @@ pub struct ProvenanceEntry {
     /// Which policy sub-source supplied the value, when `source === 'managed'`.
     pub policy_origin: Option<PolicySettingsOrigin>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -278,8 +278,8 @@ struct ProvenanceEntryWire {
     pub path: Option<String>,
     #[serde(rename = "policyOrigin", default, skip_serializing_if = "Option::is_none")]
     pub policy_origin: Option<PolicySettingsOrigin>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -296,7 +296,7 @@ impl ProvenanceEntry {
 
 impl Serialize for ProvenanceEntry {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ProvenanceEntryWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ProvenanceEntryWire::serialize(self, serde_json::value::Serializer), |text| ProvenanceEntryWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -504,15 +504,15 @@ pub struct ResolveSettingsOptions {
     /// filtered through a restrictive-key allowlist (`allowManaged*Only` locks,
     /// `permissions.deny`/`ask`, sandbox restrictions); non-restrictive keys
     /// such as `model`, `env`, `cleanupPeriodDays` are silently dropped.
-    pub managed_settings: Option<super::settings::Settings>,
+    pub managed_settings: Option<crate::DeepJsonObject>,
     /// Server-managed settings payload (the result of fetching
     /// `/api/claude_code/settings`). Feeds the `'remote'` policy sub-source -
     /// same trust level as the on-disk cache it replaces, so non-restrictive
     /// keys flow through unfiltered. Use this when the embedding host has a
     /// fresher result than the CLI's `~/.claude/remote-settings.json` cache.
-    pub server_managed_settings: Option<super::settings::Settings>,
+    pub server_managed_settings: Option<crate::DeepJsonObject>,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -524,12 +524,12 @@ struct ResolveSettingsOptionsWire {
     pub cwd: Option<String>,
     #[serde(rename = "settingSources", default, skip_serializing_if = "Option::is_none")]
     pub setting_sources: Option<Vec<SettingSource>>,
-    #[serde(rename = "managedSettings", default, skip_serializing_if = "Option::is_none")]
-    pub managed_settings: Option<super::settings::Settings>,
-    #[serde(rename = "serverManagedSettings", default, skip_serializing_if = "Option::is_none")]
-    pub server_managed_settings: Option<super::settings::Settings>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(rename = "managedSettings", default, skip_serializing_if = "Option::is_none", serialize_with = "super::support::optional_shallow_object")]
+    pub managed_settings: Option<crate::DeepJsonObject>,
+    #[serde(rename = "serverManagedSettings", default, skip_serializing_if = "Option::is_none", serialize_with = "super::support::optional_shallow_object")]
+    pub server_managed_settings: Option<crate::DeepJsonObject>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -546,7 +546,7 @@ impl ResolveSettingsOptions {
 
 impl Serialize for ResolveSettingsOptions {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(ResolveSettingsOptionsWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(ResolveSettingsOptionsWire::serialize(self, serde_json::value::Serializer), |text| ResolveSettingsOptionsWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 
@@ -569,7 +569,7 @@ pub struct SDKSettingsParseError {
     /// Human-readable error message.
     pub message: String,
     /// Keys the pinned upstream declarations do not list, in the order they were decoded.
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     /// The key order this value was decoded with; encoding reproduces it.
     pub key_order: super::support::KeyOrder,
 }
@@ -581,8 +581,8 @@ struct SDKSettingsParseErrorWire {
     pub file: Option<String>,
     pub path: String,
     pub message: String,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    #[serde(flatten, serialize_with = "super::support::shallow_members")]
+    pub extra: indexmap::IndexMap<String, crate::DeepJsonValue>,
     #[serde(skip)]
     pub key_order: super::support::KeyOrder,
 }
@@ -599,7 +599,7 @@ impl SDKSettingsParseError {
 
 impl Serialize for SDKSettingsParseError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        super::support::ordered(SDKSettingsParseErrorWire::serialize(self, serde_json::value::Serializer), &self.key_order, serializer)
+        super::support::ordered(SDKSettingsParseErrorWire::serialize(self, serde_json::value::Serializer), |text| SDKSettingsParseErrorWire::serialize(self, text), &self.key_order, serializer)
     }
 }
 

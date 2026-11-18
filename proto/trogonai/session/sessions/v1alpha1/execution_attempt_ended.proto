@@ -9,6 +9,7 @@ import "google/protobuf/timestamp.proto";
 // not itself a session terminal marker (ADR#0031 §4, ADR#0035 facet 6). It
 // advances the same attempt counter's one-active-attempt invariant, so it is
 // invariant-bearing (WRITE_PRECONDITION = At), not a commuting happened-fact.
+// The outcome must be a known, nonzero non-success value.
 message ExecutionAttemptEnded {
   string session_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -18,10 +19,14 @@ message ExecutionAttemptEnded {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  AttemptOutcome outcome = 3 [features.field_presence = LEGACY_REQUIRED];
-  // Human-readable explanation of the outcome; empty when none. This is a
-  // failure-only event (no success outcome exists), so an audit fold needs it to
-  // explain, not just classify, why the attempt ended.
+  AttemptOutcome outcome = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Human-readable explanation of the non-success outcome; empty when none.
   string detail = 4;
   // Wall-clock instant the attempt actually ended: a real external occurrence
   // distinct from envelope append time (D10).

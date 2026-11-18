@@ -253,12 +253,16 @@ fn servers_for_logging(servers: &[String]) -> Vec<String> {
     servers.iter().map(|server| redact_server_userinfo(server)).collect()
 }
 
-fn redact_server_userinfo(server: &str) -> String {
+/// `server` with the user name, password, or token it carries replaced by
+/// `<redacted>`, so the address can be logged or shown without the credential
+/// a NATS URL may hold.
+///
+/// A password may carry an unescaped `/`, `?`, or `#`, which makes an `@` in a
+/// path indistinguishable from the end of userinfo, so everything up to the
+/// last `@` is redacted rather than risk showing a secret.
+pub fn redact_server_userinfo(server: &str) -> String {
     let authority_start = server.find("://").map_or(0, |scheme_end| scheme_end + 3);
-    let authority = &server[authority_start..];
-    let authority_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
-    let authority = &authority[..authority_end];
-    let Some(userinfo_end) = authority.rfind('@') else {
+    let Some(userinfo_end) = server[authority_start..].rfind('@') else {
         return server.to_owned();
     };
     let userinfo_end = authority_start + userinfo_end;
