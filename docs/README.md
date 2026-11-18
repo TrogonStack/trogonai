@@ -11,6 +11,11 @@ runtime acceptance evidence.
 - Check the detailed [ACP conformance matrix](./architecture/acp-conformance.md).
 - Browse the [protocols product showcase](./product/protocols.md).
 
+## Scheduler
+
+Browse the [scheduler product showcase](./product/scheduler.md) for what a
+schedule does and what is built so far.
+
 ## Development verification
 
 [Verify scheduler decisions with Hydro](./how-to/verify-scheduler-with-hydro.md)
