@@ -1,6 +1,6 @@
 //! The JavaScript string and number semantics the zod port in `sdk_mcp_zod` depends on.
 
-use crate::{session_prompt::js_trim, settings_json::js_stringify};
+use crate::{js_string_number::js_string_to_number, settings_json::js_stringify};
 use serde_json::Value;
 
 /// `text.length`: the number of UTF-16 code units.
@@ -14,36 +14,10 @@ pub(crate) fn to_number(value: &Value) -> f64 {
         Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
         Value::Bool(flag) => f64::from(u8::from(*flag)),
         Value::Null => 0.0,
-        Value::String(text) => string_to_number(text),
-        Value::Array(_) => string_to_number(&js_string(value)),
+        Value::String(text) => js_string_to_number(text),
+        Value::Array(_) => js_string_to_number(&js_string(value)),
         Value::Object(_) => f64::NAN,
     }
-}
-
-fn string_to_number(text: &str) -> f64 {
-    let text = js_trim(text);
-    if text.is_empty() {
-        return 0.0;
-    }
-    for (prefix, radix) in [("0x", 16), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)] {
-        if let Some(digits) = text.strip_prefix(prefix) {
-            return u64::from_str_radix(digits, radix)
-                .map(|number| number as f64)
-                .unwrap_or(f64::NAN);
-        }
-    }
-    match text {
-        "Infinity" | "+Infinity" => return f64::INFINITY,
-        "-Infinity" => return f64::NEG_INFINITY,
-        _ => {}
-    }
-    if !text
-        .chars()
-        .all(|character| character.is_ascii_digit() || matches!(character, '.' | 'e' | 'E' | '+' | '-'))
-    {
-        return f64::NAN;
-    }
-    text.parse().unwrap_or(f64::NAN)
 }
 
 /// zod `floatSafeRemainder`: the remainder zod's `multipleOf` check compares with zero. The quotient counts as
@@ -123,3 +97,7 @@ pub(crate) fn js_string(value: &Value) -> String {
         scalar => js_stringify(scalar),
     }
 }
+
+#[cfg(test)]
+#[path = "sdk_mcp_js_tests.rs"]
+mod tests;

@@ -5111,7 +5111,7 @@
           "name": "describes_credentials_failures"
         },
         {
-          "path": "src/bridge_js_tests.rs",
+          "path": "src/js_string_number_tests.rs",
           "name": "reads_numbers_like_the_number_function"
         }
       ],

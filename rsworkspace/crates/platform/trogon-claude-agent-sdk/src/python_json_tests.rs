@@ -45,3 +45,16 @@ fn python_repr_matches_python() {
     assert_eq!(python_repr("\u{7f}\u{a0}\u{2028}\u{e9}"), "'\\x7f\\xa0\\u2028\u{e9}'");
     assert_eq!(python_repr("\u{10ffff}"), "'\\U0010ffff'");
 }
+
+/// `json.dumps` writes a dict in insertion order, so unlike `JSON.stringify` it leaves array-index keys where they
+/// were set. The expected text is what CPython 3.12 printed for the dict with these keys in this order.
+#[test]
+fn objects_keep_array_index_keys_in_insertion_order() -> Result<(), serde_json::Error> {
+    let value: serde_json::Value =
+        serde_json::from_str(r#"{"b":1,"1":"one","0":"zero","n":{"z":1,"2":[{"10":2,"9":3}]}}"#)?;
+    assert_eq!(
+        to_string(&value)?,
+        r#"{"b": 1, "1": "one", "0": "zero", "n": {"z": 1, "2": [{"10": 2, "9": 3}]}}"#
+    );
+    Ok(())
+}

@@ -8,7 +8,7 @@ use std::{
 
 mod constants;
 
-use crate::session_prompt::js_trim;
+use crate::js_string_number::js_string_to_number;
 
 use constants::{BACKOFF_BASE_MS, BACKOFF_CAP_MS, JITTER_US};
 pub(crate) use constants::{CONNECT_TIMEOUT, LIVENESS_TIMEOUT, POST_TIMEOUT, RECONNECT_BUDGET};
@@ -43,63 +43,7 @@ pub(crate) fn retry_delay(attempt: u32, retry_after_ms: Option<f64>, jitter: Dur
 /// when the header is not empty. The result can be infinite or NaN.
 pub(crate) fn retry_after_ms(header: Option<&str>) -> Option<f64> {
     let text = header.filter(|text| !text.is_empty())?;
-    Some(js_number(text) * 1_000.0)
-}
-
-/// JavaScript `Number(text)`.
-fn js_number(text: &str) -> f64 {
-    let text = js_trim(text);
-    if text.is_empty() {
-        return 0.0;
-    }
-    let radix = match text.get(..2) {
-        Some("0x" | "0X") => 16,
-        Some("0o" | "0O") => 8,
-        Some("0b" | "0B") => 2,
-        _ => 0,
-    };
-    if radix != 0 {
-        let digits = text.get(2..).unwrap_or_default();
-        if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
-            return f64::NAN;
-        }
-        return digits.chars().fold(0.0, |value, c| {
-            value * f64::from(radix) + f64::from(c.to_digit(radix).unwrap_or_default())
-        });
-    }
-    let (sign, unsigned) = match text.strip_prefix('-') {
-        Some(rest) => (-1.0, rest),
-        None => (1.0, text.strip_prefix('+').unwrap_or(text)),
-    };
-    if unsigned == "Infinity" {
-        return sign * f64::INFINITY;
-    }
-    if is_decimal_literal(unsigned) {
-        unsigned.parse::<f64>().map_or(f64::NAN, |value| sign * value)
-    } else {
-        f64::NAN
-    }
-}
-
-/// `digits [. digits] [exponent]` or `. digits [exponent]`.
-fn is_decimal_literal(text: &str) -> bool {
-    let digits = |part: &str| part.bytes().all(|byte| byte.is_ascii_digit());
-    let (mantissa, exponent) = match text.split_once(['e', 'E']) {
-        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
-        None => (text, None),
-    };
-    let (whole, fraction) = match mantissa.split_once('.') {
-        Some((whole, fraction)) => (whole, Some(fraction)),
-        None => (mantissa, None),
-    };
-    let has_digit = !whole.is_empty() || fraction.is_some_and(|fraction| !fraction.is_empty());
-    digits(whole)
-        && fraction.is_none_or(digits)
-        && has_digit
-        && exponent.is_none_or(|exponent| {
-            let exponent = exponent.strip_prefix(['+', '-']).unwrap_or(exponent);
-            !exponent.is_empty() && digits(exponent)
-        })
+    Some(js_string_to_number(text) * 1_000.0)
 }
 
 #[cfg(test)]
