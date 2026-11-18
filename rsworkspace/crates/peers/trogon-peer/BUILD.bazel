@@ -3,11 +3,14 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 workspace_crate(
     integration_tests = {
         "attachment": {},
+        "claim_check_validation": {},
+        "content_purposes": {},
         "creation_precondition": {},
         "detach": {},
         "enrollment": {},
         "enrollment_timestamp": {},
         "heartbeat": {},
+        "sending": {},
         "validation": {},
     },
 )
