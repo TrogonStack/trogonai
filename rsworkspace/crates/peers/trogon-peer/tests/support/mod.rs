@@ -49,9 +49,10 @@ where
     C::EvolveError: std::fmt::Debug,
 {
     match evaluate_decision(state, command).unwrap_err() {
-        DecisionError::Decide(e) => e,
-        other => panic!("unexpected failure: {other:?}"),
+        DecisionError::Decide(e) => Ok(e),
+        other => Err(other),
     }
+    .unwrap()
 }
 pub fn claim_check(locator: &str, stored: &[u8]) -> proto::ClaimCheck {
     proto::ClaimCheck {
@@ -124,4 +125,19 @@ pub fn inbox(indices: &[usize], size: u32) -> PeerState {
     indices
         .iter()
         .fold(enrolled("recipient", 0), |state, i| run(state, &intake(*i, size)))
+}
+
+pub fn acknowledge(batch: &str, seconds: i64) -> AcknowledgeBatch {
+    AcknowledgeBatch::new(
+        identity("recipient").owner().clone(),
+        reference("recipient", 1),
+        BatchId::new(batch).unwrap(),
+        time(seconds),
+    )
+}
+pub fn receipt(state: &PeerState, index: usize) -> AuthoritativeReceipt {
+    AuthoritativeReceipt::from_recipient_history(state, &MessageId::new(format!("message_{index}")).unwrap()).unwrap()
+}
+pub fn settle(state: &PeerState, index: usize) -> SettleMessage {
+    SettleMessage::new(identity("sender").peer_id().clone(), receipt(state, index))
 }
