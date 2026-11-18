@@ -17,6 +17,11 @@ The [gateway webhook reference](./reference/gateway-webhooks.md) describes
 dynamic endpoint registration, request authentication, and the durable delivery
 contract that other systems consume.
 
+## Scheduler
+
+Browse the [scheduler product showcase](./product/scheduler.md) for what a
+schedule does and what is built so far.
+
 ## Development verification
 
 [Verify scheduler decisions with Hydro](./how-to/verify-scheduler-with-hydro.md)

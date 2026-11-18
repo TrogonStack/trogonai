@@ -14,12 +14,11 @@ use crate::constants::{
     PRECOMPACT_CHUNK, PRECOMPACT_NEAR, PRECOMPACT_NEEDLE, PRECOMPACT_NEWLINE, PRECOMPACT_SNAPSHOT, PRECOMPACT_SYSTEM,
 };
 
-/// Whether `CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP` is set to a truthy value (`1`, `true`, `yes` or `on`).
+/// Whether `CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP` is truthy: upstream reads it through `u.bool()`, which is `Te`.
 pub(crate) fn skip_disabled<E: EnvironmentVariable>(environment: &E) -> bool {
     environment
         .var_os(OsStr::new("CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP"))
-        .and_then(|value| value.into_string().ok())
-        .is_some_and(|value| matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .is_some_and(|value| crate::session_prompt::js_truthy(&value.to_string_lossy()))
 }
 
 /// `f0`: a compact boundary line that preserves nothing, so everything before it can be dropped.

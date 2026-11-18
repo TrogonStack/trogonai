@@ -244,11 +244,11 @@ required application cleanup in the application's own awaited shutdown path.
 
 ## Evidence and compatibility
 
-This decision reviews Python `0.2.179` and published TypeScript `0.3.319`:
+This decision reviews Python `0.2.181` and published TypeScript `0.3.323`:
 
-- [Python client positioning and lifecycle](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/client.py), including `receive_response()`, `disconnect()` and context management.
-- [Python query internals](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/_internal/query.py) and [shared streaming initialization](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/_internal/client.py).
-- [Published TypeScript source archive](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.319.tgz), inspected with verified integrity. Relevant `sdk.d.ts` contracts are `HookCallbackMatcher`, `Query`, `startup()` and `WarmQuery`; bundled runtime implements initialization, callback dispatch and cleanup.
+- [Python client positioning and lifecycle](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/client.py), including `receive_response()`, `disconnect()` and context management.
+- [Python query internals](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/query.py) and [shared streaming initialization](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/_internal/client.py).
+- [Published TypeScript source archive](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.323.tgz), inspected with verified integrity. Relevant `sdk.d.ts` contracts are `HookCallbackMatcher`, `Query`, `startup()` and `WarmQuery`; bundled runtime implements initialization, callback dispatch and cleanup.
 - [Rust owner and query facades](../../src/client.rs) and [driver](../../src/driver.rs).
 
 Public fixture regressions in [subprocess tests](../../tests/subprocess.rs)

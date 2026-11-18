@@ -31,12 +31,45 @@ pub enum ConfigSetting {
     XkeySeed,
     CredentialStream,
     AdmissionLimit,
+    InvalidationStreamReplicas,
     AuditTenant,
     AuditProject,
     AuditInstance,
 }
 
 impl ConfigSetting {
+    /// Every setting, in the order they are declared.
+    pub const ALL: [Self; 28] = [
+        Self::NatsUrl,
+        Self::NatsCreds,
+        Self::NatsNkey,
+        Self::NatsUser,
+        Self::NatsPassword,
+        Self::NatsToken,
+        Self::NatsJwt,
+        Self::NatsSeed,
+        Self::NatsTlsCert,
+        Self::NatsTlsKey,
+        Self::NatsTlsCa,
+        Self::NatsTlsDisabled,
+        Self::OpenBaoAddress,
+        Self::OpenBaoTlsDisabled,
+        Self::OpenBaoMount,
+        Self::OpenBaoRoleId,
+        Self::OpenBaoSecretIdFile,
+        Self::OpenBaoChildTokenRole,
+        Self::OpenBaoChildTokenPolicy,
+        Self::TenantOwnersFile,
+        Self::ReleasePoliciesFile,
+        Self::XkeySeed,
+        Self::CredentialStream,
+        Self::AdmissionLimit,
+        Self::InvalidationStreamReplicas,
+        Self::AuditTenant,
+        Self::AuditProject,
+        Self::AuditInstance,
+    ];
+
     /// The key of the setting in the configuration file, when the file may
     /// hold it.
     pub fn key(self) -> Option<&'static str> {
@@ -64,6 +97,7 @@ impl ConfigSetting {
             Self::XkeySeed => "release.xkey_seed",
             Self::CredentialStream => "release.credential_stream",
             Self::AdmissionLimit => "release.admission_limit",
+            Self::InvalidationStreamReplicas => "release.invalidation_stream_replicas",
             Self::AuditTenant => "audit.tenant",
             Self::AuditProject => "audit.project",
             Self::AuditInstance => "audit.instance",
@@ -97,6 +131,7 @@ impl ConfigSetting {
             Self::XkeySeed => "TROGON_SECRETS_XKEY_SEED",
             Self::CredentialStream => "TROGON_SECRETS_CREDENTIAL_STREAM",
             Self::AdmissionLimit => "TROGON_SECRETS_ADMISSION_LIMIT",
+            Self::InvalidationStreamReplicas => "TROGON_SECRETS_INVALIDATION_STREAM_REPLICAS",
             Self::AuditTenant => "TROGON_SECRETS_AUDIT_TENANT",
             Self::AuditProject => "TROGON_SECRETS_AUDIT_PROJECT",
             Self::AuditInstance => "TROGON_SECRETS_AUDIT_INSTANCE",

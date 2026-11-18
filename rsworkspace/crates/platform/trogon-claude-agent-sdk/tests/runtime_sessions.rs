@@ -175,8 +175,11 @@ async fn each_result_waits_for_its_own_mirror_fence_and_controls_progress() -> T
     store.gates[0].add_permits(1);
     assert_eq!(receive_result(&mut client).await?, "mirror-one");
     wait_appends(&store, 2).await?;
+    // The mirror appends a batch only when a result asks for its flush, so the second append started once the
+    // driver had read the second result and held it behind its own fence, which the gated store keeps closed:
+    // draining what was already delivered, a single poll at a time, shows that result was not.
     loop {
-        match timeout(Duration::from_millis(30), client.next_message()).await {
+        match timeout(Duration::ZERO, client.next_message()).await {
             Err(_) => break,
             Ok(Ok(Some(Message::Result(_)))) => {
                 return Err(std::io::Error::other("second result escaped its mirror fence").into());
