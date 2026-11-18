@@ -859,10 +859,10 @@ index d2a8d04898..f7c415d88d 100644
  mod option_error;
  mod options;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_managed_pass.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_managed_pass.rs
-index a370b0b0af..e418e78602 100644
+index a370b0b0af..ae67b6f6d0 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_managed_pass.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_managed_pass.rs
-@@ -1,15 +1,22 @@
+@@ -1,17 +1,27 @@
  //! Which evaluation of the managed file tier (`pE` upstream) a read of managed settings documents models.
  //!
 -//! `resolveSettings` evaluates the tier for the sources and the effective settings (two calls with the same room),
@@ -890,6 +890,11 @@ index a370b0b0af..e418e78602 100644
      /// The policy origin (`IX` through `$u`).
      Origin,
      /// The managed files the machine policy reports as not loaded (`KX`).
+     MachinePolicy,
++    /// The evaluation `mX` runs for the login pins (`QP > mX > XP > $u > pE`), on the chain of the sources with the
++    /// two frames of `mX` and `XP` more under it.
++    Login,
+ }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs
 index b6c772bc80..8d58cb7701 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs
@@ -912,10 +917,10 @@ index b6c772bc80..8d58cb7701 100644
          self.index_tests < Self::INDEX_COMPILES
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_policy_reader.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_policy_reader.rs
 new file mode 100644
-index 0000000000..437493b104
+index 0000000000..116710d2cc
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_policy_reader.rs
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,23 @@
 +//! Which reader of the TypeScript SDK parses a managed settings document, which sets the stack it parses on.
 +
 +use crate::node_resume_base::ResumeBase;
@@ -930,6 +935,8 @@ index 0000000000..437493b104
 +    Origin,
 +    /// A read in the evaluation for the machine policy, of a drop-in no evaluation before it reached.
 +    MachinePolicy,
++    /// A read in the evaluation `mX` runs for the login pins, which has the room of the sources less its two frames.
++    Login,
 +    /// The check of whether a managed folder holds settings that keep the user registry out (`n8` through `nD`),
 +    /// on the stack of the completion its chain resumed from. Its reads go around the file cache and merge nothing.
 +    HeldCheck(ResumeBase),
@@ -960,7 +967,7 @@ index 0000000000..561c647178
 +    Tool,
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
-index f01219da74..d7c5d70501 100644
+index f01219da74..f39fc8034d 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 @@ -29,9 +29,11 @@
@@ -994,7 +1001,7 @@ index f01219da74..d7c5d70501 100644
      walk: PathCost,
      clone: PathCost,
      copy: PathCost,
-@@ -172,13 +177,82 @@ enum StartupShare {
+@@ -172,13 +177,88 @@ enum StartupShare {
  }
  
  /// The budgets a managed settings document's passes have, out of the same stack, in each evaluation of the managed
@@ -1023,6 +1030,12 @@ index f01219da74..d7c5d70501 100644
 +/// through `G7e`, and the frame `G7e` leaves under `pm` takes 16 bytes more than the one `WP` leaves, for the walk, the
 +/// clone and the copy alike, on every platform measured.
 +const PARENT_MANAGED_FRAME: usize = 16;
++
++/// How much room the evaluation of the managed file tier `mX` runs for the login pins (`QP > mX > XP > $u > pE`) has
++/// less than the one for the sources (`QP > $u > pE`): the frames of `mX` and `XP`, for the walk, the clone, the copy
++/// and the merge into the folder alike. Every path of the native reads of the login documents on the three profiles
++/// that the pins keep or drop is explained by any multiple of 16 from 160 to 288; this is the one in the middle.
++const LOGIN_FRAMES: usize = 224;
 +
 +/// A managed settings document the caller hands over as an object, which the policy cache (`pm` upstream) reads on
 +/// the stack of the resolve.
@@ -1078,11 +1091,21 @@ index f01219da74..d7c5d70501 100644
  }
  
  /// The budgets of the reader's walk and clone, the file cache copy and the merge into the folder in one evaluation of
-@@ -191,12 +265,59 @@ struct PassBudgets {
+@@ -191,12 +271,72 @@ struct PassBudgets {
      folder_merge: usize,
  }
  
 +impl PassBudgets {
++    /// The budgets of the same evaluation with `frames` more bytes of stack in use.
++    fn deeper(self, frames: usize) -> Self {
++        Self {
++            walk: self.walk.saturating_sub(frames),
++            clone: self.clone.saturating_sub(frames),
++            copy: self.copy.saturating_sub(frames),
++            folder_merge: self.folder_merge.saturating_sub(frames),
++        }
++    }
++
 +    fn reader(self) -> ReaderBudgets {
 +        ReaderBudgets {
 +            walk: self.walk,
@@ -1106,22 +1129,24 @@ index f01219da74..d7c5d70501 100644
 +    }
 +
 +    fn copy(self, pass: ManagedPass) -> usize {
-+        match pass {
-+            ManagedPass::Sources => self.sources.copy,
-+            ManagedPass::Effective => self.effective_copy,
-+            ManagedPass::Origin => self.origin.copy,
-+            ManagedPass::MachinePolicy => self.machine_policy.copy,
-+        }
-+    }
-+
-+    fn folder_merge(self, pass: ManagedPass) -> usize {
          match pass {
 -            ManagedPass::Sources => self.sources,
 -            ManagedPass::Origin => self.origin,
 -            ManagedPass::MachinePolicy => self.machine_policy,
++            ManagedPass::Sources => self.sources.copy,
++            ManagedPass::Effective => self.effective_copy,
++            ManagedPass::Origin => self.origin.copy,
++            ManagedPass::MachinePolicy => self.machine_policy.copy,
++            ManagedPass::Login => self.sources.deeper(LOGIN_FRAMES).copy,
++        }
++    }
++
++    fn folder_merge(self, pass: ManagedPass) -> usize {
++        match pass {
 +            ManagedPass::Sources | ManagedPass::Effective => self.sources.folder_merge,
 +            ManagedPass::Origin => self.origin.folder_merge,
 +            ManagedPass::MachinePolicy => self.machine_policy.folder_merge,
++            ManagedPass::Login => self.sources.deeper(LOGIN_FRAMES).folder_merge,
 +        }
 +    }
 +
@@ -1130,6 +1155,7 @@ index f01219da74..d7c5d70501 100644
 +            PolicyReader::Sources => self.sources.reader(),
 +            PolicyReader::Origin => self.origin.reader(),
 +            PolicyReader::MachinePolicy => self.machine_policy.reader(),
++            PolicyReader::Login => self.sources.deeper(LOGIN_FRAMES).reader(),
 +            PolicyReader::HeldCheck(ResumeBase::Fs) => self.held_check.fs,
 +            PolicyReader::HeldCheck(ResumeBase::Tool) => self.held_check.tool,
 +            PolicyReader::Registry(base) => {
@@ -1142,7 +1168,7 @@ index f01219da74..d7c5d70501 100644
          }
      }
  }
-@@ -207,9 +328,8 @@ impl NodeStack {
+@@ -207,9 +347,8 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 448 bytes per object and 240
      /// per array out of 1000451, and 288 per object and 304 per array out of 1000724. The file cache copy then takes
      /// 288 per object and 512 per array out of 1000884. At the object or array that ends a path, the walk takes 144
@@ -1154,7 +1180,7 @@ index f01219da74..d7c5d70501 100644
      ///
      /// A merge takes 768 per array or object it enters out of 960611. Assigning a member takes 416 more while no merge
      /// of the process assigned one before. An array takes 1339 more when it holds members and lodash `isIndex`
-@@ -222,15 +342,32 @@ impl NodeStack {
+@@ -222,15 +361,32 @@ impl NodeStack {
      /// nested arrays for the copy, and 1244 levels around `null` for a merge.
      ///
      /// A managed settings document's reader has 997859 and 998160 for the same two passes when the sources are
@@ -1193,7 +1219,7 @@ index f01219da74..d7c5d70501 100644
          walk: PathCost {
              object: 448,
              array: 240,
-@@ -238,7 +375,7 @@ impl NodeStack {
+@@ -238,7 +394,7 @@ impl NodeStack {
                  empty_object: 144,
                  scalar_object: 448,
                  empty_array: 176,
@@ -1202,7 +1228,7 @@ index f01219da74..d7c5d70501 100644
              },
              budget: 1_000_451,
          },
-@@ -257,8 +394,8 @@ impl NodeStack {
+@@ -257,8 +413,8 @@ impl NodeStack {
              object: 288,
              array: 512,
              leaves: LeafCost {
@@ -1213,7 +1239,7 @@ index f01219da74..d7c5d70501 100644
                  empty_array: 512,
                  scalar_array: 512,
              },
-@@ -277,22 +414,50 @@ impl NodeStack {
+@@ -277,22 +433,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 997_859,
                  clone: 998_160,
@@ -1267,7 +1293,7 @@ index f01219da74..d7c5d70501 100644
          },
      };
  
-@@ -310,17 +475,34 @@ impl NodeStack {
+@@ -310,17 +494,34 @@ impl NodeStack {
      /// merge.
      ///
      /// A managed settings document's reader has 999552 and 999840 for the same two passes when the sources are
@@ -1307,7 +1333,7 @@ index f01219da74..d7c5d70501 100644
          walk: PathCost {
              object: 512,
              array: 272,
-@@ -367,22 +549,50 @@ impl NodeStack {
+@@ -367,22 +568,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 999_552,
                  clone: 999_840,
@@ -1361,7 +1387,7 @@ index f01219da74..d7c5d70501 100644
          },
      };
  
-@@ -391,19 +601,43 @@ impl NodeStack {
+@@ -391,19 +620,43 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 608 bytes per object and 272
      /// per array out of 1002688, and 304 per object and per array out of 1002760. The file cache copy then takes 608
      /// per object and 640 per array out of 1002496. At the object or array that ends a path, the walk and the copy
@@ -1412,7 +1438,7 @@ index f01219da74..d7c5d70501 100644
      ///
      /// When a background compile lands while a merge runs, a merge after the one that compiled the `isIndex` pattern
      /// to bytecode can run out at 1362 levels instead of compiling the pattern there, and any `later_compile` from 337
-@@ -413,6 +647,7 @@ impl NodeStack {
+@@ -413,6 +666,7 @@ impl NodeStack {
      pub const NODE_24_LINUX_X64: Self = Self {
          startup: StartupShare::BesideStack,
          startup_bytes: 4384,
@@ -1420,7 +1446,7 @@ index f01219da74..d7c5d70501 100644
          walk: PathCost {
              object: 608,
              array: 272,
-@@ -441,7 +676,7 @@ impl NodeStack {
+@@ -441,7 +695,7 @@ impl NodeStack {
              leaves: LeafCost {
                  empty_object: 144,
                  scalar_object: 608,
@@ -1429,7 +1455,7 @@ index f01219da74..d7c5d70501 100644
                  scalar_array: 640,
              },
              budget: 1_002_496,
-@@ -459,22 +694,50 @@ impl NodeStack {
+@@ -459,22 +713,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 999_992,
                  clone: 1_000_312,
@@ -1484,7 +1510,7 @@ index f01219da74..d7c5d70501 100644
          },
      };
  
-@@ -513,13 +776,42 @@ impl NodeStack {
+@@ -513,13 +795,44 @@ impl NodeStack {
          }
      }
  
@@ -1520,14 +1546,16 @@ index f01219da74..d7c5d70501 100644
 +    fn reader_room(self, reader: PolicyReader, budget: usize) -> usize {
 +        match reader {
 +            PolicyReader::HeldCheck(_) | PolicyReader::Registry(_) => self.resumed(budget),
-+            PolicyReader::Sources | PolicyReader::Origin | PolicyReader::MachinePolicy => self.available(budget),
++            PolicyReader::Sources | PolicyReader::Origin | PolicyReader::MachinePolicy | PolicyReader::Login => {
++                self.available(budget)
++            }
 +        }
 +    }
 +
      /// The most nested arrays and objects a settings file the reader reads may hold.
      pub(crate) fn max_depth(self) -> usize {
          self.walk
-@@ -527,12 +819,12 @@ impl NodeStack {
+@@ -527,12 +840,12 @@ impl NodeStack {
              .min(self.clone.deepest(self.available(self.clone.budget)))
      }
  
@@ -1545,7 +1573,7 @@ index f01219da74..d7c5d70501 100644
      }
  
      /// Whether the settings file reader walks and copies `document` without running out of stack.
-@@ -541,31 +833,56 @@ impl NodeStack {
+@@ -541,31 +854,56 @@ impl NodeStack {
              && self.clone.fits(self.available(self.clone.budget), document)
      }
  
@@ -1609,7 +1637,7 @@ index f01219da74..d7c5d70501 100644
      pub(crate) fn merge_within(
          self,
          call: NodeMergeCall,
-@@ -576,7 +893,7 @@ impl NodeStack {
+@@ -576,7 +914,7 @@ impl NodeStack {
      ) -> NodeMerge {
          let budget = match call {
              NodeMergeCall::Source => self.merge_budget,
@@ -1618,7 +1646,7 @@ index f01219da74..d7c5d70501 100644
              NodeMergeCall::Admin => self.policy.admin_merge,
          };
          let room = MergeRoom {
-@@ -618,3 +935,7 @@ fn is_container(value: &Value) -> bool {
+@@ -618,3 +956,7 @@ fn is_container(value: &Value) -> bool {
  #[cfg(test)]
  #[path = "node_stack_tests.rs"]
  mod tests;
@@ -1689,10 +1717,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..9bd9a51fde
+index 0000000000..4396d82208
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,496 @@
+@@ -0,0 +1,527 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -1701,6 +1729,12 @@ index 0000000000..9bd9a51fde
 +//! the next. Each answer must be the model's answer, with the same `catch` blocks taking the `RangeError`, at an offset
 +//! inside the interval the refit measured for its host, call position and context, on the 16-byte grid; one offset
 +//! explains every case of a timer, an immediate or an I/O callback.
++//!
++//! A case can give more than one answer in a context, since the runs of one context do not all land on the same
++//! frames. The answer the reference run gave is the row labeled `ref`: the model must give it exactly at the frozen
++//! offset of its context, which is 0 for the top level and a nested chain and the one offset of a timer, an immediate
++//! or an I/O callback. Every other answer the runs gave is a row labeled `alt`: the model must give it at some offset of
++//! the context's grid, which the row names. A child process exit has no frozen offset, so both labels name an offset.
 +
 +use std::{collections::BTreeSet, thread};
 +
@@ -1738,6 +1772,9 @@ index 0000000000..9bd9a51fde
 +
 +/// The grid the offsets of a caller sit on: V8 keeps its frames 16-byte aligned.
 +const STEP: isize = 16;
++
++/// The offset of the callers that run straight from the module, the top level and a chain nested in another.
++const MODULE_OFFSET: isize = 0;
 +
 +/// Room for walking, printing and dropping the deepest settings documents of the answers.
 +const DEEP_STACK_BYTES: usize = 256 * 1024 * 1024;
@@ -2090,13 +2127,24 @@ index 0000000000..9bd9a51fde
 +    Ok((offset(&bounds[0])?, offset(&bounds[1])?))
 +}
 +
-+/// The offset a row is checked at: the one offset of its context for a timer, an immediate or an I/O callback, and
-+/// the offset the row names otherwise. It must lie inside the context's interval, on the grid.
++/// Whether a row is the answer the reference run gave (`ref`) or another answer some run of the context gave (`alt`).
++fn is_reference(row: &[Value]) -> Result<bool, Failure> {
++    match row[8].as_str() {
++        Some("ref") => Ok(true),
++        Some("alt") => Ok(false),
++        _ => Err("a row is neither a ref nor an alt".into()),
++    }
++}
++
++/// The offset a row is checked at. The reference answer is checked at the frozen offset of its context: 0 for the top
++/// level and a nested chain, the one offset of a timer, an immediate or an I/O callback. Any other answer, and the
++/// answer of a child process exit, is checked at the offset the row names. It must lie inside the context's interval,
++/// on the grid.
 +fn checked_offset(answers: &Value, row: &[Value], host: &str, call: &str, context: &str) -> Result<isize, Failure> {
-+    let at = if SETTLED.contains(&context) {
-+        offset(&answers["offsets"][host][call][context])?
-+    } else {
-+        offset(&row[7])?
++    let at = match (is_reference(row)?, context) {
++        (true, "toplevel" | "nested") => MODULE_OFFSET,
++        (true, _) if SETTLED.contains(&context) => offset(&answers["offsets"][host][call][context])?,
++        _ => offset(&row[7])?,
 +    };
 +    let (low, high) = interval(answers, host, call, context)?;
 +    if at < low || at > high || at % STEP != 0 {
@@ -2112,8 +2160,8 @@ index 0000000000..9bd9a51fde
 +    let recorded = answers["answers"].as_array().ok_or("the fixture has no answers")?;
 +    let row = row
 +        .as_array()
-+        .filter(|row| row.len() == 8)
-+        .ok_or("a row is not a list of eight")?;
++        .filter(|row| row.len() == 9)
++        .ok_or("a row is not a list of nine")?;
 +    let host = row[0].as_str().ok_or("a row names no host")?;
 +    let call = row[1].as_str().ok_or("a row names no call position")?;
 +    let context = row[2].as_str().ok_or("a row names no context")?;
@@ -2136,7 +2184,7 @@ index 0000000000..9bd9a51fde
 +    let (answered, stage) = answer_at(files, call, stack.resumed_by(at), stack.resumed_by(completion))?;
 +    let stage_matches = row[6].as_str().is_none_or(|named| named == stage);
 +    let unexplained = (answered != *expected || !stage_matches)
-+        .then(|| format!("{host} {call} {context} case {} at {at}: {stage}", row[3]));
++        .then(|| format!("{host} {call} {context} case {} at {at} ({}): {stage}", row[3], row[8]));
 +    Ok((unexplained, (host.to_owned(), call.to_owned(), context.to_owned())))
 +}
 +
@@ -2148,6 +2196,17 @@ index 0000000000..9bd9a51fde
 +    let answers: Value = serde_json::from_str(ANSWERS)?;
 +    assert_eq!((&answers["node"], &answers["step"]), (&json!("v24.13.1"), &json!(STEP)));
 +    let rows = answers["rows"].as_array().ok_or("the fixture has no rows")?;
++    let mut references = BTreeSet::new();
++    for row in rows {
++        let row = row
++            .as_array()
++            .filter(|row| row.len() == 9)
++            .ok_or("a row is not a list of nine")?;
++        let case = row[..4].iter().map(Value::to_string).collect::<Vec<_>>();
++        if is_reference(row)? && !references.insert(case) {
++            return Err("a case has two reference answers in one context".into());
++        }
++    }
 +    let workers = thread::available_parallelism().map_or(1, usize::from);
 +    let share = rows.len().div_ceil(workers).max(1);
 +    let checked = thread::scope(|scope| -> Result<Vec<_>, Failure> {
@@ -2693,10 +2752,10 @@ index f1e0862073..7d4fb7d1b8 100644
 +    })
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader.rs
-index d1442711cf..d00e3c7b78 100644
+index d1442711cf..7042d2ba7c 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_managed_reader.rs
-@@ -13,14 +13,19 @@ use crate::{
+@@ -13,22 +13,44 @@ use crate::{
      node_merge::NodeMerge,
      node_merge_call::NodeMergeCall,
      node_merge_warmth::MergeWarmth,
@@ -2717,7 +2776,34 @@ index d1442711cf..d00e3c7b78 100644
      settings_resolve_tier::{LoadState, TierRead},
      settings_resolve_values::{SettingsMap, merge_unbounded, merge_within},
  };
-@@ -36,9 +41,11 @@ pub(crate) struct ManagedReader<'p> {
+ 
+ /// The managed settings documents a resolve read so far, by path, and whether each read opened its file: the parse
+-/// cache of the file cache (`Fu` upstream), which every evaluation of the managed settings shares.
++/// cache of the file cache (`Fu` upstream), which every evaluation of the managed settings shares, and the login pins
++/// the first evaluation that needed them kept in the policy of the store (`machineLoginPins` upstream).
+ #[derive(Debug, Default)]
+-pub(crate) struct ParsedFiles(RefCell<HashMap<PathBuf, (TierRead, bool)>>);
++pub(crate) struct ParsedFiles {
++    files: RefCell<HashMap<PathBuf, (TierRead, bool)>>,
++    login_pins: RefCell<Option<SettingsMap>>,
++}
++
++impl ParsedFiles {
++    /// The login pins `mX` computed for this resolve, from `compute` the first time they are asked for.
++    pub(crate) fn login_pins<E>(&self, compute: impl FnOnce() -> Result<SettingsMap, E>) -> Result<SettingsMap, E> {
++        let cached = self.login_pins.borrow().clone();
++        if let Some(pins) = cached {
++            return Ok(pins);
++        }
++        let pins = compute()?;
++        *self.login_pins.borrow_mut() = Some(pins.clone());
++        Ok(pins)
++    }
++}
+ 
+ /// The reader of a resolve's managed settings documents.
+ #[derive(Clone, Copy, Debug)]
+@@ -36,9 +58,11 @@ pub(crate) struct ManagedReader<'p> {
      decoder: Decoder,
      /// The stack of this Node process, which the TypeScript dialect reads and merges on.
      node: NodeStack,
@@ -2731,7 +2817,7 @@ index d1442711cf..d00e3c7b78 100644
      parsed: &'p ParsedFiles,
      /// What the merges of the resolve left V8 having run, which the merges of the sources go on from.
      warmth: &'p Cell<MergeWarmth>,
-@@ -54,31 +61,162 @@ enum Decoder {
+@@ -54,31 +78,188 @@ enum Decoder {
      Node,
  }
  
@@ -2868,14 +2954,11 @@ index d1442711cf..d00e3c7b78 100644
              node,
              pass: ManagedPass::Sources,
 +            reader: PolicyReader::Sources,
-             parsed,
-             warmth,
-         }
-     }
- 
--    /// The same reader in the evaluation `pass`, sharing what the others parsed.
--    pub(crate) fn in_pass(self, pass: ManagedPass) -> Self {
--        Self { pass, ..self }
++            parsed,
++            warmth,
++        }
++    }
++
 +    /// The same reader in the evaluation for the effective settings, which runs right after the one for the sources
 +    /// and finds every document it reads in the file cache that one filled.
 +    pub(crate) fn for_effective(self) -> Self {
@@ -2901,10 +2984,53 @@ index d1442711cf..d00e3c7b78 100644
 +            reader: PolicyReader::MachinePolicy,
 +            ..self
 +        }
++    }
++
++    /// The same reader in the evaluation `mX` runs for the login pins, which builds a fresh store (`WX` upstream) and so
++    /// parses every document again into `parsed`, on the chain of the sources with the frames of `mX` and `XP` more.
++    /// Its merges go on from a copy of `warmth`, so they leave what the resolve's own merges ran alone.
++    pub(crate) fn for_login<'q>(self, parsed: &'q ParsedFiles, warmth: &'q Cell<MergeWarmth>) -> ManagedReader<'q>
++    where
++        'p: 'q,
++    {
++        ManagedReader {
++            pass: ManagedPass::Login,
++            reader: PolicyReader::Login,
+             parsed,
+             warmth,
++            ..self
+         }
+     }
+ 
+-    /// The same reader in the evaluation `pass`, sharing what the others parsed.
+-    pub(crate) fn in_pass(self, pass: ManagedPass) -> Self {
+-        Self { pass, ..self }
++    /// What the merges of the resolve left V8 having run so far.
++    pub(crate) fn warmth(self) -> MergeWarmth {
++        self.warmth.get()
++    }
++
++    /// The login pins `mX` kept in the store of this resolve, computed by `compute` the first time.
++    pub(crate) fn login_pins<E>(self, compute: impl FnOnce() -> Result<SettingsMap, E>) -> Result<SettingsMap, E> {
++        self.parsed.login_pins(compute)
      }
  
      /// Whether the reader runs on a Node stack, where each evaluation of the managed settings has its own room.
-@@ -104,38 +242,7 @@ impl<'p> ManagedReader<'p> {
+@@ -92,50 +273,19 @@ impl<'p> ManagedReader<'p> {
+         if !self.has_stack() {
+             return read(self);
+         }
+-        let cached = self.parsed.0.borrow().get(path).cloned();
++        let cached = self.parsed.files.borrow().get(path).cloned();
+         if let Some(cached) = cached {
+             return cached;
+         }
+         let fresh = read(self);
+-        self.parsed.0.borrow_mut().insert(path.to_path_buf(), fresh.clone());
++        self.parsed.files.borrow_mut().insert(path.to_path_buf(), fresh.clone());
+         fresh
+     }
+ 
      /// A managed settings document from the bytes of its file at `path`, which fit the size limit, sanitized and read
      /// by the policy-tolerant schema parse in either dialect.
      pub(crate) fn read(self, bytes: &[u8], path: &Path) -> TierRead {
@@ -2944,7 +3070,7 @@ index d1442711cf..d00e3c7b78 100644
      }
  
      /// Whether the file cache (`Fu` upstream) runs out of stack copying the settings read from a managed document.
-@@ -152,6 +259,13 @@ impl<'p> ManagedReader<'p> {
+@@ -152,6 +302,13 @@ impl<'p> ManagedReader<'p> {
          self.merge(NodeMergeCall::Folder, destination, source)
      }
  
@@ -3652,18 +3778,19 @@ index cf31f0b4e4..1418b590d6 100644
 +    Ok(errors.evaluation(base(), SettingsMap::new(), inherits, None))
  }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy.rs
-index a3d2ccead8..b8391407d5 100644
+index a3d2ccead8..21464d65f0 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy.rs
-@@ -1,6 +1,7 @@
+@@ -1,6 +1,8 @@
  use std::{
++    cell::Cell,
      cmp::Ordering,
      collections::HashMap,
 +    convert::Infallible,
      io,
      path::{Path, PathBuf},
  };
-@@ -16,8 +17,8 @@ use crate::{
+@@ -16,10 +18,10 @@ use crate::{
          OTEL_EXACT, OTEL_PREFIXES, PARENT_RESTRICT_FALSE_KEYS, PARENT_RESTRICT_TRUE_KEYS, PARENT_SETTINGS_BEHAVIOR_KEY,
          POLICY_META_KEYS, SETTINGS_FILE_MAX_BYTES,
      },
@@ -3671,9 +3798,12 @@ index a3d2ccead8..b8391407d5 100644
      node_merge::NodeMerge,
 +    node_stack_catch::{self, StackCatch},
      node_text_file::read_node_text,
-     settings_managed_reader::ManagedReader,
+-    settings_managed_reader::ManagedReader,
++    settings_managed_reader::{ManagedReader, ParsedFiles},
      settings_policy_content::{has_authored_value, has_policy_content},
-@@ -28,7 +29,7 @@ use crate::{
+     settings_resolve_admin::build_admin,
+     settings_resolve_error::ResolveSettingsError,
+@@ -28,7 +30,7 @@ use crate::{
          MdmEvaluation, asks_organization, kernel_reports_wsl, managed_directory, wsl_managed_directory,
      },
      settings_resolve_platform_kind::PlatformKind,
@@ -3682,7 +3812,7 @@ index a3d2ccead8..b8391407d5 100644
      settings_resolve_state::ResolverState,
      settings_resolve_tier::{LoadState, TierRead},
      settings_resolve_values::{SettingsMap, in_schema_order, omit, pick},
-@@ -108,20 +109,160 @@ fn is_drop_in(name: &str) -> bool {
+@@ -108,20 +110,160 @@ fn is_drop_in(name: &str) -> bool {
      name.ends_with(".json") && !name.starts_with('.')
  }
  
@@ -3849,7 +3979,7 @@ index a3d2ccead8..b8391407d5 100644
  
  /// The documents of one managed folder merged so far (`s` in `um` upstream).
  struct Folder {
-@@ -149,9 +290,14 @@ impl Folder {
+@@ -149,9 +291,14 @@ impl Folder {
          }
      }
  
@@ -3867,7 +3997,7 @@ index a3d2ccead8..b8391407d5 100644
          if let Some(mut settings) = settings
              && !settings.is_empty()
          {
-@@ -166,10 +312,32 @@ impl Folder {
+@@ -166,10 +313,32 @@ impl Folder {
              self.found = true;
              self.authored |= has_authored_value(&settings) && !document.only_substitutes;
          }
@@ -3901,7 +4031,7 @@ index a3d2ccead8..b8391407d5 100644
      }
  
      /// The `catch` around the drop-ins in `um` upstream: the folder did not load, and keeps what merged before.
-@@ -193,44 +361,31 @@ impl Folder {
+@@ -193,44 +362,31 @@ impl Folder {
  }
  
  /// `um` upstream: the held registry documents, then the managed settings file of `directory` plus its sorted
@@ -3954,7 +4084,7 @@ index a3d2ccead8..b8391407d5 100644
      let drop_ins = directory.join(MANAGED_SETTINGS_DROP_IN_DIRECTORY);
      match host.read_directory(&drop_ins) {
          Ok(entries) => {
-@@ -248,6 +403,7 @@ fn read_managed_directory<H: SettingsHost>(
+@@ -248,6 +404,7 @@ fn read_managed_directory<H: SettingsHost>(
                      .as_ref()
                      .is_some_and(|settings| reader.copy_overflows(settings))
                  {
@@ -3962,7 +4092,7 @@ index a3d2ccead8..b8391407d5 100644
                      folder.abandon();
                      break;
                  }
-@@ -257,8 +413,12 @@ fn read_managed_directory<H: SettingsHost>(
+@@ -257,8 +414,12 @@ fn read_managed_directory<H: SettingsHost>(
                      last_is_link: Some(linked),
                      opened,
                  });
@@ -3977,7 +4107,7 @@ index a3d2ccead8..b8391407d5 100644
                      folder.abandon();
                      break;
                  }
-@@ -272,18 +432,18 @@ fn read_managed_directory<H: SettingsHost>(
+@@ -272,18 +433,18 @@ fn read_managed_directory<H: SettingsHost>(
  
  /// `Q5` upstream: the managed file tier for this platform, with the held registry documents ahead of the managed
  /// files. A session that asks its organization reads the Windows side of WSL only when the kernel says WSL.
@@ -4000,7 +4130,7 @@ index a3d2ccead8..b8391407d5 100644
      }
      let machine_holds = mdm.mdm.has_policy_content || mdm.mdm.load_state == LoadState::DidNotLoad;
      if mdm.wsl_inherits {
-@@ -291,18 +451,18 @@ fn read_file_tier<H: SettingsHost>(
+@@ -291,18 +452,18 @@ fn read_file_tier<H: SettingsHost>(
          // inherits the Windows settings holds any: an organization session inherits them only while the kernel says
          // WSL (`Gc`), and in that same evaluation `GP` settles the WSL registry tool as writable by nobody (`_X(!0)`),
          // so `_E` holds no registry document; a re-read replaces the whole evaluation, never one of the two.
@@ -4023,7 +4153,7 @@ index a3d2ccead8..b8391407d5 100644
  }
  
  /// What reading the managed file for an organization (`pE` upstream) tells the admin selection.
-@@ -340,7 +500,6 @@ struct Rewrites<'h, H> {
+@@ -340,7 +501,6 @@ struct Rewrites<'h, H> {
  impl<H: SettingsHost> Rewrites<'_, H> {
      fn allowed(&mut self, rewritable: Rewritable<'_>) -> bool {
          match rewritable {
@@ -4031,7 +4161,7 @@ index a3d2ccead8..b8391407d5 100644
              Rewritable::Never => false,
              Rewritable::Ask(probe) => {
                  self.organization
-@@ -375,44 +534,26 @@ fn read_managed_file<H: SettingsHost>(
+@@ -375,44 +535,26 @@ fn read_managed_file<H: SettingsHost>(
          wsl_organization: organization && kind == PlatformKind::Wsl && kernel_reports_wsl(host),
          certain: HashMap::new(),
      };
@@ -4088,7 +4218,84 @@ index a3d2ccead8..b8391407d5 100644
      let kept = held.settings.clone().unwrap_or_default();
      let added = restricted.settings.clone().unwrap_or_default();
      let mut flags = Held {
-@@ -1063,16 +1204,9 @@ pub(crate) fn reevaluate_policy<H: SettingsHost>(
+@@ -775,15 +917,36 @@ fn restrictive_union_env(tiers: &[SettingsMap], first_trusted_tier: usize) -> Op
+     (!result.is_empty()).then_some(result)
+ }
+ 
+-/// `mX` upstream: the machine policy, read without the remote tier, keeps the login pins it sets.
+-fn pin_machine_login(
+-    merged: &mut SettingsMap,
++/// `mX` upstream: the login pins of the machine policy, which `XP` reads without the remote tier. `WX` builds a fresh
++/// store for it (`new Bs`), so the managed documents are read and parsed again, on the chain of the caller with the
++/// frames of `mX` and `XP` more (`QP > mX > XP > $u > pE`), where a document the sources read can run out of stack
++/// and leave no pins. The store keeps the pins (`machineLoginPins`), so the first evaluation that needs them computes
++/// them for the whole resolve.
++fn machine_login_pins<H: SettingsHost>(
++    host: &H,
++    state: &ResolverState,
++    kind: PlatformKind,
++    evaluation: &MdmEvaluation,
++    parent: Option<&SettingsMap>,
++    reader: ManagedReader<'_>,
++) -> Result<SettingsMap, ResolveSettingsError> {
++    reader.login_pins(|| {
++        let fresh = ParsedFiles::default();
++        let warmth = Cell::new(reader.warmth());
++        let (file, held) = read_managed_file(host, state, kind, evaluation, reader.for_login(&fresh, &warmth))?;
++        Ok(login_pins(&evaluation.mdm, &file, &held, parent, kind))
++    })
++}
++
++/// The pins `XP` leaves from the managed file and the machine's own registry or preferences tier, the organization
++/// and the login method when it names one of the known methods.
++fn login_pins(
+     mdm: &TierRead,
+     file: &TierRead,
+     held: &Held,
+     parent: Option<&SettingsMap>,
+     kind: PlatformKind,
+-) {
++) -> SettingsMap {
+     let machine_mdm = if mdm.user_writable {
+         TierRead {
+             settings: Some(SettingsMap::new()),
+@@ -793,18 +956,19 @@ fn pin_machine_login(
+     } else {
+         mdm.clone()
+     };
+-    let machine = select_admin(None, &machine_mdm, file, held, parent, kind.as_str()).admin;
+-    let Some(machine) = machine else {
+-        return;
++    let mut pins = SettingsMap::new();
++    let Some(machine) = select_admin(None, &machine_mdm, file, held, parent, kind.as_str()).admin else {
++        return pins;
+     };
+     if let Some(organization) = machine.get(LOGIN_ORGANIZATION_KEY) {
+-        merged.insert(LOGIN_ORGANIZATION_KEY.to_owned(), organization.clone());
++        pins.insert(LOGIN_ORGANIZATION_KEY.to_owned(), organization.clone());
+     }
+     if let Some(method) = machine.get(LOGIN_METHOD_KEY)
+         && method.as_str().is_some_and(|name| LOGIN_METHODS.contains(&name))
+     {
+-        merged.insert(LOGIN_METHOD_KEY.to_owned(), method.clone());
++        pins.insert(LOGIN_METHOD_KEY.to_owned(), method.clone());
+     }
++    pins
+ }
+ 
+ /// What the admin selection of one evaluation of the managed settings composes from what it read.
+@@ -1010,7 +1174,9 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
+             merged.insert("forceRemoteSettingsRefresh".to_owned(), Value::Bool(true));
+         }
+         if selection.remote_in_sources || evaluation.mdm.user_writable {
+-            pin_machine_login(&mut merged, &evaluation.mdm, &file, &held, parent_managed, kind);
++            for (key, value) in machine_login_pins(host, state, kind, evaluation, parent_managed, reader)? {
++                merged.insert(key, value);
++            }
+         }
+         let union_disabled = crate::settings_resolve_env::flag_is_true(host, DISABLE_ADMIN_ENV_UNION_VARIABLE);
+         if !union_disabled {
+@@ -1063,16 +1229,9 @@ pub(crate) fn reevaluate_policy<H: SettingsHost>(
      reader: ManagedReader<'_>,
  ) -> Result<PolicyReevaluation, ResolveSettingsError> {
      let parent_managed = parent_managed.filter(|parent| !parent.is_empty());
@@ -4107,6 +4314,74 @@ index a3d2ccead8..b8391407d5 100644
      Ok(PolicyReevaluation {
          origin,
          file_did_not_load: machine.load_state == LoadState::DidNotLoad,
+diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy_tests.rs
+index c4a9c9fbea..3ecbb1a4a8 100644
+--- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy_tests.rs
++++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_policy_tests.rs
+@@ -8,9 +8,7 @@ use std::{
+ 
+ use serde_json::{Value, json};
+ 
+-use super::{
+-    Held, held_by_other_tier, pin_machine_login, read_policy_file, restrictive_union_env, same_value, select_admin,
+-};
++use super::{Held, held_by_other_tier, login_pins, read_policy_file, restrictive_union_env, same_value, select_admin};
+ use crate::{
+     adapters::ReadFile,
+     constants::{
+@@ -422,16 +420,8 @@ fn a_user_writable_mdm_tier_does_not_pin_the_machine_login() {
+         user_writable: true,
+         ..loaded(Some(json!({"forceLoginOrgUUID": "mdm-org"})), true)
+     };
+-    let mut merged = SettingsMap::new();
+-    pin_machine_login(
+-        &mut merged,
+-        &mdm,
+-        &TierRead::absent(),
+-        &Held::default(),
+-        None,
+-        PlatformKind::Linux,
+-    );
+-    assert!(merged.is_empty());
++    let pins = login_pins(&mdm, &TierRead::absent(), &Held::default(), None, PlatformKind::Linux);
++    assert!(pins.is_empty());
+ }
+ 
+ #[test]
+@@ -440,29 +430,13 @@ fn the_machine_policy_keeps_the_login_pins_it_sets() {
+         Some(json!({"forceLoginOrgUUID": "file-org", "forceLoginMethod": "console"})),
+         true,
+     );
+-    let mut merged = object(&json!({"forceLoginOrgUUID": "remote-org"}));
+-    pin_machine_login(
+-        &mut merged,
+-        &TierRead::absent(),
+-        &file,
+-        &Held::default(),
+-        None,
+-        PlatformKind::Linux,
+-    );
++    let pins = login_pins(&TierRead::absent(), &file, &Held::default(), None, PlatformKind::Linux);
+     assert_eq!(
+-        Value::Object(merged),
++        Value::Object(pins),
+         json!({"forceLoginOrgUUID": "file-org", "forceLoginMethod": "console"})
+     );
+ 
+     let file = loaded(Some(json!({"forceLoginMethod": "sso"})), true);
+-    let mut merged = SettingsMap::new();
+-    pin_machine_login(
+-        &mut merged,
+-        &TierRead::absent(),
+-        &file,
+-        &Held::default(),
+-        None,
+-        PlatformKind::Linux,
+-    );
+-    assert!(merged.is_empty());
++    let pins = login_pins(&TierRead::absent(), &file, &Held::default(), None, PlatformKind::Linux);
++    assert!(pins.is_empty());
+ }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_reread.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_reread.rs
 index e83282a76a..58891703b5 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve_reread.rs
