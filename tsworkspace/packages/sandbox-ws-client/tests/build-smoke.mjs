@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -6,6 +7,26 @@ import { fileURLToPath } from 'node:url';
 
 import { MemorySandboxClient, Sandbox, tenantId } from '@trogonai/sandbox-ws-client';
 import ts from 'typescript';
+
+test('the public Git status parser bounds malformed tracking-header work', () => {
+  const script = `
+    import assert from 'node:assert/strict';
+    import { parseGitStatus } from '@trogonai/sandbox-ws-client';
+    const header = ' [a'.repeat(100_000);
+    const result = parseGitStatus('## ' + header);
+    assert.equal(result.branch, header);
+    assert.equal(result.upstream, undefined);
+    assert.equal(result.ahead, 0);
+    assert.equal(result.behind, 0);
+    assert.equal(result.clean, true);
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+    encoding: 'utf8',
+    timeout: 5_000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+});
 
 test('the emitted package imports and preserves the public lifecycle contract', async () => {
   const client = new MemorySandboxClient();

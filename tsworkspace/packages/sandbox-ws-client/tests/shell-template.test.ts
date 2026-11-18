@@ -201,6 +201,7 @@ describe('Sandbox.$', () => {
   it('rejects before running when a value cannot be quoted', async () => {
     const client = new MemorySandboxClient();
     const sandbox = await Sandbox.create(client, { tenant: tenantId('acme') });
-    await expect(sandbox.$`echo ${undefined}`).rejects.toBeInstanceOf(TypeError);
+    const template: TemplateStringsArray = Object.assign(['echo ', ''], { raw: ['echo ', ''] });
+    await expect(sandbox.$(template, undefined)).rejects.toBeInstanceOf(TypeError);
   });
 });

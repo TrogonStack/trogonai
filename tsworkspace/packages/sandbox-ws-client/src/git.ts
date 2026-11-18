@@ -160,8 +160,9 @@ export function parseGitStatus(text: string): GitStatusResult {
     if (line.length === 0) continue;
     if (line.startsWith('## ')) {
       const head = line.slice(3);
-      const track = /^(.*?)(?: \[(.*)\])?$/.exec(head);
-      const names = track?.[1] ?? head;
+      const trackingStart = head.endsWith(']') ? head.indexOf(' [') : -1;
+      const names = trackingStart < 0 ? head : head.slice(0, trackingStart);
+      const tracking = trackingStart < 0 ? '' : head.slice(trackingStart + 2, -1);
       const [local, upstream] = names.split('...');
       if (local === undefined || local.startsWith('HEAD (no branch)')) {
         result.branch = null;
@@ -169,8 +170,8 @@ export function parseGitStatus(text: string): GitStatusResult {
         result.branch = local.replace(/^No commits yet on /, '').replace(/^Initial commit on /, '');
       }
       if (upstream !== undefined) result.upstream = upstream;
-      const ahead = /ahead (\d+)/.exec(track?.[2] ?? '');
-      const behind = /behind (\d+)/.exec(track?.[2] ?? '');
+      const ahead = /ahead (\d+)/.exec(tracking);
+      const behind = /behind (\d+)/.exec(tracking);
       result.ahead = ahead ? Number(ahead[1]) : 0;
       result.behind = behind ? Number(behind[1]) : 0;
       continue;
