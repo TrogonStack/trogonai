@@ -1,0 +1,8 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    integration_tests = {
+        "error_contract": {},
+        "prompt_hook": {},
+    },
+)
