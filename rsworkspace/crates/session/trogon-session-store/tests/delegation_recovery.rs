@@ -12,9 +12,7 @@ use async_nats::jetstream;
 use buffa::{Message, MessageName};
 use sha2::{Digest as _, Sha256};
 use tokio::sync::{Notify, watch};
-use trogon_decider_nats::{
-    JetStreamStore, StreamSubject, StreamSubjectResolver, SubjectState, subject_current_position,
-};
+use trogon_decider_nats::JetStreamStore;
 use trogon_decider_runtime::{
     AppendStreamRequest, CommandId, Event, EventId, Headers, ReadFrom, ReadStreamRequest, StreamAppend, StreamRead,
     StreamWritePrecondition,
@@ -176,37 +174,9 @@ impl SessionAdmission for FixtureAdmission {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-enum FixtureStoreError {
-    #[error(transparent)]
-    Subject(#[from] async_nats::SubjectError),
-    #[error(transparent)]
-    Read(#[from] trogon_decider_nats::StreamStoreError),
-}
-
-#[derive(Clone)]
-struct FixtureResolver;
-
-impl StreamSubjectResolver<SessionKey> for FixtureResolver {
-    type Error = FixtureStoreError;
-
-    async fn resolve_subject_state(
-        &self,
-        stream: &jetstream::stream::Stream,
-        key: &SessionKey,
-    ) -> Result<SubjectState, Self::Error> {
-        let subject = StreamSubject::new(key.subject())?;
-        let current_position = subject_current_position(stream, &subject).await?;
-        Ok(SubjectState {
-            subject,
-            current_position,
-        })
-    }
-}
-
 struct Harness {
     _server: JetStreamTestServer,
-    store: Arc<JetStreamStore<FixtureResolver>>,
+    store: Arc<JetStreamStore<trogon_session_store::SessionSubjectResolver>>,
     admission: Arc<FixtureAdmission>,
     codec: Arc<FixtureCodec>,
 }
@@ -226,6 +196,7 @@ impl Harness {
                 storage: jetstream::stream::StorageType::File,
                 retention: jetstream::stream::RetentionPolicy::Limits,
                 max_messages: 1024,
+                max_message_size: 262144,
                 max_bytes: 4 * 1024 * 1024,
                 discard: jetstream::stream::DiscardPolicy::New,
                 deny_delete: true,
@@ -241,7 +212,18 @@ impl Harness {
             })
             .await
             .expect("create unused snapshots bucket");
-        let store = Arc::new(JetStreamStore::builder(js, stream, snapshots).with_subject_resolver(FixtureResolver));
+        let store = Arc::new(
+            JetStreamStore::builder(js, stream, snapshots).with_subject_resolver(
+                trogon_session_store::SessionSubjectResolver::new(
+                    trogon_session_store::SessionStreamProfile::new(
+                        "SESSION_RECOVERY",
+                        NatsToken::new("fixture").unwrap(),
+                        1,
+                    )
+                    .unwrap(),
+                ),
+            ),
+        );
         Self {
             _server: server,
             store,
@@ -250,7 +232,10 @@ impl Harness {
         }
     }
 
-    fn runtime(&self) -> SessionRuntime<JetStreamStore<FixtureResolver>, FixtureAdmission, FixtureCodec> {
+    fn runtime(
+        &self,
+    ) -> SessionRuntime<JetStreamStore<trogon_session_store::SessionSubjectResolver>, FixtureAdmission, FixtureCodec>
+    {
         SessionRuntime::new(
             Arc::clone(&self.store),
             Arc::clone(&self.admission),
@@ -719,8 +704,12 @@ async fn unknown_original_parent_fields_are_never_normalized_into_recovery_autho
 async fn concurrent_reconcilers_observe_one_atomic_child_creation() {
     let harness = Harness::new().await;
     harness.seed_parent().await;
-    let first = harness.runtime();
-    let second = harness.runtime();
+    let (first, observed) = harness.fault_runtime(0);
+    let second = SessionRuntime::new(
+        Arc::clone(&observed),
+        Arc::clone(&harness.admission),
+        Arc::clone(&harness.codec),
+    );
     let actor = caller();
     let parent = key("parent");
     let (first, second) = tokio::join!(
@@ -734,8 +723,8 @@ async fn concurrent_reconcilers_observe_one_atomic_child_creation() {
     assert_eq!(harness.child_events().await.len(), 2);
 }
 
-type NativeStore = JetStreamStore<FixtureResolver>;
-type NativeAppendError = trogon_decider_nats::JetStreamStoreError<FixtureStoreError>;
+type NativeStore = JetStreamStore<trogon_session_store::SessionSubjectResolver>;
+type NativeAppendError = trogon_decider_nats::JetStreamStoreError<trogon_session_store::SessionNativeError>;
 
 #[derive(Debug, thiserror::Error)]
 enum FaultError {
@@ -827,6 +816,31 @@ impl StreamAppend<SessionKey> for FaultStore {
         }
         if mode == 3 {
             self.close_parent().await;
+        }
+        if mode == 4 {
+            let mut independently_sealed = Vec::new();
+            for event in request.events {
+                let original = self
+                    .codec
+                    .open(request.stream_id, event.id, &event.r#type, &event.content)
+                    .await
+                    .unwrap();
+                let content = self
+                    .codec
+                    .seal(request.stream_id, event.id, &event.r#type, &original)
+                    .await
+                    .unwrap();
+                assert_ne!(content, event.content);
+                independently_sealed.push(Event { content, ..event });
+            }
+            self.store
+                .append_stream(AppendStreamRequest {
+                    stream_id: request.stream_id,
+                    stream_write_precondition: request.stream_write_precondition,
+                    events: independently_sealed,
+                })
+                .await?;
+            return Err(FaultError::LostAck);
         }
         let result = self.store.append_stream(request).await?;
         if mode == 1 {
@@ -1038,7 +1052,11 @@ async fn conflicting_candidate_or_checkout_is_refused_with_identical_event_ident
             }
             .into();
         } else {
-            child_started.checkout_ref = wire::CheckoutRef { uri: "git://example.test/other".to_owned(), ..checkout() }.into();
+            child_started.checkout_ref = wire::CheckoutRef {
+                uri: "git://example.test/other".to_owned(),
+                ..checkout()
+            }
+            .into();
         }
         let link = wire::ParentLinked {
             session_id: "child".to_owned(),
@@ -1105,4 +1123,199 @@ async fn randomized_envelopes_do_not_change_original_child_duplicate_identity() 
     );
     assert_eq!(harness.child_events().await, existing);
     assert_eq!(store.child_appends.load(Ordering::SeqCst), 1);
+}
+
+impl trogon_session_store::SessionAppend for FaultStore {
+    fn classify_session_append(&self, error: &Self::Error) -> trogon_session_store::SessionAppendFailure {
+        match error {
+            FaultError::Native(error) => {
+                trogon_session_store::SessionAppend::classify_session_append(self.store.as_ref(), error)
+            }
+            FaultError::LostAck => trogon_session_store::SessionAppendFailure::Unknown,
+        }
+    }
+}
+
+#[tokio::test]
+async fn exact_nested_plan_encoding_survives_recovery_and_semantic_reencoding_is_not_a_duplicate() {
+    for preseed_reencoded_child in [false, true] {
+        let harness = Harness::new().await;
+        let parent_key = key("parent");
+        let child_key = key("child");
+        let parent = started("parent", b"original parent plan");
+        let dispatch = dispatch(&parent);
+        let dispatch_id = command_id();
+        let plan = dispatch.child_creation.execution_plan.encode_to_vec();
+        let split = 2 + b"original child plan".len();
+        assert_eq!(plan[0], 0x0a);
+        assert_eq!(plan[1] as usize, b"original child plan".len());
+        let reordered = [&plan[split..], &plan[..split]].concat();
+        assert_eq!(
+            wire::StoredSessionExecutionPlan::decode_from_slice(&plan).unwrap(),
+            wire::StoredSessionExecutionPlan::decode_from_slice(&reordered).unwrap()
+        );
+        let mut original_dispatch = dispatch.encode_to_vec();
+        let positions = original_dispatch
+            .windows(plan.len())
+            .enumerate()
+            .filter_map(|(index, value)| (value == plan).then_some(index))
+            .collect::<Vec<_>>();
+        assert_eq!(positions.len(), 1);
+        original_dispatch[positions[0]..positions[0] + plan.len()].copy_from_slice(&reordered);
+        let id = dispatch_id.event_id(0);
+        let content = harness
+            .codec
+            .seal(
+                &parent_key,
+                id,
+                wire::DelegationDispatched::FULL_NAME,
+                &original_dispatch,
+            )
+            .await
+            .unwrap();
+        harness
+            .store
+            .append_stream(AppendStreamRequest {
+                stream_id: &parent_key,
+                stream_write_precondition: StreamWritePrecondition::NoStream,
+                events: vec![
+                    harness.fact(&parent_key, command_id(), 0, &parent).await,
+                    Event {
+                        id,
+                        r#type: wire::DelegationDispatched::FULL_NAME.to_owned(),
+                        content,
+                        headers: Headers::empty(),
+                    },
+                ],
+            })
+            .await
+            .unwrap();
+        if preseed_reencoded_child {
+            let creation_id = CommandId::new(id.as_uuid());
+            let canonical = started("child", b"original child plan");
+            let link = wire::ParentLinked {
+                session_id: "child".to_owned(),
+                parent_session_id: "parent".to_owned(),
+                parent_dispatched_at: wire::SessionOrdinal { value: 2 }.into(),
+                cascade_policy: dispatch.cascade_policy,
+                operation_id: dispatch.operation_id,
+                delegate_binding: dispatch.delegate_binding,
+            };
+            harness
+                .store
+                .append_stream(AppendStreamRequest {
+                    stream_id: &child_key,
+                    stream_write_precondition: StreamWritePrecondition::NoStream,
+                    events: vec![
+                        harness.fact(&child_key, creation_id, 0, &canonical).await,
+                        harness.fact(&child_key, creation_id, 1, &link).await,
+                    ],
+                })
+                .await
+                .unwrap();
+            assert!(matches!(
+                harness
+                    .runtime()
+                    .recover_child(&caller(), &parent_key, "delegate-operation")
+                    .await,
+                Err(trogon_session_store::SessionError::CreationConflict)
+            ));
+        } else {
+            harness
+                .runtime()
+                .recover_child(&caller(), &parent_key, "delegate-operation")
+                .await
+                .unwrap();
+            let child = harness.child_events().await;
+            let original = harness
+                .codec
+                .open(
+                    &child_key,
+                    child[0].event.id,
+                    &child[0].event.r#type,
+                    &child[0].event.content,
+                )
+                .await
+                .unwrap();
+            assert!(original.windows(reordered.len()).any(|value| value == reordered));
+            assert!(!original.windows(plan.len()).any(|value| value == plan));
+            assert_eq!(
+                wire::SessionStarted::decode_from_slice(&original).unwrap(),
+                started("child", b"original child plan")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn declared_binding_preserves_case_dots_and_unicode_without_subject_token_restrictions() {
+    let harness = Harness::new().await;
+    let parent_key = key("parent");
+    let parent = started("parent", b"original parent plan");
+    let mut dispatch = dispatch(&parent);
+    dispatch.delegate_binding = wire::DelegationBindingRef {
+        binding_name: Some("Reviewer.日本語".to_owned()),
+        parent_execution_plan_digest: parent.execution_plan.plan_digest.clone(),
+    }
+    .into();
+    harness
+        .store
+        .append_stream(AppendStreamRequest {
+            stream_id: &parent_key,
+            stream_write_precondition: StreamWritePrecondition::NoStream,
+            events: vec![
+                harness.fact(&parent_key, command_id(), 0, &parent).await,
+                harness.fact(&parent_key, command_id(), 0, &dispatch).await,
+            ],
+        })
+        .await
+        .unwrap();
+    harness
+        .runtime()
+        .recover_child(&caller(), &parent_key, "delegate-operation")
+        .await
+        .unwrap();
+    let child = harness.child_events().await;
+    let original_link = harness
+        .codec
+        .open(
+            &key("child"),
+            child[1].event.id,
+            &child[1].event.r#type,
+            &child[1].event.content,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        wire::ParentLinked::decode_from_slice(&original_link)
+            .unwrap()
+            .delegate_binding
+            .binding_name
+            .as_deref(),
+        Some("Reviewer.日本語")
+    );
+}
+
+#[tokio::test]
+async fn unknown_append_with_independently_sealed_exact_winner_is_reconciled_without_replay() {
+    let harness = Harness::new().await;
+    harness.seed_parent().await;
+    let (runtime, store) = harness.fault_runtime(4);
+    let recovered = runtime
+        .recover_child(&caller(), &key("parent"), "delegate-operation")
+        .await
+        .expect("authenticated exact winning creation must satisfy desired state regardless of sealing nonce");
+    assert!(!recovered.inserted);
+    assert_eq!(store.child_appends.load(Ordering::SeqCst), 1);
+    let existing = harness.child_events().await;
+    assert_eq!(existing.len(), 2);
+    assert!(
+        !runtime
+            .recover_child(&caller(), &key("parent"), "delegate-operation")
+            .await
+            .unwrap()
+            .inserted
+    );
+    assert_eq!(store.child_appends.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.child_events().await, existing);
 }
