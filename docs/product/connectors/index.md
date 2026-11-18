@@ -113,6 +113,20 @@ restarted agent misses nothing.
 
 <ConnectorIngress />
 
+## Google Chat events through Pub/Sub {#google-chat}
+
+In the preview, mention your Chat app in a space it has joined. Google Chat
+publishes the interaction to a Cloud Pub/Sub topic. The gateway pulls from
+your subscription and stores the event in JetStream for consumers.
+
+```text
+Google Chat app → Cloud Pub/Sub → TrogonAI gateway → JetStream
+```
+
+For example, with a subject prefix of `google-pubsub-chat`, subscribe to
+`google-pubsub-chat.message` to receive the interaction payload. The event
+includes the space and message that triggered it. [Google Chat Events Preview](/product/connectors/google-chat)
+
 ## Every provider proves itself differently
 
 Each provider signs its requests in its own way. The gateway knows each one, and
