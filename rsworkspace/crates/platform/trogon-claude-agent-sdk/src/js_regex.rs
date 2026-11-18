@@ -19,12 +19,6 @@ fn in_ranges(ranges: &[(u16, u16)], unit: u16) -> bool {
     ranges.iter().any(|(low, high)| (*low..=*high).contains(&unit))
 }
 
-/// Whether JavaScript's `String.prototype.trim` strips `character`. It differs from `char::is_whitespace`: it
-/// strips the byte order mark and keeps U+0085.
-pub(crate) fn is_whitespace(character: char) -> bool {
-    u16::try_from(u32::from(character)).is_ok_and(|unit| in_ranges(WHITESPACE, unit))
-}
-
 /// The other case of an ASCII letter. JavaScript's non-Unicode case folding never maps a non-ASCII character onto
 /// an ASCII one, so everything else folds to itself.
 fn swap_case(unit: u16) -> u16 {

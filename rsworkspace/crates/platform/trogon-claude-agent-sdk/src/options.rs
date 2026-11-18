@@ -269,9 +269,8 @@ impl ClaudeAgentOptions {
     /// The variable is read from the process environment, never from `ClaudeAgentOptions::env`. Pass the value the
     /// parent process has for it.
     pub fn captures_sdk_mcp_manifests(&self, disable_variable: Option<&std::ffi::OsStr>) -> bool {
-        self.capture_sdk_mcp_manifests.unwrap_or_else(|| {
-            !disable_variable.is_some_and(|value| crate::session_prompt::js_truthy(&value.to_string_lossy()))
-        })
+        self.capture_sdk_mcp_manifests
+            .unwrap_or_else(|| !crate::session_prompt::js_env_truthy(disable_variable))
     }
 }
 

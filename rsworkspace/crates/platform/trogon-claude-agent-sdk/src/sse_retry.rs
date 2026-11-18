@@ -8,6 +8,8 @@ use std::{
 
 mod constants;
 
+use crate::session_prompt::js_trim;
+
 use constants::{BACKOFF_BASE_MS, BACKOFF_CAP_MS, JITTER_US};
 pub(crate) use constants::{CONNECT_TIMEOUT, LIVENESS_TIMEOUT, POST_TIMEOUT, RECONNECT_BUDGET};
 
@@ -44,13 +46,9 @@ pub(crate) fn retry_after_ms(header: Option<&str>) -> Option<f64> {
     Some(js_number(text) * 1_000.0)
 }
 
-fn is_js_space(c: char) -> bool {
-    c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}')
-}
-
 /// JavaScript `Number(text)`.
 fn js_number(text: &str) -> f64 {
-    let text = text.trim_matches(is_js_space);
+    let text = js_trim(text);
     if text.is_empty() {
         return 0.0;
     }

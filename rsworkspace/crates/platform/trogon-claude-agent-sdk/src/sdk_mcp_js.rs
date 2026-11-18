@@ -1,58 +1,11 @@
-//! The JavaScript string, number and key-order semantics the zod port in `sdk_mcp_zod` depends on.
+//! The JavaScript string and number semantics the zod port in `sdk_mcp_zod` depends on.
 
-use crate::{JsonObject, js_object_order::array_index, settings_json::js_stringify};
+use crate::{session_prompt::js_trim, settings_json::js_stringify};
 use serde_json::Value;
-
-/// `ECMAScript WhiteSpace` and `LineTerminator`, the characters `String.prototype.trim` removes.
-fn is_space(character: char) -> bool {
-    matches!(
-        character,
-        '\u{9}'..='\u{d}'
-            | ' '
-            | '\u{a0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200a}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202f}'
-            | '\u{205f}'
-            | '\u{3000}'
-            | '\u{feff}'
-    )
-}
-
-/// `text.trim()`.
-pub(crate) fn trim(text: &str) -> &str {
-    text.trim_matches(is_space)
-}
 
 /// `text.length`: the number of UTF-16 code units.
 pub(crate) fn utf16_length(text: &str) -> usize {
     text.encode_utf16().count()
-}
-
-/// `Object.keys(object)`: integer keys in ascending order, then the others in insertion order.
-pub(crate) fn ordered_keys(object: &JsonObject) -> Vec<&String> {
-    let mut indexed: Vec<(u32, &String)> = Vec::new();
-    let mut named: Vec<&String> = Vec::new();
-    for key in object.keys() {
-        match array_index(key) {
-            Some(index) => indexed.push((index, key)),
-            None => named.push(key),
-        }
-    }
-    indexed.sort_by_key(|(index, _)| *index);
-    indexed.into_iter().map(|(_, key)| key).chain(named).collect()
-}
-
-/// The object a JavaScript engine would enumerate: the same entries in `Object.keys` order.
-pub(crate) fn ordered(object: JsonObject) -> JsonObject {
-    let order: Vec<String> = ordered_keys(&object).into_iter().cloned().collect();
-    let mut object = object;
-    order
-        .into_iter()
-        .filter_map(|key| object.remove(&key).map(|value| (key, value)))
-        .collect()
 }
 
 /// The `Number(value)` conversion of a JSON value, as the relational operators apply it.
@@ -68,7 +21,7 @@ pub(crate) fn to_number(value: &Value) -> f64 {
 }
 
 fn string_to_number(text: &str) -> f64 {
-    let text = trim(text);
+    let text = js_trim(text);
     if text.is_empty() {
         return 0.0;
     }

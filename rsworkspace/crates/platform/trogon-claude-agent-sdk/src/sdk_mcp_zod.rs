@@ -18,8 +18,8 @@
 
 use crate::{
     JsonObject, constants,
+    js_object_order::js_keys,
     sdk_mcp_choices::{SchemaCallback, StringCheckKind},
-    sdk_mcp_js::ordered_keys,
     sdk_mcp_regexp,
 };
 use serde_json::{Number, Value};
@@ -518,7 +518,7 @@ fn object(schema: &JsonObject, callbacks: Callbacks<'_>) -> Node {
         };
     }
     let properties = match schema.get("properties").and_then(Value::as_object) {
-        Some(properties) => ordered_keys(properties)
+        Some(properties) => js_keys(properties)
             .into_iter()
             .filter_map(|key| {
                 let is_required = required.contains(&key.as_str());

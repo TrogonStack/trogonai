@@ -534,27 +534,11 @@ fn apply_flag_settings(replier: &Replier<'_>, settings: Option<&Value>) -> Bridg
     }
 }
 
-/// `Object.keys` order: array-index names ascending, then the rest as they were written.
-fn js_key_order(map: &Map<String, Value>) -> Vec<&String> {
-    let index = |key: &str| {
-        key.parse::<u32>()
-            .ok()
-            .filter(|index| *index < u32::MAX && index.to_string() == key)
-    };
-    let mut indexed: Vec<(u32, &String)> = map
-        .keys()
-        .filter_map(|key| index(key).map(|index| (index, key)))
-        .collect();
-    indexed.sort_by_key(|(index, _)| *index);
-    let named = map.keys().filter(|key| index(key).is_none());
-    indexed.into_iter().map(|(_, key)| key).chain(named).collect()
-}
-
 fn check_flag_settings(settings: Option<&Value>) -> Result<(), String> {
     let Some(settings) = settings.and_then(Value::as_object) else {
         return Err("apply_flag_settings: settings must be an object".to_owned());
     };
-    let unknown: Vec<&String> = js_key_order(settings)
+    let unknown: Vec<&String> = crate::js_object_order::js_keys(settings)
         .into_iter()
         .filter(|key| !FLAG_SETTINGS.contains(&key.as_str()))
         .collect();

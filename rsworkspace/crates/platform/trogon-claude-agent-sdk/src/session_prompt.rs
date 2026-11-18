@@ -1,6 +1,6 @@
 //! First-prompt extraction and timestamp parsing shared by the summary fold and the transcript readers.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, ffi::OsStr};
 
 use serde_json::Value;
 
@@ -47,6 +47,12 @@ pub(crate) fn js_trim(text: &str) -> &str {
 /// (U+0130 and U+212A) never spell one of the four words.
 pub(crate) fn js_truthy(value: &str) -> bool {
     matches!(js_trim(value).to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
+/// [`js_truthy`] of an environment variable's value, false when it is unset. A value that is not valid Unicode is
+/// read with each invalid sequence replaced by U+FFFD.
+pub(crate) fn js_env_truthy(value: Option<&OsStr>) -> bool {
+    value.is_some_and(|value| js_truthy(&value.to_string_lossy()))
 }
 
 /// Upstream `Rxe` and `$U`: `Prompt from the <label> plugin: <text>` for a stored plugin prompt, else `None`.

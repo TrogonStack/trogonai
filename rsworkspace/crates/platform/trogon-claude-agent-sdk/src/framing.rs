@@ -247,7 +247,7 @@ impl SharedTail {
     pub(crate) fn snapshot(&self) -> StderrTail {
         let text = self.state.lock().map(|state| state.text.clone()).unwrap_or_default();
         let scrubbed = self.scrubbed(&text);
-        let kept = last_units(&scrubbed, self.units).trim_matches(crate::js_regex::is_whitespace);
+        let kept = crate::session_prompt::js_trim(last_units(&scrubbed, self.units));
         StderrTail(kept.as_bytes().to_vec())
     }
 
