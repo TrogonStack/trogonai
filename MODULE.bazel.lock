@@ -815,7 +815,7 @@
           "FILE:@@//rsworkspace/crates/a2a/a2a-nats/Cargo.toml 968ef41d1765a3cd14e290e099c6fe8311e5860863bbd1d9049531a474e8c3f5",
           "FILE:@@//rsworkspace/crates/a2a/a2a-pack/Cargo.toml 31109b61e034aebaf091945fc66583d99499740d00b349cf896715475eac9305",
           "FILE:@@//rsworkspace/crates/platform/jsonrpc-nats/Cargo.toml c9da5bec55d52c39ee3cef5a51305e04c0c43e1c9191eb4e8fdaad868c10f080",
-          "FILE:@@//rsworkspace/crates/platform/trogon-nats/Cargo.toml 2324c4a5b3360e9640262c13e54b92d14f068cfedb2e01349d2f3387fbeb16b4",
+          "FILE:@@//rsworkspace/crates/platform/trogon-nats/Cargo.toml 40dcbc9b711890305240c8c87f1680c5b1af4e2dd0dc852d7d011a2e77d10d31",
           "FILE:@@//rsworkspace/crates/platform/trogon-semconv/Cargo.toml 0bab21466a62f5f04a14f9682ff36b25b74fc6f947c6461c185b41af63f8a66b",
           "FILE:@@//rsworkspace/crates/platform/trogon-std/Cargo.toml 89337755dbbdb07931f74c9b12aa07c04617ec56b82a93e687f123e5e29b969a",
           "FILE:@@//rsworkspace/crates/platform/trogon-service-config/Cargo.toml ac96151c67ae838700444c0a5a8133dc46ac80b649a87abf8ff0c5454110e44b",
