@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
 import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
 import "trogonai/session/sessions/v1alpha1/checkout.proto";
+import "trogonai/session/sessions/v1alpha1/delegation_binding_ref.proto";
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 
@@ -14,12 +15,24 @@ import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 // batch so a child can never exist without its lineage.
 //
 // Write precondition NoStream on the child. parent_dispatched_at and
-// cascade_policy are copied verbatim from the parent's DelegationDispatched, so
-// a redelivered saga step reproduces the same link (ADR#0035 facet 6).
+// cascade_policy and delegate_binding are copied verbatim from the parent's
+// DelegationDispatched; execution_plan, checkout_ref and candidate_ref are copied
+// from its child_creation. A redelivered saga step reproduces the same creation
+// inputs and link (ADR#0035 facet 6). Admission rejects any differing copy.
+// Parent and child ids differ, and the cascade policy is known and nonzero.
+// NoStream failure alone is not duplicate success: verified original creation
+// evidence must match this request's exact plan, checkout, candidate and lineage.
+// Conflicting or unverifiable existing creation is refused.
 // Agent-backed child admission requires the target registry's current ACTIVE
 // lifecycle and live policy. Parent dispatch and a pinned plan do not authorize
 // execution of an Agent whose provisioning is pending or cancelled (ADR#0024).
 message CreateChildSession {
+  option (buf.validate.message).cel = {
+    id: "create_child_session.distinct_parent"
+    message: "parent session must differ from child session"
+    expression: "this.session_id != this.parent_session_id"
+  };
+
   // The child session's own id.
   string session_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
@@ -33,7 +46,13 @@ message CreateChildSession {
   ];
   // The parent's own ordinal of the DelegationDispatched being followed.
   SessionOrdinal parent_dispatched_at = 5 [features.field_presence = LEGACY_REQUIRED];
-  CascadePolicy cascade_policy = 6 [features.field_presence = LEGACY_REQUIRED];
+  CascadePolicy cascade_policy = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // The parent-side ledger operation this dispatch reserved.
   string operation_id = 7 [
     features.field_presence = LEGACY_REQUIRED,
@@ -43,4 +62,5 @@ message CreateChildSession {
   // SessionStarted; the plan stays authoritative. Absent means the registered
   // revision ran unchanged.
   CandidateRef candidate_ref = 8;
+  DelegationBindingRef delegate_binding = 9 [(buf.validate.field).required = true];
 }

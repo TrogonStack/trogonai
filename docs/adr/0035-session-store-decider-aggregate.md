@@ -1043,25 +1043,47 @@ one, and JetStream offers no atomic write across subjects).
 
 **Dispatch is parent-first, with crash-safe repair.** `DispatchDelegation`
 (`At`-guarded, on the parent stream) appends `DelegationDispatched{session_id,
-operation_id, child_session_id, cascade_policy}` -- no position field; the
-event's own fold ordinal is the dispatch point, so nothing needs to name it.
-Only after that append acks does child creation happen: the atomic
+operation_id, child_session_id, cascade_policy, delegate_binding,
+child_creation}`. Its own fold ordinal is the dispatch point; no payload field
+predicts that position. `delegate_binding` carries the selected declaration's
+case-sensitive binding name and exact parent execution-plan digest. Admission
+checks that digest against the parent's immutable plan, resolves the declaration
+there, and refuses a mismatched or unavailable source. Two aliases selecting
+the same target remain distinct; replay never infers the alias from that target
+or the Agent's latest configuration.
+
+`child_creation` retains the canonical child execution-plan bytes and digest,
+checkout reference, and optional candidate reference before the parent append
+is acknowledged. It preserves candidate presence exactly. Its work contract
+and input references remain in the plan; no separate input blob or variable
+schema is introduced. The parent's write-side `Delegation` fold retains this
+value so snapshot-based repair and dispatch conflict checks use the original
+creation inputs instead of selecting new ones.
+
+Only after the parent append acks does child creation happen: the atomic
 `[SessionStarted, ParentLinked]` batch under `NoStream` on the new child
 subject. `ParentLinked` carries `operation_id` (the saga's join key, reusing the
 operation-ledger id) and `parent_dispatched_at`, a `SessionOrdinal` (facet 2)
 copied from the parent's `DelegationDispatched` event only after that parent
-append has acked. `DelegationDispatched.cascade_policy` is the authoritative
-saga input -- the crash-repair path mints the child from the parent fact alone,
-so the parent fact must carry everything creation needs -- and
-`ParentLinked.cascade_policy` is copied verbatim from it by the creation batch;
-`decide` rejects a creation whose copy differs as a typed conflict, so the two
-records cannot diverge. If the process crashes between the parent append and the
-child creation, a reconciler observes a `DelegationDispatched` with no
-corresponding child stream and re-issues child creation; `NoStream` makes that
-repair exactly-once, and a duplicate creation attempt simply no-ops on
-`WrongExpectedVersion`. The reverse ordering -- a child claiming a parent that
-never actually dispatched it -- cannot occur by construction, because nothing
-but this saga produces a `ParentLinked`.
+append has acked. The creation batch also copies `delegate_binding` and
+`cascade_policy` verbatim. `SessionStarted` copies the exact retained plan,
+checkout and candidate. Admission verifies the original dispatch, digest and
+cross-record agreement, rejecting any differing copy as a typed conflict.
+The child's current ACTIVE Agent lifecycle and live policy are still checked;
+retained bytes and parent dispatch do not grant execution authority.
+
+If the process crashes between the parent append and child creation, a
+reconciler re-issues creation from that original acknowledged fact. `NoStream`
+excludes another creation append; `WrongExpectedVersion` alone does not prove
+that an existing child is the intended one. Duplicate success requires verified
+original evidence for the child's atomic creation batch and equality of its
+plan bytes and digest, checkout, candidate presence/value, parent identity,
+operation id, dispatch ordinal, binding reference and cascade policy. Different,
+incomplete or unverifiable creation evidence is a conflict or refusal, never a
+silent success. This idempotent creation contract makes no exactly-once claim
+about the child's external side effects. The reverse ordering, a child claiming
+a parent that never dispatched it, is refused because verified parent dispatch
+is required before this saga can produce `ParentLinked`.
 
 **Acyclicity by construction.** `DispatchDelegation` always mints a fresh
 `child_session_id`; `ParentLinked` is valid only inside the creation batch, so
@@ -1069,6 +1091,26 @@ re-parenting an already-existing stream is rejected by `decide` (the stream
 already exists, so the `NoStream` batch fails outright). A cycle would require
 an edge into a pre-existing session, which this makes impossible -- the graph is
 a directed tree by construction, not by a runtime cycle check.
+
+**Local lifecycle shape is explicit.** Dispatch, creation and parent-link
+messages reject equal parent and child ids. Cascade policies, delegation kinds,
+attempt outcomes and parent-terminal causes must be known and nonzero. A
+child-Session delegation fold requires a child id, cascade policy and retained
+creation inputs, and carries no external delegate reference. An external
+delegation carries no child id, cascade policy or child-creation value. Both
+kinds retain their plan-scoped declaration identity. These checks establish
+message-local shape only; fresh child identity, original source authenticity,
+cross-record equality, current authority and valid history transitions remain
+runtime obligations.
+
+These Agent and Session contracts remain unpromoted drafts. Existing draft
+records missing binding or creation evidence do not acquire it by inference
+from a target, alias guess or current configuration. Any future reader must
+refuse unsupported evidence or use an explicitly reviewed migration with
+verified original sources before relying on it. This refinement neither
+reopens terminal Sessions nor adds a persistent conversation/thread resource.
+Ending an execution attempt remains distinct from a Session-terminal marker
+and never alone triggers parent-terminal cascade.
 
 **Rewind invalidates history; it does not terminate.** `SessionRewound.keep_through`
 (a `SessionOrdinal`, facet 2) is inclusive: events `[1..keep_through]` remain
