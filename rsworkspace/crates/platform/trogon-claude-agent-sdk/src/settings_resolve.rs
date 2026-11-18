@@ -532,15 +532,12 @@ fn resolve_core<H: SettingsHost>(
     settle(&mut settled, array_mark()).map_err(|StringTooLong| ResolveSettingsError::InvalidStringLength)?;
     let [effective, sources] = settled;
     let mut result = Map::new();
-    result.insert(
-        "effective".to_owned(),
-        crate::settings_read::js_property_order(effective),
-    );
+    result.insert("effective".to_owned(), crate::js_object_order::js_ordered(effective));
     result.insert(
         "provenance".to_owned(),
-        crate::settings_read::js_property_order(Value::Object(provenance)),
+        crate::js_object_order::js_ordered(Value::Object(provenance)),
     );
-    result.insert("sources".to_owned(), crate::settings_read::js_property_order(sources));
+    result.insert("sources".to_owned(), crate::js_object_order::js_ordered(sources));
     result.insert("machinePolicy".to_owned(), Value::Object(machine_policy));
     Ok(Value::Object(result))
 }

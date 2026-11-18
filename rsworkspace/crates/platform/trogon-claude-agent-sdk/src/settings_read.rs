@@ -5,7 +5,7 @@
 use serde_json::{Map, Value};
 
 use crate::{
-    js_object_order::array_index,
+    js_object_order::js_ordered_object,
     node_stack::NodeStack,
     python_c_stack::PythonCStack,
     python_json_load::loads_text,
@@ -45,10 +45,7 @@ pub(crate) fn read_document(
         return None;
     }
     let parsed = schema.parse_document(&document)?;
-    match js_property_order(Value::Object(parsed)) {
-        Value::Object(ordered) => Some(ordered),
-        _ => None,
-    }
+    Some(js_ordered_object(parsed))
 }
 
 /// The document object of a settings text, with numbers the way JavaScript prints them (`Ya` plus `Tr`) for the dialect.
@@ -330,34 +327,6 @@ fn filter_mcp_lists(document: &mut Map<String, Value>, schema: &SettingsSchema, 
     }
 }
 
-/// JavaScript objects enumerate array-index names first in ascending order, then the rest in insertion order.
-pub(crate) fn js_property_order(value: Value) -> Value {
-    match value {
-        Value::Array(items) => Value::Array(items.into_iter().map(js_property_order).collect()),
-        Value::Object(entries) => Value::Object(js_property_order_map(entries)),
-        other => other,
-    }
-}
-
-/// `js_property_order` of an object, kept as the map it already is.
-fn js_property_order_map(entries: SettingsMap) -> SettingsMap {
-    let mut indexed: Vec<(u32, String, Value)> = Vec::new();
-    let mut named = Vec::new();
-    for (name, entry) in entries {
-        let entry = js_property_order(entry);
-        match array_index(&name) {
-            Some(index) => indexed.push((index, name, entry)),
-            None => named.push((name, entry)),
-        }
-    }
-    indexed.sort_by_key(|(index, _, _)| *index);
-    indexed
-        .into_iter()
-        .map(|(_, name, entry)| (name, entry))
-        .chain(named)
-        .collect()
-}
-
 /// A managed settings document after the policy sanitizers, before the policy schema parse.
 #[cfg(test)]
 pub(crate) fn sanitize_policy_document(text: &str) -> Option<SettingsMap> {
@@ -369,7 +338,7 @@ pub(crate) fn sanitize_policy_document(text: &str) -> Option<SettingsMap> {
     )?;
     let schema = schema()?;
     sanitize(&mut document, schema, schema.read_spec(), true);
-    js_property_order(Value::Object(document)).as_object().cloned()
+    Some(js_ordered_object(document))
 }
 
 /// What `lE(text, file, true)` returns for a managed settings text: the settings (`None` for a document that
@@ -423,9 +392,9 @@ pub(crate) fn read_policy_object(raw: Map<String, Value>, file: Option<&str>) ->
     let schema = schema()?;
     let mut document = raw.clone();
     sanitize(&mut document, schema, schema.read_spec(), true);
-    let document = js_property_order_map(document);
+    let document = js_ordered_object(document);
     let parse = schema.parse_policy(&document, file);
-    let settings = js_property_order_map(parse.settings);
+    let settings = js_ordered_object(parse.settings);
     let has_policy_content = schema.policy_has_content(&raw, &settings);
     Some(PolicyObject {
         settings,

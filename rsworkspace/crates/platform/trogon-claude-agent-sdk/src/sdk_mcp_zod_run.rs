@@ -2,14 +2,15 @@
 
 use crate::{
     JsonObject, constants,
+    js_object_order::{js_keys, js_reorder},
     sdk_mcp_choices::{SchemaCallback, StringCheckKind},
     sdk_mcp_js::{
-        float_safe_remainder, forgiving_base64, js_string, ordered, ordered_keys, prototype_function_length, to_number,
-        trim, utf16_length,
+        float_safe_remainder, forgiving_base64, js_string, prototype_function_length, to_number, utf16_length,
     },
     sdk_mcp_regexp,
     sdk_mcp_zod::{Affix, ArrayNode, Bound, Node, NumberNode, ObjectMode, ObjectNode, Parsed, StringCheck, StringNode},
     sdk_mcp_zod_issue::{Issue, aborted},
+    session_prompt::js_trim,
 };
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -445,7 +446,7 @@ fn format_check(node: &StringNode, text: &str, issues: &mut Vec<Issue>, value: &
             }
         }
         StringCheck::Url => {
-            let trimmed = trim(text);
+            let trimmed = js_trim(text);
             if url::Url::parse(trimmed).is_ok() {
                 // `$ZodURL` hands back the trimmed text without the tabs and line breaks the URL parser skips.
                 *value = Out::Json(Value::from(trimmed.replace(['\t', '\n', '\r'], "")));
@@ -711,14 +712,15 @@ fn object(node: &ObjectNode, input: Input<'_>) -> Outcome {
         assign(&mut out, key.clone(), result.value);
     }
     if matches!(node.mode, ObjectMode::Strip) {
+        js_reorder(&mut out);
         return Outcome {
             issues,
-            value: Out::Json(Value::Object(ordered(out))),
+            value: Out::Json(Value::Object(out)),
         };
     }
     let known: HashSet<&str> = node.properties.iter().map(|(key, _, _)| key.as_str()).collect();
     let mut unrecognized: Vec<Value> = Vec::new();
-    for key in ordered_keys(map) {
+    for key in js_keys(map) {
         if known.contains(key.as_str()) {
             continue;
         }
@@ -741,9 +743,10 @@ fn object(node: &ObjectNode, input: Input<'_>) -> Outcome {
             false,
         ));
     }
+    js_reorder(&mut out);
     Outcome {
         issues,
-        value: Out::Json(Value::Object(ordered(out))),
+        value: Out::Json(Value::Object(out)),
     }
 }
 
@@ -753,7 +756,7 @@ fn record(key_node: &Node, value_node: &Node, input: Input<'_>) -> Outcome {
     };
     let mut issues = Vec::new();
     let mut out = JsonObject::new();
-    for key in ordered_keys(map) {
+    for key in js_keys(map) {
         if key == "__proto__" {
             continue;
         }
@@ -782,9 +785,10 @@ fn record(key_node: &Node, value_node: &Node, input: Input<'_>) -> Outcome {
             assign(&mut out, js_string(&name), result.value);
         }
     }
+    js_reorder(&mut out);
     Outcome {
         issues,
-        value: Out::Json(Value::Object(ordered(out))),
+        value: Out::Json(Value::Object(out)),
     }
 }
 
@@ -799,7 +803,7 @@ fn record_enum(keys: &[(String, Node)], input: Input<'_>) -> Outcome {
         issues.extend(prefixed(result.issues, &Value::from(key.as_str())));
         assign(&mut out, key.clone(), result.value);
     }
-    let unrecognized: Vec<Value> = ordered_keys(map)
+    let unrecognized: Vec<Value> = js_keys(map)
         .into_iter()
         .filter(|key| !keys.iter().any(|(name, _)| name == *key))
         .map(|key| Value::from(key.as_str()))
@@ -813,8 +817,9 @@ fn record_enum(keys: &[(String, Node)], input: Input<'_>) -> Outcome {
             false,
         ));
     }
+    js_reorder(&mut out);
     Outcome {
         issues,
-        value: Out::Json(Value::Object(ordered(out))),
+        value: Out::Json(Value::Object(out)),
     }
 }

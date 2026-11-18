@@ -16,9 +16,11 @@ use crate::constants::{
 
 /// Whether `CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP` is truthy: upstream reads it through `u.bool()`, which is `Te`.
 pub(crate) fn skip_disabled<E: EnvironmentVariable>(environment: &E) -> bool {
-    environment
-        .var_os(OsStr::new("CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP"))
-        .is_some_and(|value| crate::session_prompt::js_truthy(&value.to_string_lossy()))
+    crate::session_prompt::js_env_truthy(
+        environment
+            .var_os(OsStr::new("CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP"))
+            .as_deref(),
+    )
 }
 
 /// `f0`: a compact boundary line that preserves nothing, so everything before it can be dropped.
