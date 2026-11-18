@@ -51,8 +51,11 @@ pub use domain::EnrollmentFacts;
 mod peer_history;
 pub use peer_history::PeerHistory;
 
-mod heartbeat_error;
+mod intaken_message;
+pub use intaken_message::IntakenMessage;
+
+mod inbox_replacement;
 
 mod accepted_outbox;
-
+mod heartbeat_error;
 mod message_values;
