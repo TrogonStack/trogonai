@@ -83,8 +83,14 @@ case "$mode" in
     "$py" -I oracle-recording/r3.py oracle-recording/native "$node_bin" ~/package "$out/r3.json" "$shard" "$shards" \
       2> >(tee "$out/r3.log" >&2)
     ;;
+  rows41)
+    # The limit pair alone with the exemption mg37 carries, into the rows41 folder (ruling 41 rule 4, PLAN Update 109).
+    export R3_ONLY='^(pm8:|rows41:)'
+    "$py" -I oracle-recording/r3.py oracle-recording/native "$node_bin" ~/package "$out/r3.json" 1 1 \
+      2> >(tee "$out/r3.log" >&2)
+    ;;
   mg37)
-    # The organization goldens at their band37 union margins, observed from every caller context (PLAN Update 96).
+    # The organization goldens at their band40 margins, observed from every caller context (PLAN Update 107).
     export R3_ONLY='^(pm8:|mg37:)'
     "$py" -I oracle-recording/r3.py oracle-recording/native "$node_bin" ~/package "$out/r3.json" 1 1 \
       2> >(tee "$out/r3.log" >&2)

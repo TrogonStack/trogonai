@@ -41,7 +41,7 @@ jobs:
       R3_CALL: ${{ matrix.call }}
       R3_CONTEXT: ${{ matrix.context }}
       R3_DISCOVERY: "1"
-      R3_ONLY: "^(?!(band8|band8c|band8x|mg8x|mg8|band37|band39|band40):)"
+      R3_ONLY: "^(?!(band8|band8c|band8x|mg8x|mg8|band37|band39|band40|rows41):)"
       SHARD: ${{ matrix.shard }}
       SHARDS: "4"
       R3_BAND_RUNS: "50"
@@ -118,7 +118,7 @@ jobs:
     # The Windows native discovery: platform win32, SYSTEMROOT under each run root and the stand-in reg.exe a real
     # child spawned through execFile, every call position and caller context.
     # `[band40]` leaves it out: ruling 40's offsets are measured on the three native hosts.
-    if: contains(github.event.head_commit.message, '[refit]') && !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[band40]')
+    if: contains(github.event.head_commit.message, '[refit]') && !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[rows41]')
     strategy:
       fail-fast: false
       matrix:
@@ -263,7 +263,7 @@ jobs:
   goldens:
     # Every golden recorder natively, through record.py, starting from the committed golden of the host so each
     # change shows as a diff.
-    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -370,7 +370,7 @@ jobs:
 
   wsl-goldens:
     # The managed organization goldens under a real WSL 2 kernel, starting from the committed linux x64 golden.
-    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -860,6 +860,148 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  rows41:
+    # Runs only when the head commit asks for it with `[rows41]`: the sides ruling 41 gives no golden, located at job
+    # 54's edge and their edge level run in full in all six caller contexts (PLAN Update 109), for the fixture rows the
+    # model must give at offset 0.
+    if: contains(github.event.head_commit.message, '[rows41]')
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - { runner: macos-latest, label: darwin-arm64 }
+          - { runner: ubuntu-latest, label: linux-x64 }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64 }
+        call: [first, second]
+    runs-on: ${{ matrix.host.runner }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      R3_CALL: ${{ matrix.call }}
+      R3_CONTEXT: toplevel
+      R3_ONLY: "^(pm8:|rows41:)"
+      SHARD: "1"
+      SHARDS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.13.1
+
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install: false
+          cache: false
+
+      - name: Locate tools
+        run: |
+          # Outside the checkout, so mise reads no repository config.
+          cd "$RUNNER_TEMP"
+          mise install "python@$R3_PYTHON"
+          py="$(mise exec "python@$R3_PYTHON" -- python3 -c 'import sys; print(sys.executable)' 2>/dev/null \
+            || mise exec "python@$R3_PYTHON" -- python -c 'import sys; print(sys.executable)')"
+          {
+            echo "PY=$py"
+            echo "NODE_BIN=$(node -p 'process.execPath')"
+            echo "OUT=$RUNNER_TEMP/out"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/out"
+
+      - name: Install reg.exe at the WSL path
+        if: runner.os == 'Linux'
+        run: |
+          command -v rustc >/dev/null || { sudo apt-get update && sudo apt-get install -y rustc; }
+          rustc --edition 2021 -O -o "$RUNNER_TEMP/reg.exe" "$NATIVE_LIB/registry_stand_in.rs"
+          sudo install -D -m 0755 "$RUNNER_TEMP/reg.exe" /mnt/c/Windows/System32/reg.exe
+
+      - name: Check the fixture bytes
+        run: |
+          bash oracle-recording/check_fixture_bytes.sh "$GITHUB_WORKSPACE" "$OUT"
+
+      - name: Describe the host
+        run: |
+          {
+            node -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8, now: Date.now()})'
+            "$PY" --version
+            uname -a || true
+            ls -l /mnt/c/Windows/System32/reg.exe /usr/bin/plutil 2>/dev/null || true
+          } | tee "$OUT/host.txt"
+
+      - name: Fetch the pinned package
+        run: |
+          "$PY" -I "$FETCH_LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
+
+      - name: Measure the ruling 41 sides in every context
+        run: |
+          "$PY" -I oracle-recording/r3.py "$NATIVE_LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/r3.json" "$SHARD" "$SHARDS" 2> >(tee "$OUT/r3.log" >&2)
+
+      - name: Keep the oracle output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-rows41-${{ matrix.host.label }}-${{ matrix.call }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 7
+
+  wsl-rows41:
+    # The limit pair under a real WSL 2 kernel with the exemption mg37 carries (ruling 41 rule 4, PLAN Update 109).
+    # `[native-only]` leaves it out when only the native legs need another round.
+    if: contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[native-only]')
+    strategy:
+      fail-fast: false
+      matrix:
+        call: [first, second]
+    runs-on: windows-latest
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # The checkout is copied into the distribution, so it keeps the committed line endings.
+      - name: Keep line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Provision WSL 2 with Ubuntu 24.04
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rootfs = Join-Path $env:RUNNER_TEMP 'rootfs.tar.gz'
+          Invoke-WebRequest -Uri 'https://cloud-images.ubuntu.com/wsl/releases/noble/20240423/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz' -OutFile $rootfs
+          $hash = (Get-FileHash $rootfs -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '8251e27ffff381a4af5f41dcb94d867de3e0d9774a9241908ab34555d99315ea') { throw "rootfs checksum $hash" }
+          wsl --import oracle (Join-Path $env:RUNNER_TEMP 'wsl-oracle') $rootfs --version 2
+          if ($LASTEXITCODE -ne 0) { throw "wsl --import exited $LASTEXITCODE" }
+          wsl -d oracle -u root -e sh -c "printf '[automount]\nroot = /winmnt/\n[interop]\nappendWindowsPath = false\n' > /etc/wsl.conf"
+          if ($LASTEXITCODE -ne 0) { throw "wsl.conf exited $LASTEXITCODE" }
+          wsl --terminate oracle
+          wsl --list --verbose
+
+      - name: Measure the limit pair under WSL
+        run: |
+          $checkout = (wsl -d oracle -u root -e wslpath -u "$env:GITHUB_WORKSPACE").Trim()
+          $out = (wsl -d oracle -u root -e wslpath -u "$env:RUNNER_TEMP").Trim() + '/wsl-out'
+          wsl -d oracle -u root -e bash -euo pipefail "$checkout/oracle-recording/wsl_job.sh" rows41 $checkout $out '${{ matrix.call }}' toplevel 1 1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Keep the oracle output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-wsl-rows41-${{ matrix.call }}
+          path: ${{ runner.temp }}/wsl-out
+          if-no-files-found: warn
+          retention-days: 7
+
   model40:
     # Runs only when the head commit asks for it with `[model40]`: what the crate's stage model answers, with the catches
     # it notes, at every offset on the 16-byte grid of each context's interval (PLAN Update 106), for the groups in
@@ -921,8 +1063,8 @@ jobs:
           retention-days: 7
 
   mg37:
-    # Runs only when the head commit asks for it with `[mg37]`: every golden of the host at its band37 union margin,
-    # recorded in the default context and observed from every caller context (ruling 37 B, PLAN Update 96).
+    # Runs only when the head commit asks for it with `[mg37]`: every golden of the host at its band40 margin,
+    # recorded in the default context and observed from every caller context (ruling 40, PLAN Update 107).
     if: contains(github.event.head_commit.message, '[mg37]')
     strategy:
       fail-fast: false
@@ -1008,7 +1150,7 @@ jobs:
           retention-days: 7
 
   wsl-mg37:
-    # The organization goldens at their band37 union margins under a real WSL 2 kernel, as mg37 records the others.
+    # The organization goldens at their band40 margins under a real WSL 2 kernel, as mg37 records the others.
     # `[native-only]` leaves it out when only the native legs need another round.
     if: contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[native-only]')
     strategy:

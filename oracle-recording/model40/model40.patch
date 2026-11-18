@@ -1573,10 +1573,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..3a2530cefe
+index 0000000000..c8451aa468
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,308 @@
+@@ -0,0 +1,309 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -1606,11 +1606,12 @@ index 0000000000..3a2530cefe
 +
 +const ANSWERS: &str = include_str!("../tests/fixtures/settings_resolve/ts_managed_context_answers.json");
 +
-+/// The profile of each host the answers were recorded on.
-+const HOSTS: [(&str, NodeStack); 3] = [
++/// The profile of each host the answers were recorded on. Under a WSL 2 kernel the host is the same linux x86_64.
++const HOSTS: [(&str, NodeStack); 4] = [
 +    ("darwin arm64", NodeStack::NODE_24_DARWIN_ARM64),
 +    ("linux aarch64", NodeStack::NODE_24_LINUX_ARM64),
 +    ("linux x86_64", NodeStack::NODE_24_LINUX_X64),
++    ("wsl x86_64", NodeStack::NODE_24_LINUX_X64),
 +];
 +
 +/// The callers that resume at the same depth on every run.
@@ -1887,13 +1888,14 @@ index 0000000000..3a2530cefe
 +mod scan40;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
 new file mode 100644
-index 0000000000..916c9b6db7
+index 0000000000..be62131148
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,132 @@
 +//! Scratch scan for the model40 job, never committed: for each group of a case, host, call position and startup,
-+//! what the engine answers and which catches took a `RangeError` at every offset from `high` down to `low` on the
-+//! 16-byte grid, as runs of offsets that answer alike.
++//! the offsets of each context's interval on the 16-byte grid where the engine gives each recorded answer with its
++//! stage. A context run in full lists every offset that gives each answer, with the runs of what the engine gives;
++//! one that is not stops once every answer has a witness, and runs in full when one has none.
 +
 +use std::{
 +    env, fs,
@@ -1914,22 +1916,27 @@ index 0000000000..916c9b6db7
 +    Ok(value.as_i64().and_then(|value| isize::try_from(value).ok()).ok_or(what)?)
 +}
 +
-+fn scan(group: &Value) -> Result<Value, Failure> {
-+    let host = group["host"].as_str().ok_or("no host")?;
-+    let (_, profile) = HOSTS.iter().find(|(name, _)| *name == host).ok_or("unknown host")?;
-+    let call = group["call"].as_str().ok_or("no call")?;
-+    let startup = usize::try_from(whole(&group["startup"], "no startup")?)?;
-+    let (low, high) = (whole(&group["low"], "no low")?, whole(&group["high"], "no high")?);
-+    let started = Instant::now();
++fn context(files: &Value, call: &str, stack: crate::NodeStack, scan: &Value) -> Result<Value, Failure> {
++    let (low, high) = (whole(&scan["low"], "no low")?, whole(&scan["high"], "no high")?);
++    let every = scan["all"].as_bool().ok_or("no all")?;
++    let targets = scan["targets"].as_array().ok_or("no targets")?;
++    let mut found: Vec<Vec<isize>> = vec![Vec::new(); targets.len()];
 +    let mut answers: Vec<Value> = Vec::new();
 +    let mut runs: Vec<Value> = Vec::new();
 +    let mut at = high;
++    let mut scanned = 0usize;
 +    while at >= low {
-+        let stack = profile.with_startup_bytes(startup).resumed_by(at);
-+        let (answered, stage) = match answer_at(&group["files"], call, stack) {
-+            Ok(found) => found,
++        let (answered, stage) = match answer_at(files, call, stack.resumed_by(at)) {
++            Ok(given) => given,
 +            Err(error) => (json!({"scan_error": error.to_string()}), "scan_error".to_owned()),
 +        };
++        scanned += 1;
++        for (index, target) in targets.iter().enumerate() {
++            let stage_matches = target[1].as_str().is_none_or(|named| named == stage);
++            if target[0] == answered && stage_matches {
++                found[index].push(at);
++            }
++        }
 +        let index = if let Some(index) = answers.iter().position(|seen| *seen == answered) {
 +            index
 +        } else {
@@ -1940,10 +1947,34 @@ index 0000000000..916c9b6db7
 +            Some(last) if last[2] == json!(index) && last[3] == json!(stage) => last[1] = json!(at),
 +            _ => runs.push(json!([at, at, index, stage])),
 +        }
++        if !every && found.iter().all(|offsets| !offsets.is_empty()) {
++            break;
++        }
 +        at -= STEP;
 +    }
-+    Ok(json!({"key": group["key"], "runs": runs, "answers": answers,
-+              "seconds": started.elapsed().as_secs_f64()}))
++    let complete = found.iter().all(|offsets| !offsets.is_empty());
++    let mut out = json!({"context": scan["context"], "found": found, "scanned": scanned});
++    if every || !complete {
++        out["runs"] = json!(runs);
++        out["answers"] = json!(answers);
++    }
++    Ok(out)
++}
++
++fn scan(group: &Value) -> Result<Value, Failure> {
++    let host = group["host"].as_str().ok_or("no host")?;
++    let (_, profile) = HOSTS.iter().find(|(name, _)| *name == host).ok_or("unknown host")?;
++    let call = group["call"].as_str().ok_or("no call")?;
++    let startup = usize::try_from(whole(&group["startup"], "no startup")?)?;
++    let stack = profile.with_startup_bytes(startup);
++    let started = Instant::now();
++    let scans = group["scans"]
++        .as_array()
++        .ok_or("no scans")?
++        .iter()
++        .map(|scan| context(&group["files"], call, stack, scan))
++        .collect::<Result<Vec<_>, _>>()?;
++    Ok(json!({"key": group["key"], "scans": scans, "seconds": started.elapsed().as_secs_f64()}))
 +}
 +
 +#[test]

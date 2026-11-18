@@ -1,0 +1,200 @@
+{
+ "darwin arm64": {
+  "first": [
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1941,
+     "near_level": 1940,
+     "shift": 0
+    },
+    "pair": "effective_ask",
+    "sides": [
+     "far"
+    ]
+   },
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1244,
+     "near_level": 1243,
+     "shift": 0
+    },
+    "pair": "origin_merge",
+    "sides": [
+     "far"
+    ]
+   },
+   {
+    "class": false,
+    "edge": {
+     "far_level": 2216,
+     "near_level": 2215,
+     "shift": 0
+    },
+    "pair": "xp_login",
+    "sides": [
+     "far"
+    ]
+   }
+  ],
+  "second": [
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1941,
+     "near_level": 1940,
+     "shift": 0
+    },
+    "pair": "effective_ask",
+    "sides": [
+     "far"
+    ]
+   },
+   {
+    "class": false,
+    "edge": {
+     "far_level": 2216,
+     "near_level": 2215,
+     "shift": 0
+    },
+    "pair": "xp_login",
+    "sides": [
+     "far"
+    ]
+   }
+  ]
+ },
+ "linux aarch64": {
+  "first": [
+   {
+    "class": true,
+    "edge": {
+     "far_level": 1785,
+     "near_level": 1784,
+     "shift": 0
+    },
+    "pair": "origin_copy",
+    "sides": [
+     "near"
+    ]
+   },
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1252,
+     "near_level": 1251,
+     "shift": 0
+    },
+    "pair": "origin_merge",
+    "sides": [
+     "far"
+    ]
+   }
+  ],
+  "second": [
+   {
+    "class": true,
+    "edge": {
+     "far_level": 1785,
+     "near_level": 1784,
+     "shift": 0
+    },
+    "pair": "origin_copy",
+    "sides": [
+     "near"
+    ]
+   }
+  ]
+ },
+ "linux x86_64": {
+  "first": [
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1562,
+     "near_level": 1561,
+     "shift": 0
+    },
+    "pair": "effective_ask",
+    "sides": [
+     "far"
+    ]
+   },
+   {
+    "class": true,
+    "edge": {
+     "far_level": 1562,
+     "near_level": 1561,
+     "shift": 0
+    },
+    "pair": "origin_copy",
+    "sides": [
+     "near"
+    ]
+   },
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1307,
+     "near_level": 1306,
+     "shift": 0
+    },
+    "pair": "origin_merge",
+    "sides": [
+     "far"
+    ]
+   },
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1643,
+     "near_level": 1642,
+     "shift": 0
+    },
+    "pair": "xp_login",
+    "sides": [
+     "far"
+    ]
+   }
+  ],
+  "second": [
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1562,
+     "near_level": 1561,
+     "shift": 0
+    },
+    "pair": "effective_ask",
+    "sides": [
+     "far"
+    ]
+   },
+   {
+    "class": true,
+    "edge": {
+     "far_level": 1562,
+     "near_level": 1561,
+     "shift": 0
+    },
+    "pair": "origin_copy",
+    "sides": [
+     "near"
+    ]
+   },
+   {
+    "class": false,
+    "edge": {
+     "far_level": 1643,
+     "near_level": 1642,
+     "shift": 0
+    },
+    "pair": "xp_login",
+    "sides": [
+     "far"
+    ]
+   }
+  ]
+ }
+}
