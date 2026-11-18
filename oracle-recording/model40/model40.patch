@@ -1303,7 +1303,7 @@ index 87219bc878..6e6411a743 100644
          depth.saturating_mul(self.cost.level).saturating_add(extra)
              <= self.available.saturating_add(self.cost.descent_reach)
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_tests.rs
-index 1040906dde..5ffa0b0217 100644
+index 1040906dde..0329df6ab1 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_tests.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_tests.rs
 @@ -2,15 +2,23 @@ use serde_json::{Map, Value, json};
@@ -1328,7 +1328,7 @@ index 1040906dde..5ffa0b0217 100644
 +    warm_assign: 0,
      first_array: 576,
      shallow_array: 1339,
-+    array_keys: 1_104,
++    array_keys: 816,
      descent_reach: 40230,
      later_compile: 0,
  };
@@ -1548,7 +1548,7 @@ index 0000000000..561c647178
 +    Tool,
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
-index f01219da74..ddccafded2 100644
+index f01219da74..7f9da64a86 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 @@ -29,21 +29,26 @@
@@ -1846,7 +1846,7 @@ index f01219da74..ddccafded2 100644
 +            warm_assign: 0,
              first_array: 576,
              shallow_array: 1339,
-+            array_keys: 1_104,
++            array_keys: 816,
              descent_reach: 40_230,
              later_compile: 0,
          },
@@ -1951,7 +1951,7 @@ index f01219da74..ddccafded2 100644
 +            warm_assign: 0,
              first_array: 576,
              shallow_array: 1339,
-+            array_keys: 1_104,
++            array_keys: 816,
              descent_reach: 40_230,
              later_compile: 0,
          },
@@ -2088,7 +2088,7 @@ index f01219da74..ddccafded2 100644
 +            warm_assign: 448,
              first_array: 576,
              shallow_array: 1339,
-+            array_keys: 1_104,
++            array_keys: 816,
              descent_reach: 40_656,
              later_compile: 0,
          },
