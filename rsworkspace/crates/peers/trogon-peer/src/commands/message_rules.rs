@@ -61,6 +61,7 @@ pub(super) fn fold_accepted(
         tenant: facts.identity().owner().tenant().clone(),
         recipient: parsed.metadata.recipient,
         message: parsed.metadata.message.clone(),
+        content: parsed.metadata.content,
     };
     state.outbox.push(entry.clone());
     Ok(AcceptedOutbox {
