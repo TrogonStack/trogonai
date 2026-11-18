@@ -112,8 +112,8 @@ instance. A NATS subject is the only delivery target.
 **Understand the design**
 
 - [Decider Platform](/architecture/decider)
-- [ADR#0045: Aggregate-Oriented Module Layout for Event-Sourced Services](/adr/0045-event-sourced-service-module-layout)
-- [ADR#0057: Decider Command NATS Binding](/adr/0057-decider-command-nats-binding)
+- [ADR#0045: Aggregate-Oriented Module Layout for Event-Sourced Services](../adr/0045-event-sourced-service-module-layout.md)
+- [ADR#0057: Decider Command NATS Binding](../adr/0057-decider-command-nats-binding.md)
 
 **Check its behavior**
 
