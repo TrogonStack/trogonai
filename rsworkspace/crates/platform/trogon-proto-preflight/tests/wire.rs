@@ -1,5 +1,7 @@
-use super::*;
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
 use serde_json::json;
+use trogon_proto_preflight::*;
 
 fn fixture_pool() -> WireSchemaPool {
     let descriptor = json!({"file":[{"syntax":"proto2","package":"example","enumType":[

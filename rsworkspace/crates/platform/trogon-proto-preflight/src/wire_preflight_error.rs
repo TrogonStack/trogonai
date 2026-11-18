@@ -24,7 +24,7 @@ pub enum WirePreflightError {
     UnsupportedGroup,
     #[error("protobuf maps require a separately reviewed duplicate-key profile")]
     UnsupportedMap,
-    #[error("string map profile belongs to another schema")]
+    #[error("map profile belongs to another schema")]
     MapProfileSchema,
     #[error("protobuf map field {field_number} repeats a logical key")]
     DuplicateMapKey { field_number: u32 },

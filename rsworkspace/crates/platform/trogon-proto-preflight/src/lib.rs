@@ -238,11 +238,6 @@ fn delimited<'a>(bytes: &'a [u8], offset: &mut usize) -> Result<&'a [u8], WirePr
     Ok(&bytes[start..*offset])
 }
 
-#[cfg(test)]
-mod string_map_tests;
-#[cfg(test)]
-mod tests;
-
 pub fn preflight_with_message_maps(
     descriptor: &WireMessageDescriptor,
     bytes: &[u8],

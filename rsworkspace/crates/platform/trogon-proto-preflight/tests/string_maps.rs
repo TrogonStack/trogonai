@@ -1,5 +1,7 @@
-use super::*;
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
 use serde_json::{Value, json};
+use trogon_proto_preflight::*;
 
 fn schema() -> Value {
     json!({"file":[{"syntax":"proto3","package":"maps","messageType":[
