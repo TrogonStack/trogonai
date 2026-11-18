@@ -92,7 +92,7 @@ where
             })?;
         Ok(v1alpha1::EnrollResponse {
             peer_id: result.state.enrollment.peer_id.clone(),
-            attachment: result.state.attachment,
+            attachment: result.state.attachment.clone(),
         })
     }
 }
