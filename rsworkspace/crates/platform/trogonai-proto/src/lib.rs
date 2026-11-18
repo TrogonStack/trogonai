@@ -25,6 +25,25 @@ mod codec;
 
 pub mod constants;
 
+#[cfg(feature = "session-contracts")]
+#[allow(clippy::all)]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    allow(
+        acyclic_modules,
+        reason = "Buffa emits message and view modules that reference each other"
+    )
+)]
+#[path = "session_gen/mod.rs"]
+mod session_gen;
+
+#[cfg(feature = "session-contracts")]
+pub mod session_contracts {
+    pub use crate::session_gen::*;
+    pub const FILE_DESCRIPTOR_SET_JSON: &[u8] = include_bytes!("session_gen/contracts.json");
+    pub const PLAN_DESCRIPTOR_SET_JSON: &[u8] = include_bytes!("session_gen/plan-contracts.json");
+}
+
 #[cfg(feature = "chrono")]
 pub mod convert;
 

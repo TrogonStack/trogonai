@@ -1,0 +1,19 @@
+version: v2
+clean: true
+inputs:
+  - directory: .
+    paths:
+      - proto/trogonai/session
+      - proto/trogonai/agents/agents
+plugins:
+  - local: [.config/mise/lib/proto-plugin, protoc-gen-buffa]
+    out: rsworkspace/crates/platform/trogonai-proto/src/session_gen
+    include_imports: true
+    strategy: all
+    opt:
+      - json=true
+      - unknown_fields=false
+  - local: [.config/mise/lib/proto-plugin, protoc-gen-buffa-packaging]
+    out: rsworkspace/crates/platform/trogonai-proto/src/session_gen
+    include_imports: true
+    strategy: all
