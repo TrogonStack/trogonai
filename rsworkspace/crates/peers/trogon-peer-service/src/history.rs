@@ -3,8 +3,9 @@ use crate::history_error::HistoryError;
 use trogon_decider_runtime::{
     ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamPosition, StreamRead, read_stream_for_execution,
 };
+use trogon_peer::PeerState;
 use trogon_peer::{PeerId, commands::state};
-use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1::PeerEvent};
+use trogonai_proto::peers::v1alpha1::PeerEvent;
 
 pub(crate) async fn load<Store: StreamRead<PeerId>>(
     store: &Store,
