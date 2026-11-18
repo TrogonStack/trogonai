@@ -25,6 +25,20 @@ mod codec;
 
 pub mod constants;
 
+#[cfg(feature = "session-contracts")]
+#[allow(clippy::all)]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    allow(
+        acyclic_modules,
+        reason = "Buffa emits message and view modules that reference each other"
+    )
+)]
+mod session_gen;
+
+#[cfg(feature = "session-contracts")]
+pub mod session_contracts;
+
 #[cfg(feature = "chrono")]
 pub mod convert;
 
