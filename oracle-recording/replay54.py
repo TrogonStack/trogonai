@@ -77,9 +77,14 @@ def log_files(path):
 
 
 def read_events(paths):
-    """The function events of sdk.mjs and of the oracle in a V8 log, in log order, split at the oracle's own functions:
-    `resolveFrom` is the first execution of the first resolve (the prime of a second call, else the case) and `snapshot` the
-    first execution after it (the end of the prime, else the end of the case). Preparse events are left out."""
+    """The function events of sdk.mjs and of the oracle in a V8 log, in log order, split at the oracle's own functions.
+
+    V8 logs `first-execution` only once a function has a feedback vector, which lazy feedback allocation delays past the
+    call, so those events come late and cannot mark where a resolve starts. The split uses the compile events instead, which
+    V8 logs when it compiles the function, at its first call: `resolveFrom` compiles at the start of the first resolve (the
+    prime of a second call, else the case) and `snapshot` at its end. Items carry their event kind, so a reader can keep the
+    compile events only. Preparse events are left out. `sequence` is every kept event in log order, for the levels a reader
+    needs whole."""
     best = None
     for path in paths:
         scripts, events = {}, []
@@ -92,18 +97,26 @@ def read_events(paths):
                     events.append((parts[1], parts[2], parts[3], parts[4], ",".join(parts[7:])))
         sdk = {key for key, name in scripts.items() if name.endswith("sdk.mjs")}
         oracle = {key for key, name in scripts.items() if name.endswith("resolve_settings_oracle.mjs")}
-        start = next((i for i, one in enumerate(events) if one[1] in oracle and one[4] == "resolveFrom" and one[0] == "first-execution"), None)
-        end = None
-        if start is not None:
-            end = next((i for i, one in enumerate(events) if i > start and one[1] in oracle and one[4] == "snapshot"
-                        and one[0] == "first-execution"), None)
+
+        def marker(name, after, compiled):
+            return next((i for i, one in enumerate(events) if i > after and one[1] in oracle and one[4] == name
+                         and ((one[0] != "first-execution") if compiled else (one[0] == "first-execution"))), None)
+
+        start = marker("resolveFrom", -1, True)
+        end = None if start is None else marker("snapshot", start, True)
+        late_start = marker("resolveFrom", -1, False)
+        late_end = None if late_start is None else marker("snapshot", late_start, False)
         picked = [(i, one) for i, one in enumerate(events) if one[1] in sdk]
-        found = {"bounds": {"resolveFrom": start, "snapshot": end}, "events": len(events), "sdk_events": len(picked),
+        found = {"bounds": {"resolveFrom": start, "snapshot": end},
+                 "late_bounds": {"resolveFrom": late_start, "snapshot": late_end},
+                 "events": len(events), "sdk_events": len(picked),
                  "pre": sorted({f"{k}:{s}:{e}" for i, (k, _, s, e, n) in picked if start is not None and i < start}),
                  "first": sorted({f"{k}:{s}:{e}" for i, (k, _, s, e, n) in picked
                                   if start is not None and i >= start and (end is None or i < end)}),
                  "after": sorted({f"{k}:{s}:{e}" for i, (k, _, s, e, n) in picked if end is not None and i >= end}),
-                 "names": {f"{s}:{e}": n for i, (k, _, s, e, n) in picked}}
+                 "names": {f"{s}:{e}": n for i, (k, _, s, e, n) in picked},
+                 "sequence": [[k, "s" if script in sdk else "o", s, e] + ([] if script in sdk else [n])
+                              for k, script, s, e, n in events if script in sdk or script in oracle]}
         if best is None or found["sdk_events"] > best["sdk_events"]:
             best = found
     return best
@@ -220,10 +233,14 @@ for level in window:
             entry["error"] = answer
         if found is not None:
             entry["bounds"], entry["events"], entry["sdk_events"] = found["bounds"], found["events"], found["sdk_events"]
+            entry["late_bounds"] = found["late_bounds"]
             entry["pre_count"], entry["pre_sha"] = len(found["pre"]), digest(found["pre"])
             keep = level in range(profile["drop_merge"] - 1, profile["drop_merge"] + 5)
             if keep:
                 entry["first"], entry["after"] = found["first"], found["after"]
+                entry["pre"] = found["pre"]
+                if repeat == 0:
+                    entry["sequence"] = found["sequence"]
                 needed.update(found["first"] + found["after"])
                 result.setdefault("names", {}).update(found["names"])
             else:

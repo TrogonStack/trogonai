@@ -37,9 +37,16 @@ def edge(levels, leg):
             last = level
     if last is None:
         return None, "no near answer"
-    if any(classes[level] != "far" for level in order if level > last) or any(classes[level] != "near" for level in order if level <= last):
+    # Far is any answer other than near: a first call can show two overflow answers above its edge (job 54's far, then the
+    # answer the second call has above its own edge), and the edge is where near ends either way.
+    if any(classes[level] in ("near", "none", "error") for level in order if level > last) or any(
+            classes[level] != "near" for level in order if level <= last):
         return None, f"not a single step: {classes}"
-    return last, None
+    above = []
+    for level in order:
+        if level > last and (not above or above[-1][0] != classes[level]):
+            above.append([classes[level], level])
+    return last, (None if len(above) == 1 else f"answers above the edge: {above}")
 
 
 def accounts(levels):
@@ -52,14 +59,20 @@ def accounts(levels):
     return sorted(seen, key=str)
 
 
+def compiled(items):
+    """The compile events of a list of `kind:start:end` items. V8 logs `first-execution` late (lazy feedback allocation), so
+    the first compile of a function marks its first call."""
+    return {item for item in items if not item.startswith("first-execution:")}
+
+
 def stable(records, field):
-    """The items every repeat names (a run that did not log is left out)."""
-    sets = [set(one[field]) for one in records if field in one]
+    """The compile items every repeat names (a run that did not log is left out)."""
+    sets = [compiled(one[field]) for one in records if field in one]
     return set.intersection(*sets) if sets else None
 
 
 def union(records, field):
-    sets = [set(one[field]) for one in records if field in one]
+    sets = [compiled(one[field]) for one in records if field in one]
     return set.union(*sets) if sets else None
 
 
