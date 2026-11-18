@@ -41,7 +41,8 @@ budget for a batch and defaults to 10 seconds.
 2. Subscribe to the `messages` webhook field for
    `whatsapp_business_account`. Ensure the app has the
    `whatsapp_business_messaging` permission and is subscribed to the target
-   Messaging account. [WhatsApp webhooks](https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/overview) · [Manage Webhooks](https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/manage-webhooks#subscribe-to-a-whatsapp-business-account)
+   Messaging account. For explicit account subscription, use
+   `POST /<WABA_ID>/subscribed_apps`. [WhatsApp webhooks](https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/overview) · [Subscribe to a Messaging account](https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/manage-webhooks#subscribe-to-webhooks-on-a-client-waba)
 3. If the app serves several WABAs or phone numbers, set Meta's account or
    phone-number callback override for each separately configured route.
    [Override the callback URL](https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/override)
