@@ -1,14 +1,11 @@
+use crate::commands::state::PeerState;
 use buffa::MessageField;
 use chrono::{DateTime, Utc};
 use trogon_decider::{Decider, Decision, Events, WritePrecondition};
 use trogonai_proto::convert::timestamp_from_datetime;
-use trogonai_proto::peers::{
-    state_v1alpha1::PeerState,
-    v1alpha1::{self as proto, PeerEvent},
-};
+use trogonai_proto::peers::v1alpha1::{self as proto, PeerEvent};
 
 use super::domain::{CollaborationRef, ConnectorId, EnrollmentIdentity, PeerDisplayName, PeerId};
-use super::state::{self, EvolveError};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EnrollError {
@@ -70,20 +67,11 @@ impl Decider for Enroll {
     type State = PeerState;
     type Event = PeerEvent;
     type DecideError = EnrollError;
-    type EvolveError = EvolveError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::NoStream;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.identity.peer_id()
-    }
-
-    fn initial_state() -> Self::State {
-        state::initial_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {

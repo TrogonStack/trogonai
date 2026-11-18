@@ -8,7 +8,8 @@ use trogon_peer::{
     PeerDisplayName, TenantId, TrustedPeerOwner,
 };
 use trogonai_proto::convert::timestamp_from_datetime;
-use trogonai_proto::peers::{state_v1alpha1::PeerState, v1alpha1 as proto};
+use trogonai_proto::peers::state_v1alpha1 as state;
+use trogonai_proto::peers::v1alpha1 as proto;
 
 #[test]
 fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
@@ -56,6 +57,14 @@ fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
         expires_at: MessageField::some(timestamp_from_datetime(&(now + chrono::Duration::seconds(10)))),
     };
 
+    let expected_payload = state::PeerState {
+        enrollment: MessageField::some(enrollment.clone()),
+        attachment: MessageField::some(attachment.clone()),
+        availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
+        next_intake_ordinal: Some(1),
+        ..Default::default()
+    };
+
     let result = TestCase::<Enroll>::new()
         .given_no_history()
         .when(command)
@@ -77,13 +86,44 @@ fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
                 ),
             },
         ])
-        .then_state(PeerState {
-            enrollment: MessageField::some(enrollment),
-            attachment: MessageField::some(attachment),
-            availability: Some(proto::PeerAvailability::PEER_AVAILABILITY_READY.into()),
-            next_intake_ordinal: Some(1),
-            ..Default::default()
-        });
+        .then_state(expected_payload.clone().into());
     assert_eq!(result.stream_id(), peer_id);
     assert!(!result.resulting_state().active_at.is_set());
+    type DomainState = <Enroll as Decider>::State;
+    type Payload = <DomainState as trogon_decider::StateSnapshot>::Payload;
+    let initial = DomainState::default();
+    let expected_initial = Payload {
+        next_intake_ordinal: Some(1),
+        ..Default::default()
+    };
+    assert_eq!(initial.as_ref(), &expected_initial);
+    assert_eq!(
+        buffa::Message::encode_to_vec(initial.as_ref()),
+        buffa::Message::encode_to_vec(&expected_initial)
+    );
+    assert_ne!(
+        buffa::Message::encode_to_vec(initial.as_ref()),
+        buffa::Message::encode_to_vec(&Payload::default())
+    );
+    let mut replayed = initial;
+    for event in result.then_events() {
+        replayed = trogon_decider::Evolve::evolve(replayed, event).unwrap();
+    }
+    assert_eq!(&replayed, result.resulting_state());
+    let payload: Payload = replayed.clone().into();
+    assert_eq!(&payload, result.resulting_state().as_ref());
+    let bytes = buffa::Message::encode_to_vec(&payload);
+    assert_eq!(bytes, buffa::Message::encode_to_vec(&expected_payload));
+    let decoded = <Payload as buffa::Message>::decode_from_slice(&bytes).unwrap();
+    let restored = DomainState::from(decoded);
+    assert_eq!(restored, replayed);
+    assert_eq!(buffa::Message::encode_to_vec(restored.as_ref()), bytes);
+    assert!(matches!(
+        trogon_decider::Evolve::evolve(restored.clone(), &result.then_events()[0]),
+        Err(trogon_peer::EvolveError::AlreadyEnrolled)
+    ));
+    assert!(matches!(
+        trogon_decider::Evolve::evolve(restored, &proto::PeerEvent::default()),
+        Err(trogon_peer::EvolveError::MissingEvent)
+    ));
 }
