@@ -40,27 +40,29 @@ async fn read_result(client: &mut ClaudeSdkClient) -> Result<String, Box<dyn Std
     .await?
 }
 
-/// Keeps a paused clock still: Tokio does not auto-advance a paused clock while a blocking task runs, so no SDK
-/// deadline fires before the fixture event it guards, however slowly the fixture starts or exits. The wall-clock
-/// bound turns a lost event into a failure instead of a hang, since the clock then advances and the deadlines fire.
+/// Keeps a paused clock still for as long as it lives: Tokio does not auto-advance a paused clock while a blocking
+/// task runs, so no SDK deadline fires before the fixture event it guards, however slowly the fixture starts or
+/// exits. Only the test lets the clock go, by ending the hold or dropping it on an early return, so no wall-clock
+/// bound can release it while a loaded machine is still starting the fixture.
 struct ClockHold {
     release: std::sync::mpsc::Sender<()>,
-    hold: tokio::task::JoinHandle<Result<(), std::sync::mpsc::RecvTimeoutError>>,
+    hold: tokio::task::JoinHandle<()>,
 }
 
 impl ClockHold {
     fn start() -> Self {
-        let (release, held) = std::sync::mpsc::channel();
-        let hold = tokio::task::spawn_blocking(move || held.recv_timeout(Duration::from_secs(10)));
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        // Nothing is ever sent: `recv` returns once the sender is gone.
+        let hold = tokio::task::spawn_blocking(move || {
+            let _ = held.recv();
+        });
         Self { release, hold }
     }
 
-    /// Fails when the bound ran out first, because the deadlines could then have fired before the events.
+    /// Lets the clock go, and returns once it may auto-advance again.
     async fn end(self) -> TestResult {
-        self.release
-            .send(())
-            .map_err(|_| "the clock hold ran out before the fixture events it waited on")?;
-        self.hold.await??;
+        drop(self.release);
+        self.hold.await?;
         Ok(())
     }
 }
