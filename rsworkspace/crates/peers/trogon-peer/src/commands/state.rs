@@ -2,7 +2,7 @@ use buffa::MessageField;
 use buffa_types::google::protobuf::Timestamp;
 use chrono::{DateTime, Utc};
 use trogonai_proto::convert::{TimestampConversionError, datetime_from_timestamp};
-use trogonai_proto::peers::{PeerEventCase, state_v1alpha1::PeerState, v1alpha1 as proto};
+use trogonai_proto::peers::{PeerEventCase, state_v1alpha1, v1alpha1 as proto};
 
 use super::domain::{
     CallerId, CollaborationRef, ConnectorId, EnrollmentIdentity, InstallationId, NativeSessionId, PeerDisplayName,
@@ -43,11 +43,65 @@ pub enum EvolveError {
     InvalidAttachment,
 }
 
-pub fn initial_state() -> PeerState {
-    PeerState {
-        next_intake_ordinal: Some(1),
-        ..Default::default()
+#[repr(transparent)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PeerState(state_v1alpha1::PeerState);
+
+impl Default for PeerState {
+    fn default() -> Self {
+        Self(state_v1alpha1::PeerState {
+            next_intake_ordinal: Some(1),
+            ..Default::default()
+        })
     }
+}
+
+impl trogon_decider::Evolve<proto::PeerEvent> for PeerState {
+    type Error = EvolveError;
+
+    fn evolve(self, event: &proto::PeerEvent) -> Result<Self, Self::Error> {
+        evolve(self, event)
+    }
+}
+
+impl std::ops::Deref for PeerState {
+    type Target = state_v1alpha1::PeerState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for PeerState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<state_v1alpha1::PeerState> for PeerState {
+    fn from(value: state_v1alpha1::PeerState) -> Self {
+        Self(value)
+    }
+}
+
+impl From<PeerState> for state_v1alpha1::PeerState {
+    fn from(value: PeerState) -> Self {
+        value.0
+    }
+}
+
+impl AsRef<state_v1alpha1::PeerState> for PeerState {
+    fn as_ref(&self) -> &state_v1alpha1::PeerState {
+        &self.0
+    }
+}
+
+impl trogon_decider::StateSnapshot for PeerState {
+    type Payload = state_v1alpha1::PeerState;
+}
+
+pub fn initial_state() -> PeerState {
+    PeerState::default()
 }
 
 pub fn evolve(mut state: PeerState, event: &proto::PeerEvent) -> Result<PeerState, EvolveError> {
