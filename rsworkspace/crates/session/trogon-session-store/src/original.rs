@@ -110,16 +110,22 @@ pub(crate) fn write_varint(mut value: u64, output: &mut Vec<u8>) {
 
 fn read_varint(bytes: &[u8], offset: &mut usize) -> Result<u64, SessionError> {
     let mut value = 0u64;
-    for shift in (0..70).step_by(7) {
+    for shift in (0..63).step_by(7) {
         let byte = *bytes.get(*offset).ok_or(SessionError::MalformedWire)?;
         *offset += 1;
-        if shift == 63 && byte > 1 {
-            return Err(SessionError::MalformedWire);
-        }
         value |= u64::from(byte & 127) << shift;
         if byte & 128 == 0 {
             return Ok(value);
         }
     }
-    Err(SessionError::MalformedWire)
+    let final_byte = *bytes.get(*offset).ok_or(SessionError::MalformedWire)?;
+    *offset += 1;
+    if final_byte > 1 {
+        return Err(SessionError::MalformedWire);
+    }
+    Ok(value | (u64::from(final_byte) << 63))
 }
+
+// Public ingress rejects malformed wire before reaching this private copier.
+#[cfg(test)]
+mod tests;

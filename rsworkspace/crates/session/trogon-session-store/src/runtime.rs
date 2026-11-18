@@ -490,3 +490,7 @@ fn child_originals(
     };
     Ok((started, link, creation))
 }
+
+// Strict public ingress already bounds originals before the final sealing boundary.
+#[cfg(test)]
+mod tests;

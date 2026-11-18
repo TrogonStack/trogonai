@@ -229,16 +229,22 @@ fn original_field_payload(bytes: &[u8], field: u64) -> Result<Option<&[u8]>, Pla
 
 fn varint(bytes: &[u8], offset: &mut usize) -> Result<u64, PlanError> {
     let mut value = 0u64;
-    for shift in (0..=63).step_by(7) {
+    for shift in (0..63).step_by(7) {
         let byte = *bytes.get(*offset).ok_or(PlanError::Wire)?;
         *offset += 1;
-        if shift == 63 && byte > 1 {
-            return Err(PlanError::Wire);
-        }
         value |= u64::from(byte & 127) << shift;
         if byte & 128 == 0 {
             return Ok(value);
         }
     }
-    Err(PlanError::Wire)
+    let final_byte = *bytes.get(*offset).ok_or(PlanError::Wire)?;
+    *offset += 1;
+    if final_byte > 1 {
+        return Err(PlanError::Wire);
+    }
+    Ok(value | u64::from(final_byte) << 63)
 }
+
+#[cfg(test)]
+#[path = "decoder_tests.rs"]
+mod tests;

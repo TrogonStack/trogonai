@@ -209,18 +209,20 @@ fn scalar(
 
 fn varint(bytes: &[u8], offset: &mut usize) -> Result<u64, WirePreflightError> {
     let mut value = 0u64;
-    for shift in (0..70).step_by(7) {
+    for shift in (0..63).step_by(7) {
         let byte = *bytes.get(*offset).ok_or(WirePreflightError::Truncated)?;
         *offset += 1;
-        if shift == 63 && byte > 1 {
-            return Err(WirePreflightError::MalformedVarint);
-        }
         value |= u64::from(byte & 127) << shift;
         if byte & 128 == 0 {
             return Ok(value);
         }
     }
-    Err(WirePreflightError::MalformedVarint)
+    let byte = *bytes.get(*offset).ok_or(WirePreflightError::Truncated)?;
+    *offset += 1;
+    if byte > 1 {
+        return Err(WirePreflightError::MalformedVarint);
+    }
+    Ok(value | (u64::from(byte) << 63))
 }
 
 fn advance(bytes: &[u8], offset: &mut usize, length: usize) -> Result<(), WirePreflightError> {
@@ -262,4 +264,26 @@ pub fn preflight_with_maps(
         profile.require_schema(descriptor)?;
     }
     preflight_profile(descriptor, bytes, limits, string_maps, message_maps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scalar_rejects_non_scalar_internal_dispatch_without_consuming_input() {
+        let field = FieldShape {
+            kind: "TYPE_BYTES".into(),
+            type_name: None,
+            repeated: false,
+            required: false,
+            oneof: None,
+        };
+        let mut offset = 0;
+        assert_eq!(
+            scalar(&SchemaData::default(), &field, 1, &[], &mut offset),
+            Err(WirePreflightError::WrongWireType { field_number: 1 })
+        );
+        assert_eq!(offset, 0);
+    }
 }
