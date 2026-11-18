@@ -21,6 +21,7 @@ use trogon_peer::IntakeMessage;
 use trogon_peer::MessageError;
 use trogon_peer::MessageId;
 use trogon_peer::PeerId;
+use trogon_peer::PeerState;
 use trogon_peer::PeerValueError;
 use trogon_peer::PrepareBatch;
 use trogon_peer::SealedContentRef;
