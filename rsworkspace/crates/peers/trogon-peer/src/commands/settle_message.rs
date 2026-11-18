@@ -9,6 +9,12 @@ pub struct SettleMessage {
     evidence: AuthoritativeReceipt,
 }
 impl SettleMessage {
+    pub fn sender(&self) -> &PeerId {
+        &self.sender
+    }
+    pub fn evidence(&self) -> &AuthoritativeReceipt {
+        &self.evidence
+    }
     pub fn new(sender: PeerId, evidence: AuthoritativeReceipt) -> Self {
         Self { sender, evidence }
     }
