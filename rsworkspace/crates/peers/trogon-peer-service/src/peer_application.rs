@@ -1,6 +1,6 @@
-use crate::{peer_application_error::PeerApplicationError, work_limit::WorkLimit};
+use crate::peer_application_error::PeerApplicationError;
 use trogon_decider_runtime::{StreamAppend, StreamRead};
-use trogon_peer::{MessageId, PeerId, TrustedPeerOwner};
+use trogon_peer::{PeerId, TrustedPeerOwner};
 use trogonai_proto::peers::v1alpha1 as proto;
 pub type ApplicationResult<T, S> =
     Result<T, PeerApplicationError<<S as StreamRead<PeerId>>::Error, <S as StreamAppend<PeerId>>::Error>>;
@@ -30,15 +30,6 @@ impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Ca
 where
     S: StreamRead<PeerId> + StreamAppend<PeerId>,
 {
-    pub async fn reconcile(
-        &self,
-        _owner: &TrustedPeerOwner,
-        _sender: &PeerId,
-        _messages: &[MessageId],
-        _limit: WorkLimit,
-    ) -> ApplicationResult<usize, S> {
-        Err(PeerApplicationError::NotImplemented)
-    }
     pub async fn prepare_batch(
         &self,
         _owner: &TrustedPeerOwner,
