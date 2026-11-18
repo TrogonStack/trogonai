@@ -4,6 +4,12 @@ use crate::PeerMcpErrorCode;
 pub enum PeerMcpError {
     #[error("Peer enrollment is unconfirmed; lease expiry remains the fallback.")]
     EnrollmentUncertain,
+    #[error("Peer connector is detached; start a new connector runtime.")]
+    Detached,
+    #[error("Peer detach was not confirmed; lease expiry remains the fallback.")]
+    Detach(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Peer detach was not confirmed; lease expiry remains the fallback.")]
+    DetachDeadline,
     #[error("Peer hook deadline elapsed; retry the same prompt identity. Remote outcome is uncertain.")]
     PromptDeadline,
     #[error("Peer connector has not enrolled a native session.")]
@@ -52,6 +58,9 @@ impl PeerMcpError {
     pub const fn code(&self) -> crate::PeerMcpErrorCode {
         match self {
             Self::EnrollmentUncertain => PeerMcpErrorCode::EnrollmentUncertain,
+            Self::Detached => PeerMcpErrorCode::Detached,
+            Self::Detach(_) => PeerMcpErrorCode::Detach,
+            Self::DetachDeadline => PeerMcpErrorCode::DetachDeadline,
             Self::PromptDeadline => PeerMcpErrorCode::PromptDeadline,
             Self::Unbound => PeerMcpErrorCode::Unbound,
             Self::NativeSessionChanged => PeerMcpErrorCode::NativeSessionChanged,
