@@ -20,4 +20,7 @@ pub use commands::AcceptedMessage;
 pub use commands::domain::TerminalDisposition;
 pub use commands::{DisposeMessage, IntakeMessage};
 
+pub use commands::PrepareBatch;
+pub use commands::domain::TrustedBatchPlan;
+
 pub use commands::domain::ContentSemanticFingerprint;
