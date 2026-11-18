@@ -12,6 +12,7 @@ import ConnectorHeader from "./ConnectorHeader.vue";
 import ConnectorIngress from "./ConnectorIngress.vue";
 import ConnectorVerification from "./ConnectorVerification.vue";
 import FeatureGrid from "./FeatureGrid.vue";
+import GenericWebhook from "./GenericWebhook.vue";
 import KeyCustodyTiers from "./KeyCustodyTiers.vue";
 import KeyEnvelope from "./KeyEnvelope.vue";
 import KeyLifecycle from "./KeyLifecycle.vue";
@@ -45,6 +46,7 @@ export default {
     app.component("ConnectorIngress", ConnectorIngress);
     app.component("ConnectorVerification", ConnectorVerification);
     app.component("FeatureGrid", FeatureGrid);
+    app.component("GenericWebhook", GenericWebhook);
     app.component("KeyCustodyTiers", KeyCustodyTiers);
     app.component("KeyEnvelope", KeyEnvelope);
     app.component("KeyLifecycle", KeyLifecycle);
