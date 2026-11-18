@@ -6,6 +6,12 @@ pub enum SessionError {
     UnsupportedHistory,
     #[error("Session input exceeds the bounded lifecycle profile")]
     Limit,
+    #[error("Session original wire encoding is invalid")]
+    MalformedWire,
+    #[error("original Session authority expired")]
+    AuthorityExpired,
+    #[error("original Session authority was withdrawn")]
+    AuthorityWithdrawn,
     #[error("Session creation conflicts with original evidence")]
     CreationConflict,
     #[error("Session source changed before the guarded transition")]

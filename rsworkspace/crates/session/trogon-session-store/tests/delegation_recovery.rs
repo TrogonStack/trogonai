@@ -284,7 +284,6 @@ fn plan(bytes: &[u8]) -> wire::StoredSessionExecutionPlan {
             value: Sha256::digest(bytes).to_vec(),
         }
         .into(),
-        ..Default::default()
     }
 }
 
@@ -1123,17 +1122,6 @@ async fn randomized_envelopes_do_not_change_original_child_duplicate_identity() 
     );
     assert_eq!(harness.child_events().await, existing);
     assert_eq!(store.child_appends.load(Ordering::SeqCst), 1);
-}
-
-impl trogon_session_store::SessionAppend for FaultStore {
-    fn classify_session_append(&self, error: &Self::Error) -> trogon_session_store::SessionAppendFailure {
-        match error {
-            FaultError::Native(error) => {
-                trogon_session_store::SessionAppend::classify_session_append(self.store.as_ref(), error)
-            }
-            FaultError::LostAck => trogon_session_store::SessionAppendFailure::Unknown,
-        }
-    }
 }
 
 #[tokio::test]

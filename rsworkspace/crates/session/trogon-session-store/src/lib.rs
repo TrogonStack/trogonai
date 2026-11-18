@@ -1,15 +1,22 @@
 pub mod admission;
 pub mod codec;
 pub mod error;
+mod history;
 pub mod key;
+mod lease;
+pub mod native;
+mod original;
 pub mod runtime;
 
 pub mod wire {
     pub use trogonai_proto::session_contracts::trogonai::session::sessions::v1alpha1::*;
 }
 
-pub use admission::{ChildAdmission, CreateAdmission, DispatchAdmission, SessionAdmission, SessionAdmissionLease};
+pub use admission::{
+    AttemptSource, ChildAdmission, CreateAdmission, DispatchAdmission, SessionAdmission, SessionAdmissionLease,
+};
 pub use codec::SessionFactCodec;
 pub use error::SessionError;
 pub use key::SessionKey;
-pub use runtime::{RecoveredChild, SessionRuntime};
+pub use native::{SessionNativeError, SessionStreamProfile, SessionSubjectResolver};
+pub use runtime::{RecordedDispatch, RecoveredChild, SessionRuntime};

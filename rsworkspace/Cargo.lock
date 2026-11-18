@@ -7661,6 +7661,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-proto-preflight"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "trogon-provider-gateway"
 version = "0.0.1"
 dependencies = [
@@ -7861,6 +7869,49 @@ dependencies = [
  "thiserror 2.0.21",
  "trogon-nats",
  "trogon-std",
+]
+
+[[package]]
+name = "trogon-session-plan"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "base64 0.23.1",
+ "buffa",
+ "buffa-types",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
+ "trogon-identity-types",
+ "trogon-nats",
+ "trogon-proto-preflight",
+ "trogon-session-store",
+ "trogonai-proto",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-session-store"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa",
+ "buffa-types",
+ "futures",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
+ "trogon-identity-types",
+ "trogon-nats",
+ "trogon-proto-preflight",
+ "trogonai-proto",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

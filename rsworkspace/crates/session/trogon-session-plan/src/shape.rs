@@ -71,8 +71,12 @@ pub(crate) fn plan(value: &plan::SessionExecutionPlan) -> Result<(), PlanError> 
         digest(&hash.algorithm, &hash.value)?;
     }
     let implementation = value.implementation.as_option().ok_or(PlanError::InvalidPlan)?;
-    if implementation.implementation.is_none() {
-        return Err(PlanError::InvalidPlan);
+    match implementation.implementation.as_ref().ok_or(PlanError::InvalidPlan)? {
+        agent::agent_implementation::Implementation::PlatformHarness(version) => bounded(&version.version, 128)?,
+        agent::agent_implementation::Implementation::RegisteredExtension(version) => {
+            bounded(&version.extension_id, 128)?;
+            bounded(&version.version, 128)?;
+        }
     }
     let hash = implementation
         .definition_digest
@@ -137,9 +141,7 @@ pub(crate) fn plan(value: &plan::SessionExecutionPlan) -> Result<(), PlanError> 
         }
     }
     let variables = value.variables.as_option().ok_or(PlanError::InvalidPlan)?;
-    if !variables.values.is_set() {
-        return Err(PlanError::InvalidPlan);
-    }
+    crate::variables::shape(variables)?;
     let directory = value.working_directory.as_option().ok_or(PlanError::InvalidPlan)?;
     let checkout = directory.checkout.as_option().ok_or(PlanError::InvalidPlan)?;
     bounded(&checkout.checkout_id, 128)?;

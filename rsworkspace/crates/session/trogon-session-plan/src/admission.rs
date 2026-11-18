@@ -1,96 +1,18 @@
+use crate::{
+    decoder::{DecodedPlan, RegisteredPlanDecoder},
+    error::PlanError,
+    lease::PlanAdmissionLease,
+    owner::{DelegationOwnerContext, DelegationSource, PlanOwnerContext, PlanOwners},
+};
 use std::{future::Future, sync::Arc};
-
 use trogon_identity_types::SubjectPrincipal;
 use trogon_session_store::{
-    AttemptSource, ChildAdmission, CreateAdmission, DispatchAdmission, SessionAdmission, SessionAdmissionLease, SessionKey,
+    ChildAdmission, CreateAdmission, DispatchAdmission, SessionAdmission, SessionAdmissionLease, SessionKey,
 };
-
-use crate::{
-    DecodedPlan, PlanError, RegisteredPlanDecoder,
-    wire::{agent, plan, session},
-};
-
-pub struct PlanOwnerContext<'a> {
-    pub caller: &'a SubjectPrincipal,
-    pub key: &'a SessionKey,
-    pub plan: &'a DecodedPlan,
-}
-
-pub struct DelegationOwnerContext<'a> {
-    pub caller: &'a SubjectPrincipal,
-    pub parent_key: &'a SessionKey,
-    pub child_key: &'a SessionKey,
-    pub parent: &'a DecodedPlan,
-    pub child: &'a DecodedPlan,
-    pub binding: &'a agent::DelegateDeclaration,
-    pub original_parent: &'a [u8],
-    pub parent_source: &'a session::SessionStarted,
-    pub attempt: Option<AttemptSource<'a>>,
-    pub source: DelegationSource<'a>,
-}
-
-pub enum DelegationSource<'a> {
-    Dispatch { command: &'a session::DispatchDelegation, original_command: &'a [u8] },
-    Recovery { dispatch: &'a session::DelegationDispatched, original_dispatch: &'a [u8], creation: &'a session::CreateChildSession },
-}
-
-pub trait RuntimePlanInterpreter: Send + Sync {
-    fn settings_contract(&self) -> &agent::ConfigurationContractRef;
-    fn settings_type_url(&self) -> &str;
-    fn execution_contract(&self) -> &agent::ConfigurationContractRef;
-    fn validate_and_project(
-        &self,
-        original: &agent::AgentConfiguration,
-        plan: &plan::SessionExecutionPlan,
-    ) -> Result<agent::NativeConfiguration, PlanError>;
-}
-
-/// Implemented at the actual resource owners. Source bytes and registration
-/// metadata remain usable only while this original authority remains live.
-pub trait PlanSourceLease: SessionAdmissionLease {
-    fn revision(&self) -> &agent::AgentRevisionRef;
-    fn original_configuration(&self) -> &[u8];
-    fn candidate(&self) -> Option<&session::CandidateRef>;
-    fn project_id(&self) -> &str;
-    fn interpreter(&self) -> &dyn RuntimePlanInterpreter;
-}
-
-pub trait PlanOwners: Send + Sync {
-    type SourceLease: SessionAdmissionLease;
-    type PlanLease: PlanSourceLease;
-
-    fn authorize_source(
-        &self,
-        caller: &SubjectPrincipal,
-        key: &SessionKey,
-    ) -> impl Future<Output = Result<Self::SourceLease, PlanError>> + Send;
-    /// Loads authenticated original registry/configuration sources and admits
-    /// the complete resolution, checkout and capability closure under current
-    /// lifecycle and policy. Unsupported owners must refuse the request.
-    fn admit_plan(
-        &self,
-        context: PlanOwnerContext<'_>,
-    ) -> impl Future<Output = Result<Self::PlanLease, PlanError>> + Send;
-    fn authorize_delegation(
-        &self,
-        context: DelegationOwnerContext<'_>,
-    ) -> impl Future<Output = Result<Self::SourceLease, PlanError>> + Send;
-}
 
 pub struct PlanAdmission<O> {
     decoder: RegisteredPlanDecoder,
     owners: Arc<O>,
-}
-
-pub struct PlanAdmissionLease<S, P> {
-    inner: LeaseKind<S, P>,
-}
-
-#[allow(dead_code)]
-enum LeaseKind<S, P> {
-    Source(S),
-    Plan(P),
-    Delegation { parent: P, child: P, policy: S },
 }
 
 impl<O> PlanAdmission<O> {
@@ -99,36 +21,16 @@ impl<O> PlanAdmission<O> {
     }
 }
 
-impl<S: SessionAdmissionLease, P: PlanSourceLease> SessionAdmissionLease for PlanAdmissionLease<S, P> {
-    type Error = PlanError;
-    fn require_live(&self) -> Result<(), Self::Error> {
-        match &self.inner {
-            LeaseKind::Source(source) => source.require_live().map_err(|_| PlanError::AuthorityWithdrawn),
-            LeaseKind::Plan(plan) => plan.require_live().map_err(|_| PlanError::AuthorityWithdrawn),
-            LeaseKind::Delegation { parent, child, policy } => {
-                parent.require_live().map_err(|_| PlanError::AuthorityWithdrawn)?;
-                child.require_live().map_err(|_| PlanError::AuthorityWithdrawn)?;
-                policy.require_live().map_err(|_| PlanError::AuthorityWithdrawn)
-            }
-        }
-    }
-    fn deadline(&self) -> std::time::Instant {
-        match &self.inner {
-            LeaseKind::Source(source) => source.deadline(),
-            LeaseKind::Plan(plan) => plan.deadline(),
-            LeaseKind::Delegation { parent, child, policy } => {
-                parent.deadline().min(child.deadline()).min(policy.deadline())
-            }
-        }
-    }
-    async fn withdrawn(&self) {
-        match &self.inner {
-            LeaseKind::Source(source) => source.withdrawn().await,
-            LeaseKind::Plan(plan) => plan.withdrawn().await,
-            LeaseKind::Delegation { parent, child, policy } => {
-                tokio::select! {()=parent.withdrawn()=>{},()=child.withdrawn()=>{},()=policy.withdrawn()=>{}}
-            }
-        }
+impl<O: PlanOwners> PlanAdmission<O> {
+    async fn admit(
+        &self,
+        caller: &SubjectPrincipal,
+        key: &SessionKey,
+        plan: &DecodedPlan,
+    ) -> Result<O::PlanLease, PlanError> {
+        let source = self.owners.admit_plan(PlanOwnerContext { caller, key, plan }).await?;
+        crate::source::verify(&self.decoder, plan, &source)?;
+        Ok(source)
     }
 }
 
@@ -137,16 +39,245 @@ impl<O: PlanOwners> SessionAdmission for PlanAdmission<O> {
     type Lease = PlanAdmissionLease<O::SourceLease, O::PlanLease>;
 
     async fn authorize_source(&self, caller: &SubjectPrincipal, key: &SessionKey) -> Result<Self::Lease, Self::Error> {
-        let _ = (&self.decoder, &self.owners, caller, key);
-        Err(PlanError::UnsupportedRuntime)
+        let lease = self.owners.authorize_source(caller, key).await?;
+        crate::source::live(&lease)?;
+        Ok(PlanAdmissionLease::source(lease))
     }
-    async fn authorize_create(&self, _material: CreateAdmission<'_>) -> Result<Self::Lease, Self::Error> {
-        Err(PlanError::UnsupportedRuntime)
+
+    async fn authorize_create(&self, material: CreateAdmission<'_>) -> Result<Self::Lease, Self::Error> {
+        self.decoder
+            .require_original(material.original_command, material.command)?;
+        let plan = self.decoder.decode(
+            material
+                .command
+                .execution_plan
+                .as_option()
+                .ok_or(PlanError::InvalidPlan)?,
+        )?;
+        if material.command.session_id != material.key.session_id() {
+            return Err(PlanError::OriginalSourceMismatch);
+        }
+        crate::source::projection(
+            &plan,
+            material.key,
+            material
+                .command
+                .checkout_ref
+                .as_option()
+                .ok_or(PlanError::InvalidPlan)?,
+            material.command.candidate_ref.as_option(),
+        )?;
+        let source = self.admit(material.caller, material.key, &plan).await?;
+        Ok(PlanAdmissionLease::plan(source))
     }
-    async fn authorize_dispatch(&self, _material: DispatchAdmission<'_>) -> Result<Self::Lease, Self::Error> {
-        Err(PlanError::UnsupportedRuntime)
+
+    async fn authorize_dispatch(&self, material: DispatchAdmission<'_>) -> Result<Self::Lease, Self::Error> {
+        self.decoder
+            .require_original(material.original_command, material.command)?;
+        self.decoder
+            .require_original(material.original_parent, material.parent)?;
+        let parent = self.decoder.decode(
+            material
+                .parent
+                .execution_plan
+                .as_option()
+                .ok_or(PlanError::InvalidPlan)?,
+        )?;
+        let child_creation = material
+            .command
+            .child_creation
+            .as_option()
+            .ok_or(PlanError::InvalidPlan)?;
+        let child = self.decoder.decode(
+            child_creation
+                .execution_plan
+                .as_option()
+                .ok_or(PlanError::InvalidPlan)?,
+        )?;
+        let child_key = SessionKey::new(
+            material.key.namespace().clone(),
+            material.command.child_session_id.clone(),
+        )
+        .map_err(|_| PlanError::InvalidPlan)?;
+        crate::shape::bounded(&material.command.operation_id, 128)?;
+        crate::shape::bounded(&material.command.turn_id, 128)?;
+        if matches!(
+            material.command.cascade_policy.as_known(),
+            None | Some(crate::wire::session::CascadePolicy::Unspecified)
+        ) {
+            return Err(PlanError::InvalidPlan);
+        }
+        if material.parent.session_id != material.key.session_id()
+            || material.command.session_id != material.key.session_id()
+            || child_key == *material.key
+        {
+            return Err(PlanError::OriginalSourceMismatch);
+        }
+        crate::source::projection(
+            &parent,
+            material.key,
+            material.parent.checkout_ref.as_option().ok_or(PlanError::InvalidPlan)?,
+            material.parent.candidate_ref.as_option(),
+        )?;
+        crate::source::projection(
+            &child,
+            &child_key,
+            child_creation.checkout_ref.as_option().ok_or(PlanError::InvalidPlan)?,
+            child_creation.candidate_ref.as_option(),
+        )?;
+        let parent_source = self.admit(material.caller, material.key, &parent).await?;
+        let child_source = guard(&parent_source, self.admit(material.caller, &child_key, &child)).await?;
+        let binding = crate::source::selected_delegate(
+            &self.decoder,
+            &parent,
+            &child,
+            &child_source,
+            material
+                .command
+                .delegate_binding
+                .as_option()
+                .ok_or(PlanError::InvalidPlan)?,
+        )?;
+        let policy = guard(
+            &parent_source,
+            guard(
+                &child_source,
+                self.owners.authorize_delegation(DelegationOwnerContext {
+                    caller: material.caller,
+                    parent_key: material.key,
+                    child_key: &child_key,
+                    parent: &parent,
+                    child: &child,
+                    binding,
+                    original_parent: material.original_parent,
+                    parent_source: material.parent,
+                    attempt: material.attempt,
+                    source: DelegationSource::Dispatch {
+                        command: material.command,
+                        original_command: material.original_command,
+                    },
+                }),
+            ),
+        )
+        .await?;
+        crate::source::live(&policy)?;
+        Ok(PlanAdmissionLease::delegation(parent_source, child_source, policy))
     }
-    async fn authorize_child(&self, _material: ChildAdmission<'_>) -> Result<Self::Lease, Self::Error> {
-        Err(PlanError::UnsupportedRuntime)
+
+    async fn authorize_child(&self, material: ChildAdmission<'_>) -> Result<Self::Lease, Self::Error> {
+        self.decoder
+            .require_original(material.original_parent, material.parent)?;
+        self.decoder
+            .require_original(material.original_dispatch, material.dispatch)?;
+        crate::shape::bounded(&material.dispatch.operation_id, 128)?;
+        crate::shape::bounded(&material.dispatch.turn_id, 128)?;
+        if material.dispatch_ordinal == 0
+            || matches!(
+                material.dispatch.cascade_policy.as_known(),
+                None | Some(crate::wire::session::CascadePolicy::Unspecified)
+            )
+        {
+            return Err(PlanError::InvalidPlan);
+        }
+        let retained = material
+            .dispatch
+            .child_creation
+            .as_option()
+            .ok_or(PlanError::InvalidPlan)?;
+        if material.parent.session_id != material.parent_key.session_id()
+            || material.dispatch.session_id != material.parent_key.session_id()
+            || material.dispatch.child_session_id != material.child_key.session_id()
+            || material.creation.session_id != material.child_key.session_id()
+            || material.creation.parent_session_id != material.parent_key.session_id()
+            || material.parent_key.namespace() != material.child_key.namespace()
+            || material.parent_key == material.child_key
+            || material.creation.execution_plan != retained.execution_plan
+            || material.creation.checkout_ref != retained.checkout_ref
+            || material.creation.candidate_ref != retained.candidate_ref
+            || material.creation.delegate_binding != material.dispatch.delegate_binding
+            || material.creation.operation_id != material.dispatch.operation_id
+            || material.creation.cascade_policy != material.dispatch.cascade_policy
+            || material.creation.parent_dispatched_at.value != material.dispatch_ordinal
+        {
+            return Err(PlanError::OriginalSourceMismatch);
+        }
+        let parent = self.decoder.decode(
+            material
+                .parent
+                .execution_plan
+                .as_option()
+                .ok_or(PlanError::InvalidPlan)?,
+        )?;
+        let child = self
+            .decoder
+            .decode(retained.execution_plan.as_option().ok_or(PlanError::InvalidPlan)?)?;
+        crate::source::projection(
+            &parent,
+            material.parent_key,
+            material.parent.checkout_ref.as_option().ok_or(PlanError::InvalidPlan)?,
+            material.parent.candidate_ref.as_option(),
+        )?;
+        crate::source::projection(
+            &child,
+            material.child_key,
+            retained.checkout_ref.as_option().ok_or(PlanError::InvalidPlan)?,
+            retained.candidate_ref.as_option(),
+        )?;
+        let parent_source = self.admit(material.caller, material.parent_key, &parent).await?;
+        let child_source = guard(&parent_source, self.admit(material.caller, material.child_key, &child)).await?;
+        let binding = crate::source::selected_delegate(
+            &self.decoder,
+            &parent,
+            &child,
+            &child_source,
+            material
+                .dispatch
+                .delegate_binding
+                .as_option()
+                .ok_or(PlanError::InvalidPlan)?,
+        )?;
+        let policy = guard(
+            &parent_source,
+            guard(
+                &child_source,
+                self.owners.authorize_delegation(DelegationOwnerContext {
+                    caller: material.caller,
+                    parent_key: material.parent_key,
+                    child_key: material.child_key,
+                    parent: &parent,
+                    child: &child,
+                    binding,
+                    original_parent: material.original_parent,
+                    parent_source: material.parent,
+                    attempt: material.attempt,
+                    source: DelegationSource::Recovery {
+                        dispatch: material.dispatch,
+                        original_dispatch: material.original_dispatch,
+                        creation: material.creation,
+                        dispatch_event_id: material.dispatch_event_id,
+                        dispatch_ordinal: material.dispatch_ordinal,
+                        parent_position: material.parent_position,
+                    },
+                }),
+            ),
+        )
+        .await?;
+        crate::source::live(&policy)?;
+        Ok(PlanAdmissionLease::delegation(parent_source, child_source, policy))
     }
+}
+
+async fn guard<L: SessionAdmissionLease, T>(
+    lease: &L,
+    future: impl Future<Output = Result<T, PlanError>>,
+) -> Result<T, PlanError> {
+    crate::source::live(lease)?;
+    let result = tokio::select! {
+        biased;
+        ()=lease.withdrawn()=>return Err(PlanError::AuthorityWithdrawn),
+        ()=tokio::time::sleep_until(tokio::time::Instant::from_std(lease.deadline()))=>return Err(PlanError::AuthorityWithdrawn),
+        result=future=>result,
+    }?;
+    crate::source::live(lease)?;
+    Ok(result)
 }

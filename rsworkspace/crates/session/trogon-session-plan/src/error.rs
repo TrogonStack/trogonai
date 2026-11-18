@@ -16,6 +16,8 @@ pub enum PlanError {
     UnsupportedRuntime,
     #[error("session plan variable bindings do not match the original schema")]
     Variables,
+    #[error("session original source is unavailable")]
+    SourceUnavailable,
     #[error("session admission authority was withdrawn")]
     AuthorityWithdrawn,
 }

@@ -102,4 +102,41 @@ fn native_digest_directory_and_unpinned_platform_harness_are_refused() {
         decoder.decode(&stored_bytes(value.encode_to_vec())).unwrap_err(),
         PlanError::UnsupportedRuntime
     );
+    let mut value = valid_plan();
+    value.implementation.get_or_insert_default().implementation =
+        Some(agent::agent_implementation::Implementation::RegisteredExtension(
+            Box::new(agent::RegisteredExtensionVersionRef {
+                extension_id: "example-runtime".into(),
+                version: String::new(),
+            }),
+        ));
+    assert_eq!(
+        decoder.decode(&stored_bytes(value.encode_to_vec())).unwrap_err(),
+        PlanError::InvalidPlan
+    );
+}
+
+#[test]
+fn variable_artifacts_obey_original_byte_and_total_value_budgets() {
+    let decoder = RegisteredPlanDecoder::new(contract()).unwrap();
+    let mut value = valid_plan();
+    let entries = serde_json::Map::from_iter(
+        (0..5).map(|index| (format!("name{index}"), serde_json::Value::String("x".repeat(4096)))),
+    );
+    value.variables = serde_json::from_value::<agent::VariableBindings>(serde_json::json!({"values":entries}))
+        .unwrap()
+        .into();
+    assert_eq!(
+        decoder.decode(&stored_bytes(value.encode_to_vec())).unwrap_err(),
+        PlanError::Limit
+    );
+    let mut value = valid_plan();
+    value.variables =
+        serde_json::from_value::<agent::VariableBindings>(serde_json::json!({"values":{"items":vec![true;1000]}}))
+            .unwrap()
+            .into();
+    assert_eq!(
+        decoder.decode(&stored_bytes(value.encode_to_vec())).unwrap_err(),
+        PlanError::Limit
+    );
 }

@@ -15,7 +15,9 @@ impl SessionKey {
         let session_id = session_id.into();
         if session_id.is_empty()
             || session_id.len() > 128
-            || !session_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+            || !session_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
         {
             return Err(SessionError::InvalidKey);
         }

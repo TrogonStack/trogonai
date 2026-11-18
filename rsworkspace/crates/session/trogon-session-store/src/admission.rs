@@ -19,6 +19,7 @@ pub struct DispatchAdmission<'a> {
     pub original_parent: &'a [u8],
     pub command: &'a wire::DispatchDelegation,
     pub original_command: &'a [u8],
+    pub attempt: Option<AttemptSource<'a>>,
 }
 
 pub struct ChildAdmission<'a> {
@@ -33,23 +34,42 @@ pub struct ChildAdmission<'a> {
     pub dispatch_event_id: EventId,
     pub dispatch_ordinal: u64,
     pub parent_position: StreamPosition,
+    pub attempt: Option<AttemptSource<'a>>,
 }
 
+pub struct AttemptSource<'a> {
+    pub started: &'a wire::ExecutionAttemptStarted,
+    pub original_started: &'a [u8],
+    pub ready: Option<&'a wire::ExecutionAttemptReady>,
+    pub original_ready: Option<&'a [u8]>,
+}
+
+/// Real resource owners supply current source, plan, lifecycle and caller authority.
+/// A decoded plan or claimed Ready reference cannot replace those retained authorities.
 pub trait SessionAdmission: Send + Sync {
     type Error: Error + Send + Sync + 'static;
     type Lease: SessionAdmissionLease;
 
-    fn authorize_source(&self, caller: &SubjectPrincipal, key: &SessionKey)
-    -> impl Future<Output = Result<Self::Lease, Self::Error>> + Send;
+    fn authorize_source(
+        &self,
+        caller: &SubjectPrincipal,
+        key: &SessionKey,
+    ) -> impl Future<Output = Result<Self::Lease, Self::Error>> + Send;
 
-    fn authorize_create(&self, material: CreateAdmission<'_>)
-    -> impl Future<Output = Result<Self::Lease, Self::Error>> + Send;
+    fn authorize_create(
+        &self,
+        material: CreateAdmission<'_>,
+    ) -> impl Future<Output = Result<Self::Lease, Self::Error>> + Send;
 
-    fn authorize_dispatch(&self, material: DispatchAdmission<'_>)
-    -> impl Future<Output = Result<Self::Lease, Self::Error>> + Send;
+    fn authorize_dispatch(
+        &self,
+        material: DispatchAdmission<'_>,
+    ) -> impl Future<Output = Result<Self::Lease, Self::Error>> + Send;
 
-    fn authorize_child(&self, material: ChildAdmission<'_>)
-    -> impl Future<Output = Result<Self::Lease, Self::Error>> + Send;
+    fn authorize_child(
+        &self,
+        material: ChildAdmission<'_>,
+    ) -> impl Future<Output = Result<Self::Lease, Self::Error>> + Send;
 }
 
 pub trait SessionAdmissionLease: Send + Sync {
