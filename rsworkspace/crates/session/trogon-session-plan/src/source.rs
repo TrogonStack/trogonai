@@ -35,7 +35,7 @@ pub(crate) fn verify<L: PlanSourceLease>(
     {
         return Err(PlanError::OriginalSourceMismatch);
     }
-    let original = source.original_configuration();
+    let original = source.original_configuration()?;
     if original.is_empty() || original.len() > 65536 {
         return Err(PlanError::Limit);
     }
@@ -207,7 +207,7 @@ pub(crate) fn selected_delegate<'a, L: PlanSourceLease>(
     }
     if let Some(agent::delegate_declaration::Selection::Selector(selector)) = declaration.selection.as_ref() {
         live(child_source)?;
-        let original = decoder.decode_agent_configuration(child_source.original_configuration())?;
+        let original = decoder.decode_agent_configuration(child_source.original_configuration()?)?;
         if selector.labels.is_empty()
             || !selector
                 .labels

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::wire_schema_pool::SchemaData;
+use crate::schema_data::SchemaData;
 
 #[derive(Clone, Debug)]
 pub struct WireMessageDescriptor {

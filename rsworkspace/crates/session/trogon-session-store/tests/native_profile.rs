@@ -10,9 +10,10 @@ use trogon_decider_runtime::{
 };
 use trogon_nats::{NatsToken, test_support::JetStreamTestServer};
 use trogon_session_store::{SessionKey, SessionNativeError, SessionStreamProfile, SessionSubjectResolver};
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 async fn server() -> JetStreamTestServer {
-    match std::env::var("TROGON_SESSION_TEST_NETWORK") {
+    match SystemEnv.var("TROGON_SESSION_TEST_NETWORK") {
         Ok(network) => JetStreamTestServer::start_on_network(&network).await,
         Err(_) => JetStreamTestServer::start().await,
     }

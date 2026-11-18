@@ -1,5 +1,6 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+mod schema_data;
 mod wire_limits;
 mod wire_message_descriptor;
 mod wire_message_map_profile;
@@ -16,8 +17,8 @@ pub use wire_schema_error::WireSchemaError;
 pub use wire_schema_pool::WireSchemaPool;
 pub use wire_string_map_profile::{WireStringMapProfile, WireStringMapProfileError};
 
+use schema_data::{FieldShape, SchemaData};
 use std::collections::{BTreeMap, BTreeSet};
-use wire_schema_pool::{FieldShape, SchemaData};
 
 /// Checks exact bytes before a normal decoder can discard unknown fields or
 /// merge duplicate singular/oneof values. It never rewrites signed bytes.

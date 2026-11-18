@@ -23,6 +23,7 @@ use trogon_session_store::{
     ChildAdmission, CreateAdmission, DispatchAdmission, SessionAdmission, SessionAdmissionLease, SessionFactCodec,
     SessionKey, SessionRuntime, wire,
 };
+use trogon_std::env::{ReadEnv, SystemEnv};
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -183,7 +184,7 @@ struct Harness {
 
 impl Harness {
     async fn new() -> Self {
-        let server = match std::env::var("TROGON_SESSION_TEST_NETWORK") {
+        let server = match SystemEnv.var("TROGON_SESSION_TEST_NETWORK") {
             Ok(network) => JetStreamTestServer::start_on_network(&network).await,
             Err(_) => JetStreamTestServer::start().await,
         };

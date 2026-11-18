@@ -1,4 +1,5 @@
 use async_nats::jetstream;
+use async_nats::jetstream::stream::{DiscardPolicy, PersistenceMode, RetentionPolicy, StorageType};
 use trogon_decider_nats::{
     StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectScope, SubjectScopeError, SubjectState,
     subject_current_position,
@@ -41,8 +42,6 @@ impl SessionStreamProfile {
     }
 
     fn validate(&self, actual: &jetstream::stream::Config) -> Result<(), SessionNativeError> {
-        use jetstream::stream::{DiscardPolicy, PersistenceMode, RetentionPolicy, StorageType};
-
         if actual.name != self.stream_name
             || actual.subjects.as_slice() != [self.scope.pattern()]
             || actual.storage != StorageType::File

@@ -1,4 +1,4 @@
-use crate::{WireMessageDescriptor, WirePreflightError, wire_schema_pool::SchemaData};
+use crate::{WireMessageDescriptor, WirePreflightError, schema_data::SchemaData};
 use std::{collections::BTreeSet, sync::Arc};
 
 #[derive(Clone, Debug)]

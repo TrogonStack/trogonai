@@ -21,6 +21,7 @@ trogon-proto-preflight = { path = "../../platform/trogon-proto-preflight" }
 trogonai-proto = { workspace = true, features = ["session-contracts"] }
 
 [dev-dependencies]
+trogon-std = { workspace = true }
 serde_json = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 trogon-decider-nats = { workspace = true }

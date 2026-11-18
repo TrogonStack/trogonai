@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use serde_json::json;
-use trogon_proto_preflight::{WireLimits, WireSchemaPool, preflight_with_message_maps};
+use trogon_proto_preflight::{WireLimits, WirePreflightError, WireSchemaPool, preflight, preflight_with_message_maps};
 
 fn pool() -> WireSchemaPool {
     let descriptor = json!({"file":[{"syntax":"proto3","package":"example","messageType":[
@@ -40,7 +40,6 @@ fn exact_registered_message_map_is_checked_without_discarding_original_values() 
 
 #[test]
 fn message_map_profile_cannot_widen_other_schemas_or_hide_duplicate_keys() {
-    use trogon_proto_preflight::{WirePreflightError, preflight};
     let first = pool();
     let second = pool();
     let profile = first

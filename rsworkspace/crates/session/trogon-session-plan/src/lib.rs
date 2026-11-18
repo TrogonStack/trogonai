@@ -1,4 +1,5 @@
 mod admission;
+mod constants;
 mod decoder;
 mod error;
 mod lease;
@@ -15,8 +16,4 @@ pub use owner::{
     DelegationOwnerContext, DelegationSource, PlanOwnerContext, PlanOwners, PlanSourceLease, RuntimePlanInterpreter,
 };
 
-pub mod wire {
-    pub use trogonai_proto::session_contracts::trogonai::agents::agents::v1alpha1 as agent;
-    pub use trogonai_proto::session_contracts::trogonai::session::plans::v1alpha1 as plan;
-    pub use trogonai_proto::session_contracts::trogonai::session::sessions::v1alpha1 as session;
-}
+pub mod wire;

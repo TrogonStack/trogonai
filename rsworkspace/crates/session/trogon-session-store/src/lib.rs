@@ -8,9 +8,7 @@ pub mod native;
 mod original;
 pub mod runtime;
 
-pub mod wire {
-    pub use trogonai_proto::session_contracts::trogonai::session::sessions::v1alpha1::*;
-}
+pub mod wire;
 
 pub use admission::{
     AttemptSource, ChildAdmission, CreateAdmission, DispatchAdmission, SessionAdmission, SessionAdmissionLease,

@@ -1,8 +1,8 @@
+use crate::constants::SAFE_INTEGER;
+use crate::wire::agent::variable_type::Kind;
 use crate::{PlanError, wire::agent};
 use buffa_types::google::protobuf::{Struct, Value, value};
 use std::collections::BTreeSet;
-
-const SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 pub(crate) fn shape(bindings: &agent::VariableBindings) -> Result<(), PlanError> {
     let values = bindings.values.as_option().ok_or(PlanError::Variables)?;
@@ -94,7 +94,6 @@ fn schema_shape(
 }
 
 fn type_shape(ty: &agent::VariableType, depth: usize, remaining: &mut usize) -> Result<(), PlanError> {
-    use agent::variable_type::Kind;
     spend(depth, remaining)?;
     match ty.kind.as_ref().ok_or(PlanError::Variables)? {
         Kind::StringType(ty) => {
@@ -174,7 +173,6 @@ fn match_object(definitions: &[agent::VariableDefinition], values: &Struct) -> R
 }
 
 fn match_value(ty: &agent::VariableType, value: &Value) -> Result<(), PlanError> {
-    use agent::variable_type::Kind;
     let valid = match (ty.kind.as_ref(), value.kind.as_ref()) {
         (Some(Kind::StringType(ty)), Some(value::Kind::StringValue(text))) => string_matches(ty, text),
         (Some(Kind::BooleanType(_)), Some(value::Kind::BoolValue(_))) => true,

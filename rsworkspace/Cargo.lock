@@ -7889,6 +7889,7 @@ dependencies = [
  "trogon-nats",
  "trogon-proto-preflight",
  "trogon-session-store",
+ "trogon-std",
  "trogonai-proto",
  "uuid",
 ]
@@ -7909,6 +7910,7 @@ dependencies = [
  "trogon-identity-types",
  "trogon-nats",
  "trogon-proto-preflight",
+ "trogon-std",
  "trogonai-proto",
  "uuid",
  "zeroize",

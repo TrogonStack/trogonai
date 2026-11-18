@@ -57,7 +57,7 @@ pub trait RuntimePlanInterpreter: Send + Sync {
 /// metadata remain usable only while this original authority remains live.
 pub trait PlanSourceLease: SessionAdmissionLease {
     fn revision(&self) -> &agent::AgentRevisionRef;
-    fn original_configuration(&self) -> &[u8];
+    fn original_configuration(&self) -> Result<&[u8], PlanError>;
     fn candidate(&self) -> Option<&session::CandidateRef>;
     fn project_id(&self) -> &str;
     fn interpreter(&self) -> &dyn RuntimePlanInterpreter;

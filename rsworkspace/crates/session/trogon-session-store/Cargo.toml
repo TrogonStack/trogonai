@@ -24,6 +24,7 @@ trogon-proto-preflight = { path = "../../platform/trogon-proto-preflight" }
 zeroize = "=1.8.2"
 
 [dev-dependencies]
+trogon-std = { workspace = true }
 buffa-types = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 trogon-nats = { workspace = true, features = ["test-support"] }

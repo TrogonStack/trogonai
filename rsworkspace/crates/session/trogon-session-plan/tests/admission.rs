@@ -2,20 +2,27 @@
 
 mod support;
 
+use async_nats::jetstream;
 use buffa::Message;
 use sha2::{Digest as _, Sha256};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use trogon_decider_nats::JetStreamStore;
+use trogon_decider_runtime::{CommandId, ReadFrom, ReadStreamRequest, StreamRead};
 use trogon_identity_types::SubjectPrincipal;
-use trogon_nats::NatsToken;
+use trogon_nats::{NatsToken, test_support::JetStreamTestServer};
 use trogon_session_plan::{
     DelegationOwnerContext, PlanAdmission, PlanError, PlanOwnerContext, PlanOwners, PlanSourceLease,
     RegisteredPlanDecoder, RuntimePlanInterpreter,
     wire::{agent, plan, session},
 };
-use trogon_session_store::{CreateAdmission, SessionAdmission, SessionAdmissionLease, SessionKey};
+use trogon_session_store::{
+    CreateAdmission, SessionAdmission, SessionAdmissionLease, SessionKey, SessionRuntime, SessionStreamProfile,
+    SessionSubjectResolver,
+};
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 #[derive(Clone)]
 struct FixtureLease {
@@ -27,6 +34,7 @@ struct FixtureLease {
     execution: agent::ConfigurationContractRef,
     effective: agent::NativeConfiguration,
     implementation: agent::AgentImplementation,
+    configuration_readable: bool,
 }
 
 impl SessionAdmissionLease for FixtureLease {
@@ -81,8 +89,12 @@ impl PlanSourceLease for FixtureLease {
     fn revision(&self) -> &agent::AgentRevisionRef {
         &self.revision
     }
-    fn original_configuration(&self) -> &[u8] {
-        &self.original
+    fn original_configuration(&self) -> Result<&[u8], PlanError> {
+        self.require_live()?;
+        if !self.configuration_readable {
+            return Err(PlanError::SourceUnavailable);
+        }
+        Ok(&self.original)
     }
     fn candidate(&self) -> Option<&session::CandidateRef> {
         None
@@ -179,6 +191,7 @@ fn fixture_material() -> (FixtureLease, session::CreateSession, tokio::sync::wat
         execution: plan.execution_contract.as_option().unwrap().clone(),
         effective: plan.effective_runtime_configuration.as_option().unwrap().clone(),
         implementation: plan.implementation.as_option().unwrap().clone(),
+        configuration_readable: true,
     };
     let command = session::CreateSession {
         session_id: "parent-example".into(),
@@ -251,6 +264,12 @@ fn update_configuration(
 
 #[tokio::test]
 async fn original_configuration_bytes_and_runtime_registration_cannot_be_replaced() {
+    let (mut unreadable, unreadable_command, _unreadable_live) = fixture_material();
+    unreadable.configuration_readable = false;
+    assert_eq!(
+        check(&adapter(unreadable), &unreadable_command).await.err(),
+        Some(PlanError::SourceUnavailable)
+    );
     let (mut source, command, _live) = fixture_material();
     source.original.push(0);
     assert_eq!(
@@ -617,13 +636,8 @@ impl trogon_session_store::SessionFactCodec for FixtureCodec {
 
 #[tokio::test]
 async fn admitted_original_plans_flow_through_native_acknowledgement_and_child_recovery() {
-    use async_nats::jetstream;
-    use trogon_decider_nats::JetStreamStore;
-    use trogon_decider_runtime::{CommandId, ReadFrom, ReadStreamRequest, StreamRead};
-    use trogon_nats::test_support::JetStreamTestServer;
-    use trogon_session_store::{SessionRuntime, SessionStreamProfile, SessionSubjectResolver};
     let fixture = delegation_fixture(Some("worker"), "worker", true, true);
-    let server = match std::env::var("TROGON_SESSION_TEST_NETWORK") {
+    let server = match SystemEnv.var("TROGON_SESSION_TEST_NETWORK") {
         Ok(network) => JetStreamTestServer::start_on_network(&network).await,
         Err(_) => JetStreamTestServer::start().await,
     };
