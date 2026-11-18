@@ -115,6 +115,8 @@ if (spec.prime !== undefined && spec.prime !== 'fresh') refuse(`prime ${spec.pri
 if (spec.primes !== undefined && !Array.isArray(spec.primes)) refuse('primes is not a list');
 for (const entry of spec.primes ?? []) {
   if (entry.options !== undefined && entry.options !== 'same' && entry.options !== 'fresh') refuse(`prime options ${entry.options}`);
+  if (entry.gc !== undefined && !(Number.isInteger(entry.gc) && entry.gc >= 0)) refuse(`prime gc ${entry.gc}`);
+  if (entry.gc > 0 && typeof globalThis.gc !== 'function') refuse('prime gc without --expose-gc');
 }
 // A /proc stand-in the WSL kernel already answers the same way (it names WSL) is dropped; anything else is refused.
 const kernelAnswers = (text) => report.wsl_kernel && typeof text === 'string' && namesWsl(text.toLowerCase());
@@ -427,6 +429,9 @@ if (report.call === 'second' && spec.primes !== undefined) {
     } catch (error) {
       record.thrown = error instanceof Error ? error.name : typeof error;
     }
+    // `gc` (diagnostic runs only): full collections forced after this prime, before the next resolve (needs --expose-gc).
+    for (let count = 0; count < (entry.gc ?? 0); count += 1) globalThis.gc();
+    record.gc = entry.gc ?? 0;
     report.primes.push(record);
     report.cases.push(snapshot('prime'));
   }
