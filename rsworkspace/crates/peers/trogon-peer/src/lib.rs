@@ -5,3 +5,5 @@ pub use commands::domain::{
     PeerId, PeerValueError, TenantId, TrustedPeerOwner,
 };
 pub use commands::{Enroll, EnrollError, EvolveError};
+
+pub use commands::{Attach, AttachError};
