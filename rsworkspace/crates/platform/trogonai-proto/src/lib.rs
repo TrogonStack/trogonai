@@ -21,7 +21,7 @@
 ))]
 mod r#gen;
 
-#[cfg(any(feature = "gateway", feature = "schedules"))]
+#[cfg(any(feature = "gateway", feature = "schedules", feature = "peers"))]
 mod codec;
 
 pub mod constants;
