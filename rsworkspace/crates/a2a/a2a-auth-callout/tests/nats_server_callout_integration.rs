@@ -172,6 +172,13 @@ fn sentinel_permissions() -> UserPermissionLimits {
     }
 }
 
+/// Whether an account may use JetStream; only the accounts that hold streams get it.
+#[derive(Clone, Copy)]
+enum JetStreamAccess {
+    Disabled,
+    Enabled,
+}
+
 struct AccountJwt {
     account: String,
     jwt: String,
@@ -183,11 +190,11 @@ impl AccountJwt {
         account: &str,
         signers: &[&nkeys::KeyPair],
         authorization: Option<ExternalAuthorization>,
-        jetstream: bool,
+        jetstream: JetStreamAccess,
         operator_signing: &nkeys::KeyPair,
     ) -> Self {
         let mut claims = Account::new_claims(name.to_owned(), account.to_owned());
-        if jetstream {
+        if let JetStreamAccess::Enabled = jetstream {
             claims.nats.limits = Some(OperatorLimits {
                 jetstream: Some(JetStreamLimits {
                     memory_storage: Some(NO_LIMIT),
@@ -269,13 +276,20 @@ impl OperatorFixture {
             xkey: Some(callout_xkey.public_key()),
         };
         let account_jwts = vec![
-            AccountJwt::issue("SYS", &system, &[&system_signing], None, false, &operator_signing),
+            AccountJwt::issue(
+                "SYS",
+                &system,
+                &[&system_signing],
+                None,
+                JetStreamAccess::Disabled,
+                &operator_signing,
+            ),
             AccountJwt::issue(
                 "AUTH",
                 &auth,
                 &[&auth_user_issuer, &auth_response_signing],
                 Some(callout),
-                false,
+                JetStreamAccess::Disabled,
                 &operator_signing,
             ),
             AccountJwt::issue(
@@ -283,7 +297,7 @@ impl OperatorFixture {
                 &platform,
                 &[&platform_signing],
                 None,
-                true,
+                JetStreamAccess::Enabled,
                 &operator_signing,
             ),
             AccountJwt::issue(
@@ -291,7 +305,7 @@ impl OperatorFixture {
                 tenant.account.as_str(),
                 &[&tenant.user_issuer, &tenant.callout_signing],
                 None,
-                true,
+                JetStreamAccess::Enabled,
                 &operator_signing,
             ),
         ];
