@@ -1,0 +1,31 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
+import "trogonai/session/sessions/v1alpha1/checkout.proto";
+import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
+
+// ChildSessionCreation retains the exact child creation inputs before dispatch
+// is acknowledged, so recovery cannot select a different plan or checkout.
+// Plan bytes and all supplied digests must be nonempty. Candidate presence is
+// preserved exactly. Admission verifies the bytes, digest, checkout and
+// candidate agreement; work input references remain inside the child's plan.
+// Retained evidence never replaces current lifecycle and policy checks.
+message ChildSessionCreation {
+  option (buf.validate.message).cel = {
+    id: "child_session_creation.plan_nonempty"
+    message: "child execution plan must have nonempty bytes and digest material"
+    expression: "!has(this.execution_plan) || (this.execution_plan.plan_bytes.size() > 0 && this.execution_plan.plan_digest.algorithm != '' && this.execution_plan.plan_digest.value.size() > 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "child_session_creation.candidate_digest_nonempty"
+    message: "child candidate digest must have nonempty algorithm and value"
+    expression: "!has(this.candidate_ref) || (this.candidate_ref.content_digest.algorithm != '' && this.candidate_ref.content_digest.value.size() > 0)"
+  };
+
+  StoredSessionExecutionPlan execution_plan = 1 [(buf.validate.field).required = true];
+  CheckoutRef checkout_ref = 2 [(buf.validate.field).required = true];
+  CandidateRef candidate_ref = 3;
+}

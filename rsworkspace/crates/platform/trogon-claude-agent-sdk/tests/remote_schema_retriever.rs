@@ -121,7 +121,9 @@ fn object(value: Value) -> Fallible<JsonObject> {
 }
 
 /// The port of a loopback server that answers each connection with the recorded response of its path, shuts its
-/// writing half when the recording did, and keeps its end open so the test can see how the client ended it.
+/// writing half when the recording did, and keeps its end open so the test can see how the client ended it. The kept
+/// end gets its [`CLOSE_WAIT`] read timeout before the response is written and the writing half shut: macOS refuses to
+/// set options on a socket once it is shut in both directions.
 fn holding_server(routes: &[Value]) -> Fallible<(u16, Accepted)> {
     let mut responses = HashMap::new();
     for route in routes {
@@ -154,7 +156,10 @@ fn holding_server(routes: &[Value]) -> Fallible<(u16, Accepted)> {
             let Some((response, shutdown)) = responses.get(&path) else {
                 continue;
             };
-            if let Ok(kept) = socket.try_clone() {
+            if let Ok(kept) = socket
+                .set_read_timeout(Some(CLOSE_WAIT))
+                .and_then(|()| socket.try_clone())
+            {
                 sockets
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -169,13 +174,10 @@ fn holding_server(routes: &[Value]) -> Fallible<(u16, Accepted)> {
     Ok((port, accepted))
 }
 
-/// How the client ended the connection, as the server end sees it within [`CLOSE_WAIT`]: `fin`, `rst`, `data` when
-/// it sent more, or `open`.
+/// How the client ended the connection, as the server end sees it within the [`CLOSE_WAIT`] the holding server set:
+/// `fin`, `rst`, `data` when it sent more, or `open`.
 fn client_end(socket: &TcpStream) -> &'static str {
     let mut byte = [0u8; 1];
-    if socket.set_read_timeout(Some(CLOSE_WAIT)).is_err() {
-        return "open";
-    }
     match socket.peek(&mut byte) {
         Ok(0) => "fin",
         Ok(_) => "data",

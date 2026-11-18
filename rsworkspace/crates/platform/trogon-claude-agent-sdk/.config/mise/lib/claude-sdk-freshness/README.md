@@ -131,9 +131,11 @@ reads the exact npm package recorded in `baseline.json`; `types.json` names the
 package version, source files, output files and root types. The output keeps the
 upstream wire shape and validates nothing:
 
-- every object type keeps keys upstream does not declare in a flattened `extra` map and
-  records the key order it was decoded with (`key_order`), so decoding then encoding
-  is lossless and byte-identical, including key order;
+- every object type keeps keys upstream does not declare in a flattened `extra` map
+  (`indexmap::IndexMap<String, crate::DeepJsonValue>`, whose values drop, clone, compare
+  and print at any nesting, and which the type writes past 64 levels as JSON text) and records the key order it was decoded with
+  (`key_order`), so decoding then encoding is lossless and byte-identical, including
+  key order;
 - typed maps are insertion ordered (`indexmap::IndexMap`) and untyped maps are
   `serde_json::Map`, which keeps insertion order through the crate's `preserve_order`
   feature;
@@ -153,7 +155,12 @@ visited, one undeclared key in each open object) split into per-family groups, a
 `claude-sdk:types-check` fails when the checked-in fixture file drifts.
 
 A target may also list `extern` types (`{"Name": "rust::path"}`) that live in another
-generated module instead of being generated again.
+generated module instead of being generated again, and `untyped_members`
+(`{"Type": ["property"]}`) for optional properties upstream takes as raw caller objects and
+reads key by key later instead of through their declared type. Those hold any JSON object as
+a `DeepJsonObject`: `ResolveSettingsOptions` passes `managedSettings` and
+`serverManagedSettings` through the policy schema read, which drops or keeps each key, so a
+value the declared `Settings` type refuses must still decode.
 
 ```sh
 mise run claude-sdk:types        # regenerate from the pinned upstream package
@@ -197,6 +204,24 @@ python3 -I run_end_machine_goldens.py <python-src> run_machine.json
 
 The Python recorder needs the pinned package's dependencies (`anyio`, `mcp`, `jsonschema`).
 
+## FTP goldens
+
+`python_ftp_goldens.py` opens and reads each FTP case of
+`tests/fixtures/sdk_mcp/python_ftp.json` with CPython's `urlopen` against a scripted loopback
+server and writes what it answered or raised, with the lines the client sent on each control
+connection. A case the client fails early ends at the reply it fails on, so no read races the
+client's close. Only the case whose closing reply is not UTF-8 waits 200 milliseconds before that
+reply: CPython raises opening or reading depending on whether it arrives in the same read as the
+reply before the data, and the client sends nothing in between that the server could wait for.
+
+```sh
+mise run claude-sdk:ftp-goldens          # regenerate python_ftp.json
+mise run claude-sdk:ftp-goldens --check  # fail when python_ftp.json differs
+```
+
+The task runs CPython 3.12.16 and refuses any other platform than macOS, whose `errno` and
+resolver texts the goldens keep.
+
 ## Scheduled issue reporting
 
 [The workflow](../../../../../../../../.github/workflows/claude-sdk-freshness.yml) follows the
@@ -235,7 +260,7 @@ modes fail before the checker runs.
 
    ```sh
    mise run claude-sdk:baseline \
-     --python-version 0.2.179 --typescript-version 0.3.319 \
+     --python-version 0.2.181 --typescript-version 0.3.323 \
      --out /path/to/claude-sdk-baseline-review
    ```
 

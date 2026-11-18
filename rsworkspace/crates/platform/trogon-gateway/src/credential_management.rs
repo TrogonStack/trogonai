@@ -32,9 +32,10 @@ use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1};
 
 use self::constants::{
-    ADMIN_TOKEN_HEADER, DISCORD_BOT_TOKEN, GITHUB_WEBHOOK_SECRET, GITLAB_SIGNING_TOKEN, IDEMPOTENCY_KEY_HEADER,
-    INCIDENTIO_SIGNING_SECRET, LINEAR_WEBHOOK_SECRET, MICROSOFT_GRAPH_CLIENT_STATE, NOTION_VERIFICATION_TOKEN,
-    PLAID_CLIENT_SECRET, SENTRY_CLIENT_SECRET, SLACK_SIGNING_SECRET, TELEGRAM_WEBHOOK_SECRET, TWITTER_CONSUMER_SECRET,
+    ADMIN_TOKEN_HEADER, DISCORD_BOT_TOKEN, GENERIC_WEBHOOK_SECRET, GITHUB_WEBHOOK_SECRET, GITLAB_SIGNING_TOKEN,
+    IDEMPOTENCY_KEY_HEADER, INCIDENTIO_SIGNING_SECRET, LINEAR_WEBHOOK_SECRET, MICROSOFT_GRAPH_CLIENT_STATE,
+    NOTION_VERIFICATION_TOKEN, PLAID_CLIENT_SECRET, SENTRY_CLIENT_SECRET, SLACK_SIGNING_SECRET,
+    TELEGRAM_WEBHOOK_SECRET, TWITTER_CONSUMER_SECRET,
 };
 #[cfg(test)]
 use self::idempotency::CredentialCommandInMemoryIdempotencyLedger;
@@ -119,6 +120,19 @@ where
         .route(
             "/discord/bot-token/destructions",
             post(destroy_discord_bot_token::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/webhook/{integration_id}/webhook-secret",
+            put(put_generic_webhook_secret::<EventStore, Secrets, Idempotency>)
+                .delete(revoke_generic_webhook_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/webhook/{integration_id}/webhook-secret/rotations",
+            post(rotate_generic_webhook_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/webhook/{integration_id}/webhook-secret/destructions",
+            post(destroy_generic_webhook_secret::<EventStore, Secrets, Idempotency>),
         )
         .route(
             "/github/{integration_id}/webhook-secret",
@@ -358,6 +372,29 @@ where
     Idempotency: CredentialCommandIdempotencyStore,
 {
     put_source_credential_secret(state, headers, request, DISCORD_BOT_TOKEN).await
+}
+
+async fn put_generic_webhook_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<WriteCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStorePut<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    put_credential_secret(state, path, headers, request, GENERIC_WEBHOOK_SECRET).await
 }
 
 async fn put_github_webhook_secret<EventStore, Secrets, Idempotency>(
@@ -752,6 +789,29 @@ where
     Idempotency: CredentialCommandIdempotencyStore,
 {
     rotate_source_credential_secret(state, headers, request, DISCORD_BOT_TOKEN).await
+}
+
+async fn rotate_generic_webhook_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<RotateCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreRotate<Error = SecretStoreError> + SecretStoreMetadata<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    rotate_credential_secret(state, path, headers, request, GENERIC_WEBHOOK_SECRET).await
 }
 
 async fn rotate_github_webhook_secret<EventStore, Secrets, Idempotency>(
@@ -1151,6 +1211,29 @@ where
     destroy_source_credential_secret(state, headers, request, DISCORD_BOT_TOKEN).await
 }
 
+async fn destroy_generic_webhook_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, GENERIC_WEBHOOK_SECRET).await
+}
+
 async fn destroy_github_webhook_secret<EventStore, Secrets, Idempotency>(
     State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
     Path(path): Path<ManagedCredentialPath>,
@@ -1546,6 +1629,29 @@ where
     Idempotency: CredentialCommandIdempotencyStore,
 {
     revoke_source_credential_secret(state, headers, request, DISCORD_BOT_TOKEN).await
+}
+
+async fn revoke_generic_webhook_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<RevokeCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<CredentialKey>
+        + StreamAppend<CredentialKey>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, CredentialKey>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, CredentialKey>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<CredentialKey>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreRevoke<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    revoke_credential_secret(state, path, headers, request, GENERIC_WEBHOOK_SECRET).await
 }
 
 async fn revoke_github_webhook_secret<EventStore, Secrets, Idempotency>(
@@ -2249,6 +2355,9 @@ fn integration_credential_scope(
     integration_id: String,
     source: SourceKind,
 ) -> Result<CredentialScope, CredentialManagementHttpError> {
+    if source == SourceKind::Webhook {
+        trogon_webhooks::EndpointId::new(&integration_id).map_err(CredentialManagementHttpError::invalid_input)?;
+    }
     Ok(CredentialScope::integration(
         CredentialOwnerId::new(owner_id).map_err(CredentialManagementHttpError::invalid_input)?,
         source,

@@ -56,6 +56,10 @@ build)
   cd "$ws"
   exec "$buf" build
   ;;
+schedules-descriptor)
+  cd "$ws"
+  exec "$buf" build -o "${check_args[0]}" --as-file-descriptor-set --path proto/trogonai/scheduler/schedules
+  ;;
 rust)
   # CHECK_ARGS: OUT_DIR CARGO_TOML PROTOC_GEN_BUFFA PROTOC_GEN_BUFFA_PACKAGING RUSTFMT RUSTFMT_TOML
   out="${check_args[0]}"

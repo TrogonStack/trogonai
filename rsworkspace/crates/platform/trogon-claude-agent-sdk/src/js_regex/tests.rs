@@ -1,4 +1,5 @@
-use super::{Regex, is_whitespace};
+use super::{Regex, WHITESPACE, in_ranges};
+use crate::session_prompt::js_space;
 
 type TestResult = Result<(), String>;
 
@@ -46,10 +47,14 @@ fn case_folding_is_ascii_only() -> TestResult {
 fn whitespace_is_the_javascript_set() -> TestResult {
     check(r"\s+", "a\u{a0}\u{feff}\u{2003}b\u{85}c", "-", "a-b\u{85}c")?;
     for character in [' ', '\t', '\n', '\u{a0}', '\u{feff}', '\u{2028}', '\u{3000}'] {
-        assert!(is_whitespace(character), "{character:?}");
+        assert!(js_space(character), "{character:?}");
     }
     for character in ['\u{85}', '\u{180e}', 'a', '\u{1f600}'] {
-        assert!(!is_whitespace(character), "{character:?}");
+        assert!(!js_space(character), "{character:?}");
+    }
+    for unit in 0..=u16::MAX {
+        let trimmed = char::from_u32(u32::from(unit)).is_some_and(js_space);
+        assert_eq!(in_ranges(WHITESPACE, unit), trimmed, "{unit:#06x}");
     }
     Ok(())
 }

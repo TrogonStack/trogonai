@@ -1418,6 +1418,16 @@ where
         kind: CredentialKind,
         request: &RuntimeReleaseRequest<'_>,
     ) -> Result<SecretMaterial, RuntimeCredentialError> {
+        self.resolve_bound(key, kind, request, None).await
+    }
+
+    async fn resolve_bound(
+        &self,
+        key: &RuntimeIntegrationKey,
+        kind: CredentialKind,
+        request: &RuntimeReleaseRequest<'_>,
+        expected_owner: Option<&CredentialOwnerId>,
+    ) -> Result<SecretMaterial, RuntimeCredentialError> {
         let projection = self
             .projections
             .get(key)
@@ -1443,6 +1453,10 @@ where
         let credential = projection
             .credential(kind)
             .ok_or_else(|| RuntimeCredentialError::CredentialMissing { key: key.clone(), kind })?;
+
+        if expected_owner.is_some_and(|owner| credential.owner_id() != owner) {
+            return Err(RuntimeCredentialError::OwnerMismatch { key: key.clone(), kind });
+        }
 
         if let Some(material) = self.cache.get(credential).await {
             runtime_projection_metrics().record_cache_hit(key);
@@ -1489,10 +1503,28 @@ where
             SecretMaterial::Verifier(_) => Err(RuntimeCredentialError::VerifierOnly { key: key.clone(), kind }),
         }
     }
+
+    pub async fn resolve_plaintext_for_owner(
+        &self,
+        key: &RuntimeIntegrationKey,
+        kind: CredentialKind,
+        expected_owner: &CredentialOwnerId,
+        request: &RuntimeReleaseRequest<'_>,
+    ) -> Result<SecretString, RuntimeCredentialError> {
+        match self.resolve_bound(key, kind, request, Some(expected_owner)).await? {
+            SecretMaterial::Plaintext(value) => Ok(value),
+            SecretMaterial::Verifier(_) => Err(RuntimeCredentialError::VerifierOnly { key: key.clone(), kind }),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeCredentialError {
+    #[error("runtime credential owner does not match the requested project: {key} {kind}")]
+    OwnerMismatch {
+        key: RuntimeIntegrationKey,
+        kind: CredentialKind,
+    },
     #[error("runtime integration not found: {key}")]
     IntegrationNotFound { key: RuntimeIntegrationKey },
     #[error("runtime integration is not resolvable: {key} is {status:?}")]
@@ -1539,6 +1571,7 @@ impl RuntimeCredentialError {
             | Self::IntegrationNotFound { .. }
             | Self::IntegrationNotResolvable { .. }
             | Self::CredentialMissing { .. }
+            | Self::OwnerMismatch { .. }
             | Self::VerifierOnly { .. }
             | Self::DeliveryDenied { .. } => axum::http::StatusCode::UNAUTHORIZED,
         }

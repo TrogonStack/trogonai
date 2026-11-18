@@ -1,0 +1,32 @@
+[package]
+name = "trogon-webhooks"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream"] }
+axum = { workspace = true }
+base64 = "0.22"
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+bytes = { workspace = true }
+hmac = "0.13"
+http-body-util = "0.1"
+sha2 = "0.11"
+subtle = "2.6"
+thiserror = { workspace = true }
+tokio = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+trogonai-proto = { workspace = true, features = ["gateway"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+futures-util = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+tower = "0.5"
+trogon-nats = { workspace = true, features = ["test-support"] }

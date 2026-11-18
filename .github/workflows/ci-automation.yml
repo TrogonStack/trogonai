@@ -39,8 +39,25 @@ jobs:
       - name: Install automation test tools
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
-          install_args: python node github:rhysd/actionlint
+          install_args: python node
           cache_save: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Checkout coverage tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: TrogonStack/github-actions
+          ref: 8d32cdde455b381daffbea5133a0319f374989ee
+          path: .coverage-tools
+          sparse-checkout: actions/coverage-report
+          persist-credentials: false
+
+      - name: Install coverage test dependency
+        uses: insightsengineering/pip-action@905c7a9be173f62965b791e91d0079355d99f19b # v2.0.2
+        with:
+          packages: pycobertura==3.0.0
+
+      # actionlint runs in Bazel.
       - name: Validate workflow selection and canary helpers
         run: mise run --skip-tools github:workflows:ci-automation:verify
+        env:
+          COVERAGE_TOOLS: .coverage-tools/actions/coverage-report

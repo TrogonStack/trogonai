@@ -19,8 +19,8 @@ permissions:
   id-token: write
   packages: write
 
-# The binaries restore the CI Rust release cache, whose key hashes these
-# variables. Keep them identical to ci-rust.yml or every build starts cold.
+# The release cache key hashes these variables, so changing them starts every
+# build cold.
 env:
   CARGO_TERM_COLOR: always
   MISE_TASK_RUN_AUTO_INSTALL: 'false'
@@ -93,11 +93,10 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v1-rust
-          # The CI Rust build job's key: amd64 restores the release dependencies
-          # main already compiled. arm64 has no CI build, so it saves its own.
+          # No other workflow builds the release profile any more, so each arch
+          # saves the release dependencies its next run restores.
           shared-key: build
           workspaces: rsworkspace -> target
-          save-if: ${{ matrix.arch == 'arm64' }}
 
       - name: Build release binary
         if: steps.published.outputs.published == 'false'

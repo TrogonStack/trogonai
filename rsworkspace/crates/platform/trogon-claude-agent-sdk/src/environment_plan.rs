@@ -27,13 +27,13 @@ pub struct EnvironmentPlan {
 
 pub(crate) type Inherited = BTreeMap<OsString, OsString>;
 
-fn truthy(value: Option<&OsString>) -> bool {
-    value.is_some_and(|value| {
-        matches!(
-            value.to_string_lossy().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
+/// `Te(c.DEBUG_CLAUDE_AGENT_SDK)` in `sdk.mjs` 0.3.323, which trims the value before it compares.
+fn debug_enabled(inherited: &Inherited) -> bool {
+    crate::session_prompt::js_env_truthy(
+        inherited
+            .get(OsStr::new("DEBUG_CLAUDE_AGENT_SDK"))
+            .map(OsString::as_os_str),
+    )
 }
 
 pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> EnvironmentPlan {
@@ -78,7 +78,7 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
             if !configured_non_empty("CLAUDE_AGENT_SDK_VERSION") {
                 plan.set.insert("CLAUDE_AGENT_SDK_VERSION".into(), SDK_VERSION.into());
             }
-            if truthy(inherited.get(OsStr::new("DEBUG_CLAUDE_AGENT_SDK"))) {
+            if debug_enabled(inherited) {
                 plan.set.insert("DEBUG".into(), "1".into());
             }
         }
@@ -88,7 +88,7 @@ pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> Envir
             }
             plan.set.insert("CLAUDE_AGENT_SDK_VERSION".into(), SDK_VERSION.into());
             plan.remove.insert("NODE_OPTIONS".into());
-            if truthy(inherited.get(OsStr::new("DEBUG_CLAUDE_AGENT_SDK"))) {
+            if debug_enabled(inherited) {
                 plan.set.insert("DEBUG".into(), "1".into());
             } else {
                 plan.remove.insert("DEBUG".into());

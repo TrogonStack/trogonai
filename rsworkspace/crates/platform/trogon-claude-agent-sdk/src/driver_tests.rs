@@ -21,6 +21,21 @@ struct ScriptedTransport {
     ready: bool,
     /// How long each write takes before the document arrives, as a busy pipe or a remote transport would.
     write_delay: Option<Duration>,
+    /// The first half of each document arrives at once and the rest after `write_delay`, as a pipe takes a frame
+    /// larger than its free space.
+    split: bool,
+    /// Each kill, end of input and close, in order.
+    steps: Option<mpsc::UnboundedSender<&'static str>>,
+    /// Takes each document whole or not at all, as the SSE upload queue does.
+    whole: bool,
+}
+
+impl ScriptedTransport {
+    fn step(&self, step: &'static str) {
+        if let Some(steps) = &self.steps {
+            let _ = steps.send(step);
+        }
+    }
 }
 
 impl Transport for ScriptedTransport {
@@ -29,10 +44,16 @@ impl Transport for ScriptedTransport {
     }
 
     async fn write(&mut self, data: &str) -> Result<(), Error> {
+        let mut rest = data;
+        if self.split {
+            let (head, tail) = data.split_at(data.len() / 2);
+            self.written.send(head.to_owned()).map_err(|_| Error::DriverStopped)?;
+            rest = tail;
+        }
         if let Some(delay) = self.write_delay {
             sleep(delay).await;
         }
-        self.written.send(data.to_owned()).map_err(|_| Error::DriverStopped)
+        self.written.send(rest.to_owned()).map_err(|_| Error::DriverStopped)
     }
 
     async fn read_message(&mut self) -> Result<Option<JsonObject>, Error> {
@@ -40,6 +61,7 @@ impl Transport for ScriptedTransport {
     }
 
     async fn close(&mut self) -> Result<(), Error> {
+        self.step("close");
         self.ready = false;
         Ok(())
     }
@@ -48,8 +70,18 @@ impl Transport for ScriptedTransport {
         self.ready
     }
 
+    fn writes_whole_documents(&self) -> bool {
+        self.whole
+    }
+
     async fn end_input(&mut self) -> Result<(), Error> {
+        self.step("end_input");
         self.ready = false;
+        Ok(())
+    }
+
+    async fn kill(&mut self) -> Result<(), Error> {
+        self.step("kill");
         Ok(())
     }
 }
@@ -86,6 +118,9 @@ impl DriverFixture {
                 incoming,
                 ready: true,
                 write_delay: None,
+                split: false,
+                steps: None,
+                whole: false,
             },
             input_ended: false,
             commands: command_rx,
@@ -93,6 +128,8 @@ impl DriverFixture {
             overflow: VecDeque::new(),
             shutdown: shutdown_rx,
             shutdown_seen: false,
+            close_deadline: None,
+            frame_cut: false,
             abort: crate::CancellationToken::new(),
             limits: Limits::default(),
             handler,
@@ -317,17 +354,256 @@ async fn a_prompt_taken_before_the_close_is_written() -> Result<(), Box<dyn std:
     Ok(())
 }
 
-/// A transport that cannot take the frame now loses to the close, so a CLI that stopped reading cannot hold it.
+/// A transport that cannot take the frame loses to the close at the TypeScript close grace, so a CLI that stopped
+/// reading cannot hold the close.
 #[tokio::test(start_paused = true)]
-async fn a_write_that_has_to_wait_gives_way_to_the_close() -> Result<(), Box<dyn std::error::Error>> {
+async fn a_write_that_has_to_wait_gives_way_to_the_close_at_the_grace() -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
     let (command, _receiver) = prompt_command("never drained");
     let started = Instant::now();
     let outcome = fixture.driver.command(command).await;
     assert!(matches!(outcome, Err(Error::ShutdownRequested)), "{outcome:?}");
+    assert_eq!(started.elapsed(), constants::TYPESCRIPT_CLOSE_GRACE);
+    assert!(fixture.driver.shutdown_seen);
+    assert!(fixture.driver.frame_cut);
+    fixture.finish().await
+}
+
+/// A transport that takes a frame whole or not at all has nothing of the frame on the wire while it waits, so the
+/// close wins at once, as a JavaScript close does over a write still awaiting its transport.
+#[tokio::test(start_paused = true)]
+async fn a_write_to_a_whole_document_transport_gives_way_to_the_close_at_once() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut fixture = closed_before_a_write(Some(Duration::from_secs(3600)))?;
+    fixture.driver.transport.whole = true;
+    let (command, _receiver) = prompt_command("never sent");
+    let started = Instant::now();
+    let outcome = fixture.driver.command(command).await;
+    assert!(matches!(outcome, Err(Error::ShutdownRequested)), "{outcome:?}");
     assert_eq!(started.elapsed(), Duration::ZERO);
     assert!(fixture.driver.shutdown_seen);
+    assert!(!fixture.driver.frame_cut);
+    assert!(fixture.driver.close_deadline.is_none());
     fixture.finish().await
+}
+
+/// A fixture whose close was already requested, with a pipe that takes half of each frame at once and the rest
+/// after `delay`; the receiver yields the transport's kill, end of input and close in order.
+fn split_pipe(
+    delay: Duration,
+) -> Result<(DriverFixture, mpsc::UnboundedReceiver<&'static str>), Box<dyn std::error::Error>> {
+    let mut fixture = closed_before_a_write(Some(delay))?;
+    fixture.driver.transport.split = true;
+    let (steps, stepped) = mpsc::unbounded_channel();
+    fixture.driver.transport.steps = Some(steps);
+    Ok((fixture, stepped))
+}
+
+/// Everything the scripted pipe took so far, as the CLI would read it from stdin.
+fn stdin_bytes(written: &mut mpsc::UnboundedReceiver<String>) -> String {
+    let mut stdin = String::new();
+    while let Ok(chunk) = written.try_recv() {
+        stdin.push_str(&chunk);
+    }
+    stdin
+}
+
+/// The close lands after half of the frame is on stdin. `sdk.mjs` has handed the whole frame to the stdin stream by
+/// then and Python's close waits for the write in progress, so the frame is finished before the close is honored
+/// instead of leaving half a line.
+#[tokio::test(start_paused = true)]
+async fn a_frame_the_close_meets_halfway_is_written_whole() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut fixture, mut steps) = split_pipe(Duration::from_secs(1))?;
+    let (command, receiver) = prompt_command("met halfway");
+    let started = Instant::now();
+    fixture.driver.command(command).await?;
+    assert!(matches!(receiver.await?, Ok(())));
+    assert_eq!(started.elapsed(), Duration::from_secs(1));
+    assert!(fixture.driver.shutdown_seen);
+    assert!(!fixture.driver.frame_cut);
+    let stdin = stdin_bytes(&mut fixture.harness.written);
+    let frame: serde_json::Value = serde_json::from_str(stdin.strip_suffix('\n').ok_or("no newline")?)?;
+    assert_eq!(frame["message"]["content"], "met halfway");
+    // The close still ends the run before anything else is read.
+    fixture.driver.event_loop().await?;
+    assert!(steps.try_recv().is_err(), "the transport was stopped");
+    fixture.finish().await
+}
+
+/// A queued prompt the CLI stops draining partway ends the flush at each SDK's close grace: TypeScript stops the
+/// process 2 seconds after `close()`, Python gives up on the write lock after 5. The process is stopped before input
+/// ends, so the CLI never reads the half line with an end of file behind it, and the prompt behind it is not written.
+#[tokio::test(start_paused = true)]
+async fn a_pipe_that_stops_draining_ends_the_queued_prompts_at_the_close_grace()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (style, grace) in [
+        (crate::ArgvStyle::TypeScript, constants::TYPESCRIPT_CLOSE_GRACE),
+        (crate::ArgvStyle::Python, constants::PYTHON_CLOSE_WAIT),
+    ] {
+        let (mut fixture, mut steps) = split_pipe(Duration::from_secs(3600))?;
+        fixture.driver.argv_style = style;
+        let (stuck, stuck_written) = prompt_command("never drained");
+        let (behind, _behind_written) = prompt_command("queued behind");
+        for command in [stuck, behind] {
+            fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+        }
+        let (terminal, terminated) = oneshot::channel();
+        let started = Instant::now();
+        fixture.driver.run(Ok(()), terminal).await;
+        assert_eq!(started.elapsed(), grace, "{style:?}");
+        assert!(matches!(terminated.await?, Ok(())), "{style:?}");
+        assert!(!matches!(stuck_written.await, Ok(Ok(()))), "{style:?}");
+        let stdin = stdin_bytes(&mut fixture.harness.written);
+        assert!(!stdin.is_empty() && !stdin.contains('\n'), "{style:?}: {stdin}");
+        assert!(!stdin.contains("queued behind"), "{style:?}: {stdin}");
+        assert_eq!(recorded_steps(&mut steps), ["kill", "end_input", "close"], "{style:?}");
+    }
+    Ok(())
+}
+
+/// The first queued prompt finishes exactly at each SDK's close grace, so the frame already under way still wins
+/// over the deadline and arrives whole. The prompt behind it would start after the grace, when TypeScript has stopped
+/// the process and Python has marked the transport not ready, so none of it reaches stdin and nothing is cut.
+#[tokio::test(start_paused = true)]
+async fn no_new_frame_starts_after_the_close_grace() -> Result<(), Box<dyn std::error::Error>> {
+    for (style, grace) in [
+        (crate::ArgvStyle::TypeScript, constants::TYPESCRIPT_CLOSE_GRACE),
+        (crate::ArgvStyle::Python, constants::PYTHON_CLOSE_WAIT),
+    ] {
+        let (mut fixture, mut steps) = split_pipe(grace)?;
+        fixture.driver.argv_style = style;
+        let (on_time, on_time_written) = prompt_command("finished at the grace");
+        let (late, late_written) = prompt_command("started after the grace");
+        for command in [on_time, late] {
+            fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+        }
+        let (terminal, terminated) = oneshot::channel();
+        let started = Instant::now();
+        fixture.driver.run(Ok(()), terminal).await;
+        assert_eq!(started.elapsed(), grace, "{style:?}");
+        assert!(matches!(terminated.await?, Ok(())), "{style:?}");
+        assert!(matches!(on_time_written.await, Ok(Ok(()))), "{style:?}");
+        assert!(!matches!(late_written.await, Ok(Ok(()))), "{style:?}");
+        let stdin = stdin_bytes(&mut fixture.harness.written);
+        let frame: serde_json::Value = serde_json::from_str(stdin.strip_suffix('\n').ok_or("no newline")?)?;
+        assert_eq!(frame["message"]["content"], "finished at the grace", "{style:?}");
+        assert!(!stdin.contains("started after the grace"), "{style:?}: {stdin}");
+        assert_eq!(recorded_steps(&mut steps), ["end_input", "close"], "{style:?}");
+    }
+    Ok(())
+}
+
+/// The steps the scripted transport recorded so far, in order.
+fn recorded_steps(steps: &mut mpsc::UnboundedReceiver<&'static str>) -> Vec<&'static str> {
+    let mut order = Vec::new();
+    while let Ok(step) = steps.try_recv() {
+        order.push(step);
+    }
+    order
+}
+
+/// The close lands while the event loop is writing a prompt the CLI stopped draining partway. The frame is waited for
+/// only until each SDK's close grace, and the run still ends cleanly: TypeScript stops the process 2 seconds after
+/// `close()`, Python gives up on the write lock after 5. The process is stopped before input ends, so the CLI never
+/// reads the half line with an end of file behind it, and a prompt queued behind it is not written after the cut.
+#[tokio::test(start_paused = true)]
+async fn a_close_that_meets_a_stalled_write_ends_the_run_cleanly_at_the_close_grace()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (style, grace) in [
+        (crate::ArgvStyle::TypeScript, constants::TYPESCRIPT_CLOSE_GRACE),
+        (crate::ArgvStyle::Python, constants::PYTHON_CLOSE_WAIT),
+    ] {
+        let mut fixture = DriverFixture::new()?;
+        fixture.driver.argv_style = style;
+        fixture.driver.transport.write_delay = Some(Duration::from_secs(3600));
+        fixture.driver.transport.split = true;
+        let (steps, mut stepped) = mpsc::unbounded_channel();
+        fixture.driver.transport.steps = Some(steps);
+        let (stuck, stuck_written) = prompt_command("never drained");
+        let (behind, _behind_written) = prompt_command("queued behind");
+        for command in [stuck, behind] {
+            fixture.commands.try_send(command).map_err(|_| Error::DriverStopped)?;
+        }
+        let DriverFixture {
+            driver,
+            mut harness,
+            commands: _commands,
+            messages: _messages,
+            shutdown,
+        } = fixture;
+        let (terminal, terminated) = oneshot::channel();
+        let started = Instant::now();
+        // The close is requested once the first half of the frame is on stdin, so the write is already under way.
+        let close = async {
+            let head = harness.written.recv().await;
+            let sent = shutdown.send(());
+            (head, sent)
+        };
+        let ((head, sent), ()) = tokio::join!(close, driver.run(Ok(()), terminal));
+        assert!(sent.is_ok(), "{style:?}: the run ended before the close");
+        assert_eq!(started.elapsed(), grace, "{style:?}");
+        assert!(matches!(terminated.await?, Ok(())), "{style:?}");
+        assert!(!matches!(stuck_written.await, Ok(Ok(()))), "{style:?}");
+        let mut stdin = head.ok_or("nothing reached stdin")?;
+        stdin.push_str(&stdin_bytes(&mut harness.written));
+        assert!(!stdin.is_empty(), "{style:?}");
+        assert!(!stdin.contains('\n'), "{style:?}: {stdin}");
+        assert!(!stdin.contains("queued behind"), "{style:?}: {stdin}");
+        assert_eq!(
+            recorded_steps(&mut stepped),
+            ["kill", "end_input", "close"],
+            "{style:?}"
+        );
+    }
+    Ok(())
+}
+
+/// A write that finishes inside the opt-in write timeout is not cut short: the frame arrives whole and the prompt is
+/// taken.
+#[tokio::test(start_paused = true)]
+async fn a_write_inside_the_write_timeout_delivers_the_whole_frame() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.transport.write_delay = Some(Duration::from_secs(1));
+    fixture.driver.transport.split = true;
+    fixture.driver.limits.write_timeout = Some(crate::Timeout::new(Duration::from_secs(5)));
+    let (command, receiver) = prompt_command("in time");
+    let started = Instant::now();
+    fixture.driver.command(command).await?;
+    assert!(matches!(receiver.await?, Ok(())));
+    assert_eq!(started.elapsed(), Duration::from_secs(1));
+    assert!(!fixture.driver.frame_cut);
+    let stdin = stdin_bytes(&mut fixture.harness.written);
+    let frame: serde_json::Value = serde_json::from_str(stdin.strip_suffix('\n').ok_or("no newline")?)?;
+    assert_eq!(frame["message"]["content"], "in time");
+    fixture.finish().await
+}
+
+/// A pipe that stops draining partway through a frame fails the run with `WriteTimeout` once the opt-in write timeout
+/// passes. Half a line is on stdin, so the process is stopped before input ends and the CLI never reads it as a
+/// finished frame.
+#[tokio::test(start_paused = true)]
+async fn a_write_past_the_write_timeout_fails_the_run_and_stops_the_process_before_input_ends()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let limit = Duration::from_secs(5);
+    fixture.driver.transport.write_delay = Some(Duration::from_secs(3600));
+    fixture.driver.transport.split = true;
+    let (steps, mut stepped) = mpsc::unbounded_channel();
+    fixture.driver.transport.steps = Some(steps);
+    fixture.driver.limits.write_timeout = Some(crate::Timeout::new(limit));
+    let (stuck, stuck_written) = prompt_command("never drained");
+    fixture.commands.try_send(stuck).map_err(|_| Error::DriverStopped)?;
+    let (terminal, terminated) = oneshot::channel();
+    let started = Instant::now();
+    fixture.driver.run(Ok(()), terminal).await;
+    assert_eq!(started.elapsed(), limit);
+    let outcome = terminated.await?;
+    assert!(matches!(outcome, Err(Error::WriteTimeout)), "{outcome:?}");
+    assert!(!matches!(stuck_written.await, Ok(Ok(()))));
+    let stdin = stdin_bytes(&mut fixture.harness.written);
+    assert!(!stdin.is_empty() && !stdin.contains('\n'), "{stdin}");
+    assert_eq!(recorded_steps(&mut stepped), ["kill", "end_input", "close"]);
+    Ok(())
 }
 
 /// The close reached the driver ahead of commands queued before it: the prompts go to stdin in order and everything
@@ -382,6 +658,143 @@ async fn a_queued_prompt_that_cannot_be_written_stops_the_flush() -> Result<(), 
     assert!(matches!(
         fixture.driver.commands.try_recv(),
         Some(Command::Prompt { .. })
+    ));
+    fixture.finish().await
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_queue_flushes_prompts_in_order_without_applying_other_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    let (control, mut controlled) = oneshot::channel();
+    let (first, first_written) = oneshot::channel();
+    let (finish, mut input_finished) = oneshot::channel();
+    let (second, second_written) = oneshot::channel();
+    for command in [
+        Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("first queued prompt").into()),
+            response: first,
+        },
+        Command::FinishInput {
+            completion: Completion::Run,
+            written: None,
+            response: finish,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("second queued prompt").into()),
+            response: second,
+        },
+    ] {
+        assert!(fixture.commands.try_send(command).is_ok());
+    }
+    fixture.shutdown.send(()).map_err(|_| Error::DriverStopped)?;
+    let (terminal, terminated) = oneshot::channel();
+    fixture.driver.run(Ok(()), terminal).await;
+
+    assert!(matches!(terminated.await?, Ok(())));
+    assert!(matches!(first_written.await?, Ok(())));
+    assert!(matches!(second_written.await?, Ok(())));
+    for expected in ["first queued prompt", "second queued prompt"] {
+        let frame: serde_json::Value = serde_json::from_str(&fixture.harness.written.try_recv()?)?;
+        assert_eq!(
+            frame,
+            serde_json::json!({
+                "type": "user",
+                "message": {"role": "user", "content": expected},
+                "parent_tool_use_id": null,
+            })
+        );
+    }
+    assert!(fixture.harness.written.recv().await.is_none());
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(matches!(
+        input_finished.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_queue_stops_at_first_write_failure_without_draining_later_commands()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = DriverFixture::new()?;
+    fixture.driver.shutdown_seen = true;
+    fixture.harness.written.close();
+    let (control, mut controlled) = oneshot::channel();
+    let (first, mut first_written) = oneshot::channel();
+    let (second, mut second_written) = oneshot::channel();
+    let (finish, mut input_finished) = oneshot::channel();
+    for command in [
+        Command::Control {
+            operation: ControlOperation::Interrupt,
+            request: serde_json::json!({"subtype": "interrupt"}),
+            response: control,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("failed queued prompt").into()),
+            response: first,
+        },
+        Command::Prompt {
+            input: Box::new(crate::Prompt::from("later queued prompt").into()),
+            response: second,
+        },
+        Command::FinishInput {
+            completion: Completion::Run,
+            written: None,
+            response: finish,
+        },
+    ] {
+        assert!(fixture.commands.try_send(command).is_ok());
+    }
+
+    let unapplied = fixture.driver.write_queued_prompts().await;
+
+    assert!(matches!(
+        unapplied.as_slice(),
+        [Command::Control {
+            operation: ControlOperation::Interrupt,
+            ..
+        }]
+    ));
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        first_written.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
+    ));
+    assert!(matches!(
+        second_written.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        input_finished.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::Prompt { input, .. }) if input.to_wire_json()?["message"]["content"] == "later queued prompt"
+    ));
+    assert!(matches!(
+        fixture.driver.commands.try_recv(),
+        Some(Command::FinishInput { .. })
+    ));
+    assert!(fixture.driver.commands.try_recv().is_none());
+    assert_eq!(fixture.driver.next_id, 0);
+    assert!(fixture.driver.run_state.input_done.is_none());
+    drop(unapplied);
+    assert!(matches!(
+        controlled.try_recv(),
+        Err(oneshot::error::TryRecvError::Closed)
     ));
     fixture.finish().await
 }
@@ -661,8 +1074,12 @@ async fn the_request_counter_wraps_by_default() -> Result<(), Box<dyn std::error
     let mut fixture = DriverFixture::new()?;
     fixture.driver.argv_style = crate::ArgvStyle::Python;
     fixture.driver.next_id = u64::MAX;
-    assert!(fixture.driver.next_request_id()?.as_str().starts_with("req_0_"));
-    assert!(fixture.driver.next_request_id()?.as_str().starts_with("req_1_"));
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_0_"));
+    assert_eq!(fixture.driver.next_id, 0);
+    let id = fixture.driver.next_request_id()?;
+    assert!(id.as_str().starts_with("req_1_"));
+    assert_eq!(fixture.driver.next_id, 1);
     fixture.finish().await
 }
 

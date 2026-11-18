@@ -17,6 +17,11 @@ pub(super) const GITHUB_WEBHOOK_SECRET: ManagedCredentialTarget = ManagedCredent
     kind: CredentialKind::WebhookSecret,
 };
 
+pub(super) const GENERIC_WEBHOOK_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
+    source: SourceKind::Webhook,
+    kind: CredentialKind::WebhookSecret,
+};
+
 pub(super) const DISCORD_BOT_TOKEN: ManagedCredentialTarget = ManagedCredentialTarget {
     source: SourceKind::Discord,
     kind: CredentialKind::BotToken,

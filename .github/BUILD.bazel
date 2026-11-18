@@ -1,14 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-
-# The JavaScript sources of the GitHub Actions in this repository, copied to
-# the output tree so the action tests under //tests/github_actions can import
-# them by their relative path.
-js_library(
-    name = "actions",
-    srcs = glob(["actions/*/lib/**/*.mjs"]),
-    visibility = ["//tests/github_actions:__pkg__"],
-)
 
 # Lints every workflow, so a broken expression, a bad runner label, or a wrong
 # input to a local action fails here instead of on GitHub after the merge. The

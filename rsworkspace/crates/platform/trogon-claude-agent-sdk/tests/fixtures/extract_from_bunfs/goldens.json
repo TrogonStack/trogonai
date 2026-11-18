@@ -869,6 +869,49 @@
       ],
       "warnings": [],
       "files": {}
+    },
+    {
+      "id": "empty_embedded_file_is_extracted_and_reused",
+      "platform": "linux",
+      "uid": "real",
+      "name": "claude",
+      "content": "",
+      "embedded": "{root}/$bunfs/root/claude",
+      "setup": [],
+      "env": {
+        "CLAUDE_CODE_TMPDIR": "{root}/tmp"
+      },
+      "calls": 2,
+      "hash": "e3b0c44298fc1c14",
+      "returns": [
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude",
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude"
+      ],
+      "warnings": [],
+      "files": {
+        "{root}/tmp/claude-agent-sdk-{uid}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude-agent-sdk-{hash}"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}": {
+          "kind": "directory",
+          "mode": 448,
+          "nlink": 3,
+          "listing": [
+            "claude"
+          ]
+        },
+        "{root}/tmp/claude-agent-sdk-{uid}/claude-agent-sdk-{hash}/claude": {
+          "kind": "file",
+          "mode": 493,
+          "nlink": 1,
+          "content": ""
+        }
+      }
     }
   ],
   "joins": [

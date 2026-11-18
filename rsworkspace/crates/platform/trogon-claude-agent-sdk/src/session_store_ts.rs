@@ -20,7 +20,7 @@ use crate::{
     JsonObject, MessagePage, SdkSessionInfo, SessionEntry, SessionFiles, SessionId, SessionKey, SessionMessage,
     SessionMutationError, SessionProjectKey, SessionStore, SessionStoreOperation, SessionSubpath, SummaryDialect,
     constants::{DEFAULT_IMPORT_BATCH, MAX_IMPORT_BYTES},
-    js_object_order::js_ordered,
+    js_object_order::{js_ordered, js_ordered_object},
     session_files::valid_uuid,
     session_files_ts::session_info_from_lite,
     session_fork_ts::{ForkTsRequest, fork_entries, load_state_from_objects},
@@ -66,10 +66,7 @@ async fn load_objects(
     Ok(Some(
         entries
             .into_iter()
-            .filter_map(|entry| match js_ordered(Value::Object(entry.into_object())) {
-                Value::Object(object) => Some(object),
-                _ => None,
-            })
+            .map(|entry| js_ordered_object(entry.into_object()))
             .collect(),
     ))
 }
@@ -626,14 +623,7 @@ fn metadata_sidecar_entry(sidecar: Value) -> SessionEntry {
         }
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
-    SessionEntry::new(js_reordered(object))
-}
-
-fn js_reordered(object: JsonObject) -> JsonObject {
-    match js_ordered(Value::Object(object)) {
-        Value::Object(object) => object,
-        _ => JsonObject::new(),
-    }
+    SessionEntry::new(js_ordered_object(object))
 }
 
 /// `M7`: reads a transcript line by line into entries, skipping empty and unparseable lines, and appends them in
@@ -667,7 +657,7 @@ async fn append_jsonl_in_batches(
         }
         let line = String::from_utf8_lossy(&raw);
         match serde_json::from_str::<Value>(&line) {
-            Ok(Value::Object(object)) => batch.push(SessionEntry::new(js_reordered(object))),
+            Ok(Value::Object(object)) => batch.push(SessionEntry::new(js_ordered_object(object))),
             Ok(_) => {
                 tracing::warn!(path = %path.display(), "importSessionToStore: skipping non-object line");
                 continue;

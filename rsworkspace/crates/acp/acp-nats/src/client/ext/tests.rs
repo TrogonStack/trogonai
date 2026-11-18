@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ExtRequest, ExtResponse, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SessionNotification,
 };
@@ -67,7 +67,7 @@ impl ClientHandler for FailingClient {
 
     async fn ext_method(&self, _: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
         Err(agent_client_protocol::Error::new(
-            ErrorCode::InternalError.into(),
+            ErrorCode::INTERNAL_ERROR,
             "ext method failed",
         ))
     }
@@ -222,18 +222,18 @@ async fn notification_client_error_does_not_panic() {
 fn error_code_and_message_malformed_json() {
     let err = ExtError::MalformedJson("bad json".to_string());
     let (code, msg) = error_code_and_message(&err);
-    assert_eq!(code, ErrorCode::ParseError);
+    assert_eq!(code, ErrorCode::PARSE_ERROR);
     assert!(msg.contains("Malformed ext request JSON"));
 }
 
 #[test]
 fn error_code_and_message_client_error() {
     let err = ExtError::ClientError(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "bad request",
     ));
     let (code, msg) = error_code_and_message(&err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(msg, "bad request");
 }
 

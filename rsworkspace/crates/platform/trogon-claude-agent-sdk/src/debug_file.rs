@@ -11,19 +11,10 @@ use crate::{
     constants::SDK_DEBUG_ENV,
     environment_plan::Inherited,
     home_directory::{HomeDirectoryError, Platform, node_homedir, node_join},
+    session_prompt::js_env_truthy,
 };
 
 static DERIVED: OnceLock<Option<PathBuf>> = OnceLock::new();
-
-/// JavaScript `Te`: `1`, `true`, `yes` or `on`, ignoring case and surrounding whitespace.
-fn truthy(value: Option<&std::ffi::OsString>) -> bool {
-    value.is_some_and(|value| {
-        matches!(
-            value.to_string_lossy().trim().to_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
 
 /// The configuration directory, `Wt()`: `CLAUDE_CONFIG_DIR` when set (even empty), otherwise
 /// `path.join(os.homedir(), ".claude")`, normalized to NFC. `os.homedir()` reads the process environment, so the
@@ -43,7 +34,12 @@ pub(crate) fn path_for<E: EnvironmentVariable>(
     inherited: &Inherited,
     id: uuid::Uuid,
 ) -> Result<Option<PathBuf>, HomeDirectoryError> {
-    if !truthy(inherited.get(OsStr::new(SDK_DEBUG_ENV))) {
+    // `tg("DEBUG_CLAUDE_AGENT_SDK")`, which is `Te` of the variable.
+    if !js_env_truthy(
+        inherited
+            .get(OsStr::new(SDK_DEBUG_ENV))
+            .map(std::ffi::OsString::as_os_str),
+    ) {
         return Ok(None);
     }
     let platform = Platform::host();

@@ -1,20 +1,10 @@
-//! The JavaScript string and number semantics the browser SSE port depends on: the `\s` character class, `String(x)`
-//! on a parsed JSON value, `parseInt`, UTF-16 truncation, and the control-character strip the transport applies to
-//! text it logs or returns.
+//! The JavaScript string and number semantics the browser SSE port depends on: `String(x)` on a parsed JSON value,
+//! `parseInt`, UTF-16 truncation, and the control-character strip the transport applies to text it logs or returns.
 
 use serde_json::Value;
 use unicode_general_category::{GeneralCategory, get_general_category};
 
-use crate::{constants::JS_MAX_EXACT_INTEGER, settings_json::js_number};
-
-/// Whether a regular expression `\s` matches `ch` in JavaScript: the ECMAScript white space and line terminators.
-pub(crate) fn is_js_whitespace(ch: char) -> bool {
-    matches!(
-        ch,
-        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
-    )
-}
+use crate::{constants::JS_MAX_EXACT_INTEGER, session_prompt::js_space, settings_json::js_number};
 
 /// `String(value)` threw: a JSON object with its own `toString` key cannot be turned into a primitive.
 #[derive(Debug, PartialEq, Eq)]
@@ -45,7 +35,7 @@ pub(crate) fn js_to_string(value: &Value) -> Result<String, JsConversionError> {
 
 /// `parseInt(text, 10)`: the leading digits after optional white space and a sign, or `None` for NaN.
 fn js_parse_int(text: &str) -> Option<f64> {
-    let trimmed = text.trim_start_matches(is_js_whitespace);
+    let trimmed = text.trim_start_matches(js_space);
     let (negative, unsigned) = match trimmed.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),

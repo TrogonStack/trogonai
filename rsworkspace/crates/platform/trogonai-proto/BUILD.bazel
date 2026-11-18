@@ -1,10 +1,17 @@
-load("//.config/bazel:rust.bzl", "workspace_crate")
+load("//.config/bazel:rust.bzl", "workspace_compile_fail_library", "workspace_crate")
 
 workspace_crate(
     integration_tests = {
         "peer_semantic_fingerprint_contract": {},
         "recipient_receipt_sender": {},
     },
+)
+
+workspace_compile_fail_library(
+    crate_features = [
+        "schedules",
+        "chrono",
+    ],
 )
 
 # The committed output of `mise run proto:generate`, which

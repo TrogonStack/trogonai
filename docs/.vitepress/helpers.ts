@@ -209,34 +209,6 @@ function parseAdrNumber(number: string) {
   return Number.parseInt(number, 10);
 }
 
-type ConnectorSidebarRecord = {
-  slug: string;
-  name: string;
-};
-
-export async function readConnectorRecords(rootDir: string): Promise<ConnectorSidebarRecord[]> {
-  const connectorsDir = path.join(rootDir, "product", "connectors");
-  const entries = await fs.promises.readdir(connectorsDir, { withFileTypes: true });
-  const files = entries.filter(isFile).map(toFileName).filter(isNonIndexMarkdownFile);
-
-  return files
-    .map((fileName) => {
-      const filePath = path.join(connectorsDir, fileName);
-      const name = matter(fs.readFileSync(filePath, "utf-8")).data.connector?.name;
-
-      if (typeof name !== "string" || name.length === 0) {
-        throw new Error(`${filePath}\n\nConnector pages must set connector.name in frontmatter.`);
-      }
-
-      return { slug: path.basename(fileName, ".md"), name };
-    })
-    .sort((left, right) => left.name.localeCompare(right.name));
-}
-
-export function toConnectorSidebarItem(record: ConnectorSidebarRecord) {
-  return { text: record.name, link: `/product/connectors/${record.slug}` };
-}
-
 type ProductAreaRecord = {
   link: string;
   name: string;

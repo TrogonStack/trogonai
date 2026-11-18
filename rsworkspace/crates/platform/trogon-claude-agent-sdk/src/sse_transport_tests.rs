@@ -11,8 +11,10 @@
 use std::{
     error::Error as StdError,
     sync::atomic::{AtomicUsize, Ordering},
+    task::Poll,
 };
 
+use futures_util::poll;
 use serde_json::{Map, json};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -92,6 +94,9 @@ struct Seen {
 struct Server {
     origin: String,
     seen: Arc<Mutex<Seen>>,
+    first_post: Arc<Notify>,
+    /// How many GETs the server has read, published as each one is recorded.
+    gets_seen: watch::Receiver<usize>,
 }
 
 impl Server {
@@ -112,12 +117,28 @@ async fn serve(gets: Value, posts: Value) -> Result<Server, Box<dyn StdError>> {
     let origin = format!("http://{}", listener.local_addr()?);
     let seen = Arc::new(Mutex::new(Seen::default()));
     let shared = Arc::clone(&seen);
+    let first_post = Arc::new(Notify::new());
+    let posted = Arc::clone(&first_post);
+    let (got, gets_seen) = watch::channel(0);
+    let got = Arc::new(got);
     tokio::spawn(async move {
         while let Ok((socket, _)) = listener.accept().await {
-            tokio::spawn(connection(socket, gets.clone(), posts.clone(), Arc::clone(&shared)));
+            tokio::spawn(connection(
+                socket,
+                gets.clone(),
+                posts.clone(),
+                Arc::clone(&shared),
+                Arc::clone(&posted),
+                Arc::clone(&got),
+            ));
         }
     });
-    Ok(Server { origin, seen })
+    Ok(Server {
+        origin,
+        seen,
+        first_post,
+        gets_seen,
+    })
 }
 
 struct Request {
@@ -163,7 +184,14 @@ async fn read_request(socket: &mut TcpStream, buffer: &mut Vec<u8>) -> Option<Re
     Some(Request { method, headers, body })
 }
 
-async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<Mutex<Seen>>) {
+async fn connection(
+    mut socket: TcpStream,
+    gets: Value,
+    posts: Value,
+    seen: Arc<Mutex<Seen>>,
+    first_post: Arc<Notify>,
+    got: Arc<watch::Sender<usize>>,
+) {
     let mut buffer = Vec::new();
     while let Some(request) = read_request(&mut socket, &mut buffer).await {
         let is_post = request.method == "POST";
@@ -186,6 +214,12 @@ async fn connection(mut socket: TcpStream, gets: Value, posts: Value, seen: Arc<
             list.push(entry);
             list.len() - 1
         };
+        if is_post && index == 0 {
+            first_post.notify_one();
+        }
+        if !is_post {
+            got.send_replace(index + 1);
+        }
         let script = if is_post {
             posts.get(index).cloned().unwrap_or_else(|| json!({"status": 200}))
         } else {
@@ -294,7 +328,52 @@ fn without_uuids(posts: &mut Value) {
     }
 }
 
-async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
+async fn write_many(
+    transport: &SseTransport,
+    server: &Server,
+    amount: u64,
+    pending_writes: &mut tokio::task::JoinSet<Result<(), Error>>,
+) -> usize {
+    if amount == 0 {
+        return 0;
+    }
+    if transport
+        .shared
+        .write(&json!({"type": "user", "n": 0}).to_string())
+        .await
+        .is_err()
+    {
+        return 0;
+    }
+    server.first_post.notified().await;
+    let mut resolved = 1;
+    for n in 1..amount {
+        let shared = Arc::clone(&transport.shared);
+        let line = json!({"type": "user", "n": n}).to_string();
+        let mut write = Box::pin(async move { shared.write(&line).await });
+        // Cooperative scheduler yields must not be mistaken for queue backpressure.
+        match poll!(tokio::task::unconstrained(write.as_mut())) {
+            Poll::Ready(Ok(())) => resolved += 1,
+            Poll::Ready(Err(_)) => {}
+            Poll::Pending => {
+                pending_writes.spawn(write);
+            }
+        }
+    }
+    resolved
+}
+
+/// A recorded case's server and connected transport, before any of its actions run.
+struct Started {
+    golden: Value,
+    server: Server,
+    transport: SseTransport,
+    handle: SseHandle,
+    abort: CancellationToken,
+    events: Arc<Mutex<Vec<Value>>>,
+}
+
+async fn start(name: &str) -> Result<Started, Box<dyn StdError>> {
     let golden = golden(name)?;
     let spec = &golden["spec"];
     let server = serve(spec["gets"].clone(), spec["posts"].clone()).await?;
@@ -343,16 +422,62 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
         .with_time_divisor(divisor);
     let handle = transport.handle();
     transport.connect().await?;
+    Ok(Started {
+        golden,
+        server,
+        transport,
+        handle,
+        abort,
+        events,
+    })
+}
+
+/// The `snapshot` action.
+fn snapshot(started: &Started) -> Value {
+    let drops: Map<String, Value> = started
+        .handle
+        .drop_counts()
+        .into_iter()
+        .map(|(category, count)| (category.to_owned(), json!(count)))
+        .collect();
+    json!({
+        "ready": started.transport.is_ready(),
+        "drops": drops,
+        "last": started.handle.last_sequence_num(),
+        "events": std::mem::take(&mut *locked(&started.events)),
+    })
+}
+
+/// What the server saw, with the results, in the golden's terms.
+fn finish(started: &Started, results: Vec<Value>) -> Result<Replay, Box<dyn StdError>> {
+    let (gets, mut posts) = {
+        let seen = locked(&started.server.seen);
+        (Value::Array(seen.gets.clone()), Value::Array(seen.posts.clone()))
+    };
+    without_uuids(&mut posts);
+    let origin = started.server.origin.as_str();
+    Ok(Replay {
+        results: hosted(&Value::Array(results), origin)?,
+        gets: hosted(&gets, origin)?,
+        posts: hosted(&posts, origin)?,
+        golden: started.golden.clone(),
+    })
+}
+
+async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
+    let mut started = start(name).await?;
+    let spec = started.golden["spec"].clone();
     let mut results = Vec::new();
+    let mut pending_writes = tokio::task::JoinSet::new();
     for action in spec["actions"].as_array().into_iter().flatten() {
         let name = action[0].as_str().unwrap_or_default();
         let argument = &action[1];
         let result = match name {
-            "read" => match timeout(Duration::from_secs(2), transport.read_message()).await {
+            "read" => match timeout(Duration::from_secs(2), started.transport.read_message()).await {
                 Err(_) => json!({"timeout": true}),
                 Ok(Ok(Some(message))) => {
-                    let ccr = ccr_json(handle.ccr_event(&message));
-                    handle.mark_delivered(&message);
+                    let ccr = ccr_json(started.handle.ccr_event(&message));
+                    started.handle.mark_delivered(&message);
                     json!({"message": message, "ccr": ccr})
                 }
                 Ok(Ok(None)) => json!({"done": true}),
@@ -360,85 +485,62 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
             },
             "write" => {
                 let line = argument.as_str().unwrap_or_default();
-                match timeout(Duration::from_secs(2), transport.write(line)).await {
+                match timeout(Duration::from_secs(2), started.transport.write(line)).await {
                     Err(_) => json!({"error": "write timeout"}),
                     Ok(Ok(())) => json!({"ok": true}),
                     Ok(Err(error)) => json!({"error": error.to_string()}),
                 }
             }
             "writeMany" => {
-                let resolved = Arc::new(AtomicUsize::new(0));
-                for n in 0..argument.as_u64().unwrap_or_default() {
-                    let shared = Arc::clone(&transport.shared);
-                    let resolved = Arc::clone(&resolved);
-                    let line = json!({"type": "user", "n": n}).to_string();
-                    tokio::spawn(async move {
-                        if shared.write(&line).await.is_ok() {
-                            resolved.fetch_add(1, Ordering::SeqCst);
-                        }
-                    });
-                }
-                sleep(Duration::from_millis(300)).await;
-                json!({"resolved": resolved.load(Ordering::SeqCst)})
+                let resolved = write_many(
+                    &started.transport,
+                    &started.server,
+                    argument.as_u64().unwrap_or_default(),
+                    &mut pending_writes,
+                )
+                .await;
+                json!({"resolved": resolved})
             }
             "waitGets" => {
                 let wanted = usize::try_from(argument.as_u64().unwrap_or_default())?;
-                json!({"reached": until(|| server.gets() >= wanted).await})
+                json!({"reached": until(|| started.server.gets() >= wanted).await})
             }
             "waitPosts" => {
                 let wanted = usize::try_from(argument.as_u64().unwrap_or_default())?;
-                json!({"reached": until(|| server.posts() >= wanted).await})
+                json!({"reached": until(|| started.server.posts() >= wanted).await})
             }
-            "waitReady" => json!({"reached": until(|| transport.is_ready()).await}),
+            "waitReady" => json!({"reached": until(|| started.transport.is_ready()).await}),
             "settle" => {
                 sleep(Duration::from_millis(argument.as_u64().unwrap_or_default())).await;
                 json!({"settled": true})
             }
-            "suspend" => json!({"suspended": handle.suspend()}),
-            "resume" => json!({"resumed": handle.resume()}),
+            "suspend" => json!({"suspended": started.handle.suspend()}),
+            "resume" => json!({"resumed": started.handle.resume()}),
             "expect" => {
-                handle.expect_control_response(argument.as_str().unwrap_or_default());
+                started
+                    .handle
+                    .expect_control_response(argument.as_str().unwrap_or_default());
                 json!({"expected": true})
             }
             "abort" => {
-                abort.cancel();
+                started.abort.cancel();
                 sleep(Duration::from_millis(20)).await;
                 json!({"aborted": true})
             }
             "close" => {
-                transport.close().await?;
+                started.transport.close().await?;
+                while let Some(result) = pending_writes.join_next().await {
+                    result??;
+                }
                 sleep(Duration::from_millis(10)).await;
                 json!({"closed": true})
             }
-            "snapshot" => {
-                let drops: Map<String, Value> = handle
-                    .drop_counts()
-                    .into_iter()
-                    .map(|(category, count)| (category.to_owned(), json!(count)))
-                    .collect();
-                json!({
-                    "ready": transport.is_ready(),
-                    "drops": drops,
-                    "last": handle.last_sequence_num(),
-                    "events": std::mem::take(&mut *locked(&events)),
-                })
-            }
+            "snapshot" => snapshot(&started),
             other => return Err(format!("unknown action {other}").into()),
         };
         results.push(json!([name, result]));
     }
-    let (gets, mut posts) = {
-        let seen = locked(&server.seen);
-        (Value::Array(seen.gets.clone()), Value::Array(seen.posts.clone()))
-    };
-    without_uuids(&mut posts);
-    let origin = server.origin.as_str();
-    Ok(Replay {
-        results: hosted(&Value::Array(results), origin)?,
-        gets: hosted(&gets, origin)?,
-        posts: hosted(&posts, origin)?,
-        golden,
-    })
+    finish(&started, results)
 }
 
 fn without_logs(results: &mut Value) {
@@ -450,12 +552,59 @@ fn without_logs(results: &mut Value) {
 }
 
 async fn replays(name: &str) -> TestResult {
-    let replay = replay(name).await?;
+    matches_golden(&replay(name).await?, name)
+}
+
+fn matches_golden(replay: &Replay, name: &str) -> TestResult {
     let mut expected = replay.golden["results"].clone();
     without_logs(&mut expected);
     assert_eq!(replay.results, expected, "{name}: results");
     assert_eq!(replay.gets, replay.golden["gets"], "{name}: stream requests");
     assert_eq!(replay.posts, replay.golden["posts"], "{name}: writes");
+    Ok(())
+}
+
+#[tokio::test]
+async fn queue_snapshot_waits_for_admission_after_the_sampling_timer_elapsed() -> TestResult {
+    let server = serve(json!([hold()]), json!([{"status": 200, "end": "hang"}])).await?;
+    let options = SseOptions::new(
+        format!("{}/stream", server.origin),
+        format!("{}/send", server.origin),
+        "session-1",
+    );
+    let mut transport = SseTransport::new(options).with_time_divisor(100);
+    let mut ready = transport.shared.first_ready.subscribe();
+    transport.connect().await?;
+    assert!(
+        ready
+            .wait_for(Option::is_some)
+            .await?
+            .as_ref()
+            .is_some_and(Result::is_ok)
+    );
+    let mut pending_writes = tokio::task::JoinSet::new();
+    tokio::time::pause();
+    let mut batch = Box::pin(write_many(&transport, &server, 1005, &mut pending_writes));
+    assert!(poll!(batch.as_mut()).is_pending());
+    let mut advance = Box::pin(tokio::time::advance(Duration::from_millis(300)));
+    let _ = poll!(advance.as_mut());
+    drop(advance);
+    tokio::time::resume();
+    assert_eq!(batch.await, 1001);
+    assert_eq!(pending_writes.len(), 4);
+    {
+        let next = pending_writes.join_next();
+        tokio::pin!(next);
+        assert!(poll!(next.as_mut()).is_pending());
+    }
+    assert_eq!(server.posts(), 1);
+    transport.close().await?;
+    let mut settled_after_close = 0;
+    while let Some(result) = pending_writes.join_next().await {
+        result??;
+        settled_after_close += 1;
+    }
+    assert_eq!(settled_after_close, 4);
     Ok(())
 }
 
@@ -548,9 +697,63 @@ async fn a_silent_stream_is_reconnected() -> TestResult {
     replays("liveness_timeout_reconnects").await
 }
 
-#[tokio::test]
+/// `connect_timeout_reconnects` on a paused clock. The test moves time past the connect timeout and the reconnect
+/// wait itself, each only once the stream task is waiting on it, so neither wait races the machine's speed.
+#[tokio::test(start_paused = true)]
 async fn a_stream_that_never_answers_is_reconnected() -> TestResult {
-    replays("connect_timeout_reconnects").await
+    let name = "connect_timeout_reconnects";
+    // While a blocking task runs, a paused clock does not auto-advance, so it stays put while the test waits on the
+    // loopback sockets. Only the test lets it go, once the case is recorded or by returning early, so no wall-clock
+    // bound can free it on a loaded machine and let the liveness timeout end the second stream and open a third.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    // Nothing is ever sent: `recv` returns once the sender is gone.
+    let clock_hold = tokio::task::spawn_blocking(move || {
+        let _ = held.recv();
+    });
+    let mut started = start(name).await?;
+    let shared = Arc::clone(&started.transport.shared);
+    let mut ready = shared.first_ready.subscribe();
+
+    // Each wait is reduced to a flag at once, so the `watch::Ref` it returns does not keep `started` borrowed.
+    let first_seen = started.server.gets_seen.wait_for(|gets| *gets >= 1).await.is_ok();
+    // The first request hangs, so only the connect timeout ends it.
+    tokio::time::advance(shared.scaled(CONNECT_TIMEOUT)).await;
+    // The stream task arms the reconnect wait in the same poll that sees the connect timeout fire, so once the attempt
+    // is counted the wait is pending at the paused instant.
+    let mut yields = 0;
+    while shared.state().reconnect_attempts == 0 {
+        yields += 1;
+        if yields > 1_000 {
+            return Err("the connect timeout never ended the first request".into());
+        }
+        tokio::task::yield_now().await;
+    }
+    tokio::time::advance(shared.scaled(reconnect_delay(1))).await;
+    let second_seen = started.server.gets_seen.wait_for(|gets| *gets >= 2).await.is_ok();
+    let wait_gets = json!({"reached": first_seen && second_seen});
+    let settled = ready.wait_for(Option::is_some).await;
+    let opened = settled.is_ok_and(|value| value.as_ref().is_some_and(Result::is_ok));
+    let wait_ready = json!({"reached": opened && started.transport.is_ready()});
+    let results = vec![
+        json!(["waitGets", wait_gets]),
+        json!(["waitReady", wait_ready]),
+        json!(["snapshot", snapshot(&started)]),
+    ];
+    let replay = finish(&started, results)?;
+    drop(release);
+    clock_hold.await?;
+    let actions: Vec<&str> = replay.golden["spec"]["actions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|action| action[0].as_str())
+        .collect();
+    assert_eq!(
+        actions,
+        ["waitGets", "waitReady", "snapshot"],
+        "{name}: the steps above"
+    );
+    matches_golden(&replay, name)
 }
 
 #[tokio::test]

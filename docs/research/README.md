@@ -12,6 +12,9 @@ corpora. Entries are public repositories unless the line says otherwise.
 - [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)
 - [google/adk-python](https://github.com/google/adk-python)
 - [a2aproject/A2A](https://github.com/a2aproject/A2A)
+- [standardagents/spec](https://github.com/standardagents/spec), studied in the
+  [Standard Agents dossier](./agent-platform/products/standard-agents.md) and
+  [platform comparison](./agent-platform/contract-impact-standard-agents.md)
 - [langchain-ai/deepagentsjs](https://github.com/langchain-ai/deepagentsjs)
 - [langchain-ai/docs](https://github.com/langchain-ai/docs)
 - [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)

@@ -215,6 +215,42 @@ async fn t15_a_custom_transport_drives_a_full_session_through_the_trait() -> Tes
 }
 
 #[tokio::test]
+async fn python_disconnect_keeps_an_unbounded_initialize_pending_until_its_caller_leaves() -> TestResult {
+    let metrics = tokio::runtime::Handle::current().metrics();
+    let initial_tasks = metrics.num_alive_tasks();
+    let (transport, mut peer) = transport(false);
+    let connecting = tokio::spawn(ClaudeSdkClient::connect_with_transport(
+        ClaudeAgentOptions {
+            argv_style: ArgvStyle::Python,
+            ..ClaudeAgentOptions::default()
+        },
+        transport,
+    ));
+    peer.accept_initialize().await?;
+    let client = connecting.await??;
+    let handle = client.handle();
+    let mut reinitializing = Box::pin(handle.reinitialize());
+    assert!(futures_util::poll!(reinitializing.as_mut()).is_pending());
+    let request = peer.read().await?;
+    assert_eq!(request["type"], "control_request");
+    assert_eq!(request["request"]["subtype"], "initialize");
+
+    client.disconnect().await?;
+    assert_eq!(peer.calls.count("end_input"), 1);
+    assert_eq!(peer.calls.count("close"), 1);
+    assert!(futures_util::poll!(reinitializing.as_mut()).is_pending());
+
+    drop(reinitializing);
+    timeout(Duration::from_secs(5), async {
+        while metrics.num_alive_tasks() != initial_tasks {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn t15_the_end_of_the_message_stream_ends_the_run() -> TestResult {
     let (transport, mut peer) = transport(false);
     let connecting = tokio::spawn(ClaudeSdkClient::connect_with_transport(options()?, transport));

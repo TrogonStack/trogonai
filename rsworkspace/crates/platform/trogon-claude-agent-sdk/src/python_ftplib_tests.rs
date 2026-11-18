@@ -24,7 +24,7 @@ type Commands = Arc<Mutex<Vec<Vec<String>>>>;
 /// Each placeholder of the fixture and the value it stands for in this run.
 type Placeholders = Vec<(&'static str, String)>;
 
-/// The goldens of `urlopen` over FTP, recorded against CPython 3.12 with a scripted loopback server.
+/// The goldens of `urlopen` over FTP that `.config/mise/lib/claude-sdk-freshness/python_ftp_goldens.py` records.
 const FIXTURE: &str = include_str!("../tests/fixtures/sdk_mcp/python_ftp.json");
 
 /// How long the scripted server waits for a data connection, as the recording server did.

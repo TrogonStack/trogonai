@@ -23,14 +23,22 @@
 //! # Features
 //!
 //! `decider` adds `PolicyAuthorizer`, which plugs the evaluator into the
-//! decider runtime's `CommandAuthorizer` seam. The core compiles and tests
-//! without it.
+//! decider runtime's `CommandAuthorizer` seam.
 //!
-//! # Not yet here
+//! `proto` adds `TryFrom` conversions from the generated `policy` messages
+//! (subjects, rule refs, holds, model ceilings, and the egress and delegation
+//! permissions) into the types of this crate, failing with
+//! [`ProtoConversionError`]. A projection that reads decider state uses them
+//! to fill a [`PolicySnapshotBuilder`].
 //!
-//! The types are shaped to convert to and from the generated policy messages
-//! (`PolicyRuleRef`, the permission and ceiling states) and no conversion is
-//! written yet, so this crate does not depend on the generated code.
+//! The core compiles and tests without either.
+//!
+//! # Not converted
+//!
+//! Policy state wraps a history in a `Missing` or `Holds` arm and carries the
+//! stream revision outside the message. The snapshot represents a missing
+//! history by leaving it out, so the projection owns that step and converts
+//! the messages inside it.
 
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
@@ -72,6 +80,9 @@ mod staleness_budget;
 mod stream_revision;
 mod subject;
 mod view;
+
+#[cfg(feature = "proto")]
+mod proto;
 
 #[cfg(feature = "decider")]
 mod action_mapper;
@@ -118,6 +129,9 @@ pub use staleness_budget::{StalenessBudget, StalenessBudgetError};
 pub use stream_revision::StreamRevision;
 pub use subject::Subject;
 pub use view::PolicyView;
+
+#[cfg(feature = "proto")]
+pub use proto::ProtoConversionError;
 
 #[cfg(feature = "decider")]
 pub use action_mapper::{ActionMapper, agent_of};

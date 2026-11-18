@@ -3,7 +3,7 @@
 
 use super::{LocalMcpSession, McpServerError, RequestId, ServerState, tool_error};
 use crate::{
-    CallbackError, CancellationToken, JsonObject, McpToolRequest, SdkTool, SdkTools,
+    CallbackError, CancellationToken, JsonObject, McpToolArgumentsError, McpToolRequest, SdkTool, SdkTools,
     constants::{self, SUPPORTED_PROTOCOL_VERSIONS},
     sdk_mcp_js::stringify_primitive,
     sdk_mcp_regexp, sdk_mcp_zod,
@@ -240,11 +240,10 @@ fn listed_input_schema(tool: &SdkTool) -> JsonObject {
 /// a `pattern` is an ECMAScript `RegExp`; the `jsonschema` regex engine rejects ECMAScript syntax such as a
 /// named backreference, and the draft-07 meta-schema asserts `format: regex` on every `pattern`. So each
 /// `pattern` moves to a keyword that runs the ECMAScript engine, and the rest compiles as before.
-fn call_validator(schema: &JsonObject) -> Result<jsonschema::Validator, String> {
+fn call_validator(schema: &JsonObject) -> Result<jsonschema::Validator, ValidationError<'static>> {
     jsonschema::options()
         .with_keyword(constants::ECMA_PATTERN, ecma_pattern)
         .build(&Value::Object(ecma_patterns(schema)))
-        .map_err(|error| error.to_string())
 }
 
 /// `schema` with each string `pattern` in a schema position renamed to `constants::ECMA_PATTERN`, keys in order.
@@ -382,7 +381,7 @@ async fn call_tool(
     // Compiled under the draft the listing advertises, so a draft-07 tuple (`items` as a list) compiles.
     let schema = match call_validator(&listed_input_schema(tool)) {
         Ok(schema) => schema,
-        Err(error) => return Ok(Ok(tool_error(error))),
+        Err(error) => return Ok(Ok(tool_error(error.to_string()))),
     };
     let Ok(prepared) = tool.validation().prepare(declared.as_json()) else {
         return Ok(Ok(tool_error(format!(
@@ -399,10 +398,7 @@ async fn call_tool(
         issues.push(custom(Vec::new()));
     }
     if !issues.is_empty() {
-        return Ok(Ok(tool_error(format!(
-            "MCP error -32602: Input validation error: Invalid arguments for tool {name}: {}",
-            pretty(&issues)
-        ))));
+        return Ok(Ok(tool_error(invalid_arguments(name, &pretty(&issues)))));
     }
     let arguments = match parsed.value {
         Some(Value::Object(arguments)) => arguments,
@@ -422,8 +418,16 @@ async fn call_tool(
             }
         }
         Err(CallbackError::Cancelled) => Err(CallbackError::Cancelled.into()),
-        Err(CallbackError::Failed(error)) => Ok(Ok(tool_error(error.to_string()))),
+        Err(CallbackError::Failed(error)) => Ok(Ok(tool_error(match error.downcast_ref::<McpToolArgumentsError>() {
+            Some(invalid) => invalid_arguments(name, invalid.message()),
+            None => error.to_string(),
+        }))),
     }
+}
+
+/// The message of the `-32602` `McpError` that `validateToolInput` throws, which `createToolError` answers with.
+fn invalid_arguments(name: &str, detail: &str) -> String {
+    format!("MCP error -32602: Input validation error: Invalid arguments for tool {name}: {detail}")
 }
 
 /// The zod issues of `CallToolRequestSchema.params`.

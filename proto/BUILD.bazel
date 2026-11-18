@@ -8,7 +8,11 @@ filegroup(
     srcs = glob(["**/*.proto"]) + [
         "//proto/trogonai/scheduler/schedules/v1:sources",
     ],
-    visibility = ["//tsworkspace/packages/proto:__pkg__"],
+    visibility = [
+        "//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__",
+        "//tests/proto:__pkg__",
+        "//tsworkspace/packages/proto:__pkg__",
+    ],
 )
 
 _WORKSPACE = [
@@ -16,6 +20,21 @@ _WORKSPACE = [
     "//:buf.yaml",
     ":sources",
 ]
+
+genrule(
+    name = "schedules_descriptor_set",
+    srcs = _WORKSPACE + [":buf_cache"],
+    outs = ["trogon_schedules_decider.binpb"],
+    cmd = "work=$$(mktemp -d) && trap 'rm -rf \"$$work\"' EXIT && " +
+          "TEST_TMPDIR=$$work $(execpath buf_test.sh) $(execpath //.config/bazel:buf) " +
+          "$(execpath :buf_cache) schedules-descriptor $$PWD/$@ -- " +
+          "$(execpath //:buf.lock) $(execpath //:buf.yaml) $(execpaths :sources)",
+    tools = [
+        "buf_test.sh",
+        "//.config/bazel:buf",
+    ],
+    visibility = ["//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__"],
+)
 
 # The registry modules pinned in buf.lock. Fetching them is the only step that
 # needs the network; the tests below run offline from this archive.
@@ -32,7 +51,11 @@ genrule(
         "buf_cache.sh",
         "//.config/bazel:buf",
     ],
-    visibility = ["//tsworkspace/packages/proto:__pkg__"],
+    visibility = [
+        "//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__",
+        "//tests/proto:__pkg__",
+        "//tsworkspace/packages/proto:__pkg__",
+    ],
 )
 
 exports_files(
@@ -130,8 +153,8 @@ sh_test(
     data = _WORKSPACE + [
         ":buf_cache",
         ":run_contract_validator",
-        "//.config/mise:config.toml",
         "//.config/bazel:buf",
+        "//.config/mise:config.toml",
         "//tests/proto:contracts",
     ],
 )

@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
 use async_nats::header::HeaderMap;
@@ -203,25 +203,25 @@ async fn handle_success_flush_failure_exercises_warn_path() {
 fn error_code_and_message_invalid_request_returns_invalid_params() {
     let tr_err = TerminalReleaseError::InvalidRequest("bad".to_string());
     let (code, message) = error_code_and_message(&tr_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "bad");
 }
 
 #[test]
 fn error_code_and_message_client_error_preserves_code_and_message() {
-    let inner = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "params is null");
+    let inner = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "params is null");
     let tr_err = TerminalReleaseError::ClientError(inner);
     let (code, message) = error_code_and_message(&tr_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "params is null");
 }
 
 #[test]
 fn error_code_and_message_client_error_preserves_client_code() {
-    let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+    let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "denied");
     let tr_err = TerminalReleaseError::ClientError(client_err);
     let (code, message) = error_code_and_message(&tr_err);
-    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "denied");
 }
 
@@ -231,7 +231,7 @@ fn terminal_release_error_display() {
     assert_eq!(invalid_params.to_string(), "invalid request: bad params");
 
     let client_err = TerminalReleaseError::ClientError(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "client fail",
     ));
     assert_eq!(client_err.to_string(), "client error: client fail");
@@ -243,7 +243,7 @@ fn terminal_release_error_source() {
     assert!(invalid_params.source().is_none());
 
     let client_err = TerminalReleaseError::ClientError(agent_client_protocol::Error::new(
-        ErrorCode::InvalidParams.into(),
+        ErrorCode::INVALID_PARAMS,
         "client fail",
     ));
     assert!(client_err.source().is_some());

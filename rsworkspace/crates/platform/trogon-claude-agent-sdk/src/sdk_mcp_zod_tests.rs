@@ -38,5 +38,5 @@ fn js_helpers_follow_javascript_semantics() {
 }
 
 fn sdk_js_trim(text: &str) -> &str {
-    sdk_mcp_js::trim(text)
+    crate::session_prompt::js_trim(text)
 }

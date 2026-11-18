@@ -21,7 +21,7 @@ use crate::connect::build_options;
 use crate::telemetry::fixture_diagnostics::FixtureDiagnostics;
 use crate::tls::NatsTls;
 
-const NATS_IMAGE_TAG: &str = "2.10.14";
+const NATS_IMAGE_TAG: &str = "2.14.2-alpine";
 const NATS_CLIENT_PORT: u16 = 4222;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const SERVER_NAMES: [&str; 3] = ["localhost", "127.0.0.1", "::1"];

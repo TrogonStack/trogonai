@@ -269,14 +269,8 @@ impl ClaudeAgentOptions {
     /// The variable is read from the process environment, never from `ClaudeAgentOptions::env`. Pass the value the
     /// parent process has for it.
     pub fn captures_sdk_mcp_manifests(&self, disable_variable: Option<&std::ffi::OsStr>) -> bool {
-        self.capture_sdk_mcp_manifests.unwrap_or_else(|| {
-            !disable_variable.is_some_and(|value| {
-                matches!(
-                    value.to_string_lossy().trim().to_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
-            })
-        })
+        self.capture_sdk_mcp_manifests
+            .unwrap_or_else(|| !crate::session_prompt::js_env_truthy(disable_variable))
     }
 }
 
@@ -394,7 +388,9 @@ pub struct ClaudeAgentOptions {
     /// `AbortError("Claude Code process aborted by user")`; a token already cancelled makes `connect` fail with that
     /// error. `None` uses a fresh token, which `abort()` cancels. Closing the client does not cancel it.
     pub abort_controller: Option<crate::CancellationToken>,
-    /// TypeScript `spawnClaudeCodeProcess`: start the CLI with this instead of the SDK's own spawn.
+    /// TypeScript `spawnClaudeCodeProcess`: start the CLI with this instead of the SDK's own spawn. The SDK's own
+    /// spawn passes the child only its stdio under the Python dialect, and on Apple platforms under the TypeScript
+    /// one, as the upstream SDKs do; with this function, which descriptors the child keeps is the caller's choice.
     pub spawn_claude_code_process: Option<crate::SpawnClaudeCodeProcess>,
     /// TypeScript `onProcessSpawned`: told the process id when the SDK starts the CLI itself.
     pub on_process_spawned: Option<crate::OnProcessSpawned>,

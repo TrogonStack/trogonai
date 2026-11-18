@@ -9,11 +9,10 @@ test --test_output=errors
 
 # CI logs have no terminal to redraw the progress line in place, so every update
 # became a new line and buried the errors. Keep warnings, errors, failing test
-# output and the summary of tests that did not pass.
+# output, cache statistics and the test summary.
 common:ci --curses=no
 common:ci --noshow_loading_progress
 common:ci --show_progress_rate_limit=60
-common:ci --ui_event_filters=-info
 build:ci --show_result=0
 test:ci --test_summary=terse
 
@@ -25,14 +24,13 @@ common:ci --experimental_disk_cache_gc_max_size=4G
 common:ci --experimental_disk_cache_gc_idle_delay=0s
 
 # Lint checks run as aspects over the Rust targets, so that `bazel build
-# --config=lint //...` checks the same targets CI builds. The checks are an
-# output group, so a build with this config also fails on their findings;
+# --config=lint //...` checks the same targets CI builds. Select only the check
+# output groups to avoid rebuilding ordinary artifacts after coverage;
 # --keep_going reports every finding instead of the first.
 build:lint --keep_going
 build:lint --aspects=//.config/bazel:rustfmt.bzl%rustfmt_aspect
-build:lint --output_groups=+rustfmt_checks
 build:lint --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
-build:lint --output_groups=+clippy_checks
+build:lint --output_groups=rustfmt_checks,clippy_checks
 build:lint --@rules_rust//rust/settings:clippy.toml=//rsworkspace:clippy.toml
 # Crate lint levels replace the aspect's default of denying warnings.
 build:lint --@rules_rust//rust/settings:clippy_flag=-Dwarnings

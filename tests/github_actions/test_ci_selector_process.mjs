@@ -28,7 +28,7 @@ function fixture(t) {
     return git('rev-parse', 'HEAD');
   };
   git('init', '--quiet', '-b', 'main');
-  for (const name of ['ci', 'codeql']) write(`.github/filters/${name}.yml`, fs.readFileSync(path.join(root, `.github/filters/${name}.yml`)));
+  write('.github/filters/codeql.yml', fs.readFileSync(path.join(root, '.github/filters/codeql.yml')));
   write('rsworkspace/src/lib.rs', 'before');
   commit();
 
@@ -51,7 +51,7 @@ function fixture(t) {
         ...env, PATH: [path.join(directory, 'bin'), path.dirname(process.execPath), env.PATH].join(path.delimiter),
         GITHUB_WORKSPACE: directory, GITHUB_EVENT_PATH: path.join(directory, 'event.json'),
         GITHUB_EVENT_NAME: eventName, GITHUB_REPOSITORY: 'example/project', GITHUB_SHA: git('rev-parse', 'HEAD'),
-        GITHUB_OUTPUT: path.join(directory, 'output'), CI_FILTERS: '.github/filters/ci.yml', ...overrides,
+        GITHUB_OUTPUT: path.join(directory, 'output'), CI_FILTERS: '.github/filters/codeql.yml', ...overrides,
       },
     });
     const output = fs.readFileSync(path.join(directory, 'output'), 'utf8');
@@ -73,11 +73,11 @@ function failed(result) {
 test('push compares real before/head commits and keeps the canary fix selective', (t) => {
   const f = fixture(t); const before = f.git('rev-parse', 'HEAD');
   f.write('.config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip', 'change');
-  f.write('buf.gen.yaml', 'change');
+  f.write('tsworkspace/apps/console/src/index.ts', 'change');
   const after = f.commit();
   const result = f.run('push', { before, after });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.values, { rust: 'false', go: 'false', proto: 'true', changes: '["proto"]' });
+  assert.deepEqual(result.values, { go: 'false', 'javascript-typescript': 'true', rust: 'false', changes: '["javascript-typescript"]' });
   assert.deepEqual(result.calls, []);
 });
 
@@ -86,11 +86,8 @@ test('initial pushes select every check without comparing a nonexistent commit',
   for (const before of [undefined, null, '', '0'.repeat(40)]) {
     const result = f.run('push', { before, after });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.values, { rust: 'true', go: 'true', proto: 'true', changes: '["rust","go","proto"]' });
+    assert.deepEqual(result.values, { go: 'true', 'javascript-typescript': 'true', rust: 'true', changes: '["go","javascript-typescript","rust"]' });
     assert.deepEqual(result.calls, []);
-    const codeql = f.run('push', { before, after }, [], { CI_FILTERS: '.github/filters/codeql.yml' });
-    assert.equal(codeql.status, 0, codeql.stderr);
-    assert.equal(codeql.values.changes, '["go","javascript-typescript","rust"]');
   }
 });
 
@@ -98,7 +95,7 @@ test('manual dispatch selects every check without consulting the API', (t) => {
   const f = fixture(t);
   const result = f.run('workflow_dispatch', {});
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.values, { rust: 'true', go: 'true', proto: 'true', changes: '["rust","go","proto"]' });
+  assert.deepEqual(result.values, { go: 'true', 'javascript-typescript': 'true', rust: 'true', changes: '["go","javascript-typescript","rust"]' });
   assert.deepEqual(result.calls, []);
   failed(f.run('schedule', {}));
 });
@@ -132,7 +129,7 @@ test('PR metadata permits an empty complete list and selects only CodeQL input l
   const f = fixture(t);
   const empty = f.run('pull_request', event(), [metadata(0), [], metadata(0)]);
   assert.equal(empty.status, 0, empty.stderr); assert.equal(empty.values.changes, '[]');
-  const rust = f.run('pull_request', event(), [metadata(1), [[row('rsworkspace/src/lib.rs')]], metadata(1)], { CI_FILTERS: '.github/filters/codeql.yml' });
+  const rust = f.run('pull_request', event(), [metadata(1), [[row('rsworkspace/src/lib.rs')]], metadata(1)]);
   assert.equal(rust.status, 0, rust.stderr); assert.equal(rust.values.changes, '["rust"]');
 });
 
@@ -184,6 +181,6 @@ test('unknown push history, malformed SHAs and mismatched event commits fail clo
 test('repository and filter schema errors do not publish partial selection output', (t) => {
   const f = fixture(t);
   failed(f.run('pull_request', { ...event(), repository: { full_name: 'another/project' } }));
-  f.write('.github/filters/ci.yml', 'rust: ["rsworkspace/**"]\n');
+  f.write('.github/filters/codeql.yml', 'rust: ["rsworkspace/**"]\n');
   failed(f.run('pull_request', event(), [metadata(0), [], metadata(0)]));
 });

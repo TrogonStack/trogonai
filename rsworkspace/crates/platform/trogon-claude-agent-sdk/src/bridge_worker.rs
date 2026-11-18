@@ -39,7 +39,7 @@ use serde_json::{Map, Value};
 use crate::SensitiveString;
 use crate::adapters::HttpExecute;
 use crate::bridge_client::{USER_AGENT, client_platform, header_text};
-use crate::bridge_js::{js_number, js_parse_int, plain_detail, safe_integer};
+use crate::bridge_js::{js_parse_int, plain_detail, safe_integer};
 use crate::bridge_types::SessionState;
 use crate::bridge_worker_delivery::{DeliveryAck, DeliveryNext, DeliveryQueue, DeliveryStatus, delivery_body};
 use crate::bridge_worker_events::{ClientEvent, EventNext, EventQueue, refused_for_good, upload_body, upload_timeout};
@@ -49,8 +49,10 @@ use crate::bridge_worker_types::{
     InitError, InitFailureError, MismatchReason, RegisterFailureError, RequestFailure, RequestOutcome,
     RequiresActionDetails,
 };
+use crate::js_string_number::js_string_to_number;
 use crate::settings_json::js_stringify;
 use crate::settings_parse::parse_json;
+use crate::transport_cause::{TransportCause, transport_cause};
 
 mod constants;
 
@@ -300,6 +302,33 @@ fn header_value(text: &str, for_fetch: bool) -> Option<HeaderValue> {
 }
 
 /// What axios throws for a request that never got an answer, read from the transport error.
+///
+/// Each case and the tests that pin it (unit tests in `transport_cause_tests.rs`, end to end in
+/// `tests/bridge_worker.rs`):
+///
+/// - too many redirects, `ERR_FR_TOO_MANY_REDIRECTS`: the `loop` network golden;
+/// - a body that failed or did not decode, `ERR_BAD_RESPONSE`: the `truncated` network golden;
+/// - a [`crate::adapters::NameLookupError`] in the chain, `getaddrinfo ENOTFOUND {host}`:
+///   `a_name_lookup_error_anywhere_in_the_chain_is_a_missing_host`,
+///   `a_name_lookup_error_wrapped_in_an_io_error_is_a_missing_host`,
+///   `a_name_lookup_error_is_read_before_the_io_kind_it_carries`, the `notfound` network golden and
+///   `a_host_the_crate_resolver_cannot_find_is_enotfound`;
+/// - hyper's incomplete message, `socket hang up` / `ECONNRESET`: the `destroy` network golden and
+///   `a_peer_that_closes_after_reading_is_a_socket_hang_up`;
+/// - a reset, aborted or ended connection, `socket hang up` / `ECONNRESET`:
+///   `a_reset_aborted_or_ended_connection_is_reset`, `an_io_kind_above_a_name_lookup_error_is_read_first`,
+///   `an_io_kind_wrapping_a_name_lookup_error_directly_is_read_first`, `an_io_kind_wrapped_in_another_io_error_is_read`
+///   and `a_peer_that_resets_is_a_socket_hang_up`;
+/// - a refused connection, `connect ECONNREFUSED {host}:{port}`, or no message for `localhost`:
+///   `a_refused_connection_is_refused` and the `refused` and `localhost` network goldens;
+/// - anything else, `Network Error` / `ERR_NETWORK`: `other_io_kinds_name_no_cause`,
+///   `a_plain_io_error_from_a_custom_resolver_names_no_cause`, `a_failure_with_no_node_equivalent_is_a_network_error`
+///   and `a_custom_resolver_failure_without_a_name_lookup_error_is_a_network_error`.
+///
+/// Edge cases: an empty answer from the resolver fails to connect with no io kind named here, so it is `ERR_NETWORK`
+/// (`an_empty_answer_set_is_a_network_error`); an IP literal host never reaches the resolver
+/// (`an_ip_literal_host_never_reaches_the_resolver`, `an_ip_literal_is_answered_without_a_lookup`); and a lookup
+/// that fails after a partial answer cannot happen, since `getaddrinfo` returns every address or an error.
 fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailureError {
     let host = url
         .host_str()
@@ -319,42 +348,15 @@ fn network_failure(url: &reqwest::Url, error: &reqwest::Error) -> RegisterFailur
     if error.is_body() || error.is_decode() {
         return named("stream has been aborted".to_owned(), "ERR_BAD_RESPONSE");
     }
-    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    while let Some(current) = source {
-        if let Some(io) = current.downcast_ref::<std::io::Error>() {
-            match io.kind() {
-                std::io::ErrorKind::ConnectionRefused if host.eq_ignore_ascii_case("localhost") => {
-                    // `localhost` names both loopback addresses, and when every one refuses node raises an
-                    // `AggregateError`, which has no message of its own.
-                    return named(String::new(), "ECONNREFUSED");
-                }
-                std::io::ErrorKind::ConnectionRefused => {
-                    return named(format!("connect ECONNREFUSED {host}:{port}"), "ECONNREFUSED");
-                }
-                std::io::ErrorKind::ConnectionReset
-                | std::io::ErrorKind::ConnectionAborted
-                | std::io::ErrorKind::UnexpectedEof => return named("socket hang up".to_owned(), "ECONNRESET"),
-                // A failed name lookup is a connect failure whose io error carries no OS code and a kind of its
-                // own that none of the arms here or the usual transport kinds name.
-                std::io::ErrorKind::InvalidData
-                | std::io::ErrorKind::InvalidInput
-                | std::io::ErrorKind::Other
-                | std::io::ErrorKind::TimedOut
-                | std::io::ErrorKind::PermissionDenied => {}
-                _ if error.is_connect() && io.raw_os_error().is_none() => {
-                    return named(format!("getaddrinfo ENOTFOUND {host}"), "ENOTFOUND");
-                }
-                _ => {}
-            }
-        }
-        source = current.source();
+    match transport_cause(error) {
+        Some(TransportCause::NameNotFound) => named(format!("getaddrinfo ENOTFOUND {host}"), "ENOTFOUND"),
+        Some(TransportCause::ClosedEarly | TransportCause::Reset) => named("socket hang up".to_owned(), "ECONNRESET"),
+        // `localhost` names both loopback addresses, and when every one refuses node raises an `AggregateError`,
+        // which has no message of its own.
+        Some(TransportCause::Refused) if host.eq_ignore_ascii_case("localhost") => named(String::new(), "ECONNREFUSED"),
+        Some(TransportCause::Refused) => named(format!("connect ECONNREFUSED {host}:{port}"), "ECONNREFUSED"),
+        None => named("Network Error".to_owned(), "ERR_NETWORK"),
     }
-    // The connection was dropped mid-request without an io error to say so: the peer closed before the message
-    // completed.
-    if error.is_request() && !error.is_connect() && !error.is_timeout() {
-        return named("socket hang up".to_owned(), "ECONNRESET");
-    }
-    named("Network Error".to_owned(), "ERR_NETWORK")
 }
 
 enum Fault {
@@ -412,7 +414,7 @@ fn decode(bytes: &[u8]) -> Value {
 fn worker_epoch(data: &Value) -> Result<i64, RegisterFailureError> {
     let number = match data.get("worker_epoch") {
         Some(Value::Number(number)) => number.as_f64(),
-        Some(Value::String(text)) => Some(js_number(text)),
+        Some(Value::String(text)) => Some(js_string_to_number(text)),
         _ => None,
     };
     number
@@ -544,6 +546,11 @@ pub struct WorkerClient<H, P = TokioPacing> {
 }
 
 impl<H, P> WorkerClient<H, P> {
+    /// A `reqwest::Client` reports a registration that never got an answer with the upstream error codes only when it
+    /// resolves host names with [`crate::adapters::GetAddrInfoResolver`] (installed through
+    /// `reqwest::ClientBuilder::dns_resolver`) or with a resolver that reports its failures as
+    /// [`crate::adapters::NameLookupError`]; otherwise a host that cannot be found is reported as `ERR_NETWORK` instead of
+    /// `ENOTFOUND`.
     pub fn new(http: H, pacing: P, config: WorkerConfig) -> Result<Self, InvalidSessionIdError> {
         let session_url = session_url(&config.api_base_url, &config.session_id)?;
         let interval = config.heartbeat_interval_ms.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL_MS);

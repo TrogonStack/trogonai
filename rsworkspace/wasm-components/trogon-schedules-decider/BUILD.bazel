@@ -1,3 +1,4 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 # Also built for the host, as the all-features Cargo test run does. The wasm32
@@ -5,4 +6,34 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 # to wit_bindgen over the WIT contract.
 workspace_crate(
     compile_data = ["//rsworkspace/crates/decider/trogon-decider-wit:wit"],
+)
+
+genrule(
+    name = "descriptor",
+    srcs = ["//proto:schedules_descriptor_set"],
+    outs = ["component/trogon_schedules_decider.binpb"],
+    cmd = "cp $< $@",
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "descriptor_test",
+    srcs = ["//.config/bazel:decider_descriptor_test.sh"],
+    args = [
+        "$(rootpath :component)",
+        "$(rootpath //.config/bazel:buf)",
+        "$(rootpath //proto:buf_cache)",
+        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths //:buf.lock)",
+        "$(rootpaths //proto:sources)",
+    ],
+    data = [
+        ":component",
+        ":descriptor",
+        "//:buf.lock",
+        "//:buf.yaml",
+        "//.config/bazel:buf",
+        "//proto:buf_cache",
+        "//proto:sources",
+    ],
 )

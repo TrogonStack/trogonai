@@ -228,8 +228,15 @@ impl Deployment {
     /// A plain PLATFORM subscriber beside the queue group, so a test sees each
     /// call exactly as it reached the endpoint.
     async fn tap(&self) -> Subscriber {
-        let tap = self.platform.subscribe(RELEASE_SUBSCRIPTION).await.unwrap();
-        self.platform.flush().await.unwrap();
+        let mut tap = self.platform.subscribe(RELEASE_SUBSCRIPTION).await.unwrap();
+        // A socket flush does not confirm that the server has registered the subscription.
+        self.wait_until_serving().await;
+        let probe = tokio::time::timeout(TAPPED_WITHIN, tap.next()).await.unwrap().unwrap();
+        assert_eq!(
+            probe.subject.as_str(),
+            platform_subject(&self.a.account, RUNTIME_SERVICE)
+        );
+        assert!(probe.payload.is_empty());
         tap
     }
 

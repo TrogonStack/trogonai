@@ -314,9 +314,11 @@ pub(crate) fn entries_from_objects(
     let mut entries = Vec::new();
     let mut delivered = Delivered::default();
     for object in objects {
-        if let Value::Object(object) = crate::js_object_order::js_ordered(Value::Object(object)) {
-            collect_entry(&mut entries, &mut delivered, object);
-        }
+        collect_entry(
+            &mut entries,
+            &mut delivered,
+            crate::js_object_order::js_ordered_object(object),
+        );
     }
     (entries, delivered.finish())
 }

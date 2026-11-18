@@ -247,9 +247,37 @@ async fn empty_source_mode_logs_and_reaches_connection_setup() {
 }
 
 #[tokio::test]
+async fn serve_without_sources_provisions_the_default_claim_retention_before_shutdown() {
+    let server = JetStreamTestServer::start().await;
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    assert!(!resolved.has_any_source());
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &trogon_std::env::InMemoryEnv::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let js = server.jetstream().await;
+    js.get_stream(credential::constants::CREDENTIAL_STREAM).await.unwrap();
+    let mut claims = js.get_stream(format!("OBJ_{}", ClaimBucket::default())).await.unwrap();
+    assert_eq!(
+        claims.info().await.unwrap().config.max_age,
+        Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS) + Duration::from(CLAIM_CHECK_TTL_GRACE)
+    );
+}
+
+#[tokio::test]
 async fn serve_provisions_stream_and_claim_bucket_before_graceful_shutdown() {
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();
+    let stream_max_age_secs = DEFAULT_STREAM_MAX_AGE_SECS * 2;
+    resolved.notion[0].config.stream_max_age = StreamMaxAge::from_secs(stream_max_age_secs).unwrap();
     resolved.http_server.port = 0;
     resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
     tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
@@ -262,6 +290,11 @@ async fn serve_provisions_stream_and_claim_bucket_before_graceful_shutdown() {
     NatsObjectStore::bind_claim_bucket(&js, ClaimBucket::default())
         .await
         .unwrap();
+    let mut claims = js.get_stream(format!("OBJ_{}", ClaimBucket::default())).await.unwrap();
+    assert_eq!(
+        claims.info().await.unwrap().config.max_age,
+        Duration::from_secs(stream_max_age_secs) + Duration::from(CLAIM_CHECK_TTL_GRACE)
+    );
 }
 
 #[tokio::test]
@@ -414,6 +447,123 @@ fn management_env(address: &str) -> trogon_std::env::InMemoryEnv {
     env.set(OPENBAO_TOKEN, "openbao-token");
     env.set(OPENBAO_ALLOW_PLAINTEXT, "true");
     env
+}
+
+fn generic_webhook_configuration(server: &JetStreamTestServer) -> config::ResolvedConfig {
+    let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    file.write_all(b"[webhooks]\n").unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
+    resolved
+}
+
+fn generic_webhook_environment() -> trogon_std::env::InMemoryEnv {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ADDR, "https://openbao.invalid:8200");
+    env.set(OPENBAO_TOKEN, "test-openbao-token");
+    env
+}
+
+#[tokio::test]
+async fn generic_webhooks_serve_assembles_the_receiver_and_durable_registry_without_provider_sources() {
+    let server = JetStreamTestServer::start().await;
+    let resolved = generic_webhook_configuration(&server);
+    let environment = generic_webhook_environment();
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &environment),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let context = server.jetstream().await;
+    let registry = context.get_key_value("GATEWAY_WEBHOOK_ENDPOINTS").await.unwrap();
+    let registry_status = registry.status().await.unwrap();
+    assert!(registry_status.max_age().is_zero());
+    assert_eq!(registry_status.history(), 1);
+    assert_eq!(registry_status.values(), 0);
+    let delivery_stream = context.get_stream("WEBHOOKS").await.unwrap();
+    let config = &delivery_stream.cached_info().config;
+    assert_eq!(config.subjects, vec!["webhooks.>"]);
+    assert_eq!(config.max_age, Duration::from_secs(604_800));
+    assert_eq!(config.duplicate_window, Duration::from_secs(604_800));
+}
+
+#[tokio::test]
+async fn generic_webhooks_serve_refuses_missing_credential_backend_configuration() {
+    let server = JetStreamTestServer::start().await;
+    let resolved = generic_webhook_configuration(&server);
+    let environment = trogon_std::env::InMemoryEnv::new();
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &environment),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+
+    assert!(matches!(
+        error.downcast_ref::<std::env::VarError>(),
+        Some(std::env::VarError::NotPresent)
+    ));
+    assert_eq!(
+        error.to_string(),
+        format!("{OPENBAO_ADDR} must be set when webhooks is enabled")
+    );
+    assert!(
+        server
+            .jetstream()
+            .await
+            .get_key_value("GATEWAY_WEBHOOK_ENDPOINTS")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn generic_webhooks_serve_refuses_an_expiring_registry_before_starting_ingress() {
+    let server = JetStreamTestServer::start().await;
+    let context = server.jetstream().await;
+    let registry = context
+        .create_key_value(async_nats::jetstream::kv::Config {
+            bucket: "GATEWAY_WEBHOOK_ENDPOINTS".to_owned(),
+            history: 1,
+            max_age: Duration::from_secs(60),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    registry
+        .put("existing-registration", Bytes::from_static(b"retained-registration"))
+        .await
+        .unwrap();
+    let resolved = generic_webhook_configuration(&server);
+    let environment = generic_webhook_environment();
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &environment),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+
+    assert!(matches!(
+        error.downcast_ref::<webhooks::RegistryOpenError>(),
+        Some(webhooks::RegistryOpenError::Configuration {
+            field: webhooks::RegistryConfigurationField::Retention,
+        })
+    ));
+    let registry = context.get_key_value("GATEWAY_WEBHOOK_ENDPOINTS").await.unwrap();
+    assert_eq!(registry.status().await.unwrap().max_age(), Duration::from_secs(60));
+    assert_eq!(
+        registry.get("existing-registration").await.unwrap().unwrap(),
+        Bytes::from_static(b"retained-registration")
+    );
 }
 
 struct NonUnicodeEnv;

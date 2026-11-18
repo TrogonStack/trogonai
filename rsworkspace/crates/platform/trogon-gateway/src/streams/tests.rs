@@ -77,6 +77,24 @@ async fn provision_no_sources_leaves_the_credential_stream_to_the_event_store() 
 }
 
 #[tokio::test]
+async fn generic_webhooks_provision_a_durable_source_stream() {
+    let file = write_toml("[webhooks]\n");
+    let config = load(Some(file.path())).expect("generic webhook config must load");
+    let js = MockJetStreamContext::new();
+
+    provision(&js, &config).await.expect("stream provisioning must succeed");
+
+    let streams = js.created_streams();
+    let webhook_stream = streams
+        .iter()
+        .find(|stream| stream.name == "WEBHOOKS")
+        .expect("generic webhook ingress needs its durable stream");
+    assert_eq!(webhook_stream.subjects, vec!["webhooks.>"]);
+    assert_eq!(webhook_stream.max_age, std::time::Duration::from_secs(604_800));
+    assert_eq!(webhook_stream.duplicate_window, std::time::Duration::from_secs(604_800));
+}
+
+#[tokio::test]
 async fn provision_all_sources_creates_all_streams() {
     let f = write_toml(&all_sources_toml());
     let cfg = load(Some(f.path())).expect("load failed");

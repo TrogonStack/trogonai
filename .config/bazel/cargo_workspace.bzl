@@ -226,7 +226,7 @@ def _crate(package, workspace_package, workspace_root, by_dir, unified, wasm):
         elif kind == "example":
             examples.append({"name": target["name"], "root": _relative(target["src_path"], manifest_dir)})
 
-    # Bazel builds every feature, as the Cargo CI test run does.
+    # Bazel builds every feature, as `cargo test --all-features` does.
     closure = _feature_closure(package, package["features"].keys())
     resolved = _feature_closure(package, unified[package["name"]].keys())
 
@@ -252,7 +252,7 @@ def _crate(package, workspace_package, workspace_root, by_dir, unified, wasm):
         elif dep["optional"] and key not in resolved.activated:
             # crate_universe's resolution leaves this optional dependency out
             # of all_crate_deps, so it is listed explicitly.
-            label = "@crates//:" + dep["name"]
+            label = "@crates//:" + key
             proc_macro = False
         else:
             continue
