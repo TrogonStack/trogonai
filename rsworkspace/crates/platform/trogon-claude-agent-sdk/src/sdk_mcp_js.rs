@@ -97,3 +97,7 @@ pub(crate) fn js_string(value: &Value) -> String {
         scalar => js_stringify(scalar),
     }
 }
+
+#[cfg(test)]
+#[path = "sdk_mcp_js_tests.rs"]
+mod tests;
