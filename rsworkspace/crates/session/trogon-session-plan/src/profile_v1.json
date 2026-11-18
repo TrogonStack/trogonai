@@ -1,0 +1,15 @@
+{
+  "profile": "session-plan-structural-v1",
+  "contract_version": 1,
+  "message": "trogonai.session.plans.v1alpha1.SessionExecutionPlan",
+  "artifact_identity": "sha256-original-protobuf-bytes",
+  "wire_semantics": "strict-known-fields-unique-singular-and-oneof-v1",
+  "maximum_plan_bytes": 65536,
+  "maximum_depth": 32,
+  "maximum_wire_fields": 8192,
+  "maximum_native_configuration_bytes": 32768,
+  "maximum_combined_native_configuration_bytes": 49152,
+  "maximum_dependency_resolutions": 256,
+  "native_payload_semantics": "exact-runtime-registration-required-before-admission",
+  "authority": "original-resource-source-and-current-policy-lease-required-before-persistence"
+}

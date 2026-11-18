@@ -1,0 +1,3 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(compile_data = ["src/profile_v1.json"])
