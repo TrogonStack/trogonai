@@ -868,10 +868,10 @@ index d2a8d04898..43396d5d49 100644
  mod options;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_compiled.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_compiled.rs
 new file mode 100644
-index 0000000000..1fb6c50811
+index 0000000000..ed1f2faa09
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_compiled.rs
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,119 @@
 +//! The functions of the bundled lodash that V8 already compiled in a Node process, and so no longer first-compiles on
 +//! whatever stack the next call to them has.
 +//!
@@ -898,14 +898,17 @@ index 0000000000..1fb6c50811
 +    MapCacheDelete,
 +    /// lodash `assignMergeValue` (`e4e`, bytes 868193..868273, aliased `Mf`), which `baseMerge` and `baseMergeDeep`
 +    /// run for every member they write. The first member a merge of the process assigns compiles it, which
-+    /// [`MergeCost::cold_assign`](crate::node_merge_cost::MergeCost::cold_assign) prices.
++    /// [`MergeCost::cold_assign`](crate::node_merge_cost::MergeCost::cold_assign) prices, and every assign after it
++    /// spends [`MergeCost::warm_assign`](crate::node_merge_cost::MergeCost::warm_assign).
 +    AssignMergeValue,
 +    /// lodash `baseMergeDeep` (`y4e`, bytes 869866..870290, aliased `Y4`), which runs for every array or object the
 +    /// merge enters below the root. The first nested array or object a merge of the process enters compiles it.
 +    BaseMergeDeep,
 +    /// lodash `arrayLikeKeys` (`y2e`, bytes 819119..819417, aliased `Iy`), the branch of `keysIn` that lists the
 +    /// keys of an array, which only an array the merge enters runs. The first array of the process compiles it, which
-+    /// [`MergeCost::first_array`](crate::node_merge_cost::MergeCost::first_array) prices.
++    /// [`MergeCost::first_array`](crate::node_merge_cost::MergeCost::first_array) prices. Once compiled, an array
++    /// past the stack lists its keys where lodash reaches
++    /// [`MergeCost::array_keys`](crate::node_merge_cost::MergeCost::array_keys) past its level.
 +    ArrayLikeKeys,
 +    /// The regular expression `reIsUint` (`UVe`, bytes 817570..817588) that lodash `isIndex` (`FVe`, bytes
 +    /// 817589..817711, aliased `$i`) tests array keys with, compiled to bytecode on its first test.
@@ -1026,7 +1029,7 @@ index a370b0b0af..ae67b6f6d0 100644
 +    Login,
  }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge.rs
-index d1373390ee..a5ffd1501e 100644
+index d1373390ee..b49eab56c5 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge.rs
 @@ -20,6 +20,7 @@ use crate::{
@@ -1111,9 +1114,15 @@ index d1373390ee..a5ffd1501e 100644
              Ok(Level::Doomed)
          } else {
              Err(Stop::Overflow)
-@@ -279,16 +307,18 @@ impl Merge<'_, '_> {
+@@ -277,21 +305,30 @@ impl Merge<'_, '_> {
+     /// An array holding members that does not fit where `isIndex` compiles its regular expression throws
+     /// `SyntaxError` where V8 starts the compile: the bytecode compile where the stack holds the level and
      /// [`MergeCost::first_array`](crate::node_merge_cost::MergeCost::first_array), and the machine code compile
-     /// where lodash still reaches the level and what the compile spends there.
+-    /// where lodash still reaches the level and what the compile spends there.
++    /// where lodash still reaches the level and what the compile spends there. Past the stack, an array holding
++    /// members runs out where lodash `keysIn` lists its keys unless it reaches
++    /// [`MergeCost::array_keys`](crate::node_merge_cost::MergeCost::array_keys) past the level, as the frame of
++    /// [`CompiledFunction::ArrayLikeKeys`] decides.
      fn enter_array(&mut self, depth: usize, position: usize, items: &[Value]) -> Result<Level, Stop> {
 -        let extra = self.room.cost.array(position, !items.is_empty(), *self.warmth);
 -        if self.room.fits(depth, extra) {
@@ -1134,7 +1143,14 @@ index d1373390ee..a5ffd1501e 100644
              };
              return Err(if compiles { Stop::IndexCompile } else { Stop::Overflow });
          }
-@@ -299,12 +329,21 @@ impl Merge<'_, '_> {
++        let keys_listed = self.warmth.finished_array;
++        if !items.is_empty() && !self.runs(keys_listed, depth, room.cost.array_keys) {
++            return Err(Stop::Overflow);
++        }
+         if extra == 0 {
+             self.enter_level(depth)
+         } else {
+@@ -299,12 +336,21 @@ impl Merge<'_, '_> {
          }
      }
  
@@ -1161,7 +1177,7 @@ index d1373390ee..a5ffd1501e 100644
      }
  
      /// Merges the members of `source`, an array or object the merge entered at `depth` below `arrays` arrays of its
-@@ -364,7 +403,7 @@ impl Merge<'_, '_> {
+@@ -364,7 +410,7 @@ impl Merge<'_, '_> {
                  position,
              )?;
              self.warmth.finished_array = true;
@@ -1170,7 +1186,7 @@ index d1373390ee..a5ffd1501e 100644
              self.assign(depth)?;
              return target.write(key, Value::Array(copied), mark);
          }
-@@ -388,14 +427,14 @@ impl Merge<'_, '_> {
+@@ -388,14 +434,14 @@ impl Merge<'_, '_> {
              (Some(Value::Object(held)), Source::Object(_)) => {
                  let level = self.enter_level(next)?;
                  self.merge_members(&mut Target::Object(held), child, next, arrays)?;
@@ -1187,7 +1203,7 @@ index d1373390ee..a5ffd1501e 100644
                  self.assign(depth)?;
                  false
              }
-@@ -424,7 +463,10 @@ impl Merge<'_, '_> {
+@@ -424,7 +470,10 @@ impl Merge<'_, '_> {
                      self.warmth.finished_array = true;
                      continue;
                  }
@@ -1199,7 +1215,7 @@ index d1373390ee..a5ffd1501e 100644
                  Step::Enter { entered, depth, arrays } => (entered, depth, arrays),
              };
              let (level, arrays) = match entered {
-@@ -434,8 +476,8 @@ impl Merge<'_, '_> {
+@@ -434,8 +483,8 @@ impl Merge<'_, '_> {
                      (self.enter_array(depth, position, items)?, position)
                  }
              };
@@ -1211,21 +1227,54 @@ index d1373390ee..a5ffd1501e 100644
              if matches!(entered, Source::Array(_)) {
                  steps.push(Step::FinishArray);
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_cost.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_cost.rs
-index 1f8ede3622..5dc66f4efc 100644
+index 1f8ede3622..38123411d4 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_cost.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_cost.rs
-@@ -18,8 +18,9 @@ pub(crate) struct MergeCost {
+@@ -10,6 +10,11 @@ pub(crate) struct MergeCost {
+     pub(crate) level: usize,
+     /// An array or object assigning a member while no merge of the process assigned one before.
+     pub(crate) cold_assign: usize,
++    /// An array or object assigning a member once a merge of the process assigned one before: the frame of lodash
++    /// `assignMergeValue` (`e4e`, bytes 868193..868273) the process compiled by then. A compiled frame needs only the
++    /// stack ([`MergeRoom::reaches_past`](crate::node_merge_room::MergeRoom::reaches_past)), so it decides only where
++    /// lodash assigns past the stack.
++    pub(crate) warm_assign: usize,
+     /// An array at one of the first three array levels of its path while no merge of the process finished an array
+     /// before, unless it is one that `shallow_array` covers. V8 also checks for that much at the level of the first
+     /// lodash `isIndex` test of the process before it compiles the regular expression to bytecode.
+@@ -17,10 +22,17 @@ pub(crate) struct MergeCost {
+     /// An array holding members where lodash `isIndex` compiles its regular expression to test the first index,
      /// wherever the array sits in its path.
      pub(crate) shallow_array: usize,
++    /// An array holding members where lodash `keysIn` lists its keys once the process compiled `arrayLikeKeys`
++    /// (`y2e`, bytes 819119..819417): the frames of `arrayLikeKeys` and of the `isIndex` test (`FVe`, bytes
++    /// 817589..817711) it runs for each index, on top of the level of the array. A compiled frame needs only the
++    /// stack ([`MergeRoom::reaches_past`](crate::node_merge_room::MergeRoom::reaches_past)), so it decides only
++    /// where lodash enters an array past the stack.
++    pub(crate) array_keys: usize,
      /// How many bytes past the `level`s the stack holds lodash still enters an array or object: it merges the
 -    /// members of such a level, which run out of stack where they enter or assign anything, and runs out itself as
 -    /// it returns from the level, when lodash `Stack.delete` runs. A compile of the `isIndex` regular expression to
+-    /// machine code in such an array throws `SyntaxError` instead.
 +    /// members of such a level, which run out of stack where they first-compile a function of the bundle (an assign
 +    /// before any merge of the process assigned included), and runs out itself as it returns from the level, when
-+    /// lodash `Stack.delete` runs, unless the process already compiled `mapCacheDelete`. A compile of the `isIndex` regular expression to
-     /// machine code in such an array throws `SyntaxError` instead.
++    /// lodash `Stack.delete` runs, unless the process already compiled `mapCacheDelete`. A compile of the `isIndex`
++    /// regular expression to machine code in such an array throws `SyntaxError` instead.
      pub(crate) descent_reach: usize,
      /// What the compile of the lodash `isIndex` regular expression to machine code at the end of the descent reach
+     /// spends on top of its levels in a merge after the one that compiled it to bytecode. V8 spends it when a
+@@ -42,6 +54,10 @@ impl MergeCost {
+ 
+     /// What assigning a member spends on top of the `level`s of the array or object it assigns into.
+     pub(crate) fn assign(self, warmth: MergeWarmth) -> usize {
+-        if warmth.assigned { 0 } else { self.cold_assign }
++        if warmth.assigned {
++            self.warm_assign
++        } else {
++            self.cold_assign
++        }
+     }
+ }
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_room.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_room.rs
 index 87219bc878..6e6411a743 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_room.rs
@@ -1253,6 +1302,102 @@ index 87219bc878..6e6411a743 100644
      pub(crate) fn reaches_past(self, depth: usize, extra: usize) -> bool {
          depth.saturating_mul(self.cost.level).saturating_add(extra)
              <= self.available.saturating_add(self.cost.descent_reach)
+diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_tests.rs
+index 1040906dde..5ffa0b0217 100644
+--- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_tests.rs
++++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_tests.rs
+@@ -2,15 +2,23 @@ use serde_json::{Map, Value, json};
+ 
+ use super::{NodeMerge, merge_within};
+ use crate::{
+-    constants::V8_MAX_STRING_LENGTH, js_array_mark::ArrayMark, node_merge_cost::MergeCost, node_merge_room::MergeRoom,
+-    node_merge_warmth::MergeWarmth, settings_merge_spec::MergeSpec, settings_resolve_error::ResolveSettingsError,
++    constants::V8_MAX_STRING_LENGTH,
++    js_array_mark::ArrayMark,
++    node_compiled::{CompiledFunction, CompiledSet},
++    node_merge_cost::MergeCost,
++    node_merge_room::MergeRoom,
++    node_merge_warmth::MergeWarmth,
++    settings_merge_spec::MergeSpec,
++    settings_resolve_error::ResolveSettingsError,
+ };
+ 
+ const COST: MergeCost = MergeCost {
+     level: 768,
+     cold_assign: 416,
++    warm_assign: 0,
+     first_array: 576,
+     shallow_array: 1339,
++    array_keys: 1_104,
+     descent_reach: 40230,
+     later_compile: 0,
+ };
+@@ -338,6 +346,65 @@ fn a_held_object_entered_past_the_stack_runs_out_as_the_merge_returns_from_it()
+     assert_eq!(Value::Object(destination), json!({"x": {"z": 0}}));
+ }
+ 
++#[test]
++fn an_array_past_the_stack_lists_its_keys_where_lodash_reaches_the_compiled_keys_frame() {
++    let mut compiled = CompiledSet::EMPTY;
++    compiled.insert(CompiledFunction::MapCacheDelete);
++    let returning = MergeWarmth { compiled, ..HOT };
++    let reach = COST.level + COST.descent_reach;
++    let listed = (reach - COST.array_keys) / COST.level;
++    let source = |depth: usize, leaf: Value| json!({"x": (2..depth).fold(leaf, |value, _| json!({"x": value}))});
++    assert_eq!(
++        [
++            merged(returning, COST.level, &mut Map::new(), &source(listed, json!([1]))),
++            merged(returning, COST.level, &mut Map::new(), &source(listed + 1, json!([1]))),
++            merged(returning, COST.level, &mut Map::new(), &source(listed + 1, json!([]))),
++            merged(
++                returning,
++                COST.level,
++                &mut Map::new(),
++                &source(listed + 1, json!({"y": 1}))
++            ),
++        ],
++        [
++            NodeMerge::Merged,
++            NodeMerge::Overflowed,
++            NodeMerge::Merged,
++            NodeMerge::Merged,
++        ]
++    );
++}
++
++#[test]
++fn an_assign_past_the_stack_spends_the_warm_assign_where_lodash_reaches_the_compiled_assign_frame() {
++    let mut compiled = CompiledSet::EMPTY;
++    compiled.insert(CompiledFunction::MapCacheDelete);
++    let returning = MergeWarmth { compiled, ..HOT };
++    let warm = MergeCost {
++        warm_assign: COST.level / 2,
++        ..COST
++    };
++    let reach = COST.level + COST.descent_reach;
++    let assigned = (reach - warm.warm_assign) / COST.level;
++    let source = |depth: usize| json!({"x": (2..depth).fold(json!({"y": 1}), |value, _| json!({"x": value}))});
++    let merge = |cost: MergeCost, depth: usize| {
++        let mut warmth = returning;
++        let room = MergeRoom {
++            cost,
++            available: COST.level,
++        };
++        merge_within(&rules(), &mut Map::new(), &object(source(depth)), room, &mut warmth)
++    };
++    assert_eq!(
++        [
++            merge(warm, assigned),
++            merge(warm, assigned + 1),
++            merge(COST, assigned + 1),
++        ],
++        [NodeMerge::Merged, NodeMerge::Overflowed, NodeMerge::Merged]
++    );
++}
++
+ #[test]
+ fn an_array_merged_onto_a_copy_of_an_array_like_object_that_runs_out_writes_no_copy() {
+     let mut destination = object(json!({"x": {"length": 1}}));
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs
 index b6c772bc80..d9b1da2790 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_merge_warmth.rs
@@ -1403,7 +1548,7 @@ index 0000000000..561c647178
 +    Tool,
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
-index f01219da74..69dff8a6a9 100644
+index f01219da74..ddccafded2 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 @@ -29,21 +29,26 @@
@@ -1610,7 +1755,7 @@ index f01219da74..69dff8a6a9 100644
          }
      }
  }
-@@ -207,9 +348,8 @@ impl NodeStack {
+@@ -207,30 +348,46 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 448 bytes per object and 240
      /// per array out of 1000451, and 288 per object and 304 per array out of 1000724. The file cache copy then takes
      /// 288 per object and 512 per array out of 1000884. At the object or array that ends a path, the walk takes 144
@@ -1621,9 +1766,22 @@ index f01219da74..69dff8a6a9 100644
 +    /// takes 328 for any object and 304 for any array; and the copy takes 512 for any of them.
      ///
      /// A merge takes 768 per array or object it enters out of 960611. Assigning a member takes 416 more while no merge
-     /// of the process assigned one before. An array takes 1339 more when it holds members and lodash `isIndex`
-@@ -222,15 +362,32 @@ impl NodeStack {
-     /// nested arrays for the copy, and 1244 levels around `null` for a merge.
+-    /// of the process assigned one before. An array takes 1339 more when it holds members and lodash `isIndex`
+-    /// tested fewer than two keys in the merges of the process before, one per member of each array they entered,
+-    /// wherever it sits, and else 576 more when it is one of the first three of its path while no merge finished an
+-    /// array before. lodash still enters an array or object up to 40230 bytes past that, merges its members and runs
+-    /// out as it returns from it, and an array holding members there that compiles the `isIndex` regular expression
+-    /// rejects with `SyntaxError`: the first compile where the level and 576 more fit, the second anywhere in reach.
+-    /// At this startup that is 2223 nested objects or a root object holding 3276 nested arrays for the reader, 1945
+-    /// nested arrays for the copy, and 1244 levels around `null` for a merge.
++    /// of the process assigned one before, and nothing more past the stack once one did. An array takes 1339 more
++    /// when it holds members and lodash `isIndex` tested fewer than two keys in the merges of the process before, one
++    /// per member of each array they entered, wherever it sits, and else 576 more when it is one of the first three of
++    /// its path while no merge finished an array before. lodash still enters an array or object up to 40230 bytes
++    /// past that, merges its members and runs out as it returns from it, and an array holding members there that
++    /// compiles the `isIndex` regular expression rejects with `SyntaxError`: the first compile where the level and 576
++    /// more fit, the second anywhere in reach. At this startup that is 2223 nested objects or a root object holding
++    /// 3276 nested arrays for the reader, 1945 nested arrays for the copy, and 1244 levels around `null` for a merge.
      ///
      /// A managed settings document's reader has 997859 and 998160 for the same two passes when the sources are
 -    /// evaluated, its copy 998787, the merge into its folder 958147 and the merge of the admin settings 960371: 2217
@@ -1681,7 +1839,18 @@ index f01219da74..69dff8a6a9 100644
                  empty_array: 512,
                  scalar_array: 512,
              },
-@@ -277,22 +434,50 @@ impl NodeStack {
+@@ -267,8 +424,10 @@ impl NodeStack {
+         merge: MergeCost {
+             level: 768,
+             cold_assign: 416,
++            warm_assign: 0,
+             first_array: 576,
+             shallow_array: 1339,
++            array_keys: 1_104,
+             descent_reach: 40_230,
+             later_compile: 0,
+         },
+@@ -277,22 +436,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 997_859,
                  clone: 998_160,
@@ -1735,7 +1904,7 @@ index f01219da74..69dff8a6a9 100644
          },
      };
  
-@@ -310,17 +495,34 @@ impl NodeStack {
+@@ -310,17 +497,34 @@ impl NodeStack {
      /// merge.
      ///
      /// A managed settings document's reader has 999552 and 999840 for the same two passes when the sources are
@@ -1744,7 +1913,7 @@ index f01219da74..69dff8a6a9 100644
 -    /// The evaluation of the policy origin has 1000704, 1001120, 1000952 and 961152 (1954 objects, 1250 levels), and
 -    /// the one that asks whether the machine policy loaded 1001728, 1002080, 1002064 and 961824 (1956 objects, 1788
 -    /// arrays, 1252 levels). No golden tells the origin's copy budget apart from the others, so it sits between them.
-+    /// evaluated, its copy 1000080, the merge into its folder 959824 and the merge of the admin settings 961920: 1952
++    /// evaluated, its copy 1000080, the merge into its folder 959824 and the merge of the admin settings 962016: 1952
 +    /// nested objects or a root object holding 3123 nested arrays, 1784 nested arrays, 1249 levels and 1251 levels. The
 +    /// evaluation of the policy origin has 1000704, 1001120, 1001168 and 961152 (1954 objects, 3127 and 1786 arrays,
 +    /// 1251 levels), and the one that asks whether the machine policy loaded 1001728, 1002080, 1002048 and 961824 (1956
@@ -1775,7 +1944,18 @@ index f01219da74..69dff8a6a9 100644
          walk: PathCost {
              object: 512,
              array: 272,
-@@ -367,22 +569,50 @@ impl NodeStack {
+@@ -357,8 +561,10 @@ impl NodeStack {
+         merge: MergeCost {
+             level: 768,
+             cold_assign: 416,
++            warm_assign: 0,
+             first_array: 576,
+             shallow_array: 1339,
++            array_keys: 1_104,
+             descent_reach: 40_230,
+             later_compile: 0,
+         },
+@@ -367,22 +573,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 999_552,
                  clone: 999_840,
@@ -1798,7 +1978,8 @@ index f01219da74..69dff8a6a9 100644
 +                copy: 1_002_048,
                  folder_merge: 961_824,
              },
-             admin_merge: 961_920,
+-            admin_merge: 961_920,
++            admin_merge: 962_016,
 +            held_check: HeldCheckBudgets {
 +                fs: ReaderBudgets {
 +                    walk: 980_928,
@@ -1829,7 +2010,7 @@ index f01219da74..69dff8a6a9 100644
          },
      };
  
-@@ -391,19 +621,43 @@ impl NodeStack {
+@@ -391,19 +625,44 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 608 bytes per object and 272
      /// per array out of 1002688, and 304 per object and per array out of 1002760. The file cache copy then takes 608
      /// per object and 640 per array out of 1002496. At the object or array that ends a path, the walk and the copy
@@ -1839,8 +2020,11 @@ index f01219da74..69dff8a6a9 100644
 +    /// for an empty array; the clone takes 304 for any of them.
      ///
      /// A merge takes 736 per array or object it enters out of 962848, with extra costs of 416, 576 and 1339 as on
-     /// the other profiles and a reach of 40656. That is 1649 nested objects or a root object holding 3297 nested
-     /// arrays for the reader, 1565 nested arrays for the copy, and 1307 levels around `null` for a merge.
+-    /// the other profiles and a reach of 40656. That is 1649 nested objects or a root object holding 3297 nested
+-    /// arrays for the reader, 1565 nested arrays for the copy, and 1307 levels around `null` for a merge.
++    /// the other profiles and a reach of 40656. Assigning a member once a merge of the process assigned one before
++    /// takes 448 more past the stack. That is 1649 nested objects or a root object holding 3297 nested arrays for the
++    /// reader, 1565 nested arrays for the copy, and 1307 levels around `null` for a merge.
      ///
      /// A managed settings document's reader has 999992 and 1000312 for the same two passes when the sources are
 -    /// evaluated, its copy 1000608, the merge into its folder 960320 and the merge of the admin settings 962320: 1644
@@ -1880,7 +2064,7 @@ index f01219da74..69dff8a6a9 100644
      ///
      /// When a background compile lands while a merge runs, a merge after the one that compiled the `isIndex` pattern
      /// to bytecode can run out at 1362 levels instead of compiling the pattern there, and any `later_compile` from 337
-@@ -413,6 +667,7 @@ impl NodeStack {
+@@ -413,6 +672,7 @@ impl NodeStack {
      pub const NODE_24_LINUX_X64: Self = Self {
          startup: StartupShare::BesideStack,
          startup_bytes: 4384,
@@ -1888,7 +2072,7 @@ index f01219da74..69dff8a6a9 100644
          walk: PathCost {
              object: 608,
              array: 272,
-@@ -441,7 +696,7 @@ impl NodeStack {
+@@ -441,7 +701,7 @@ impl NodeStack {
              leaves: LeafCost {
                  empty_object: 144,
                  scalar_object: 608,
@@ -1897,7 +2081,18 @@ index f01219da74..69dff8a6a9 100644
                  scalar_array: 640,
              },
              budget: 1_002_496,
-@@ -459,22 +714,50 @@ impl NodeStack {
+@@ -449,8 +709,10 @@ impl NodeStack {
+         merge: MergeCost {
+             level: 736,
+             cold_assign: 416,
++            warm_assign: 448,
+             first_array: 576,
+             shallow_array: 1339,
++            array_keys: 1_104,
+             descent_reach: 40_656,
+             later_compile: 0,
+         },
+@@ -459,22 +721,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 999_992,
                  clone: 1_000_312,
@@ -1952,7 +2147,7 @@ index f01219da74..69dff8a6a9 100644
          },
      };
  
-@@ -513,13 +796,44 @@ impl NodeStack {
+@@ -513,13 +803,44 @@ impl NodeStack {
          }
      }
  
@@ -1997,7 +2192,7 @@ index f01219da74..69dff8a6a9 100644
      /// The most nested arrays and objects a settings file the reader reads may hold.
      pub(crate) fn max_depth(self) -> usize {
          self.walk
-@@ -527,12 +841,12 @@ impl NodeStack {
+@@ -527,12 +848,12 @@ impl NodeStack {
              .min(self.clone.deepest(self.available(self.clone.budget)))
      }
  
@@ -2015,7 +2210,7 @@ index f01219da74..69dff8a6a9 100644
      }
  
      /// Whether the settings file reader walks and copies `document` without running out of stack.
-@@ -541,31 +855,58 @@ impl NodeStack {
+@@ -541,31 +862,58 @@ impl NodeStack {
              && self.clone.fits(self.available(self.clone.budget), document)
      }
  
@@ -2081,7 +2276,7 @@ index f01219da74..69dff8a6a9 100644
      pub(crate) fn merge_within(
          self,
          call: NodeMergeCall,
-@@ -573,10 +914,11 @@ impl NodeStack {
+@@ -573,10 +921,11 @@ impl NodeStack {
          destination: &mut Map<String, Value>,
          source: &Map<String, Value>,
          warmth: &Cell<MergeWarmth>,
@@ -2094,7 +2289,7 @@ index f01219da74..69dff8a6a9 100644
              NodeMergeCall::Admin => self.policy.admin_merge,
          };
          let room = MergeRoom {
-@@ -584,7 +926,9 @@ impl NodeStack {
+@@ -584,7 +933,9 @@ impl NodeStack {
              available: self.available(budget),
          };
          let mut ran = warmth.get();
@@ -2104,7 +2299,7 @@ index f01219da74..69dff8a6a9 100644
          warmth.set(ran);
          merged
      }
-@@ -618,3 +962,7 @@ fn is_container(value: &Value) -> bool {
+@@ -618,3 +969,7 @@ fn is_container(value: &Value) -> bool {
  #[cfg(test)]
  #[path = "node_stack_tests.rs"]
  mod tests;
@@ -2175,7 +2370,7 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..a5d031aa6c
+index 0000000000..0ea08b004d
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 @@ -0,0 +1,551 @@
@@ -2204,7 +2399,7 @@ index 0000000000..a5d031aa6c
 +use crate::{
 +    DeepJsonValue, NodeStack, PolicyRereads, ResolveSettingsError, ResolveSettingsOptions, ResolverState, js_stringify,
 +    node_stack_catch::{self, StackCatch},
-+    resolve_settings_with_state,
++    settings_resolve::resolve_settings_with_exact_effective,
 +};
 +
 +#[path = "../tests/support/fake_settings_host.rs"]
@@ -2426,11 +2621,11 @@ index 0000000000..a5d031aa6c
 +
 +/// What one resolve answers, as the recorder prints it: the effective settings, the machine policy and the managed
 +/// source printed by `JSON.stringify`, or the name and message of the error it rejects with when V8 runs out of
-+/// stack or room. No case here holds a
-+/// lone surrogate, so the well-formed print of the effective settings is the exact one.
++/// stack or room. The effective settings print twice: well-formed, with U+FFFD for each lone surrogate, and exact,
++/// with each one escaped as `\udxxx`, the way the recorder prints the object `resolveSettings` answers.
 +fn answer(host: &FakeHost, options: &ResolveSettingsOptions, state: &ResolverState) -> Result<Value, Failure> {
-+    match resolve_settings_with_state(host, options, state) {
-+        Ok(resolved) => {
++    match resolve_settings_with_exact_effective(host, options, state) {
++        Ok((resolved, exact)) => {
 +            let mut resolved = DeepJsonValue::encode(&resolved)?;
 +            let effective = js_stringify(&resolved["effective"].take());
 +            let machine_policy = js_stringify(&resolved["machinePolicy"].take());
@@ -2440,7 +2635,7 @@ index 0000000000..a5d031aa6c
 +                .map_or(Value::Null, Value::take);
 +            Ok(json!({
 +                "effective": effective,
-+                "exact": effective,
++                "exact": exact,
 +                "machine_policy": machine_policy,
 +                "managed_source": js_stringify(&managed),
 +                "error": null,
@@ -4000,7 +4195,7 @@ index 609b2a8241..3680aaf3a0 100644
              }
              parsed
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
-index a915357f75..8fe6e0037f 100644
+index a915357f75..d232811d5f 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/settings_resolve.rs
 @@ -11,6 +11,8 @@ use crate::{
@@ -4021,7 +4216,32 @@ index a915357f75..8fe6e0037f 100644
      settings_resolve_values::{SettingsMap, in_schema_order, merge_unbounded, merge_within},
      settings_strings::{
          SurrogateStandIns, approximate_strings, array_mark, escape_stand_ins, reserve_text, reserve_value,
-@@ -217,7 +219,8 @@ pub fn resolve_python_settings_with_state<H: SettingsHost>(
+@@ -149,6 +151,24 @@ pub fn resolve_settings_json_with_state<H: SettingsHost>(
+     })
+ }
+ 
++/// [`resolve_settings_with_state`] together with the text `JSON.stringify` prints for the effective settings the
++/// same resolve answers, each lone surrogate escaped as [`resolve_settings_json_with_state`] escapes it. One resolve
++/// answers both prints, so a process that replays its resolves against one [`ResolverState`] runs each of them once.
++#[cfg(test)]
++pub(crate) fn resolve_settings_with_exact_effective<H: SettingsHost>(
++    host: &H,
++    options: &ResolveSettingsOptions,
++    state: &ResolverState,
++) -> Result<(ResolvedSettings, String), ResolveSettingsError> {
++    on_engine_stack(|| {
++        let _strings = SurrogateStandIns::start();
++        let mut result = resolve_core(host, options, SettingsDialect::TypeScript, state)?;
++        infinities_to_null(&mut result);
++        let exact = escape_stand_ins(js_stringify(&result["effective"]));
++        Ok((decode(result)?, exact))
++    })
++}
++
+ /// [`resolve_settings_json_with_state`] with the module state of a process that starts now.
+ pub fn resolve_settings_json_with<H: SettingsHost>(
+     host: &H,
+@@ -217,7 +237,8 @@ pub fn resolve_python_settings_with_state<H: SettingsHost>(
  
  /// Runs `work` on a thread with [`SETTINGS_ENGINE_STACK_BYTES`] of stack. The engine walks a settings document
  /// recursively, once per level at several steps, the Python dialect reads documents nested almost as deep as
@@ -4031,7 +4251,7 @@ index a915357f75..8fe6e0037f 100644
  pub(crate) fn on_engine_stack<T: Send>(
      work: impl FnOnce() -> Result<T, ResolveSettingsError> + Send,
  ) -> Result<T, ResolveSettingsError> {
-@@ -225,10 +228,13 @@ pub(crate) fn on_engine_stack<T: Send>(
+@@ -225,10 +246,13 @@ pub(crate) fn on_engine_stack<T: Send>(
          let engine = thread::Builder::new()
              .name("settings-engine".to_owned())
              .stack_size(SETTINGS_ENGINE_STACK_BYTES)
@@ -4047,7 +4267,7 @@ index a915357f75..8fe6e0037f 100644
              Err(payload) => panic::resume_unwind(payload),
          }
      })
-@@ -260,12 +266,40 @@ fn decode(mut result: Value) -> Result<ResolvedSettings, ResolveSettingsError> {
+@@ -260,12 +284,40 @@ fn decode(mut result: Value) -> Result<ResolvedSettings, ResolveSettingsError> {
      serde_json::from_value(result).map_err(ResolveSettingsError::Decode)
  }
  
@@ -4088,7 +4308,7 @@ index a915357f75..8fe6e0037f 100644
      let cwd = resolve_cwd(host, options.cwd.as_deref()).map_err(ResolveSettingsError::CurrentDirectory)?;
      let stack = state.python_c_stack();
      let node = state.node_stack();
-@@ -282,7 +316,6 @@ fn resolve_core<H: SettingsHost>(
+@@ -282,7 +334,6 @@ fn resolve_core<H: SettingsHost>(
          .clone()
          .map(crate::DeepJsonObject::into_object);
      let kind = state.platform(host);
@@ -4096,7 +4316,7 @@ index a915357f75..8fe6e0037f 100644
      let evaluation = reading.evaluation.in_effect(asks_organization(host));
      let outcome_lost = reading.hklm.as_ref().map(|outcome| outcome.lost_the_answer());
      let mut texts: Vec<(&str, Option<PathBuf>, Option<String>)> = Vec::new();
-@@ -328,16 +361,21 @@ fn resolve_core<H: SettingsHost>(
+@@ -328,16 +379,21 @@ fn resolve_core<H: SettingsHost>(
          reserve_managed_texts(host, kind);
      }
      // Upstream reads the managed settings a host passes in and the server-managed settings through the policy
@@ -4124,7 +4344,7 @@ index a915357f75..8fe6e0037f 100644
      let PolicyResolution {
          settings: policy_settings,
          origin: settings_origin,
-@@ -352,7 +390,7 @@ fn resolve_core<H: SettingsHost>(
+@@ -352,7 +408,7 @@ fn resolve_core<H: SettingsHost>(
          parent.as_ref(),
          remote.as_ref(),
          evaluation,
@@ -4133,7 +4353,7 @@ index a915357f75..8fe6e0037f 100644
      )?;
      let policy_settings = policy_settings.map(|mut settings| {
          for entry in settings.values_mut() {
-@@ -389,14 +427,53 @@ fn resolve_core<H: SettingsHost>(
+@@ -389,14 +445,53 @@ fn resolve_core<H: SettingsHost>(
          per_source.push((name, path, settings));
      }
  
@@ -4191,7 +4411,7 @@ index a915357f75..8fe6e0037f 100644
              };
              if let Some(error) = merged.rejection() {
                  return Err(error);
-@@ -416,21 +493,21 @@ fn resolve_core<H: SettingsHost>(
+@@ -416,21 +511,21 @@ fn resolve_core<H: SettingsHost>(
              parent.as_ref(),
              remote.as_ref(),
              evaluation,
