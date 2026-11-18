@@ -1,7 +1,12 @@
+mod admission;
 mod decoder;
 mod error;
 mod shape;
 
+pub use admission::{
+    DelegationOwnerContext, DelegationSource, PlanAdmission, PlanAdmissionLease, PlanOwnerContext, PlanOwners, PlanSourceLease,
+    RuntimePlanInterpreter,
+};
 pub use decoder::{DecodedPlan, RegisteredPlanDecoder};
 pub use error::PlanError;
 

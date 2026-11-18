@@ -14,11 +14,19 @@ pub struct RegisteredPlanDecoder {
     descriptor: WireMessageDescriptor,
 }
 
-#[derive(Debug)]
 pub struct DecodedPlan {
     value: plan::SessionExecutionPlan,
     original: Vec<u8>,
     digest: [u8; 32],
+}
+
+impl std::fmt::Debug for DecodedPlan {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DecodedPlan")
+            .field("encoded_bytes", &self.original.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl DecodedPlan {
@@ -38,7 +46,7 @@ impl RegisteredPlanDecoder {
     /// before reading request-controlled plan bytes.
     pub fn compiled_contract() -> agent::ConfigurationContractRef {
         let profile = include_bytes!("profile_v1.json");
-        let descriptor = trogonai_proto::session_contracts::FILE_DESCRIPTOR_SET_JSON;
+        let descriptor = trogonai_proto::session_contracts::PLAN_DESCRIPTOR_SET_JSON;
         let mut hash = Sha256::new();
         hash.update(b"session-plan-contract-v1\0");
         hash.update((profile.len() as u64).to_be_bytes());
@@ -62,7 +70,7 @@ impl RegisteredPlanDecoder {
             return Err(PlanError::UnsupportedContract);
         }
         let schema =
-            WireSchemaPool::from_descriptor_set_json(trogonai_proto::session_contracts::FILE_DESCRIPTOR_SET_JSON)
+            WireSchemaPool::from_descriptor_set_json(trogonai_proto::session_contracts::PLAN_DESCRIPTOR_SET_JSON)
                 .map_err(|_| PlanError::UnsupportedContract)?;
         let descriptor = schema
             .message_by_name(&contract.message_type)

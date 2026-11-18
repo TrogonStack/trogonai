@@ -143,7 +143,7 @@ pub(crate) fn plan(value: &plan::SessionExecutionPlan) -> Result<(), PlanError> 
     let directory = value.working_directory.as_option().ok_or(PlanError::InvalidPlan)?;
     let checkout = directory.checkout.as_option().ok_or(PlanError::InvalidPlan)?;
     bounded(&checkout.checkout_id, 128)?;
-    if checkout.uri.len() > 4096 || checkout.revision.as_ref().is_some_and(|revision| revision.len() > 128) {
+    if checkout.uri.len() > 2048 || checkout.revision.as_ref().is_some_and(|revision| revision.len() > 512) {
         return Err(PlanError::Limit);
     }
     contract(
@@ -152,7 +152,7 @@ pub(crate) fn plan(value: &plan::SessionExecutionPlan) -> Result<(), PlanError> 
             .as_option()
             .ok_or(PlanError::InvalidPlan)?,
     )?;
-    let path = directory.relative_path.as_deref().ok_or(PlanError::InvalidPlan)?;
+    let path = directory.relative_path.as_deref().unwrap_or_default();
     if path.len() > 4096
         || (!path.is_empty()
             && (path

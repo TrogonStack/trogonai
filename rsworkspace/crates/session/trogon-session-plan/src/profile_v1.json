@@ -2,6 +2,7 @@
   "profile": "session-plan-structural-v1",
   "contract_version": 1,
   "message": "trogonai.session.plans.v1alpha1.SessionExecutionPlan",
+  "descriptor_scope": "session-plan-and-agent-configuration-transitive-import-closure",
   "artifact_identity": "sha256-original-protobuf-bytes",
   "wire_semantics": "strict-known-fields-unique-singular-and-oneof-v1",
   "maximum_plan_bytes": 65536,

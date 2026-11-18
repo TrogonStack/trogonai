@@ -13,8 +13,14 @@ buffa = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "time"] }
+trogon-identity-types = { workspace = true }
+trogon-session-store = { path = "../trogon-session-store" }
 trogon-proto-preflight = { path = "../../platform/trogon-proto-preflight" }
 trogonai-proto = { workspace = true, features = ["session-contracts"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+buffa-types = { workspace = true }
+trogon-nats = { workspace = true }
 base64 = { workspace = true }
