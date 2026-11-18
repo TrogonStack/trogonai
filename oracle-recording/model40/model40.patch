@@ -1649,10 +1649,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..03bad317ff
+index 0000000000..8117df8572
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,451 @@
+@@ -0,0 +1,476 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -1728,6 +1728,17 @@ index 0000000000..03bad317ff
 +    "k.json",
 +    r#"{"permissions":{"deny":["Bash(dd:*)"]}}"#,
 +);
++
++/// How the managed settings file or drop-in of the recorder's `effective_*` cases starts and goes on: a permission
++/// object at the root, then nested arrays under `disableFoo`, a member nothing reads. No other case outside an
++/// organization one holds it.
++const EFFECTIVE_START: &str = r#"{"permissions":{"#;
++const EFFECTIVE_MEMBER: &str = r#"]},"disableFoo":["#;
++
++/// Whether `document` is the managed document of an `effective_*` case.
++fn effective_document(document: &str) -> bool {
++    document.starts_with(EFFECTIVE_START) && document.contains(EFFECTIVE_MEMBER)
++}
 +
 +/// Where the fake host keeps the file each place of a case names, and the drop-in name it lists for it.
 +fn place_path(place: &str) -> Option<(&'static str, Option<&'static str>)> {
@@ -1811,11 +1822,19 @@ index 0000000000..03bad317ff
 +/// The host and options of one case: the files it puts on disk, and the managed settings it hands over as options.
 +/// A case holding a machine registry policy (`hklm`) is an organization case, which the recorder runs as root in an
 +/// organization session with no settings sources, its stand-in for `reg.exe` answering that policy and no user one.
++///
++/// The recorder also runs its `effective_*` cases as an organization session (`CLAUDE_CODE_ENTRYPOINT` is
++/// `remote_cowork`), with the settings sources left as they are, one resolve per call, as a user who owns the managed
++/// documents it wrote. So `pE` upstream finds each of them rewritable (`n`): the first pass merges `{}` for it and the
++/// second only what `H7e` keeps of it (`m5`), never `disableFoo`, while the file cache (`Fu`) still copies the whole
++/// document in each evaluation. The fake host keeps no owners, so root, whose ids settle every write check, stands in
++/// for that user.
 +fn case(files: &Value) -> Result<Case, Failure> {
 +    let mut host = FakeHost::linux();
 +    let mut drop_ins = Vec::new();
 +    let mut options = Map::new();
 +    let mut organization = None;
++    let mut effective = false;
 +    for file in files.as_array().ok_or("a case has no files")? {
 +        let place = file[0].as_str().ok_or("a settings file has no place")?;
 +        if let Some(name) = option_name(place) {
@@ -1840,8 +1859,14 @@ index 0000000000..03bad317ff
 +            continue;
 +        }
 +        let (path, drop_in) = place_path(place).ok_or("a settings file has an unknown place")?;
-+        host = host.file(path, &content(file)?);
++        let document = content(file)?;
++        effective |= place != "user" && effective_document(&document);
++        host = host.file(path, &document);
 +        drop_ins.extend(drop_in);
++    }
++    if effective && organization.is_none() {
++        host = host.variable(ORGANIZATION_ENTRYPOINT.0, ORGANIZATION_ENTRYPOINT.1);
++        host.root = true;
 +    }
 +    if !drop_ins.is_empty() {
 +        host = host.directory(DROP_INS, &drop_ins);
