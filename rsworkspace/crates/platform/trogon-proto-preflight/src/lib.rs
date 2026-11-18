@@ -26,7 +26,7 @@ pub fn preflight(
     bytes: &[u8],
     limits: WireLimits,
 ) -> Result<(), WirePreflightError> {
-    preflight_profile(descriptor, bytes, limits, None)
+    preflight_profile(descriptor, bytes, limits, None, None)
 }
 
 pub fn preflight_with_string_maps(
@@ -36,7 +36,7 @@ pub fn preflight_with_string_maps(
     profile: &WireStringMapProfile,
 ) -> Result<(), WirePreflightError> {
     profile.require_schema(descriptor)?;
-    preflight_profile(descriptor, bytes, limits, Some(profile))
+    preflight_profile(descriptor, bytes, limits, Some(profile), None)
 }
 
 fn preflight_profile(
@@ -44,6 +44,7 @@ fn preflight_profile(
     bytes: &[u8],
     limits: WireLimits,
     profile: Option<&WireStringMapProfile>,
+    message_profile: Option<&WireMessageMapProfile>,
 ) -> Result<(), WirePreflightError> {
     if bytes.len() > limits.max_bytes() {
         return Err(WirePreflightError::TooLarge);
@@ -56,6 +57,7 @@ fn preflight_profile(
         limits.max_depth(),
         &mut remaining,
         profile,
+        message_profile,
     )
     .map(|_| ())
 }
@@ -67,12 +69,16 @@ fn message<'a>(
     depth: usize,
     remaining: &mut usize,
     profile: Option<&WireStringMapProfile>,
+    message_profile: Option<&WireMessageMapProfile>,
 ) -> Result<Option<&'a [u8]>, WirePreflightError> {
     if depth == 0 {
         return Err(WirePreflightError::DepthLimit);
     }
     let shape = schema.messages.get(name).ok_or(WirePreflightError::InvalidTag)?;
-    if shape.map_entry && !profile.is_some_and(|profile| profile.permits(name)) {
+    if shape.map_entry
+        && !profile.is_some_and(|profile| profile.permits(name))
+        && !message_profile.is_some_and(|profile| profile.permits(name))
+    {
         return Err(WirePreflightError::UnsupportedMap);
     }
     let mut offset = 0;
@@ -120,7 +126,7 @@ fn message<'a>(
             "TYPE_MESSAGE" => {
                 let nested = delimited(bytes, &mut offset)?;
                 let child = field.type_name.as_deref().ok_or(WirePreflightError::InvalidTag)?;
-                if let Some(key) = message(schema, child, nested, depth - 1, remaining, profile)?
+                if let Some(key) = message(schema, child, nested, depth - 1, remaining, profile, message_profile)?
                     && !map_keys.entry(number).or_default().insert(key)
                 {
                     return Err(WirePreflightError::DuplicateMapKey { field_number: number });
@@ -241,7 +247,23 @@ pub fn preflight_with_message_maps(
     descriptor: &WireMessageDescriptor,
     bytes: &[u8],
     limits: WireLimits,
-    _profile: &WireMessageMapProfile,
+    profile: &WireMessageMapProfile,
 ) -> Result<(), WirePreflightError> {
-    preflight(descriptor, bytes, limits)
+    preflight_with_maps(descriptor, bytes, limits, None, Some(profile))
+}
+
+pub fn preflight_with_maps(
+    descriptor: &WireMessageDescriptor,
+    bytes: &[u8],
+    limits: WireLimits,
+    string_maps: Option<&WireStringMapProfile>,
+    message_maps: Option<&WireMessageMapProfile>,
+) -> Result<(), WirePreflightError> {
+    if let Some(profile) = string_maps {
+        profile.require_schema(descriptor)?;
+    }
+    if let Some(profile) = message_maps {
+        profile.require_schema(descriptor)?;
+    }
+    preflight_profile(descriptor, bytes, limits, string_maps, message_maps)
 }

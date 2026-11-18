@@ -88,9 +88,9 @@ impl WireSchemaPool {
 
     pub fn message_map_profile(
         &self,
-        _entries: &[(&str, &str)],
+        entries: &[(&str, &str)],
     ) -> Result<crate::WireMessageMapProfile, crate::WireMessageMapProfileError> {
-        Ok(crate::WireMessageMapProfile)
+        crate::WireMessageMapProfile::new(Arc::clone(&self.data), entries)
     }
 
     pub fn string_map_profile(&self, names: &[&str]) -> Result<WireStringMapProfile, WireStringMapProfileError> {
