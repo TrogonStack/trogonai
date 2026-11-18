@@ -14,16 +14,13 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::warn;
 use trogon_nats::jetstream::{
-    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
-    StreamMaxAge,
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, StreamMaxAge,
 };
 
 use super::admission::{AdmissionError, admit};
 use super::config::WhatsAppConfig;
+use super::constants::{DEDUP_WINDOW, PUBLISH_CONCURRENCY};
 use crate::source::hub_signature;
-
-const DEDUP_WINDOW: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-const PUBLISH_CONCURRENCY: usize = 16;
 
 #[derive(Clone)]
 struct AppState<P, S> {
@@ -102,14 +99,6 @@ async fn verify_callback<P, S>(
     query.challenge.into_response()
 }
 
-#[derive(Debug, thiserror::Error)]
-enum BatchPublishError<E: std::error::Error> {
-    #[error("failed to serialize a WhatsApp event")]
-    Encode(#[from] serde_json::Error),
-    #[error("failed to publish a WhatsApp event")]
-    Publish(PublishOutcome<E>),
-}
-
 async fn receive<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     headers: HeaderMap,
@@ -141,25 +130,18 @@ async fn receive<P: JetStreamPublisher, S: ObjectStorePut>(
         let subject = subject.clone();
         let publisher = &state.publisher;
         async move {
-            let payload = serde_json::to_vec(&event)?;
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("Nats-Msg-Id", event.dedup_id());
-            let outcome = publisher.publish_event(subject, headers, payload.into(), timeout).await;
-            if outcome.is_ok() {
-                Ok(())
-            } else {
-                Err(BatchPublishError::Publish(outcome))
-            }
+            let outcome = publisher
+                .publish_event(subject, headers, event.payload().into(), timeout)
+                .await;
+            if outcome.is_ok() { Ok(()) } else { Err(outcome) }
         }
     });
     match tokio::time::timeout(timeout, publishing).await {
         Ok(Ok(())) => StatusCode::OK,
-        Ok(Err(BatchPublishError::Publish(outcome))) => {
+        Ok(Err(outcome)) => {
             outcome.log_on_error("whatsapp");
-            StatusCode::SERVICE_UNAVAILABLE
-        }
-        Ok(Err(BatchPublishError::Encode(_))) => {
-            warn!("Failed to serialize a WhatsApp event");
             StatusCode::SERVICE_UNAVAILABLE
         }
         Err(_) => {

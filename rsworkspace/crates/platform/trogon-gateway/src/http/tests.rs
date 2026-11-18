@@ -37,7 +37,7 @@ use trogon_webhooks::{
     SecretWebhookVerifier, TimestampTolerance, WebhookBodySize,
 };
 
-mod whatsapp;
+mod whatsapp_tests;
 
 #[tokio::test]
 async fn generic_webhooks_mount_with_provider_routes_and_runtime_credentials() {

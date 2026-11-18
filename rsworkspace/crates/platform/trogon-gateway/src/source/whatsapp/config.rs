@@ -1,10 +1,8 @@
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::{DottedNatsToken, NatsToken};
-use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, SecretString};
+use trogon_std::{HttpBodySizeMax, NonZeroDuration, SecretString};
 
 use super::meta_object_id::MetaObjectId;
-
-pub const HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(ByteSize::b(3_000_000)).unwrap();
 
 #[derive(Clone)]
 pub struct WhatsAppWebhookConfig {

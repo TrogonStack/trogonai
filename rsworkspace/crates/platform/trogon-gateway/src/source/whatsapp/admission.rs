@@ -1,12 +1,11 @@
 use std::borrow::Cow;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
+use super::constants::MAX_BATCH_UPDATES;
 use super::meta_object_id::MetaObjectId;
-
-const MAX_BATCH_UPDATES: usize = 1_000;
 
 #[derive(Deserialize)]
 struct BatchInput<'a> {
@@ -67,16 +66,24 @@ struct MessageInput<'a> {
     kind: Cow<'a, str>,
 }
 
-#[derive(Serialize)]
 pub(super) struct InboundEvent<'a> {
     waba_id: &'a MetaObjectId,
     phone_number_id: &'a MetaObjectId,
     message: &'a RawValue,
-    #[serde(skip)]
     message_id: Cow<'a, str>,
 }
 
 impl InboundEvent<'_> {
+    pub(super) fn payload(&self) -> String {
+        // The IDs are decimal strings and the message already passed JSON validation.
+        format!(
+            r#"{{"waba_id":"{}","phone_number_id":"{}","message":{}}}"#,
+            self.waba_id.as_str(),
+            self.phone_number_id.as_str(),
+            self.message.get()
+        )
+    }
+
     pub(super) fn dedup_id(&self) -> String {
         let mut hash = Sha256::new();
         // Decimal account and phone IDs cannot contain the separator.

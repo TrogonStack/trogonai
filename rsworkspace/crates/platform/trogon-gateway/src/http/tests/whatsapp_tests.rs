@@ -1,6 +1,10 @@
 use super::*;
+use async_nats::subject::ToSubject;
+use axum::body::Bytes;
 use serde_json::{Value, json};
+use std::sync::LazyLock;
 use std::time::Duration;
+use trogon_nats::jetstream::JetStreamPublisher;
 
 const SUPPORT: &str = "/sources/whatsapp/support/webhook";
 const SALES: &str = "/sources/whatsapp/sales/webhook";
@@ -11,25 +15,49 @@ stream_max_age_secs = 3600
 [sources.whatsapp.integrations.support.webhook]
 waba_id = "100"
 phone_number_id = "101"
-verify_token = "support-test-verification"
-app_secret = "test-meta-app-signing"
+verify_token = "<support-token>"
+app_secret = "<app-secret>"
 max_body_bytes = 4096
 
 [sources.whatsapp.integrations.sales.webhook]
 waba_id = "200"
 phone_number_id = "201"
-verify_token = "sales-test-verification"
-app_secret = "test-meta-app-signing"
+verify_token = "<sales-token>"
+app_secret = "<app-secret>"
 "#;
-const APP_SECRET: &str = "test-meta-app-signing";
+struct FixtureSecrets {
+    app_secret: String,
+    support_token: String,
+    sales_token: String,
+}
 
-fn config(toml: &str) -> ResolvedConfig {
-    load(Some(write_toml(toml).path())).expect("WhatsApp source configuration must load")
+fn secrets() -> &'static FixtureSecrets {
+    static SECRETS: LazyLock<FixtureSecrets> = LazyLock::new(|| FixtureSecrets {
+        app_secret: random_secret(),
+        support_token: random_secret(),
+        sales_token: random_secret(),
+    });
+    &SECRETS
+}
+
+fn fixture_toml(toml: &str) -> String {
+    let secrets = secrets();
+    toml.replace("<app-secret>", &secrets.app_secret)
+        .replace("<support-token>", &secrets.support_token)
+        .replace("<sales-token>", &secrets.sales_token)
+}
+
+fn load_fixture(toml: &str) -> Result<ResolvedConfig, crate::config::ConfigError> {
+    load(Some(write_toml(&fixture_toml(toml)).path()))
+}
+
+fn resolved_config(toml: &str) -> ResolvedConfig {
+    load_fixture(toml).expect("WhatsApp source configuration must load")
 }
 
 fn app(publisher: &MockJetStreamPublisher) -> Router {
     mount_sources(
-        config(CONFIG),
+        resolved_config(CONFIG),
         wrap_publisher(publisher.clone()),
         &AdvancedMockNatsClient::new(),
     )
@@ -58,7 +86,7 @@ async fn deliver(app: &Router, uri: &str, envelope: Value) -> StatusCode {
     // Whitespace makes this proof depend on the original signed bytes.
     let mut body = serde_json::to_vec_pretty(&envelope).unwrap();
     body.push(b'\n');
-    let signature = compute_github_sig(APP_SECRET, &body);
+    let signature = compute_github_sig(&secrets().app_secret, &body);
     send(app, post(uri, body, Some(&signature))).await.status()
 }
 
@@ -94,25 +122,24 @@ fn text(id: &str, body: &str) -> Value {
 async fn callback_verifies_the_named_integration_and_returns_a_plain_challenge() {
     let publisher = MockJetStreamPublisher::new();
     let app = app(&publisher);
-    let query = "hub.mode=subscribe&hub.verify_token=support-test-verification&hub.challenge=001%2B9";
-    let response = send(&app, get(SUPPORT, query)).await;
+    let token = &secrets().support_token;
+    let query = format!("hub.mode=subscribe&hub.verify_token={token}&hub.challenge=001%2B9");
+    let response = send(&app, get(SUPPORT, &query)).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/plain; charset=utf-8");
     assert_eq!(axum::body::to_bytes(response.into_body(), 32).await.unwrap(), "001+9");
-    assert_eq!(send(&app, get(SALES, query)).await.status(), StatusCode::FORBIDDEN);
+    assert_eq!(send(&app, get(SALES, &query)).await.status(), StatusCode::FORBIDDEN);
     assert_eq!(
-        send(
-            &app,
-            get(SUPPORT, &query.replace("support-test-verification", APP_SECRET))
-        )
-        .await
-        .status(),
+        send(&app, get(SUPPORT, &query.replace(token, &secrets().app_secret)))
+            .await
+            .status(),
         StatusCode::FORBIDDEN
     );
     for query in [
         query.replace("subscribe", "unsubscribe"),
         query.split("&hub.challenge").next().unwrap().to_owned(),
-        format!("{query}&hub.verify_token=support-test-verification"),
+        format!("{query}&hub.verify_token={token}"),
+        format!("hub.mode=subscribe&hub.verify_token={token}&hub.challenge="),
     ] {
         assert_eq!(send(&app, get(SUPPORT, &query)).await.status(), StatusCode::BAD_REQUEST);
     }
@@ -128,8 +155,8 @@ async fn rejects_bad_signatures_and_enforces_the_managed_body_limit() {
         vec![change("101", json!({"messages":[text("wamid.example=", "hello")]}))],
     )]);
     let body = serde_json::to_vec(&event).unwrap();
-    let using_verify_token = compute_github_sig("support-test-verification", &body);
-    let original_signature = compute_github_sig(APP_SECRET, &body);
+    let using_verify_token = compute_github_sig(&secrets().support_token, &body);
+    let original_signature = compute_github_sig(&secrets().app_secret, &body);
     let mut modified = body.clone();
     modified.push(b' ');
     for (body, signature) in [
@@ -150,7 +177,7 @@ async fn rejects_bad_signatures_and_enforces_the_managed_body_limit() {
     assert_eq!(send(&app, duplicate).await.status(), StatusCode::UNAUTHORIZED);
     let mut oversized = body;
     oversized.resize(4097, b' ');
-    let signature = compute_github_sig(APP_SECRET, &oversized);
+    let signature = compute_github_sig(&secrets().app_secret, &oversized);
     assert_eq!(
         send(&app, post(SUPPORT, oversized, Some(&signature))).await.status(),
         StatusCode::PAYLOAD_TOO_LARGE
@@ -240,6 +267,20 @@ async fn invalid_or_over_count_batches_cannot_partially_publish() {
         .await,
         StatusCode::BAD_REQUEST
     );
+    let empty_identity = json!({"id":"","type":"text"});
+    let invalid = envelope(vec![entry(
+        "100",
+        vec![change("101", json!({"messages":[empty_identity]}))],
+    )]);
+    assert_eq!(deliver(&app, SUPPORT, invalid).await, StatusCode::BAD_REQUEST);
+
+    let account_update = json!({"field":"account_update","value":{}});
+    let entries = vec![entry("200", vec![account_update; 1001])];
+    assert_eq!(
+        deliver(&app, SALES, envelope(entries)).await,
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+
     let too_many = vec![json!({"id":"wamid.repeated=","type":"text"}); 1001];
     assert_eq!(
         deliver(
@@ -309,7 +350,7 @@ async fn publishes_large_admitted_messages_through_claim_check_with_runtime_moun
         MaxPayload::from_server_limit(1024),
     );
     let app = mount_sources_with_runtime_credentials(
-        config(CONFIG),
+        resolved_config(CONFIG),
         publisher,
         &AdvancedMockNatsClient::new(),
         RuntimeCredentialMounts::<MockOpenBaoSecretStore>::default(),
@@ -335,7 +376,7 @@ async fn publishes_large_admitted_messages_through_claim_check_with_runtime_moun
 
 #[tokio::test]
 async fn provisions_a_named_stream_with_dedup_bounded_by_retention() {
-    let config = config(CONFIG);
+    let config = resolved_config(CONFIG);
     assert!(config.has_any_source());
     assert_eq!(
         Duration::from(config.max_stream_max_age().unwrap()),
@@ -352,6 +393,45 @@ async fn provisions_a_named_stream_with_dedup_bounded_by_retention() {
     let sales = streams.iter().find(|stream| stream.name == "WHATSAPP_SALES").unwrap();
     assert_eq!(sales.subjects, ["whatsapp-sales.>"]);
     assert_eq!(sales.duplicate_window, Duration::from_secs(604_800));
+
+    // Operator configuration rejects zero retention. Exercise the provisioner with an unbounded stream directly.
+    let mut no_expiry = resolved_config(CONFIG);
+    let integration = no_expiry
+        .whatsapp
+        .iter_mut()
+        .find(|source| source.id.as_str() == "sales")
+        .unwrap();
+    integration.config.stream_max_age = trogon_nats::jetstream::StreamMaxAge::NoExpiry;
+    let context = trogon_nats::jetstream::MockJetStreamContext::new();
+    crate::streams::provision(&context, &no_expiry).await.unwrap();
+    let streams = context.created_streams();
+    let sales = streams.iter().find(|stream| stream.name == "WHATSAPP_SALES").unwrap();
+    assert_eq!(sales.max_age, Duration::ZERO);
+    assert_eq!(sales.duplicate_window, Duration::from_secs(604_800));
+}
+
+fn sales_integration_setting(setting: &str) -> String {
+    CONFIG.replace(
+        "[sources.whatsapp.integrations.sales.webhook]",
+        &format!("[sources.whatsapp.integrations.sales]\n{setting}\n[sources.whatsapp.integrations.sales.webhook]"),
+    )
+}
+
+#[test]
+fn skips_disabled_whatsapp_sources_and_rejects_invalid_integration_settings() {
+    let disabled = format!("[sources.whatsapp]\nstatus = \"disabled\"\n{CONFIG}");
+    assert!(resolved_config(&disabled).whatsapp.is_empty());
+
+    let disabled_sales = resolved_config(&sales_integration_setting("status = \"disabled\""));
+    assert_eq!(disabled_sales.whatsapp.len(), 1);
+    assert_eq!(disabled_sales.whatsapp[0].id.as_str(), "support");
+
+    for invalid in [
+        CONFIG.replace("integrations.sales", "integrations.\"invalid name\""),
+        sales_integration_setting("subject_prefix = \"invalid prefix\""),
+    ] {
+        assert!(load_fixture(&invalid).is_err());
+    }
 }
 
 #[test]
@@ -359,10 +439,72 @@ fn refuses_missing_or_invalid_authority_and_credential_reuse() {
     for invalid in [
         CONFIG.replace("waba_id = \"100\"", "waba_id = \"\""),
         CONFIG.replace("phone_number_id = \"101\"", "phone_number_id = \"human-phone\""),
-        CONFIG.replace("verify_token = \"support-test-verification\"", ""),
-        CONFIG.replace("support-test-verification", APP_SECRET),
+        CONFIG.replace("verify_token = \"<support-token>\"", ""),
+        CONFIG.replace("<support-token>", "<app-secret>"),
         CONFIG.replace("max_body_bytes = 4096", "max_body_bytes = 3000001"),
     ] {
-        assert!(load(Some(write_toml(&invalid).path())).is_err());
+        assert!(load_fixture(&invalid).is_err());
     }
+}
+
+#[derive(Clone)]
+struct PendingPublisher;
+
+impl JetStreamPublisher for PendingPublisher {
+    type PublishError = <MockJetStreamPublisher as JetStreamPublisher>::PublishError;
+    type AckFuture = <MockJetStreamPublisher as JetStreamPublisher>::AckFuture;
+
+    async fn publish_with_headers<S: ToSubject + Send>(
+        &self,
+        _subject: S,
+        _headers: async_nats::HeaderMap,
+        _payload: Bytes,
+    ) -> Result<Self::AckFuture, Self::PublishError> {
+        std::future::pending().await
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn unavailable_publication_returns_503_at_the_batch_deadline() {
+    let app = mount_sources(
+        resolved_config(&CONFIG.replace("stream_max_age_secs = 3600", "nats_ack_timeout_secs = 1")),
+        ClaimCheckPublisher::new(
+            PendingPublisher,
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
+            MaxPayload::from_server_limit(1024),
+        ),
+        &AdvancedMockNatsClient::new(),
+    );
+    let event = envelope(vec![entry(
+        "100",
+        vec![change(
+            "101",
+            json!({"messages":[text("wamid.pending=", "Timed delivery")]}),
+        )],
+    )]);
+    let started = tokio::time::Instant::now();
+    let status = tokio::time::timeout(Duration::from_secs(2), deliver(&app, SUPPORT, event))
+        .await
+        .expect("gateway must respond within the batch budget");
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(started.elapsed(), Duration::from_secs(1));
+}
+
+#[tokio::test]
+async fn published_event_preserves_the_original_message_object_bytes() {
+    let publisher = MockJetStreamPublisher::new();
+    let app = app(&publisher);
+    let message = r#"{ "id": "wamid.raw=", "type": "text", "text": { "body": "\u0041" } }"#;
+    let body = format!(
+        r#"{{"object":"whatsapp_business_account","entry":[{{"id":"100","changes":[{{"field":"messages","value":{{"metadata":{{"phone_number_id":"101"}},"messages":[{message}]}}}}]}}]}}"#
+    ).into_bytes();
+    let signature = compute_github_sig(&secrets().app_secret, &body);
+    assert_eq!(
+        send(&app, post(SUPPORT, body, Some(&signature))).await.status(),
+        StatusCode::OK
+    );
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    let payload = std::str::from_utf8(&messages[0].payload).unwrap();
+    assert!(payload.contains(message));
 }
