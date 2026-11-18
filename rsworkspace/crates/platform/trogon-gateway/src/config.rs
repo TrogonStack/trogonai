@@ -492,6 +492,25 @@ struct SourcesConfig {
     zoom: ZoomConfig,
     #[config(nested)]
     plaid: PlaidConfig,
+    #[config(nested)]
+    whatsapp: WhatsAppConfigInput,
+}
+
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct WhatsAppConfigInput {
+    #[config(default = {})]
+    integrations: BTreeMap<String, SourceIntegrationInput<WhatsAppWebhookInput>>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WhatsAppWebhookInput {
+    waba_id: Option<String>,
+    phone_number_id: Option<String>,
+    verify_token: Option<SecretInput>,
+    app_secret: Option<SecretInput>,
+    max_body_bytes: Option<ByteCountInput>,
 }
 
 #[derive(Config)]
@@ -1033,6 +1052,18 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
     let datadog = resolve_datadog_integrations(cfg.sources.datadog, env, &mut errors);
     let zoom = resolve_zoom_integrations(cfg.sources.zoom, env, &mut errors);
     let plaid = resolve_plaid_integrations(cfg.sources.plaid, env, &mut errors);
+    for integration in cfg.sources.whatsapp.integrations.into_values() {
+        if let Some(webhook) = integration.webhook {
+            let WhatsAppWebhookInput {
+                waba_id,
+                phone_number_id,
+                verify_token,
+                app_secret,
+                max_body_bytes,
+            } = webhook;
+            drop((waba_id, phone_number_id, verify_token, app_secret, max_body_bytes));
+        }
+    }
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(AggregateValidationError(errors)));
