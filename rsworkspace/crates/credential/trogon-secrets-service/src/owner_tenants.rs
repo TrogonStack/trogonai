@@ -4,10 +4,9 @@ use super::TenantAccount;
 
 /// Which tenant holds each credential owner, the reverse of [`TenantOwners`].
 ///
-/// An invalidation notice goes out on the subject of the one account that
-/// holds the credential's owner, since only that account may import it
-/// (ADR#0081 Decision 3). It is a port of its own because the release core
-/// only ever asks the forward question.
+/// An invalidation notice goes out on the subject that names the one account
+/// holding the credential's owner (ADR#0095 Decision 5). It is a port of its
+/// own because the release core only ever asks the forward question.
 ///
 /// [`TenantOwners`]: super::TenantOwners
 pub trait OwnerTenants: Send + Sync + 'static {

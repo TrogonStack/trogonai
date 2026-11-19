@@ -333,19 +333,15 @@ async fn write_many(
     server: &Server,
     amount: u64,
     pending_writes: &mut tokio::task::JoinSet<Result<(), Error>>,
-) -> usize {
+) -> Result<usize, Box<dyn StdError>> {
     if amount == 0 {
-        return 0;
+        return Ok(0);
     }
-    if transport
+    transport
         .shared
         .write(&json!({"type": "user", "n": 0}).to_string())
-        .await
-        .is_err()
-    {
-        return 0;
-    }
-    server.first_post.notified().await;
+        .await?;
+    timeout(Duration::from_secs(3), server.first_post.notified()).await?;
     let mut resolved = 1;
     for n in 1..amount {
         let shared = Arc::clone(&transport.shared);
@@ -353,14 +349,16 @@ async fn write_many(
         let mut write = Box::pin(async move { shared.write(&line).await });
         // Cooperative scheduler yields must not be mistaken for queue backpressure.
         match poll!(tokio::task::unconstrained(write.as_mut())) {
-            Poll::Ready(Ok(())) => resolved += 1,
-            Poll::Ready(Err(_)) => {}
+            Poll::Ready(result) => {
+                result?;
+                resolved += 1;
+            }
             Poll::Pending => {
                 pending_writes.spawn(write);
             }
         }
     }
-    resolved
+    Ok(resolved)
 }
 
 /// A recorded case's server and connected transport, before any of its actions run.
@@ -498,7 +496,7 @@ async fn replay(name: &str) -> Result<Replay, Box<dyn StdError>> {
                     argument.as_u64().unwrap_or_default(),
                     &mut pending_writes,
                 )
-                .await;
+                .await?;
                 json!({"resolved": resolved})
             }
             "waitGets" => {
@@ -590,7 +588,7 @@ async fn queue_snapshot_waits_for_admission_after_the_sampling_timer_elapsed() -
     let _ = poll!(advance.as_mut());
     drop(advance);
     tokio::time::resume();
-    assert_eq!(batch.await, 1001);
+    assert_eq!(batch.await?, 1001);
     assert_eq!(pending_writes.len(), 4);
     {
         let next = pending_writes.join_next();
