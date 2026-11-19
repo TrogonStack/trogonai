@@ -1,0 +1,151 @@
+edition = "2024";
+
+package trogonai.session.plans.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/implementation.proto";
+import "trogonai/agents/agents/v1alpha1/variables.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+import "trogonai/session/plans/v1alpha1/compaction_profile.proto";
+import "trogonai/session/plans/v1alpha1/model_access_profile.proto";
+import "trogonai/session/plans/v1alpha1/resolved_dependency.proto";
+import "trogonai/session/sessions/v1alpha1/candidate_ref.proto";
+import "trogonai/session/sessions/v1alpha1/checkout.proto";
+import "trogonai/session/sessions/v1alpha1/claim_check.proto";
+
+// Concrete content of the opaque StoredSessionExecutionPlan bytes. A protected
+// registered contract selects its descriptor and interpreter before decoding;
+// the contract inside these bytes is a consistency check, never authority.
+// Native settings remain owned by the selected runtime. Original artifacts,
+// source lineage and current authorization require separate admission proof.
+// Version 1 bounds declaration count, identifiers and native byte payloads.
+// Variable recursion, total encoded size, registered semantic interpretation
+// and dependency closure are checked by the executable verifier before use.
+message SessionExecutionPlan {
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.version"
+    message: "only plan contract version 1 is supported"
+    expression: "!has(this.contract_version) || this.contract_version == 1u"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.contract_identity"
+    message: "plan contract must name SessionExecutionPlan version 1"
+    expression: "!has(this.contract) || (this.contract.message_type == 'trogonai.session.plans.v1alpha1.SessionExecutionPlan' && this.contract.version == '1')"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.identity_bounds"
+    message: "plan identity and version values must fit their finite UTF8 bounds"
+    expression: "(!has(this.project_id) || size(bytes(this.project_id.value)) <= 128) && (!has(this.agent_revision) || size(bytes(this.agent_revision.agent_id)) <= 128) && (!has(this.implementation) || ((!has(this.implementation.platform_harness) || size(bytes(this.implementation.platform_harness.version)) <= 128) && (!has(this.implementation.registered_extension) || (size(bytes(this.implementation.registered_extension.extension_id)) <= 128 && size(bytes(this.implementation.registered_extension.version)) <= 128))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.native_configuration_bounds"
+    message: "native configurations must fit exact contract and byte bounds"
+    expression: "(!has(this.runtime_settings) || (this.runtime_settings.configuration_bytes.size() <= 32768 && size(bytes(this.runtime_settings.contract.message_type)) <= 512 && size(bytes(this.runtime_settings.contract.version)) <= 128)) && (!has(this.effective_runtime_configuration) || (this.effective_runtime_configuration.configuration_bytes.size() <= 32768 && size(bytes(this.effective_runtime_configuration.contract.message_type)) <= 512 && size(bytes(this.effective_runtime_configuration.contract.version)) <= 128)) && ((!has(this.runtime_settings) || !has(this.effective_runtime_configuration)) || this.runtime_settings.configuration_bytes.size() + this.effective_runtime_configuration.configuration_bytes.size() <= 49152)"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.execution_contract_bounds"
+    message: "execution contract values must fit their finite UTF8 bounds"
+    expression: "!has(this.execution_contract) || (size(bytes(this.execution_contract.message_type)) <= 512 && size(bytes(this.execution_contract.version)) <= 128)"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.unchanged_configuration"
+    message: "unchanged execution must preserve the revision configuration"
+    expression: "has(this.candidate) || !has(this.agent_revision) || !has(this.effective_configuration) || this.agent_revision.configuration == this.effective_configuration"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.candidate_bounds"
+    message: "candidate identity and digest must satisfy the v1 profile"
+    expression: "!has(this.candidate) || (size(bytes(this.candidate.candidate_id.value)) <= 128 && this.candidate.content_digest.algorithm == 'sha256' && this.candidate.content_digest.value.size() == 32)"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.dependency_bindings_unique"
+    message: "dependency binding names must be unique per declaring resource"
+    expression: "this.dependencies.all(d, this.dependencies.filter(other, other.declaring_resource == d.declaring_resource && other.binding_name == d.binding_name).size() == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.root_declarer"
+    message: "root declarations must identify the plan Agent revision"
+    expression: "!has(this.agent_revision) || this.dependencies.all(d, !has(d.declaring_resource.agent) || d.declaring_resource.agent == this.agent_revision)"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.platform_harness_profiles"
+    message: "platform harness requires managed models and platform compaction policy"
+    expression: "!has(this.implementation) || !has(this.implementation.platform_harness) || (has(this.model_access.managed) && has(this.compaction.platform))"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.variables_root"
+    message: "caller variables require bounded nonempty keys and nonnull root values"
+    expression: "!has(this.variables) || (this.variables.values.size() <= 128 && this.variables.values.all(key, size(bytes(key)) > 0 && size(bytes(key)) <= 128 && this.variables.values[key] != null && (type(this.variables.values[key]) != string || size(bytes(this.variables.values[key])) <= 4096)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "session_execution_plan.compaction_model"
+    message: "enabled platform compaction requires its managed producer model"
+    expression: "!has(this.compaction.platform) || has(this.compaction.platform.trigger.disabled) || (has(this.model_access.managed) && (this.compaction.platform.producer_role == 1 || (this.compaction.platform.producer_role == 2 && this.model_access.managed.auxiliary.exists(value, value.role.name == 'compaction'))))"
+  };
+
+  uint32 contract_version = 1 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef contract = 2 [(buf.validate.field).required = true];
+  string session_id = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_bytes: 1
+      max_bytes: 128
+    }
+  ];
+  trogonai.projects.projects.v1alpha1.ProjectId project_id = 4 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.AgentRevisionRef agent_revision = 5 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.AgentConfigurationRef effective_configuration = 6 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.AgentImplementation implementation = 7 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.NativeConfiguration runtime_settings = 8 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.NativeConfiguration effective_runtime_configuration = 9 [(buf.validate.field).required = true];
+  trogonai.session.sessions.v1alpha1.CandidateRef candidate = 10;
+  repeated ResolvedDependency dependencies = 11 [(buf.validate.field).repeated.max_items = 256];
+  // An explicit empty binding set records that no platform caller variables
+  // were supplied. Native-only variables remain in runtime_settings.
+  trogonai.agents.agents.v1alpha1.VariableBindings variables = 12 [(buf.validate.field).required = true];
+  WorkInput work = 13;
+  ModelAccessProfile model_access = 14 [(buf.validate.field).required = true];
+  CompactionProfile compaction = 15 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef execution_contract = 16 [(buf.validate.field).required = true];
+  WorkingDirectory working_directory = 17 [(buf.validate.field).required = true];
+}
+
+// The exact registered work contract owns input and result semantics. Ordinary
+// conversational Sessions may omit this capability. It is not caller variables.
+message WorkInput {
+  option (buf.validate.message).cel = {
+    id: "work_input.contract_bounds"
+    message: "work contract values must fit their finite UTF8 bounds"
+    expression: "!has(this.contract) || (size(bytes(this.contract.message_type)) <= 512 && size(bytes(this.contract.version)) <= 128)"
+  };
+  option (buf.validate.message).cel = {
+    id: "work_input.references"
+    message: "work input references require bounded locators and SHA256 digests"
+    expression: "this.inputs.all(input, size(bytes(input.storage_ref.value)) <= 2048 && input.digest.algorithm == 'sha256' && input.digest.value.size() == 32)"
+  };
+
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef contract = 1 [(buf.validate.field).required = true];
+  repeated trogonai.session.sessions.v1alpha1.ClaimCheck inputs = 2 [(buf.validate.field).repeated.max_items = 128];
+}
+
+// The actual checkout owner verifies root containment and symlink behavior;
+// neither a relative path nor the checkout URI proves filesystem authority.
+message WorkingDirectory {
+  option (buf.validate.message).cel = {
+    id: "working_directory.normalized_path"
+    message: "working directory must be a normalized root-relative path"
+    expression: "this.relative_path == '' || (!this.relative_path.startsWith('/') && !this.relative_path.endsWith('/') && !this.relative_path.contains('\\\\') && !this.relative_path.contains('%') && !this.relative_path.contains(':') && this.relative_path.split('/').all(segment, segment != '' && segment != '.' && segment != '..'))"
+  };
+  option (buf.validate.message).cel = {
+    id: "working_directory.reference_bounds"
+    message: "checkout and filesystem contract values must fit their finite UTF8 bounds"
+    expression: "(!has(this.checkout) || (size(bytes(this.checkout.checkout_id)) <= 128 && size(bytes(this.checkout.uri)) <= 2048 && size(bytes(this.checkout.revision)) <= 512)) && (!has(this.filesystem_contract) || (size(bytes(this.filesystem_contract.message_type)) <= 512 && size(bytes(this.filesystem_contract.version)) <= 128))"
+  };
+
+  trogonai.session.sessions.v1alpha1.CheckoutRef checkout = 1 [(buf.validate.field).required = true];
+  // Empty means the checkout root. Other values name root-relative segments.
+  string relative_path = 2 [(buf.validate.field).string.max_bytes = 4096];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef filesystem_contract = 3 [(buf.validate.field).required = true];
+}
