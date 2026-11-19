@@ -22,3 +22,34 @@ sh_test(
     # Runs the bootstrap in a container through Docker, which pulls its image.
     tags = ["requires-network"],
 )
+
+# Each drives its provisioning script against a stand-in `nats` CLI, so it
+# needs no server, no container and no copy; jq comes from the host like
+# Docker does.
+sh_test(
+    name = "provision_audit_test",
+    srcs = ["provision-audit.test.sh"],
+    data = ["provision-audit.sh"],
+)
+
+sh_test(
+    name = "provision_secrets_invalidation_test",
+    srcs = ["provision-secrets-invalidation.test.sh"],
+    data = ["provision-secrets-invalidation.sh"],
+)
+
+# Each sources the install helper it checks and stages files in a temporary
+# directory, so neither needs a server or a container.
+sh_test(
+    name = "install_seed_test",
+    srcs = ["install-seed.test.sh"],
+    data = ["install-seed.sh"],
+)
+
+sh_test(
+    name = "install_memberships_test",
+    srcs = ["install-memberships.test.sh"],
+    data = ["install-memberships.sh"],
+    # chown lives in /usr/sbin on macOS, which the default test PATH leaves out.
+    env = {"PATH": "/bin:/usr/bin:/usr/sbin:/usr/local/bin"},
+)

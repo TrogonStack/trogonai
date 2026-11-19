@@ -60,8 +60,8 @@ enum Outcome {
 }
 
 /// A port of the recording server: a thread per connection reads up to the end of the request head for at most
-/// [`HEAD_TIMEOUT`], records the head, answers the route of its path and closes. A TLS server finishes the handshake
-/// first and closes without `close_notify`, as `SSLSocket.close` does.
+/// [`HEAD_TIMEOUT`], records the head, answers the route of its path, ends its write side and reads until the client
+/// closes. A TLS server finishes the handshake first and closes without `close_notify`, as `SSLSocket.close` does.
 struct RawServer {
     port: u16,
     requests: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -123,6 +123,9 @@ fn head_end(data: &[u8]) -> Option<usize> {
 
 /// `RawServer.handle`: a read that fails or times out ends the connection without recording it.
 fn handle(socket: TcpStream, routes: &Routes, requests: &Mutex<Vec<Vec<u8>>>, tls: Option<Arc<ServerConfig>>) {
+    let Ok(mut raw) = socket.try_clone() else {
+        return;
+    };
     let Some(mut stream) = accept(socket, tls) else {
         return;
     };
@@ -145,6 +148,11 @@ fn handle(socket: TcpStream, routes: &Routes, requests: &Mutex<Vec<Vec<u8>>>, tl
     }
     let route = routes.get(&path).map_or(UNROUTED, Vec::as_slice);
     let _closed_by_the_client = stream.write_all(route).and_then(|()| stream.flush());
+    // Closing with request bytes still unread resets the connection, and the reset can discard the answer before the
+    // client reads it. Ending the write side and reading to the client's close puts a plain end of stream after the
+    // answer instead.
+    let _closed = raw.shutdown(Shutdown::Write);
+    let _drained = io::copy(&mut raw, &mut io::sink());
 }
 
 /// The recorded bytes: base64, or `[base64, repeat]` chunks.

@@ -16,7 +16,7 @@ use trogon_credential_domain::{
 };
 use trogon_decider_nats::{StreamSubject, append_stream};
 use trogon_decider_runtime::{
-    Event, EventData, EventDecode, EventEncode, EventId, EventType, Headers, ReadFrom, ReadStreamRequest,
+    Event, EventData, EventDecode, EventEncode, EventId, EventType, Evolve, Headers, ReadFrom, ReadStreamRequest,
     ReadStreamResponse, StreamEvent, StreamPosition, StreamRead,
 };
 use trogon_nats::jetstream::MockJetStreamPublishMessage;
@@ -28,6 +28,7 @@ use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use uuid::Uuid;
 
 use super::*;
+use crate::credential::commands::state::CredentialState;
 
 #[derive(Clone, Default)]
 struct ProjectionTestEventStore {
@@ -224,8 +225,9 @@ fn evolve(
 fn build_state(events: impl IntoIterator<Item = v1::CredentialEvent>) -> state_v1::CredentialStateSnapshot {
     events
         .into_iter()
-        .try_fold(initial_state(), |state, event| evolve(state, &event))
+        .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
         .unwrap()
+        .into()
 }
 
 #[tokio::test]
@@ -263,7 +265,7 @@ async fn active_projection_can_be_refreshed_from_replayed_state() {
         },
     ]
     .into_iter()
-    .try_fold(initial_state(), |state, event| evolve(state, &event))
+    .try_fold(CredentialState::default(), |state, event| state.evolve(&event))
     .unwrap();
     let projection = RuntimeIntegrationProjection::from_credential_state(&state, 2)
         .unwrap()
@@ -756,13 +758,11 @@ async fn registry_applies_revoked_state_incrementally_and_invalidates_cache() {
     );
 
     store.revoke(&credential).await.unwrap();
-    let revoked_state = evolve(
-        active_state,
-        &v1::CredentialEvent {
+    let revoked_state = CredentialState::from(active_state)
+        .evolve(&v1::CredentialEvent {
             event: Some(revoked_to_proto(&credential).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry.apply_state(&revoked_state, position(3)).await.unwrap();
 
     assert!(matches!(
@@ -793,7 +793,9 @@ async fn a_stale_active_state_does_not_republish_a_revoked_credential() {
             event: Some(activated_to_proto(&metadata).into()),
         },
     ]);
-    let revoked_state = evolve(active_state.clone(), &revoked(&credential)).unwrap();
+    let revoked_state = CredentialState::from(active_state.clone())
+        .evolve(&revoked(&credential))
+        .unwrap();
 
     registry.apply_state(&revoked_state, position(3)).await.unwrap();
     registry.apply_state(&active_state, position(2)).await.unwrap();
@@ -812,13 +814,11 @@ async fn a_stale_pending_write_state_does_not_evict_a_live_credential() {
     let registry = RuntimeCredentialRegistry::default();
     let resolver = registry.resolver(store.clone());
     let pending_state = build_state([write_requested(&credential)]);
-    let active_state = evolve(
-        pending_state.clone(),
-        &v1::CredentialEvent {
+    let active_state = CredentialState::from(pending_state.clone())
+        .evolve(&v1::CredentialEvent {
             event: Some(activated_to_proto(&metadata).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     registry.apply_state(&active_state, position(2)).await.unwrap();
     registry.apply_state(&pending_state, position(1)).await.unwrap();
@@ -894,20 +894,16 @@ async fn applying_a_rotated_state_invalidates_the_replaced_credential() {
         .rotate(&previous, SecretString::new("Bot new-token").unwrap())
         .await
         .unwrap();
-    let pending_state = evolve(
-        active_state,
-        &v1::CredentialEvent {
+    let pending_state = CredentialState::from(active_state)
+        .evolve(&v1::CredentialEvent {
             event: Some(rotation_requested_to_proto(&previous).into()),
-        },
-    )
-    .unwrap();
-    let rotated_state = evolve(
-        pending_state,
-        &v1::CredentialEvent {
+        })
+        .unwrap();
+    let rotated_state = pending_state
+        .evolve(&v1::CredentialEvent {
             event: Some(rotated_to_proto(&previous, &store.metadata(&rotated).await.unwrap()).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry.apply_state(&rotated_state, position(3)).await.unwrap();
 
     assert!(registry.cache().get(&previous).await.is_none());
@@ -937,37 +933,31 @@ async fn registry_applies_destroyed_state_incrementally_and_invalidates_cache() 
     );
 
     store.revoke(&credential).await.unwrap();
-    let revoked_state = evolve(
-        active_state,
-        &v1::CredentialEvent {
+    let revoked_state = CredentialState::from(active_state)
+        .evolve(&v1::CredentialEvent {
             event: Some(revoked_to_proto(&credential).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry.apply_state(&revoked_state, position(3)).await.unwrap();
 
     let reason = SecretDestroyReason::new("credential lifecycle cleanup").unwrap();
     let destroy_reason = CredentialDestroyReason::new(reason.as_str()).unwrap();
-    let destroy_requested_state = evolve(
-        revoked_state,
-        &v1::CredentialEvent {
+    let destroy_requested_state = revoked_state
+        .evolve(&v1::CredentialEvent {
             event: Some(destroy_requested_to_proto(&credential, &destroy_reason).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry
         .apply_state(&destroy_requested_state, position(4))
         .await
         .unwrap();
 
     store.destroy(&credential, &reason).await.unwrap();
-    let destroyed_state = evolve(
-        destroy_requested_state,
-        &v1::CredentialEvent {
+    let destroyed_state = destroy_requested_state
+        .evolve(&v1::CredentialEvent {
             event: Some(destroyed_to_proto(&credential).into()),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     registry.apply_state(&destroyed_state, position(5)).await.unwrap();
 
     assert!(matches!(
@@ -1257,6 +1247,117 @@ async fn restricted_resolver(
         .upsert(projection(RuntimeIntegrationStatus::Active, credential.clone()).with_release_policy(policy))
         .await;
     (RuntimeCredentialResolver::new(projections, store), credential)
+}
+
+#[derive(Clone)]
+struct OwnerBoundSecretStore {
+    inner: MockOpenBaoSecretStore,
+    reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl SecretStoreGet for OwnerBoundSecretStore {
+    type Error = SecretStoreError;
+
+    async fn get(&self, credential: &CredentialRef) -> Result<SecretMaterial, Self::Error> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.get(credential).await
+    }
+}
+
+#[tokio::test]
+async fn generic_webhooks_owner_bound_resolution_accepts_the_project_owner() {
+    let (resolver, credential) = restricted_resolver(RuntimeReleasePolicy::default()).await;
+
+    let material = resolver
+        .resolve_plaintext_for_owner(
+            &key(),
+            CredentialKind::BotToken,
+            credential.owner_id(),
+            &RuntimeReleaseRequest::new(),
+        )
+        .await
+        .expect("the matching owner must be able to resolve its credential");
+
+    assert!(!material.as_str().is_empty());
+}
+
+#[tokio::test]
+async fn generic_webhooks_owner_mismatch_never_reads_the_store_or_returns_a_cached_secret() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "test-owner-bound-value").await;
+    let projections = InMemoryRuntimeProjectionRepository::default();
+    projections
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential.clone()))
+        .await;
+    let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let resolver = RuntimeCredentialResolver::new(
+        projections,
+        OwnerBoundSecretStore {
+            inner: store,
+            reads: reads.clone(),
+        },
+    );
+    let foreign_owner = CredentialOwnerId::new("foreign-project").unwrap();
+
+    assert!(matches!(
+        resolver
+            .resolve_plaintext_for_owner(
+                &key(),
+                CredentialKind::BotToken,
+                &foreign_owner,
+                &RuntimeReleaseRequest::new(),
+            )
+            .await,
+        Err(RuntimeCredentialError::OwnerMismatch {
+            key: actual_key,
+            kind: CredentialKind::BotToken,
+        }) if actual_key == key()
+    ));
+    assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(resolver.cache().get(&credential).await.is_none());
+
+    resolver
+        .resolve_plaintext(&key(), CredentialKind::BotToken)
+        .await
+        .unwrap();
+    assert!(resolver.cache().get(&credential).await.is_some());
+    assert!(matches!(
+        resolver
+            .resolve_plaintext_for_owner(
+                &key(),
+                CredentialKind::BotToken,
+                &foreign_owner,
+                &RuntimeReleaseRequest::new(),
+            )
+            .await,
+        Err(RuntimeCredentialError::OwnerMismatch {
+            key: actual_key,
+            kind: CredentialKind::BotToken,
+        }) if actual_key == key()
+    ));
+    assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn generic_webhooks_owner_bound_resolution_preserves_runtime_release_policy() {
+    let (resolver, credential) = restricted_resolver(
+        RuntimeReleasePolicy::default()
+            .with_allowed_runtime_services(AllowedRuntimeServices::only(["approved-worker"]).unwrap()),
+    )
+    .await;
+
+    let denied = resolver
+        .resolve_plaintext_for_owner(
+            &key(),
+            CredentialKind::BotToken,
+            credential.owner_id(),
+            &RuntimeReleaseRequest::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(denied.is_delivery_denied());
+    assert!(resolver.cache().get(&credential).await.is_none());
 }
 
 #[test]
@@ -2328,6 +2429,36 @@ async fn resolve_plaintext_rejects_a_credential_that_only_has_a_verifier() {
     ));
 }
 
+#[tokio::test]
+async fn generic_webhooks_owner_bound_resolution_cannot_release_a_stored_verifier_as_plaintext() {
+    let store = MockOpenBaoSecretStore::default();
+    let credential = put_bot_token(&store, "test-verifier-reference").await;
+    let expected_owner = credential.owner_id().clone();
+    let projections = InMemoryRuntimeProjectionRepository::default();
+    projections
+        .upsert(projection(RuntimeIntegrationStatus::Active, credential))
+        .await;
+    let resolver = RuntimeCredentialResolver::new(projections, VerifierOnlySecretStore);
+
+    let error = resolver
+        .resolve_plaintext_for_owner(
+            &key(),
+            CredentialKind::BotToken,
+            &expected_owner,
+            &RuntimeReleaseRequest::new(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeCredentialError::VerifierOnly {
+            kind: CredentialKind::BotToken,
+            ..
+        }
+    ));
+}
+
 #[test]
 fn runtime_credential_errors_say_whether_they_came_from_the_secret_store() {
     let credential = cache_credential("credential-error");
@@ -2627,7 +2758,10 @@ async fn incremental_refresh_reports_a_credential_history_that_cannot_be_read() 
 async fn applying_a_state_with_nothing_to_publish_changes_nothing() {
     let registry = RuntimeCredentialRegistry::default();
 
-    registry.apply_state(&initial_state(), position(1)).await.unwrap();
+    registry
+        .apply_state(&CredentialState::default(), position(1))
+        .await
+        .unwrap();
 
     assert!(registry.projections.get(&key()).await.is_none());
 }

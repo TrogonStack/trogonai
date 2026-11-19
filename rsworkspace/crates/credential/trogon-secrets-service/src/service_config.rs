@@ -1,5 +1,6 @@
 use std::env::VarError;
-use std::path::{Path, PathBuf};
+use std::num::NonZeroUsize;
+use std::path::PathBuf;
 
 use trogon_audit::{AuditName, WriterId, WriterIdentity};
 use trogon_credential_aggregate::CREDENTIAL_STREAM;
@@ -9,10 +10,10 @@ use trogon_service_config::{NatsConfigSection, SecretReference, resolve_nats};
 use trogon_std::env::ReadEnv;
 use trogon_std::{ReadFile, SecretString};
 
-use super::constants::{AUDIT_COMPONENT, AUDIT_WRITER_PREFIX};
+use super::constants::{AUDIT_COMPONENT, AUDIT_WRITER_PREFIX, DEFAULT_INVALIDATION_STREAM_REPLICAS};
 use super::nats_section_wire::NatsSectionWire;
 use super::service_config_wire::ServiceConfigWire;
-use super::{AdmissionLimit, ConfigSetting, OpenBaoAddress, ServiceArgs, ServiceConfigError, TomlSyntax};
+use super::{AdmissionLimit, ConfigSetting, OpenBaoAddress, ServiceArgs, ServiceConfigError};
 
 /// The configuration the secrets service runs with, after every source is
 /// merged and every setting is validated (ADR#0007).
@@ -40,6 +41,9 @@ pub struct ServiceConfig {
     /// The credential event stream a credential's state is folded from.
     pub credential_stream: NatsToken,
     pub admission_limit: AdmissionLimit,
+    /// The replicas the invalidation stream must keep for the service to
+    /// start, checked against the stream rather than applied to it.
+    pub invalidation_stream_replicas: NonZeroUsize,
     /// Who the service's audit writer is.
     pub audit: WriterIdentity,
 }
@@ -56,10 +60,16 @@ impl ServiceConfig {
     /// setting is unset, when a value is invalid, or when a secret is given
     /// inline rather than by reference. No error quotes a secret.
     pub fn resolve(args: &ServiceArgs, env: &impl ReadEnv, fs: &impl ReadFile) -> Result<Self, ServiceConfigError> {
-        let wire = match &args.runtime.config {
-            Some(path) => read_file(path, fs)?,
-            None => ServiceConfigWire::default(),
-        };
+        Self::from_wire(ServiceConfigWire::read(args.runtime.config.as_deref(), fs)?, args, env)
+    }
+
+    /// Merges `wire`, the configuration file as written, with the environment
+    /// and the flags, and validates the result, as [`Self::resolve`] does.
+    pub(crate) fn from_wire(
+        wire: ServiceConfigWire,
+        args: &ServiceArgs,
+        env: &impl ReadEnv,
+    ) -> Result<Self, ServiceConfigError> {
         let openbao = wire.openbao;
         let release = wire.release;
         let audit = wire.audit;
@@ -111,6 +121,8 @@ impl ServiceConfig {
         .transpose()
         .map_err(ServiceConfigError::AdmissionLimit)?
         .unwrap_or_default();
+        let invalidation_stream_replicas =
+            invalidation_stream_replicas(args, env, release.invalidation_stream_replicas)?;
 
         let tenant = AuditName::new(required(env, ConfigSetting::AuditTenant, audit.tenant)?)
             .map_err(ServiceConfigError::AuditTenant)?;
@@ -133,22 +145,10 @@ impl ServiceConfig {
             xkey_seed,
             credential_stream,
             admission_limit,
+            invalidation_stream_replicas,
             audit: WriterIdentity::new(writer, component, tenant, project),
         })
     }
-}
-
-fn read_file(path: &Path, fs: &impl ReadFile) -> Result<ServiceConfigWire, ServiceConfigError> {
-    let document = fs
-        .read_to_string(path)
-        .map_err(|source| ServiceConfigError::ConfigUnreadable {
-            path: path.to_owned(),
-            source,
-        })?;
-    toml::from_str(&document).map_err(|error| ServiceConfigError::ConfigUnparsable {
-        path: path.to_owned(),
-        syntax: TomlSyntax::of(&error, &document),
-    })
 }
 
 /// The NATS connection: each setting from the file, then the environment,
@@ -207,9 +207,33 @@ fn nats(wire: NatsSectionWire, args: &ServiceArgs, env: &impl ReadEnv) -> Result
     Ok(config)
 }
 
+/// The invalidation stream's replica count: the flag's over the environment's
+/// over the file's, three when none is set.
+fn invalidation_stream_replicas(
+    args: &ServiceArgs,
+    env: &impl ReadEnv,
+    file: Option<usize>,
+) -> Result<NonZeroUsize, ServiceConfigError> {
+    let setting = ConfigSetting::InvalidationStreamReplicas;
+    let chosen = match args.invalidation_stream_replicas {
+        Some(from_flag) => Some(from_flag),
+        None => env_value(env, setting)?
+            .map(|raw| {
+                raw.parse()
+                    .map_err(|source| ServiceConfigError::NotANumber { setting, source })
+            })
+            .transpose()?
+            .or(file),
+    };
+    match chosen {
+        Some(replicas) => NonZeroUsize::new(replicas).ok_or(ServiceConfigError::Zero { setting }),
+        None => Ok(DEFAULT_INVALIDATION_STREAM_REPLICAS),
+    }
+}
+
 /// The value of `setting`'s environment variable, when it is set and not
 /// empty.
-fn env_value(env: &impl ReadEnv, setting: ConfigSetting) -> Result<Option<String>, ServiceConfigError> {
+pub(crate) fn env_value(env: &impl ReadEnv, setting: ConfigSetting) -> Result<Option<String>, ServiceConfigError> {
     match env.var(setting.env()) {
         Ok(value) if !value.is_empty() => Ok(Some(value)),
         Ok(_) | Err(VarError::NotPresent) => Ok(None),

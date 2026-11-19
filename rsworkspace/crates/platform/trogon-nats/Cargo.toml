@@ -50,3 +50,8 @@ test-support = ["dep:rcgen", "dep:tempfile", "dep:testcontainers-modules"]
 name = "tls_handshake"
 path = "tests/tls_handshake.rs"
 required-features = ["test-support"]
+
+[[test]]
+name = "jetstream_network"
+path = "tests/jetstream_network.rs"
+required-features = ["test-support"]

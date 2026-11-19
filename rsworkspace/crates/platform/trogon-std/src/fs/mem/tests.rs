@@ -64,6 +64,49 @@ fn test_memfs_overwrite() {
 }
 
 #[test]
+fn test_memfs_remove_makes_the_file_unreadable() {
+    let fs = MemFs::new();
+    let path = Path::new("/run/secrets/token");
+    fs.insert(path, "value");
+
+    fs.remove(path);
+
+    assert_eq!(fs.read_to_string(path).unwrap_err().kind(), io::ErrorKind::NotFound);
+    assert!(!fs.exists(path));
+}
+
+#[test]
+fn test_memfs_remove_of_a_missing_file_changes_nothing() {
+    let fs = MemFs::new();
+    fs.insert("/kept.txt", "kept");
+
+    fs.remove(Path::new("/missing.txt"));
+
+    assert_eq!(fs.paths(), vec![Path::new("/kept.txt").to_path_buf()]);
+}
+
+#[test]
+fn test_memfs_is_shared_across_threads() {
+    let fs = std::sync::Arc::new(MemFs::new());
+    let writer = std::sync::Arc::clone(&fs);
+
+    std::thread::spawn(move || {
+        writer.insert("/shared.txt", "from another thread");
+        writer.create_dir_all(Path::new("/shared")).unwrap();
+        writer.open_append(Path::new("/shared/log.txt")).unwrap();
+    })
+    .join()
+    .unwrap();
+
+    assert_eq!(
+        fs.read_to_string(Path::new("/shared.txt")).unwrap(),
+        "from another thread"
+    );
+    assert!(fs.dir_exists(Path::new("/shared")));
+    assert!(fs.was_opened(Path::new("/shared/log.txt")));
+}
+
+#[test]
 fn test_memfs_insert_helper() {
     let fs = MemFs::new();
     fs.insert("/config.json", r#"{"key": "value"}"#);

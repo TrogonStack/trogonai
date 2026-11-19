@@ -1,5 +1,6 @@
 # Task scripts named build collide with BUILD on case-insensitive filesystems.
 .config/mise/tasks
+.git
 .claude/worktrees
 .trogonai
 docs/node_modules
@@ -9,3 +10,4 @@ tsworkspace/node_modules
 tsworkspace/apps/console/node_modules
 tsworkspace/packages/proto/node_modules
 tsworkspace/packages/slack-bolt-fixtures/node_modules
+tsworkspace/packages/sandbox-ws-client/node_modules

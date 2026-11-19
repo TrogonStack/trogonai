@@ -3,11 +3,15 @@
 //! `trogon-secrets-service` binary.
 
 use std::error::Error;
+use std::io::Write;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::Parser;
 use tokio_util::sync::CancellationToken;
-use trogon_secrets_service::{ReleaseSources, SecretsService, ServiceArgs, ServiceConfig, error_chain};
+use trogon_secrets_service::{
+    ConfigCommand, ConfigDump, ReleaseSources, SecretsService, ServiceArgs, ServiceCommand, ServiceConfig, error_chain,
+};
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 
@@ -22,11 +26,17 @@ async fn main() -> ExitCode {
         )
         .init();
 
-    match serve().await {
-        Ok(()) => {
-            tracing::info!("trogon-secrets-service stopped");
-            ExitCode::SUCCESS
-        }
+    let args = ServiceArgs::parse();
+    let outcome = match args.command {
+        None => serve(args)
+            .await
+            .map(|()| tracing::info!("trogon-secrets-service stopped")),
+        Some(ServiceCommand::Config {
+            command: ConfigCommand::Dump { resolved: _ },
+        }) => dump(&args),
+    };
+    match outcome {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(error = %error_chain(error.as_ref()), "trogon-secrets-service stopped on an error");
             ExitCode::FAILURE
@@ -37,10 +47,9 @@ async fn main() -> ExitCode {
 /// Resolves the configuration, loads what it points at, and runs the service
 /// until a shutdown signal.
 #[cfg_attr(coverage_nightly, coverage(off))]
-async fn serve() -> Result<(), Box<dyn Error>> {
-    let args = ServiceArgs::parse();
+async fn serve(args: ServiceArgs) -> Result<(), Box<dyn Error>> {
     let config = ServiceConfig::resolve(&args, &SystemEnv, &SystemFs)?;
-    let sources = ReleaseSources::load(&config, &SystemEnv, &SystemFs)?;
+    let sources = ReleaseSources::load(&config, &SystemEnv, &Arc::new(SystemFs))?;
 
     let shutdown = CancellationToken::new();
     let on_signal = shutdown.clone();
@@ -49,5 +58,16 @@ async fn serve() -> Result<(), Box<dyn Error>> {
         on_signal.cancel();
     });
     SecretsService::new(config, sources).run(shutdown).await?;
+    Ok(())
+}
+
+/// Prints every setting with its effective value and its source, refusing the
+/// configuration the way startup does.
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn dump(args: &ServiceArgs) -> Result<(), Box<dyn Error>> {
+    let dump = ConfigDump::resolve(args, &SystemEnv, &SystemFs)?;
+    let mut stdout = std::io::stdout().lock();
+    write!(stdout, "{dump}")?;
+    stdout.flush()?;
     Ok(())
 }

@@ -7,25 +7,9 @@ use crate::{
     constants::SKILLS_DEFAULT_SETTING_SOURCES,
     process_options::ArgvStyle,
     python_json::{is_python_whitespace, python_repr},
+    session_prompt::js_space,
+    settings_json::js_stringify,
 };
-
-/// JavaScript `String.prototype.trim` whitespace: `WhiteSpace` plus `LineTerminator`.
-fn is_javascript_whitespace(c: char) -> bool {
-    matches!(
-        c,
-        '\t' | '\u{b}'
-            | '\u{c}'
-            | ' '
-            | '\u{a0}'
-            | '\u{feff}'
-            | '\n'
-            | '\r'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
-    )
-}
 
 fn trim_with(name: &str, whitespace: fn(char) -> bool) -> &str {
     name.trim_matches(whitespace)
@@ -41,14 +25,9 @@ fn is_invalid_python(c: char) -> bool {
     is_invalid_typescript(c) || c == '\u{feff}'
 }
 
-/// JSON text of a string, TypeScript `JSON.stringify`.
-fn json_text(name: &str) -> String {
-    serde_json::to_string(name).unwrap_or_else(|_| format!("\"{name}\""))
-}
-
 fn invalid_name(style: ArgvStyle, name: &str, reason: &str) -> OptionError {
     let shown = match style {
-        ArgvStyle::TypeScript => json_text(name),
+        ArgvStyle::TypeScript => js_stringify(&serde_json::Value::from(name)),
         ArgvStyle::Python => python_repr(name),
     };
     OptionError::new(format!("Invalid skill name {shown}: {reason}"))
@@ -56,10 +35,10 @@ fn invalid_name(style: ArgvStyle, name: &str, reason: &str) -> OptionError {
 
 fn validate_typescript(name: &str) -> Result<(), OptionError> {
     let fail = |reason: &str| Err(invalid_name(ArgvStyle::TypeScript, name, reason));
-    if trim_with(name, is_javascript_whitespace).is_empty() {
+    if trim_with(name, js_space).is_empty() {
         return Err(OptionError::new("Skill names must be non-empty strings."));
     }
-    if name != trim_with(name, is_javascript_whitespace) {
+    if name != trim_with(name, js_space) {
         return fail(
             "leading or trailing whitespace is not allowed \u{2014} the Skill tool trims the invoked name, so a padded rule can never match. Remove the padding.",
         );

@@ -10,5 +10,9 @@ workspace_crate(
 workspace_compile_fail_tests(
     name = "compile_fail_bazel_test",
     compile_data = ["//rsworkspace/crates/decider/trogon-decider-wit:wit"],
+    dependency_overrides = {
+        "//rsworkspace/crates/platform/trogonai-proto:trogonai-proto": "//rsworkspace/crates/platform/trogonai-proto:trogonai-proto_compile_fail",
+        "//rsworkspace/crates/scheduler/trogon-scheduler-domain:trogon-scheduler-domain": "//rsworkspace/crates/scheduler/trogon-scheduler-domain:trogon-scheduler-domain_compile_fail",
+    },
     fixtures = glob(["tests/ui/*.rs"]),
 )

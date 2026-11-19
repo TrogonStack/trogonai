@@ -1,67 +1,11 @@
-//! The JavaScript string, number and key-order semantics the zod port in `sdk_mcp_zod` depends on.
+//! The JavaScript string and number semantics the zod port in `sdk_mcp_zod` depends on.
 
-use crate::{JsonObject, settings_json::js_stringify};
+use crate::{js_string_number::js_string_to_number, settings_json::js_stringify};
 use serde_json::Value;
-
-/// `ECMAScript WhiteSpace` and `LineTerminator`, the characters `String.prototype.trim` removes.
-fn is_space(character: char) -> bool {
-    matches!(
-        character,
-        '\u{9}'..='\u{d}'
-            | ' '
-            | '\u{a0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200a}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202f}'
-            | '\u{205f}'
-            | '\u{3000}'
-            | '\u{feff}'
-    )
-}
-
-/// `text.trim()`.
-pub(crate) fn trim(text: &str) -> &str {
-    text.trim_matches(is_space)
-}
 
 /// `text.length`: the number of UTF-16 code units.
 pub(crate) fn utf16_length(text: &str) -> usize {
     text.encode_utf16().count()
-}
-
-/// The array index a canonical numeric string names; the keys `Object.keys` lists first.
-fn array_index(key: &str) -> Option<u32> {
-    if key.is_empty() || (key.len() > 1 && key.starts_with('0')) || !key.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let index: u64 = key.parse().ok()?;
-    u32::try_from(index).ok().filter(|index| *index != u32::MAX)
-}
-
-/// `Object.keys(object)`: integer keys in ascending order, then the others in insertion order.
-pub(crate) fn ordered_keys(object: &JsonObject) -> Vec<&String> {
-    let mut indexed: Vec<(u32, &String)> = Vec::new();
-    let mut named: Vec<&String> = Vec::new();
-    for key in object.keys() {
-        match array_index(key) {
-            Some(index) => indexed.push((index, key)),
-            None => named.push(key),
-        }
-    }
-    indexed.sort_by_key(|(index, _)| *index);
-    indexed.into_iter().map(|(_, key)| key).chain(named).collect()
-}
-
-/// The object a JavaScript engine would enumerate: the same entries in `Object.keys` order.
-pub(crate) fn ordered(object: JsonObject) -> JsonObject {
-    let order: Vec<String> = ordered_keys(&object).into_iter().cloned().collect();
-    let mut object = object;
-    order
-        .into_iter()
-        .filter_map(|key| object.remove(&key).map(|value| (key, value)))
-        .collect()
 }
 
 /// The `Number(value)` conversion of a JSON value, as the relational operators apply it.
@@ -70,36 +14,10 @@ pub(crate) fn to_number(value: &Value) -> f64 {
         Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
         Value::Bool(flag) => f64::from(u8::from(*flag)),
         Value::Null => 0.0,
-        Value::String(text) => string_to_number(text),
-        Value::Array(_) => string_to_number(&js_string(value)),
+        Value::String(text) => js_string_to_number(text),
+        Value::Array(_) => js_string_to_number(&js_string(value)),
         Value::Object(_) => f64::NAN,
     }
-}
-
-fn string_to_number(text: &str) -> f64 {
-    let text = trim(text);
-    if text.is_empty() {
-        return 0.0;
-    }
-    for (prefix, radix) in [("0x", 16), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)] {
-        if let Some(digits) = text.strip_prefix(prefix) {
-            return u64::from_str_radix(digits, radix)
-                .map(|number| number as f64)
-                .unwrap_or(f64::NAN);
-        }
-    }
-    match text {
-        "Infinity" | "+Infinity" => return f64::INFINITY,
-        "-Infinity" => return f64::NEG_INFINITY,
-        _ => {}
-    }
-    if !text
-        .chars()
-        .all(|character| character.is_ascii_digit() || matches!(character, '.' | 'e' | 'E' | '+' | '-'))
-    {
-        return f64::NAN;
-    }
-    text.parse().unwrap_or(f64::NAN)
 }
 
 /// zod `floatSafeRemainder`: the remainder zod's `multipleOf` check compares with zero. The quotient counts as
@@ -179,3 +97,7 @@ pub(crate) fn js_string(value: &Value) -> String {
         scalar => js_stringify(scalar),
     }
 }
+
+#[cfg(test)]
+#[path = "sdk_mcp_js_tests.rs"]
+mod tests;

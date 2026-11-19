@@ -152,6 +152,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             let pending = destination.with_extension("pending");
             std::fs::write(&pending, std::process::id().to_string())?;
             std::fs::rename(pending, destination)?;
+            // The test holds its clock until this line, so the initialize timeout cannot run out before the marker
+            // exists.
+            eprintln!("pid marker written");
         }
         std::thread::sleep(Duration::from_secs(30));
         return Ok(());

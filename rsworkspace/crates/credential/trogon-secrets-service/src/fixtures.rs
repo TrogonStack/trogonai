@@ -80,6 +80,9 @@ pub(crate) fn release_wire(requester_xkey: &str) -> ResolveForReleaseRequest {
 /// that fold a real or mocked credential stream.
 pub(crate) mod credential_events;
 
+/// A configuration the service starts with, for the tests that resolve it.
+pub(crate) mod service_settings;
+
 /// A release as the release core answers one, sealed to nobody in particular.
 pub(crate) fn sealed_release() -> SealedRelease {
     SealedRelease::new(

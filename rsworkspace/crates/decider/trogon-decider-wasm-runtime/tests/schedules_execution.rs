@@ -42,6 +42,13 @@ fn schedules_wasm() -> Vec<u8> {
     })
 }
 
+/// The fixture compiled once for the whole test process.
+///
+/// Compiling the component costs more than everything else a test here does,
+/// and Cranelift runs unoptimized in debug and coverage builds, so compiling it
+/// per test pushed this binary past its timeout. A clone shares the engine and
+/// the pre-instantiated component, the way production shares one engine per
+/// process; every execution still gets its own store and guest instance.
 fn schedules_module() -> WasmDeciderModule {
     static MODULE: OnceLock<WasmDeciderModule> = OnceLock::new();
     MODULE

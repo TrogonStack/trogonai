@@ -1,6 +1,6 @@
 //! One dispatched server-sent event frame.
 
-use crate::js_text::is_js_whitespace;
+use crate::session_prompt::js_space;
 
 /// A frame the SSE wire parser dispatched: the `event`, `id` and `data` fields, each absent when the frame did not
 /// carry it. `data` is the `data` lines joined with `\n`, and may be empty for a frame that held only a comment.
@@ -18,7 +18,7 @@ impl SseFrame {
     /// Reads one frame block (the text between two blank lines). A block with no visible character, or with
     /// neither non-empty `data` nor a comment line, is no frame.
     pub(crate) fn parse(block: &str) -> Option<Self> {
-        if block.chars().all(is_js_whitespace) {
+        if block.chars().all(js_space) {
             return None;
         }
         let mut frame = Self::default();

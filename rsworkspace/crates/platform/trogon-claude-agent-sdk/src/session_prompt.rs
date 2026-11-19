@@ -1,6 +1,6 @@
 //! First-prompt extraction and timestamp parsing shared by the summary fold and the transcript readers.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, ffi::OsStr};
 
 use serde_json::Value;
 
@@ -39,6 +39,20 @@ pub(crate) fn js_space(ch: char) -> bool {
 
 pub(crate) fn js_trim(text: &str) -> &str {
     text.trim_matches(js_space)
+}
+
+/// `Te` in `sdk.mjs` 0.3.323 (`ue` in `bridge.mjs`): `String(value).toLowerCase().trim()` is `1`, `true`, `yes` or
+/// `on`. No white space has a case mapping, so trimming first reads the same text. `to_lowercase` and JavaScript
+/// `toLowerCase` share the Unicode default mapping, and the only characters outside ASCII that lower into ASCII
+/// (U+0130 and U+212A) never spell one of the four words.
+pub(crate) fn js_truthy(value: &str) -> bool {
+    matches!(js_trim(value).to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
+/// [`js_truthy`] of an environment variable's value, false when it is unset. A value that is not valid Unicode is
+/// read with each invalid sequence replaced by U+FFFD.
+pub(crate) fn js_env_truthy(value: Option<&OsStr>) -> bool {
+    value.is_some_and(|value| js_truthy(&value.to_string_lossy()))
 }
 
 /// Upstream `Rxe` and `$U`: `Prompt from the <label> plugin: <text>` for a stored plugin prompt, else `None`.

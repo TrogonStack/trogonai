@@ -20,6 +20,8 @@ pub(crate) enum ReleaseFaultError {
     StoreMissing { credential: CredentialRef },
     #[error("{0}")]
     StoreUnavailable(SecretStoreError),
+    #[error("secret store broke its read contract: {0}")]
+    StoreContractBroken(SecretStoreError),
     #[error("{0}")]
     AuditUnavailable(ReleaseAuditError),
     #[error("{0}")]
@@ -36,6 +38,7 @@ impl ReleaseFaultError {
             Self::OtherCredential { .. } => "other_credential",
             Self::StoreMissing { .. } => "store_missing",
             Self::StoreUnavailable(_) => "store_unavailable",
+            Self::StoreContractBroken(_) => "store_contract_broken",
             Self::AuditUnavailable(_) => "audit_unavailable",
             Self::SealFailed(_) => "seal_failed",
         }
@@ -45,7 +48,10 @@ impl ReleaseFaultError {
     ///
     /// A stream or store that disagrees with itself is an integrity failure:
     /// the tenant and policy checks already passed, so saying so reveals
-    /// nothing, and retrying would not help.
+    /// nothing, and retrying would not help. A store that breaks its read
+    /// contract, or a value that cannot be sealed, is internal: the fault lies
+    /// in the machinery rather than the credential's state, and retrying would
+    /// not help either.
     pub(crate) fn failure(&self) -> CredentialReleaseError {
         match self {
             Self::StateRead(CredentialStateReadError::Unavailable { .. })
@@ -55,7 +61,7 @@ impl ReleaseFaultError {
             | Self::StateUndecodable(_)
             | Self::OtherCredential { .. }
             | Self::StoreMissing { .. } => CredentialReleaseError::IntegrityFailure,
-            Self::SealFailed(_) => CredentialReleaseError::Internal,
+            Self::StoreContractBroken(_) | Self::SealFailed(_) => CredentialReleaseError::Internal,
         }
     }
 }

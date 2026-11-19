@@ -32,6 +32,24 @@ fn numbers_are_spelled_like_javascript() {
 
 #[test]
 fn single_precision_numbers_are_printed_as_the_double_they_widen_to() {
-    assert_eq!(to_string(&0.5_f32).ok().as_deref(), Some("0.5"));
-    assert_eq!(to_string(&0.1_f32).ok().as_deref(), Some("0.10000000149011612"));
+    assert_eq!(to_string(&serde_json::json!(0.5_f32)).ok().as_deref(), Some("0.5"));
+    assert_eq!(
+        to_string(&serde_json::json!(0.1_f32)).ok().as_deref(),
+        Some("0.10000000149011612")
+    );
+}
+
+/// The expected text is what `JSON.stringify` printed under Node 24 for the object literal with these keys in this
+/// order: array indices up to 2^32 - 2 first in ascending order, every other key, `"4294967295"`, `"01"`, `"-1"` and
+/// `"1.5"` included, after them in insertion order, at every depth.
+#[test]
+fn array_index_keys_come_first_like_javascript_objects() -> Result<(), serde_json::Error> {
+    let value: Value = serde_json::from_str(
+        r#"{"b":1,"1":"one","4294967295":"max","01":"lead","-1":"neg","4294967294":"last","0":"zero","1.5":"frac","n":{"z":1,"2":[{"y":1,"10":2,"9":3}]}}"#,
+    )?;
+    assert_eq!(
+        to_string(&value)?,
+        r#"{"0":"zero","1":"one","4294967294":"last","b":1,"4294967295":"max","01":"lead","-1":"neg","1.5":"frac","n":{"2":[{"9":3,"10":2,"y":1}],"z":1}}"#
+    );
+    Ok(())
 }

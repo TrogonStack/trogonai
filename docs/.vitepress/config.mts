@@ -2,11 +2,9 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
 import {
   readAdrRecords,
-  readConnectorRecords,
   readGlossaryRecords,
   readProductAreaRecords,
   toAdrSidebarItem,
-  toConnectorSidebarItem,
   toGlossarySidebarGroups,
   toProductNavItem,
 } from "./helpers";
@@ -17,7 +15,6 @@ export default async () => {
   const rootDir = fileURLToPath(new URL("..", import.meta.url));
   const adrRecords = await readAdrRecords(rootDir);
   const glossaryRecords = await readGlossaryRecords(rootDir);
-  const connectorRecords = await readConnectorRecords(rootDir);
   const productItems = [
     { text: "Overview", link: "/product/" },
     ...(await readProductAreaRecords(rootDir)).map(toProductNavItem),
@@ -45,6 +42,7 @@ export default async () => {
           activeMatch: "^/(get-started|how-to|architecture|reference|glossary|adr)/",
           items: [
             { text: "Get started", link: "/get-started/" },
+            { text: "Protocols", link: "/architecture/agent-protocols" },
             { text: "Glossary", link: "/glossary/" },
             { text: "Architecture Decisions", link: "/adr/" },
           ],
@@ -52,16 +50,7 @@ export default async () => {
         { text: "GitHub", link: "https://github.com/TrogonStack/trogonai" },
       ],
       sidebar: {
-        "/product/": [
-          { text: "Product", items: productItems },
-          {
-            text: "Connectors",
-            items: [
-              { text: "All connectors", link: "/product/connectors/" },
-              ...connectorRecords.map(toConnectorSidebarItem),
-            ],
-          },
-        ],
+        "/product/": [{ text: "Product", items: productItems }],
         "/releases/": [
           {
             text: "Releases",
@@ -100,14 +89,19 @@ export default async () => {
                 items: [
                   { text: "Agent Platform", link: "/architecture/agent-platform" },
                   { text: "Workflows", link: "/architecture/workflows" },
+                  { text: "Sandbox Client", link: "/architecture/sandbox-foundation" },
                 ],
               },
             ],
           },
           {
-            text: "ACP",
+            text: "Protocols",
             collapsed: true,
             items: [
+              {
+                text: "Explanation",
+                items: [{ text: "A2A, ACP & MCP", link: "/architecture/agent-protocols" }],
+              },
               {
                 text: "How-to",
                 items: [
@@ -119,7 +113,13 @@ export default async () => {
               },
               {
                 text: "Reference",
-                items: [{ text: "ACP Conformance", link: "/architecture/acp-conformance" }],
+                items: [
+                  { text: "Protocol Support", link: "/reference/agent-protocols" },
+                  { text: "A2A", link: "/reference/agent-protocols#a2a" },
+                  { text: "ACP", link: "/reference/agent-protocols#acp" },
+                  { text: "MCP", link: "/reference/agent-protocols#mcp" },
+                  { text: "ACP Conformance", link: "/architecture/acp-conformance" },
+                ],
               },
             ],
           },
@@ -138,7 +138,10 @@ export default async () => {
               },
               {
                 text: "Reference",
-                items: [{ text: "Container Images", link: "/reference/container-images" }],
+                items: [
+                  { text: "Container Images", link: "/reference/container-images" },
+                  { text: "Gateway Webhooks", link: "/reference/gateway-webhooks" },
+                ],
               },
               {
                 text: "Explanation",
@@ -264,6 +267,8 @@ export default async () => {
                 items: [
                   { text: "Portable Workload Identity", link: "/research/workload-identity/README" },
                   { text: "Workload Federation", link: "/research/workload-identity/federation" },
+                  { text: "Federation Inventory", link: "/research/workload-identity/federation-inventory" },
+                  { text: "JWT-SVID Issuer Spike", link: "/research/workload-identity/jwt-svid-issuer-spike" },
                   { text: "Identity & KMS Adapter Roadmap", link: "/research/workload-identity/adapter-roadmap" },
                 ],
               },

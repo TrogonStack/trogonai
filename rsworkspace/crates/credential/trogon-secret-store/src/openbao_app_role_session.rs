@@ -99,12 +99,15 @@ impl OpenBaoAppRoleSession {
         let url = address
             .join(APPROLE_LOGIN_PATH)
             .map_err(OpenBaoCallError::InvalidEndpoint)?;
+        let request = {
+            let secret_id = self.approle.read_secret_id()?;
+            http.post(url).json(&OpenBaoLoginRequest {
+                role_id: self.approle.role_id(),
+                secret_id: secret_id.as_str(),
+            })
+        };
         let obtained_at = self.clock.now();
-        let response: OpenBaoAuthResponse = send_token_json(http.post(url).json(&OpenBaoLoginRequest {
-            role_id: self.approle.role_id(),
-            secret_id: self.approle.secret_id().as_str(),
-        }))
-        .await?;
+        let response: OpenBaoAuthResponse = send_token_json(request).await?;
         self.admit(response.into_lease(obtained_at))
     }
 

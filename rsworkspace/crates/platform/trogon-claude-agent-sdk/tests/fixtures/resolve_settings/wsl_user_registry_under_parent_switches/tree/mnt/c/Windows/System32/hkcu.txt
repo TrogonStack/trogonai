@@ -1,0 +1,1 @@
+    Settings    REG_SZ    {"wslInheritsWindowsSettings":true,"model":"user-registry","permissions":{"deny":["Read(./secrets/**)"]}}

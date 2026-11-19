@@ -21,8 +21,10 @@ impl LoginRetry {
     }
 
     /// Attempts `login` until OpenBao accepts it, waiting the backoff delay
-    /// after each refusal and logging the refusal with its attempt number and
-    /// the delay before the next one.
+    /// after each failed attempt and logging why it failed with its attempt
+    /// number and the delay before the next one. An attempt fails when OpenBao
+    /// refuses it or when the secret id file cannot be read for it, which a
+    /// platform rotating the file in place can cause for a moment.
     ///
     /// Returns `Ok(None)` when `shutdown` comes first, whether during an
     /// attempt or the wait after it, so the caller stops without serving.
@@ -51,12 +53,16 @@ impl LoginRetry {
                 () = shutdown.cancelled() => return Ok(None),
                 outcome = login() => outcome,
             };
-            let error = match outcome {
+            match outcome {
                 Ok(store) => return Ok(Some(store)),
                 Err(error @ OpenBaoLoginError::Config(_)) => return Err(error),
-                Err(error @ OpenBaoLoginError::Refused { .. }) => error,
-            };
-            warn!(attempt, retry_in = ?delay, error = %error, "OpenBao refused the AppRole login; retrying");
+                Err(error @ OpenBaoLoginError::Refused { .. }) => {
+                    warn!(attempt, retry_in = ?delay, error = %error, "OpenBao refused the AppRole login; retrying");
+                }
+                Err(error @ OpenBaoLoginError::SecretId(_)) => {
+                    warn!(attempt, retry_in = ?delay, error = %error, "could not read the OpenBao AppRole secret id; retrying");
+                }
+            }
             tokio::select! {
                 biased;
                 () = shutdown.cancelled() => return Ok(None),

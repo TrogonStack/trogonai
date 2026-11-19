@@ -1,8 +1,62 @@
+use std::ops::Deref;
+
 use trogon_credential_aggregate::CredentialProtoDecodeError;
 use trogon_credential_domain::{
     CredentialId, CredentialIdentity, CredentialKey, CredentialMetadata, CredentialRef, CredentialStatus,
     CredentialVersion,
 };
+use trogon_decider_runtime::{Evolve, StateSnapshot};
+use trogonai_proto::gateway::credentials::{state_v1, v1};
+
+#[repr(transparent)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CredentialState(state_v1::CredentialStateSnapshot);
+
+impl Default for CredentialState {
+    fn default() -> Self {
+        Self(state_v1::CredentialStateSnapshot {
+            state: Some(state_v1::CredentialMissingState {}.into()),
+        })
+    }
+}
+
+impl Evolve<v1::CredentialEvent> for CredentialState {
+    type Error = trogon_credential_aggregate::CredentialEvolveError;
+
+    fn evolve(self, event: &v1::CredentialEvent) -> Result<Self, Self::Error> {
+        trogon_credential_aggregate::evolve(self.0, event).map(Self)
+    }
+}
+
+impl StateSnapshot for CredentialState {
+    type Payload = state_v1::CredentialStateSnapshot;
+}
+
+impl Deref for CredentialState {
+    type Target = state_v1::CredentialStateSnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<state_v1::CredentialStateSnapshot> for CredentialState {
+    fn as_ref(&self) -> &state_v1::CredentialStateSnapshot {
+        &self.0
+    }
+}
+
+impl From<state_v1::CredentialStateSnapshot> for CredentialState {
+    fn from(value: state_v1::CredentialStateSnapshot) -> Self {
+        Self(value)
+    }
+}
+
+impl From<CredentialState> for state_v1::CredentialStateSnapshot {
+    fn from(value: CredentialState) -> Self {
+        value.0
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum CredentialDecideError {

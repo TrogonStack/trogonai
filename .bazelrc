@@ -9,11 +9,10 @@ test --test_output=errors
 
 # CI logs have no terminal to redraw the progress line in place, so every update
 # became a new line and buried the errors. Keep warnings, errors, failing test
-# output and the summary of tests that did not pass.
+# output, cache statistics and the test summary.
 common:ci --curses=no
 common:ci --noshow_loading_progress
 common:ci --show_progress_rate_limit=60
-common:ci --ui_event_filters=-info
 build:ci --show_result=0
 test:ci --test_summary=terse
 

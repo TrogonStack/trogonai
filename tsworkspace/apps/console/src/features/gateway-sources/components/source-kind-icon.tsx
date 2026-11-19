@@ -13,14 +13,16 @@ import {
   SirenIcon,
   SquareKanbanIcon,
   VideoIcon,
+  WebhookIcon,
   type LucideIcon,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
-import type { SourceKind } from '../domain/source-kind';
+import type { SourceListKind } from '../domain/source-list';
 
-const icons: Record<SourceKind, LucideIcon> = {
+const icons: Record<SourceListKind, LucideIcon> = {
+  webhook: WebhookIcon,
   github: GitBranchIcon,
   gitlab: GitMergeIcon,
   slack: HashIcon,
@@ -37,7 +39,7 @@ const icons: Record<SourceKind, LucideIcon> = {
   zoom: VideoIcon,
 };
 
-export function SourceKindIcon({ kind, className }: { kind: SourceKind; className?: string }) {
+export function SourceKindIcon({ kind, className }: { kind: SourceListKind; className?: string }) {
   const Icon = icons[kind];
   return (
     <span className={cn('keycap flex size-8 shrink-0 items-center justify-center rounded-md', className)}>

@@ -7,7 +7,10 @@
 
 use std::{ffi::OsStr, time::Duration};
 
-use crate::{ClaudeAgentOptions, RunEndTimeout, adapters::EnvironmentVariable, process_options::EnvironmentMode};
+use crate::{
+    ClaudeAgentOptions, RunEndTimeout, adapters::EnvironmentVariable, process_options::EnvironmentMode,
+    session_prompt::js_trim,
+};
 
 mod constants;
 
@@ -73,26 +76,8 @@ pub(crate) fn python(raw: Option<&str>) -> Option<Duration> {
 
 /// `gd`: the trimmed text through `wC`, then `parseInt(text, 10)`. NaN stands for both NaN and a missing value.
 fn javascript_number(raw: &str) -> f64 {
-    let text = raw.trim_matches(is_javascript_space);
+    let text = js_trim(raw);
     spelled_number(text).unwrap_or_else(|| parse_int(text))
-}
-
-/// `String.prototype.trim`: white space and line terminators.
-fn is_javascript_space(character: char) -> bool {
-    matches!(
-        character,
-        '\t'..='\r'
-            | ' '
-            | '\u{a0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200a}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202f}'
-            | '\u{205f}'
-            | '\u{3000}'
-            | '\u{feff}'
-    )
 }
 
 /// `wC`: short text in exponent form is a number that must be whole, and short text with one separator between

@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 /// The `[openbao]` section as written. The AppRole secret id is named by the
 /// file that holds it, never written here.
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OpenBaoSectionWire {
     pub(crate) address: Option<String>,

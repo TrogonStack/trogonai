@@ -4,11 +4,13 @@ use crate::constants::MAX_BUFFER_ERRNO;
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::{
     ffi::OsStr,
     io::{self, Read},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -190,11 +192,16 @@ pub struct ExecuteFileOutcome {
     pub status: ExecuteFileStatus,
     pub exit_code: Option<i32>,
     pub errno: Option<String>,
+    /// Observed Unix signal: `SIGKILL`, `SIGTERM`, or the decimal signal number otherwise.
+    /// Absent when the platform or wait result supplies no signal.
     pub signal: Option<String>,
     pub duration_ms: u128,
 }
 
 /// Runs a program to completion the way `child_process.execFile` does.
+///
+/// `NativeHost` forcibly kills timed-out or overflowing children and waits for reaping.
+/// On Unix this sends `SIGKILL`, unlike Node's default `SIGTERM`.
 pub trait ExecuteFile {
     fn execute_file(&self, request: &ExecuteFileRequest<'_>) -> ExecuteFileOutcome;
 }
@@ -555,6 +562,20 @@ fn drain(
     })
 }
 
+#[cfg(unix)]
+fn exit_signal(status: &ExitStatus) -> Option<String> {
+    status.signal().map(|signal| match signal {
+        libc::SIGKILL => "SIGKILL".to_owned(),
+        libc::SIGTERM => "SIGTERM".to_owned(),
+        signal => signal.to_string(),
+    })
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &ExitStatus) -> Option<String> {
+    None
+}
+
 impl ExecuteFile for NativeHost {
     fn execute_file(&self, request: &ExecuteFileRequest<'_>) -> ExecuteFileOutcome {
         let started = Instant::now();
@@ -635,13 +656,18 @@ impl ExecuteFile for NativeHost {
             );
         }
         if timed_out {
-            return make(ExecuteFileStatus::Timeout, None, None, Some("SIGTERM".to_owned()));
+            return make(
+                ExecuteFileStatus::Timeout,
+                status.as_ref().and_then(ExitStatus::code),
+                None,
+                status.as_ref().and_then(exit_signal),
+            );
         }
         match status {
             Some(status) if status.success() => make(ExecuteFileStatus::Ok, Some(0), None, None),
             Some(status) => match status.code() {
                 Some(code) => make(ExecuteFileStatus::Exited, Some(code), None, None),
-                None => make(ExecuteFileStatus::Killed, None, None, Some("SIGKILL".to_owned())),
+                None => make(ExecuteFileStatus::Killed, None, None, exit_signal(&status)),
             },
             None => make(ExecuteFileStatus::Killed, None, None, None),
         }

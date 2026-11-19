@@ -44,6 +44,7 @@ tracing = { workspace = true }
 twilight-gateway = { workspace = true }
 twilight-model = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-webhooks = { workspace = true }
 trogon-semconv = { workspace = true }
 trogonai-proto = { workspace = true, features = ["gateway"] }
 trogon-decider-nats = { workspace = true }

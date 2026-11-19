@@ -20,7 +20,7 @@ use crate::auth::NatsConfig;
 use crate::connect::build_options;
 use crate::tls::NatsTls;
 
-const NATS_IMAGE_TAG: &str = "2.10.14";
+const NATS_IMAGE_TAG: &str = "2.14.2-alpine";
 const NATS_CLIENT_PORT: u16 = 4222;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const SERVER_NAMES: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
@@ -84,6 +84,11 @@ impl JetStreamTestServer {
     /// Starts the pinned NATS image and waits until it accepts client connections.
     pub async fn start() -> Self {
         Self(TestServer::start(image(&NatsServerCmd::default().with_jetstream())).await)
+    }
+
+    /// Starts the isolated server on an existing Docker network.
+    pub async fn start_on_network(network: &str) -> Self {
+        Self(TestServer::start(image(&NatsServerCmd::default().with_jetstream()).with_network(network)).await)
     }
 
     /// Connects to the isolated server and returns its JetStream context.

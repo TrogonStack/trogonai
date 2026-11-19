@@ -4,8 +4,8 @@ These Rust declarations are the messages a session yields. The
 [Decoding](#decoding) section describes how CLI frames become them; process
 ownership and permission policy are separate runtime concerns.
 
-Comparison sources are pinned [Python types](https://github.com/anthropics/claude-agent-sdk-python/blob/2209f2c134fee914c0f75733b631a5fc238ca846/src/claude_agent_sdk/types.py)
-and the integrity-verified [TypeScript 0.3.319 declarations](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.319.tgz).
+Comparison sources are pinned [Python types](https://github.com/anthropics/claude-agent-sdk-python/blob/22b8eb9c19adfa78759b79e22bd664a57843bb06/src/claude_agent_sdk/types.py)
+and the integrity-verified [TypeScript 0.3.323 declarations](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.323.tgz).
 The table entries describe stored shapes and deliberate Rust representations;
 they do not assert runtime parity or complete upstream union coverage.
 

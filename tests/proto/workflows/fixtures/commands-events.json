@@ -539,7 +539,14 @@
             "value": "4"
           },
           "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
-          "operationId": "operation-example"
+          "operationId": "operation-example",
+          "delegateBinding": {
+            "bindingName": "reviewer",
+            "parentExecutionPlanDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
         },
         "admission": {
           "agentRevision": {
@@ -698,7 +705,14 @@
                     "value": "4"
                   },
                   "cascadePolicy": "CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL",
-                  "operationId": "operation-example"
+                  "operationId": "operation-example",
+                  "delegateBinding": {
+                    "bindingName": "reviewer",
+                    "parentExecutionPlanDigest": {
+                      "algorithm": "sha256",
+                      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                    }
+                  }
                 },
                 "admission": {
                   "agentRevision": {

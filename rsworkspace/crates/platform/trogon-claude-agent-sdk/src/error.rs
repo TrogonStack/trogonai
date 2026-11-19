@@ -185,6 +185,10 @@ pub enum Error {
     /// An option the upstream SDK rejects before it starts the CLI.
     #[error(transparent)]
     Option(#[from] crate::OptionError),
+    /// Python `CLIConnectionError("Failed to load settings: ...")`, raised while the command is built when the
+    /// settings a sandbox is merged into cannot be loaded.
+    #[error(transparent)]
+    SettingsLoad(#[from] crate::SettingsLoadError),
     /// Python `MessageParseError`.
     #[error(transparent)]
     MessageParse(#[from] MessageParseError),
@@ -403,7 +407,7 @@ impl Error {
             return None;
         };
         let tail = String::from_utf8_lossy(stderr.as_bytes());
-        let tail = tail.trim_matches(crate::js_regex::is_whitespace);
+        let tail = crate::session_prompt::js_trim(&tail);
         let tail = if tail.is_empty() {
             String::new()
         } else {

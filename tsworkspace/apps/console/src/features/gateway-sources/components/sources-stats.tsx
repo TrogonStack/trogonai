@@ -2,9 +2,10 @@ import { ActivityIcon, RadioIcon, ShieldXIcon, TriangleAlertIcon } from 'lucide-
 
 import { Stat, StatStrip, StatStripSkeleton } from '@/components/stat-strip';
 
-import { summarizeSources, type SourceView } from '../domain/view';
+import type { SourceListRow } from '../domain/source-list';
+import { summarizeSources } from '../domain/view';
 
-export function SourcesStats({ sources }: { sources: readonly SourceView[] }) {
+export function SourcesStats({ sources }: { sources: readonly SourceListRow[] }) {
   const overview = summarizeSources(sources);
   return (
     <StatStrip label="Sources summary">
