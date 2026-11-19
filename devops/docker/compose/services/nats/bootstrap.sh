@@ -33,6 +33,10 @@ GATEWAY_DIR="$CLIENTS_DIR/a2a-gateway"
 # The subject an a2a-bridge sends its mint requests to and the callout answers
 # on. It is the default of both, so neither sets AUTH_CALLOUT_MINT_SUBJECT.
 BRIDGE_MINT_SUBJECT=a2a.bridge.auth.callout.request
+# Release invalidation notices live on a PLATFORM stream that the secrets
+# service alone publishes to, and only its provisioner may manage.
+INVALIDATION_STREAM=SECRETS_INVALIDATION
+INVALIDATION_NOTICES='secrets.invalidation.v1.>'
 
 umask 077
 
@@ -95,20 +99,65 @@ ensure_jetstream() {
   fi
 }
 
-# Any further arguments are nsc permission flags, applied when the user is
-# created. A user that already exists keeps the permissions it was issued with.
+# Any further arguments are nsc `--deny-pub` and `--deny-sub` flags. They are
+# applied when the user is created, and a user that already exists is brought
+# up to date by adding the entries it lacks, so a rerun picks up new denies and
+# changes nothing when there are none. Entries are only ever added.
 ensure_user() {
   account=$1 name=$2 owner=$3
   shift 3
   if [ ! -f "$STORE/accounts/$account/users/$name.jwt" ]; then
     nsc add user --account "$account" --name "$name" --private-key "$(account_signing_key "$account")" "$@"
   fi
+  reconcile_denies "$account" "$name" "$@"
   dir="$CLIENTS_DIR/$name"
   mkdir -p "$dir"
   quietly nsc generate creds --account "$account" --name "$name" --output-file "$dir/nats.creds"
   chown "$owner" "$dir" "$dir/nats.creds"
   chmod 0700 "$dir"
   chmod 0400 "$dir/nats.creds"
+}
+
+reconcile_denies() {
+  account=$1 name=$2
+  shift 2
+  while [ "$#" -ge 2 ]; do
+    flag=$1 entry=$2
+    shift 2
+    case "$flag" in
+      --deny-pub) kind=pub ;;
+      --deny-sub) kind=sub ;;
+      *) continue ;;
+    esac
+    if ! nsc describe user --account "$account" --name "$name" --json | jq -e \
+      --arg kind "$kind" --arg entry "$entry" '(.nats[$kind].deny // []) | index($entry) != null' >/dev/null; then
+      quietly nsc edit user --account "$account" --name "$name" "$flag" "$entry"
+    fi
+  done
+}
+
+# Every PLATFORM user is kept from publishing a release invalidation notice, so
+# a notice cannot be forged. Only the provisioner may also create, update,
+# delete, purge, restore or delete a message of the stream, so no other user can
+# replace the stream, loosen its protections or drop a notice. The stream's own
+# deny_delete and deny_purge hold only while it is left unchanged. The
+# provisioner publishes no notice either: it creates the stream and nothing
+# else. No bootstrap user is the secrets service, so none may publish a notice.
+# Readers keep STREAM.INFO and consumer creation and reads.
+ensure_platform_user() {
+  account=$1 name=$2 owner=$3
+  shift 3
+  if [ "$name" = secrets-invalidation-provisioner ]; then
+    ensure_user "$account" "$name" "$owner" "$@" --deny-pub "$INVALIDATION_NOTICES"
+  else
+    ensure_user "$account" "$name" "$owner" "$@" --deny-pub "$INVALIDATION_NOTICES" \
+      --deny-pub "\$JS.API.STREAM.CREATE.$INVALIDATION_STREAM" \
+      --deny-pub "\$JS.API.STREAM.UPDATE.$INVALIDATION_STREAM" \
+      --deny-pub "\$JS.API.STREAM.DELETE.$INVALIDATION_STREAM" \
+      --deny-pub "\$JS.API.STREAM.PURGE.$INVALIDATION_STREAM" \
+      --deny-pub "\$JS.API.STREAM.MSG.DELETE.$INVALIDATION_STREAM" \
+      --deny-pub "\$JS.API.STREAM.RESTORE.$INVALIDATION_STREAM"
+  fi
 }
 
 # The bridge's mint request crosses from PLATFORM into AUTH as a service. AUTH
@@ -180,9 +229,9 @@ ensure_bridge_mint_exchange
 # so the callout is the only one that can answer.
 while read -r account name owner; do
   case "$account/$name" in
-    PLATFORM/a2a-bridge) ensure_user "$account" "$name" "$owner" --deny-sub "$BRIDGE_MINT_SUBJECT" ;;
+    PLATFORM/a2a-bridge) ensure_platform_user "$account" "$name" "$owner" --deny-sub "$BRIDGE_MINT_SUBJECT" ;;
     PLATFORM/*)
-      ensure_user "$account" "$name" "$owner" --deny-pub "$BRIDGE_MINT_SUBJECT" --deny-sub "$BRIDGE_MINT_SUBJECT"
+      ensure_platform_user "$account" "$name" "$owner" --deny-pub "$BRIDGE_MINT_SUBJECT" --deny-sub "$BRIDGE_MINT_SUBJECT"
       ;;
     *) ensure_user "$account" "$name" "$owner" ;;
   esac

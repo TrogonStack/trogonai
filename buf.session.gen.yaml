@@ -1,0 +1,37 @@
+version: v2
+clean: true
+inputs:
+  - directory: .
+    paths:
+      - proto/trogonai/session/plans
+      - proto/trogonai/agents/agents/v1alpha1/agent.proto
+      - proto/trogonai/session/sessions/v1alpha1/create_session.proto
+      - proto/trogonai/session/sessions/v1alpha1/dispatch_delegation.proto
+      - proto/trogonai/session/sessions/v1alpha1/create_child_session.proto
+      - proto/trogonai/session/sessions/v1alpha1/session_started.proto
+      - proto/trogonai/session/sessions/v1alpha1/delegation_dispatched.proto
+      - proto/trogonai/session/sessions/v1alpha1/parent_linked.proto
+      - proto/trogonai/session/sessions/v1alpha1/session_closed.proto
+      - proto/trogonai/session/sessions/v1alpha1/session_cancelled.proto
+      - proto/trogonai/session/sessions/v1alpha1/session_failed.proto
+      - proto/trogonai/session/sessions/v1alpha1/execution_attempt_started.proto
+      - proto/trogonai/session/sessions/v1alpha1/execution_attempt_ready.proto
+      - proto/trogonai/session/sessions/v1alpha1/execution_attempt_ended.proto
+      - proto/trogonai/session/sessions/v1alpha1/operation_reserved.proto
+plugins:
+  - local: [.config/mise/lib/proto-plugin, protoc-gen-buffa]
+    out: rsworkspace/crates/platform/trogonai-proto/src/session_gen
+    include_imports: true
+    strategy: all
+    opt:
+      - json=true
+      - unknown_fields=false
+      - exclude_package=.buf.validate
+      - exclude_package=.elixirpb
+  - local: [.config/mise/lib/proto-plugin, protoc-gen-buffa-packaging]
+    out: rsworkspace/crates/platform/trogonai-proto/src/session_gen
+    include_imports: true
+    strategy: all
+    opt:
+      - exclude_package=.buf.validate
+      - exclude_package=.elixirpb
