@@ -57,11 +57,6 @@ pub(crate) const TLS_NAME_TYPE_HOST_NAME: u8 = 0;
 /// shaped, so no real destination can collide with it.
 pub(crate) const NO_DESTINATION_TARGET: &str = "no_destination";
 
-/// The `target` of a decision record whose destination is longer than an audit
-/// name may be (a 250 byte host and a port do not fit). The decision is still
-/// recorded; only the spelling of where is replaced.
-pub(crate) const DESTINATION_TOO_LONG_TARGET: &str = "destination_too_long";
-
 /// Log target of the one local line written per decision.
 pub(crate) const AUDIT_LOG_TARGET: &str = "egress_audit";
 

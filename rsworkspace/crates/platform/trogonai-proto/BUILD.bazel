@@ -1,6 +1,6 @@
 load("//.config/bazel:rust.bzl", "workspace_compile_fail_library", "workspace_crate")
 
-workspace_crate()
+workspace_crate(compile_data = ["src/session_gen/*.json"])
 
 workspace_compile_fail_library(
     crate_features = [
@@ -14,6 +14,12 @@ workspace_compile_fail_library(
 filegroup(
     name = "generated",
     srcs = glob(["src/gen/**"]),
+    visibility = ["//proto:__pkg__"],
+)
+
+filegroup(
+    name = "session_generated",
+    srcs = glob(["src/session_gen/**"]),
     visibility = ["//proto:__pkg__"],
 )
 

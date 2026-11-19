@@ -253,6 +253,7 @@ npm.npm_translate_lock(
         "//tsworkspace:pnpm-workspace.yaml",
         "//tsworkspace/apps/console:package.json",
         "//tsworkspace/packages/proto:package.json",
+        "//tsworkspace/packages/sandbox-ws-client:package.json",
         "//tsworkspace/packages/slack-bolt-fixtures:package.json",
     ],
     npmrc = "//tsworkspace:.npmrc",

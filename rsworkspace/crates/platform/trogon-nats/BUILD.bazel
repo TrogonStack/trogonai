@@ -2,6 +2,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     integration_tests = {
+        "jetstream_network": {"tags": ["requires-network"]},
+        "native_conditional_update": {"tags": ["requires-network"]},
         # Scans the sources of sibling crates, so it runs only under Cargo.
         "subject_literal_policy": {"tags": ["manual"]},
         "tls_handshake": {"tags": ["requires-network"]},
