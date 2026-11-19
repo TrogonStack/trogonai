@@ -1,0 +1,50 @@
+{
+  "name": "@trogonai/sandbox-ws-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript client SDK for sandbox-ws-gateway, the WebSocket gateway that brokers sandbox leases for browser/Node clients.",
+  "license": "Apache-2.0",
+  "author": "TrogonAI",
+  "files": [
+    "dist",
+    "README.md",
+    "llms.txt",
+    "docs"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc --noEmit && pnpm typecheck:api && pnpm check:doc-snippets",
+    "typecheck:api": "tsc -p tsconfig.public-api.json",
+    "test": "vitest run && pnpm test:built",
+    "check:doc-snippets": "node scripts/check-doc-snippets.ts",
+    "dev": "tsc --watch",
+    "test:coverage": "vitest run --coverage",
+    "test:built": "pnpm build && node --test tests/build-smoke.mjs",
+    "lint": "oxlint --deny-warnings ."
+  },
+  "dependencies": {
+    "ws": "8.22.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "@types/ws": "8.18.2",
+    "@vitest/coverage-v8": "5.0.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.0"
+  },
+  "engines": {
+    "node": ">=22.7"
+  }
+}

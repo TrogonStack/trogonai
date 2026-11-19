@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Generate opt-in Session contracts and trusted wire descriptors"
+set -euo pipefail
+
+exec python3 "$MISE_PROJECT_ROOT/.config/mise/lib/generate-session-protobuf.py" "$@"
