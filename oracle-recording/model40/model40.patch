@@ -1548,7 +1548,7 @@ index 0000000000..561c647178
 +    Tool,
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
-index f01219da74..7f9da64a86 100644
+index f01219da74..bf10b3bc56 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 @@ -29,21 +29,26 @@
@@ -1588,7 +1588,7 @@ index f01219da74..7f9da64a86 100644
      walk: PathCost,
      clone: PathCost,
      copy: PathCost,
-@@ -172,13 +178,88 @@ enum StartupShare {
+@@ -172,13 +178,91 @@ enum StartupShare {
  }
  
  /// The budgets a managed settings document's passes have, out of the same stack, in each evaluation of the managed
@@ -1620,9 +1620,12 @@ index f01219da74..7f9da64a86 100644
 +
 +/// How much room the evaluation of the managed file tier `mX` runs for the login pins (`QP > mX > XP > $u > pE`) has
 +/// less than the one for the sources (`QP > $u > pE`): the frames of `mX` and `XP`, for the walk, the clone, the copy
-+/// and the merge into the folder alike. Every path of the native reads of the login documents on the three profiles
-+/// that the pins keep or drop is explained by any multiple of 16 from 160 to 288; this is the one in the middle.
-+const LOGIN_FRAMES: usize = 224;
++/// and the merge into the folder alike (`mX` at 1277885 and `XP` at 1277441 in the 0.3.323 bundle). With the sources
++/// budgets below, every path of the native reads of the login documents on the three profiles that the pins keep or
++/// drop is explained by 256 or 272: the 1951 nested objects that fail on Linux on arm64 from a timer need more than
++/// 240, the 2216 that macOS reads from a timer at most 272, and on Linux on x64 the 1644 that fail at the top level
++/// need more than 184 and the 1643 read from an immediate at most 280. This is the least of the two.
++const LOGIN_FRAMES: usize = 256;
 +
 +/// A managed settings document the caller hands over as an object, which the policy cache (`pm` upstream) reads on
 +/// the stack of the resolve.
@@ -1678,7 +1681,7 @@ index f01219da74..7f9da64a86 100644
  }
  
  /// The budgets of the reader's walk and clone, the file cache copy and the merge into the folder in one evaluation of
-@@ -191,12 +272,72 @@ struct PassBudgets {
+@@ -191,12 +275,72 @@ struct PassBudgets {
      folder_merge: usize,
  }
  
@@ -1755,7 +1758,7 @@ index f01219da74..7f9da64a86 100644
          }
      }
  }
-@@ -207,30 +348,46 @@ impl NodeStack {
+@@ -207,30 +351,46 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 448 bytes per object and 240
      /// per array out of 1000451, and 288 per object and 304 per array out of 1000724. The file cache copy then takes
      /// 288 per object and 512 per array out of 1000884. At the object or array that ends a path, the walk takes 144
@@ -1793,7 +1796,7 @@ index f01219da74..7f9da64a86 100644
 +    /// evaluated, its copy 998826, the merge into its folder 958147 and the merge of the admin settings 960371: 2217
 +    /// nested objects or a root object holding 3268 nested arrays, 1941 nested arrays, 1241 levels and 1244 levels. The
 +    /// evaluation of the policy origin has 998944, 999245, 999914 and 959008 (2220 objects, 3271 and 1943 arrays, 1243
-+    /// levels), and the one that asks whether the machine policy loaded 999840, 1000141, 1000794 and 959776 (2222
++    /// levels), and the one that asks whether the machine policy loaded 999840, 1000141, 1000794 and 960016 (2222
 +    /// objects, 3274 and 1945 arrays, 1244 levels). The evaluation of the effective settings copies with 998394 (1940
 +    /// arrays). Each copy budget is the room Node has for nested arrays around `[null]` under `__proto__` in a drop-in,
 +    /// which the file cache copy enters and the merge skips: 1939 for the effective settings, 1940 for the sources,
@@ -1819,7 +1822,7 @@ index f01219da74..7f9da64a86 100644
          walk: PathCost {
              object: 448,
              array: 240,
-@@ -238,7 +395,7 @@ impl NodeStack {
+@@ -238,7 +398,7 @@ impl NodeStack {
                  empty_object: 144,
                  scalar_object: 448,
                  empty_array: 176,
@@ -1828,7 +1831,7 @@ index f01219da74..7f9da64a86 100644
              },
              budget: 1_000_451,
          },
-@@ -257,8 +414,8 @@ impl NodeStack {
+@@ -257,8 +417,8 @@ impl NodeStack {
              object: 288,
              array: 512,
              leaves: LeafCost {
@@ -1839,7 +1842,7 @@ index f01219da74..7f9da64a86 100644
                  empty_array: 512,
                  scalar_array: 512,
              },
-@@ -267,8 +424,10 @@ impl NodeStack {
+@@ -267,8 +427,10 @@ impl NodeStack {
          merge: MergeCost {
              level: 768,
              cold_assign: 416,
@@ -1850,7 +1853,7 @@ index f01219da74..7f9da64a86 100644
              descent_reach: 40_230,
              later_compile: 0,
          },
-@@ -277,22 +436,50 @@ impl NodeStack {
+@@ -277,22 +439,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 997_859,
                  clone: 998_160,
@@ -1870,8 +1873,9 @@ index f01219da74..7f9da64a86 100644
                  walk: 999_840,
                  clone: 1_000_141,
 -                copy: 1_000_576,
+-                folder_merge: 959_776,
 +                copy: 1_000_794,
-                 folder_merge: 959_776,
++                folder_merge: 960_016,
              },
              admin_merge: 960_371,
 +            held_check: HeldCheckBudgets {
@@ -1904,19 +1908,21 @@ index f01219da74..7f9da64a86 100644
          },
      };
  
-@@ -310,17 +497,34 @@ impl NodeStack {
+@@ -309,18 +499,35 @@ impl NodeStack {
+     /// holding 3131 nested arrays for the reader, 1788 nested arrays for the copy, and 1252 levels around `null` for a
      /// merge.
      ///
-     /// A managed settings document's reader has 999552 and 999840 for the same two passes when the sources are
+-    /// A managed settings document's reader has 999552 and 999840 for the same two passes when the sources are
 -    /// evaluated, its copy 999824, the merge into its folder 959824 and the merge of the admin settings 961920: 1952
 -    /// nested objects or a root object holding 3123 nested arrays, 1784 nested arrays, 1249 levels and 1251 levels.
 -    /// The evaluation of the policy origin has 1000704, 1001120, 1000952 and 961152 (1954 objects, 1250 levels), and
 -    /// the one that asks whether the machine policy loaded 1001728, 1002080, 1002064 and 961824 (1956 objects, 1788
 -    /// arrays, 1252 levels). No golden tells the origin's copy budget apart from the others, so it sits between them.
-+    /// evaluated, its copy 1000080, the merge into its folder 959824 and the merge of the admin settings 962016: 1952
++    /// A managed settings document's reader has 999680 and 999936 for the same two passes when the sources are
++    /// evaluated, its copy 1000080, the merge into its folder 959904 and the merge of the admin settings 962064: 1952
 +    /// nested objects or a root object holding 3123 nested arrays, 1784 nested arrays, 1249 levels and 1251 levels. The
 +    /// evaluation of the policy origin has 1000704, 1001120, 1001168 and 961152 (1954 objects, 3127 and 1786 arrays,
-+    /// 1251 levels), and the one that asks whether the machine policy loaded 1001728, 1002080, 1002048 and 961824 (1956
++    /// 1251 levels), and the one that asks whether the machine policy loaded 1001728, 1002080, 1002048 and 961872 (1956
 +    /// objects, 3130 and 1788 arrays, 1252 levels). The evaluation of the effective settings copies with 999648: 1784
 +    /// nested arrays, as for the sources, and 1775 under 9 nested objects. Each copy budget is the room Node has for
 +    /// nested arrays around `[null]` under `__proto__` in a drop-in, which the file cache copy enters and the merge
@@ -1944,7 +1950,7 @@ index f01219da74..7f9da64a86 100644
          walk: PathCost {
              object: 512,
              array: 272,
-@@ -357,8 +561,10 @@ impl NodeStack {
+@@ -357,32 +564,62 @@ impl NodeStack {
          merge: MergeCost {
              level: 768,
              cold_assign: 416,
@@ -1955,13 +1961,17 @@ index f01219da74..7f9da64a86 100644
              descent_reach: 40_230,
              later_compile: 0,
          },
-@@ -367,22 +573,50 @@ impl NodeStack {
+         merge_budget: 962_512,
+         policy: PolicyBudgets {
              sources: PassBudgets {
-                 walk: 999_552,
-                 clone: 999_840,
+-                walk: 999_552,
+-                clone: 999_840,
 -                copy: 999_824,
+-                folder_merge: 959_824,
++                walk: 999_680,
++                clone: 999_936,
 +                copy: 1_000_080,
-                 folder_merge: 959_824,
++                folder_merge: 959_904,
              },
 +            effective_copy: 999_648,
              origin: PassBudgets {
@@ -1975,11 +1985,11 @@ index f01219da74..7f9da64a86 100644
                  walk: 1_001_728,
                  clone: 1_002_080,
 -                copy: 1_002_064,
+-                folder_merge: 961_824,
 +                copy: 1_002_048,
-                 folder_merge: 961_824,
-             },
--            admin_merge: 961_920,
-+            admin_merge: 962_016,
++                folder_merge: 961_872,
++            },
++            admin_merge: 962_064,
 +            held_check: HeldCheckBudgets {
 +                fs: ReaderBudgets {
 +                    walk: 980_928,
@@ -2006,11 +2016,12 @@ index f01219da74..7f9da64a86 100644
 +                walk: 1_000_720,
 +                clone: 1_000_976,
 +                copy: 1_000_368,
-+            },
+             },
+-            admin_merge: 961_920,
          },
      };
  
-@@ -391,19 +625,44 @@ impl NodeStack {
+@@ -391,19 +628,44 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 608 bytes per object and 272
      /// per array out of 1002688, and 304 per object and per array out of 1002760. The file cache copy then takes 608
      /// per object and 640 per array out of 1002496. At the object or array that ends a path, the walk and the copy
@@ -2064,7 +2075,7 @@ index f01219da74..7f9da64a86 100644
      ///
      /// When a background compile lands while a merge runs, a merge after the one that compiled the `isIndex` pattern
      /// to bytecode can run out at 1362 levels instead of compiling the pattern there, and any `later_compile` from 337
-@@ -413,6 +672,7 @@ impl NodeStack {
+@@ -413,6 +675,7 @@ impl NodeStack {
      pub const NODE_24_LINUX_X64: Self = Self {
          startup: StartupShare::BesideStack,
          startup_bytes: 4384,
@@ -2072,7 +2083,7 @@ index f01219da74..7f9da64a86 100644
          walk: PathCost {
              object: 608,
              array: 272,
-@@ -441,7 +701,7 @@ impl NodeStack {
+@@ -441,7 +704,7 @@ impl NodeStack {
              leaves: LeafCost {
                  empty_object: 144,
                  scalar_object: 608,
@@ -2081,7 +2092,7 @@ index f01219da74..7f9da64a86 100644
                  scalar_array: 640,
              },
              budget: 1_002_496,
-@@ -449,8 +709,10 @@ impl NodeStack {
+@@ -449,8 +712,10 @@ impl NodeStack {
          merge: MergeCost {
              level: 736,
              cold_assign: 416,
@@ -2092,7 +2103,7 @@ index f01219da74..7f9da64a86 100644
              descent_reach: 40_656,
              later_compile: 0,
          },
-@@ -459,22 +721,50 @@ impl NodeStack {
+@@ -459,22 +724,50 @@ impl NodeStack {
              sources: PassBudgets {
                  walk: 999_992,
                  clone: 1_000_312,
@@ -2147,7 +2158,7 @@ index f01219da74..7f9da64a86 100644
          },
      };
  
-@@ -513,13 +803,44 @@ impl NodeStack {
+@@ -513,13 +806,44 @@ impl NodeStack {
          }
      }
  
@@ -2192,7 +2203,7 @@ index f01219da74..7f9da64a86 100644
      /// The most nested arrays and objects a settings file the reader reads may hold.
      pub(crate) fn max_depth(self) -> usize {
          self.walk
-@@ -527,12 +848,12 @@ impl NodeStack {
+@@ -527,12 +851,12 @@ impl NodeStack {
              .min(self.clone.deepest(self.available(self.clone.budget)))
      }
  
@@ -2210,7 +2221,7 @@ index f01219da74..7f9da64a86 100644
      }
  
      /// Whether the settings file reader walks and copies `document` without running out of stack.
-@@ -541,31 +862,58 @@ impl NodeStack {
+@@ -541,31 +865,58 @@ impl NodeStack {
              && self.clone.fits(self.available(self.clone.budget), document)
      }
  
@@ -2276,7 +2287,7 @@ index f01219da74..7f9da64a86 100644
      pub(crate) fn merge_within(
          self,
          call: NodeMergeCall,
-@@ -573,10 +921,11 @@ impl NodeStack {
+@@ -573,10 +924,11 @@ impl NodeStack {
          destination: &mut Map<String, Value>,
          source: &Map<String, Value>,
          warmth: &Cell<MergeWarmth>,
@@ -2289,7 +2300,7 @@ index f01219da74..7f9da64a86 100644
              NodeMergeCall::Admin => self.policy.admin_merge,
          };
          let room = MergeRoom {
-@@ -584,7 +933,9 @@ impl NodeStack {
+@@ -584,7 +936,9 @@ impl NodeStack {
              available: self.available(budget),
          };
          let mut ran = warmth.get();
@@ -2299,7 +2310,7 @@ index f01219da74..7f9da64a86 100644
          warmth.set(ran);
          merged
      }
-@@ -618,3 +969,7 @@ fn is_container(value: &Value) -> bool {
+@@ -618,3 +972,7 @@ fn is_container(value: &Value) -> bool {
  #[cfg(test)]
  #[path = "node_stack_tests.rs"]
  mod tests;
