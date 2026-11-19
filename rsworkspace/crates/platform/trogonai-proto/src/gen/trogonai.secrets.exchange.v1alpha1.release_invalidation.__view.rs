@@ -6,8 +6,9 @@
 /// which records a credential becoming unusable on its own stream.
 ///
 /// Published on `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`,
-/// where `{tenant}` is the account key of the tenant holding the owner, so only
-/// that account can import it (ADR#0081 Decision 3 amendment), and
+/// where `{tenant}` is the account key of the tenant holding the owner. The
+/// notice stays in PLATFORM, where registered trusted callers read it
+/// (ADR#0095 Decision 5), and
 /// `{owner_token}` is the owner id with each `.` written as `~`, as the
 /// credential event subjects write it.
 ///

@@ -93,6 +93,11 @@ impl JetStreamTestServer {
         Self(TestServer::start(image(&NatsServerCmd::default().with_jetstream())).await)
     }
 
+    /// Starts the isolated server on an existing Docker network.
+    pub async fn start_on_network(network: &str) -> Self {
+        Self(TestServer::start(image(&NatsServerCmd::default().with_jetstream()).with_network(network)).await)
+    }
+
     /// Connects to the isolated server and returns its JetStream context.
     pub async fn jetstream(&self) -> jetstream::Context {
         jetstream::new(self.client().await)
