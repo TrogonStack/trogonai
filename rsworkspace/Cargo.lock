@@ -7613,6 +7613,7 @@ name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "base64 0.23.1",
  "bytes",
  "futures",
  "hex",
@@ -7751,6 +7752,14 @@ dependencies = [
  "trogon-decider-runtime",
  "trogon-std",
  "trogonai-proto",
+]
+
+[[package]]
+name = "trogon-proto-preflight"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -7954,6 +7963,51 @@ dependencies = [
  "thiserror 2.0.21",
  "trogon-nats",
  "trogon-std",
+]
+
+[[package]]
+name = "trogon-session-plan"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "base64 0.23.1",
+ "buffa",
+ "buffa-types",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
+ "trogon-identity-types",
+ "trogon-nats",
+ "trogon-proto-preflight",
+ "trogon-session-store",
+ "trogon-std",
+ "trogonai-proto",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-session-store"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "buffa",
+ "buffa-types",
+ "futures",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
+ "trogon-identity-types",
+ "trogon-nats",
+ "trogon-proto-preflight",
+ "trogon-std",
+ "trogonai-proto",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]
