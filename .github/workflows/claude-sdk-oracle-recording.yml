@@ -1452,15 +1452,17 @@ jobs:
 
       - name: Scan the job 55 rows
         # Ruling 46 rule 2 and Ruling 47: the held-out second-call rows with their primes, once job 55 has recorded them.
-        if: always() && hashFiles('scratch/oracle-recording/model40/j55.jsonl') != ''
+        # The rows ship gzipped: the plain file is over the host's per-file limit.
+        if: always() && hashFiles('scratch/oracle-recording/model40/j55.jsonl.gz') != ''
         working-directory: rsworkspace
         env:
-          SCAN40_ROWS: ${{ github.workspace }}/scratch/oracle-recording/model40/j55.jsonl
+          SCAN40_ROWS: ${{ runner.temp }}/j55.jsonl
           SCAN40_OUT: ${{ runner.temp }}/out/j55-${{ matrix.shard }}.jsonl
           SCAN40_SHARD: ${{ matrix.shard }}
           SCAN40_SHARDS: "4"
         run: |
           mkdir -p "$RUNNER_TEMP/out"
+          gunzip -c "$GITHUB_WORKSPACE/scratch/oracle-recording/model40/j55.jsonl.gz" > "$SCAN40_ROWS"
           cargo test --release -p trogon-claude-agent-sdk --lib scan40 -- --nocapture 2> >(tee "$RUNNER_TEMP/out/j55.log" >&2)
 
       - name: Run the crate's own tests
