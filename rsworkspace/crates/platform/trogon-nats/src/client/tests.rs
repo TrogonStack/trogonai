@@ -74,22 +74,27 @@ async fn the_client_traits_publish_subscribe_flush_and_request_against_a_live_se
     assert_eq!(received.headers.unwrap().get("x-trace").unwrap().as_str(), "abc");
 
     let mut requests = client.subscribe("client.echo").await.unwrap();
-    let responder = client.clone();
-    tokio::spawn(async move {
-        if let Some(request) = requests.next().await {
-            responder
-                .publish(request.reply.unwrap(), request.payload)
-                .await
-                .unwrap();
-        }
+    let responder_client = client.clone();
+    let responder = tokio::spawn(async move {
+        let request = requests.next().await.expect("the request must arrive");
+        responder_client
+            .publish(
+                request.reply.expect("a request carries a reply subject"),
+                request.payload,
+            )
+            .await
+            .expect("the reply must publish");
     });
 
     let reply = tokio::time::timeout(
         DELIVERY_DEADLINE,
         RequestClient::request_with_headers(&client, "client.echo", HeaderMap::new(), Bytes::from_static(b"ping")),
     )
-    .await
-    .unwrap()
-    .unwrap();
-    assert_eq!(reply.payload, "ping");
+    .await;
+    // Check the responder first, so a failure there is reported instead of the request's timeout.
+    tokio::time::timeout(DELIVERY_DEADLINE, responder)
+        .await
+        .expect("the responder must finish")
+        .expect("the responder must not panic");
+    assert_eq!(reply.expect("timeout").unwrap().payload, "ping");
 }

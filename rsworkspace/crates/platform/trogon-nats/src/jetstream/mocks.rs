@@ -1486,7 +1486,9 @@ impl JetStreamGetStream for MockJetStreamConsumerFactory {
 }
 
 /// A JetStream client that both publishes and opens streams, for code that needs
-/// `JetStreamPublisher + JetStreamGetStream` from one value.
+/// `JetStreamPublisher + JetStreamGetStream` from one value. It is not a stand-in for
+/// `NatsJetStreamClient`: it implements only those two traits, not `JetStreamContext`
+/// or the KV traits.
 #[derive(Clone, Default)]
 pub struct MockJetStreamClient {
     pub publisher: MockJetStreamPublisher,

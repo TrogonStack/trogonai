@@ -274,5 +274,5 @@ where
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, feature = "test-support"))]
+#[cfg(test)]
 mod integration_tests;
