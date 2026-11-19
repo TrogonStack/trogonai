@@ -6,7 +6,7 @@ use super::config::GithubConfig;
 use super::constants::{
     HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_DELIVERY, NATS_HEADER_EVENT,
 };
-use super::signature;
+use crate::source::hub_signature;
 use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
@@ -151,7 +151,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 
     match sig {
         Some(sig) => {
-            if let Err(e) = signature::verify(state.webhook_secret.as_str(), &body, sig) {
+            if let Err(e) = hub_signature::verify(state.webhook_secret.as_str(), &body, sig) {
                 warn!(reason = %e, "GitHub webhook signature validation failed");
                 return StatusCode::UNAUTHORIZED;
             }
@@ -239,7 +239,7 @@ where
         }
     };
 
-    if let Err(e) = signature::verify(webhook_secret.as_str(), &body, sig) {
+    if let Err(e) = hub_signature::verify(webhook_secret.as_str(), &body, sig) {
         warn!(reason = %e, "GitHub webhook signature validation failed");
         return StatusCode::UNAUTHORIZED;
     }

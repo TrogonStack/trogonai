@@ -37,6 +37,8 @@ use trogon_webhooks::{
     SecretWebhookVerifier, TimestampTolerance, WebhookBodySize,
 };
 
+mod whatsapp_tests;
+
 #[tokio::test]
 async fn generic_webhooks_mount_with_provider_routes_and_runtime_credentials() {
     let endpoint_id = "3cc8a622-fcdd-42c2-b4ad-88d638053814";

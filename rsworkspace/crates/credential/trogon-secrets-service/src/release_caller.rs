@@ -6,8 +6,9 @@ use super::{ReleaseCallerError, TenantAccount};
 /// Who called the release endpoint, read from the subject the request arrived
 /// on.
 ///
-/// The tenant is the subject's first token, which the PLATFORM export pins to
-/// the importing account (ADR#0081 Decision 3). The runtime service is the
+/// The tenant is the subject's first token, which the registered PLATFORM
+/// trusted caller names and NATS does not pin; the service authorizes it from
+/// its own state (ADR#0095 Decision 5). The runtime service is the
 /// `service.{id}` principal after the domain and version (ADR#0082 Decision
 /// 2). Nothing the caller wrote in its payload or headers takes part, so no
 /// part of the caller is self-asserted.

@@ -1,6 +1,7 @@
 //! The audit records of a release decision, built from the facts the release
 //! core hands its audit port.
 
+use trogon_audit::constants::DESTINATION_TOO_LONG;
 use trogon_audit::{
     Actor, AuditName, CredentialFacts, CredentialTerminal, DecisionFacts, DecisionOutcome, ReasonCode, Record,
     RecordScope, Stamp, Surface,
@@ -8,7 +9,6 @@ use trogon_audit::{
 use trogon_credential_aggregate::credential_project_token;
 use trogon_credential_domain::CredentialKey;
 
-use super::constants::DESTINATION_TOO_LONG_NAME;
 use super::{DenialRecord, ReleaseAuditRecordError, ReleaseRecord, ReleaseRequest};
 
 /// The must-audit credential use of a release, written before the value is
@@ -20,10 +20,7 @@ pub(crate) fn release_record(record: &ReleaseRecord, stamp: Stamp) -> Result<Rec
     // policy binds it to the runtime service, destination and location, so the
     // credential's name is the binding.
     let mut facts = CredentialFacts::new(CredentialTerminal::Release, credential.clone(), credential);
-    facts.destination = Some(
-        AuditName::new(request.destination().to_string())
-            .or_else(|_| name("destination", DESTINATION_TOO_LONG_NAME))?,
-    );
+    facts.destination = Some(destination_name(request)?);
     facts.location = Some(name("location", request.location().to_string())?);
     Ok(Record::credential_use(scope(request)?, facts, stamp))
 }
@@ -50,6 +47,13 @@ fn scope(request: &ReleaseRequest) -> Result<RecordScope, ReleaseAuditRecordErro
     };
     let request_id = name("correlation id", request.correlation_id().as_str())?;
     Ok(RecordScope::new(tenant, project, caller).with_request_id(request_id))
+}
+
+/// The destination as the egress proxy names it, so both records of the dual
+/// audit (ADR#0023 Decision 6) name it alike. One longer than an audit name may
+/// be is recorded under the shared placeholder; the release is still recorded.
+fn destination_name(request: &ReleaseRequest) -> Result<AuditName, ReleaseAuditRecordError> {
+    AuditName::new(request.destination().to_string()).or_else(|_| name("destination", DESTINATION_TOO_LONG))
 }
 
 /// The credential's resource name (ADR#0046), so the record names the same
