@@ -2396,10 +2396,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..f432d3e670
+index 0000000000..4871a161b8
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,662 @@
+@@ -0,0 +1,690 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -2754,12 +2754,17 @@ index 0000000000..f432d3e670
 +}
 +
 +/// What `stack` answers for a recorded case after `primes`, each an earlier resolve of the same process in order, and
-+/// its causal stage: every resolve runs on `stack` and shares the one process state, so each prime compiles into the
-+/// same per-function set the case then finds, as `answer_at`'s own prime does. An organization case, or an
-+/// organization prime, takes a different path and is not modeled here.
-+fn answer_after_primes(files: &Value, primes: &[Value], stack: NodeStack) -> Result<(Value, String), Failure> {
++/// its causal stage: the primes run on `prime` and the case on `stack`, all sharing the one process state, so each
++/// prime compiles into the same per-function set the case then finds, as `answer_at`'s own prime does. The recorder
++/// starts each resolve from its own caller, so the primes and the case need not share an offset. An organization case,
++/// or an organization prime, takes a different path and is not modeled here.
++fn answer_after_primes(
++    files: &Value,
++    primes: &[Value],
++    (prime, stack): (NodeStack, NodeStack),
++) -> Result<(Value, String), Failure> {
 +    let _ = node_stack_catch::take();
-+    let state = ResolverState::new().with_node_stack(stack);
++    let state = ResolverState::new().with_node_stack(prime);
 +    for prime in primes {
 +        let Case {
 +            host,
@@ -2781,9 +2786,32 @@ index 0000000000..f432d3e670
 +    if organization.is_some() {
 +        return Err("a primed case names an organization case".into());
 +    }
-+    let answered = answer(&host, &options, &state)?;
++    let answered = answer(&host, &options, &state.with_node_stack(stack))?;
 +    let stage = stage(&node_stack_catch::take(), &answered);
 +    Ok((answered, stage))
++}
++
++/// What `primes`, run in order on `prime` as earlier resolves of one process, leave for the case after them: the
++/// functions they compiled, with each one's answer and the catches it took, which the case's stage counts too. Two
++/// offsets with the same outcome give the case the same answer at any offset of its own.
++fn primes_outcome(primes: &[Value], prime: NodeStack) -> Result<String, Failure> {
++    let state = ResolverState::new().with_node_stack(prime);
++    let mut left = Vec::new();
++    for files in primes {
++        let Case {
++            host,
++            options,
++            organization,
++            ..
++        } = case(files)?;
++        if organization.is_some() {
++            return Err("a prime names an organization case".into());
++        }
++        let _ = node_stack_catch::take();
++        let answered = answer(&host, &options, &state)?;
++        left.push(format!("{} {answered}", stage(&node_stack_catch::take(), &answered)));
++    }
++    Ok(format!("{:?} {left:?}", state.compiled().get()))
 +}
 +
 +/// What a second call's prime leaves for the case after it: the functions it compiled, with its answer and the
@@ -3064,10 +3092,10 @@ index 0000000000..f432d3e670
 +mod scan45;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
 new file mode 100644
-index 0000000000..a40c94562e
+index 0000000000..6273d22bc0
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
-@@ -0,0 +1,307 @@
+@@ -0,0 +1,430 @@
 +//! Scratch scan for the model40 job, never committed: for each group of a case, host, call position and startup,
 +//! the offsets of each context's interval on the 16-byte grid where the engine gives each recorded answer with its
 +//! stage. A context run in full lists every offset that gives each answer, with the runs of what the engine gives;
@@ -3082,6 +3110,11 @@ index 0000000000..a40c94562e
 +//! anywhere on the union grid leaves behind, and records under `pairs` what the case gives at each offset it visits
 +//! after each of those primes, as runs `[prime, high, low, answer, stage]` with the answers in `pair_answers`. The
 +//! `found`, `runs` and `answers` keep their same-offset meaning, so the scoring that reads them is unchanged.
++//!
++//! A row naming its `primes` scans the whole union grid in every context, so it is scanned once for all six. The
++//! recorder starts each prime and the case from its own caller, so the primes take one offset per distinct thing they
++//! leave behind anywhere on the union grid, apart from the case's offset: the group line carries `pairs` and
++//! `pair_answers` for them, and a child exit's found offsets take the primes inside its own interval as well.
 +
 +use std::{
 +    env, fs,
@@ -3098,6 +3131,7 @@ index 0000000000..a40c94562e
 +
 +use super::{
 +    CHILD_EXIT, DEEP_STACK_BYTES, Failure, HOSTS, STEP, TestResult, answer_after_primes, answer_at, prime_outcome,
++    primes_outcome,
 +};
 +
 +fn whole(value: &Value, what: &'static str) -> Result<isize, Failure> {
@@ -3155,7 +3189,7 @@ index 0000000000..a40c94562e
 +}
 +
 +fn context(
-+    (files, primed): (&Value, Option<(&[Value], &[isize])>),
++    files: &Value,
 +    call: &str,
 +    stack: crate::NodeStack,
 +    io: isize,
@@ -3169,8 +3203,7 @@ index 0000000000..a40c94562e
 +    } else {
 +        Vec::new()
 +    };
-+    // A primed row reports every offset of the union grid of the six contexts, in full, whatever its own interval.
-+    let every = primed.is_some() || scan["all"].as_bool().ok_or("no all")?;
++    let every = scan["all"].as_bool().ok_or("no all")?;
 +    let targets = scan["targets"].as_array().ok_or("no targets")?;
 +    let mut found: Vec<Vec<isize>> = vec![Vec::new(); targets.len()];
 +    let mut answers: Vec<Value> = Vec::new();
@@ -3179,20 +3212,13 @@ index 0000000000..a40c94562e
 +    let mut pairs: Vec<Value> = Vec::new();
 +    let mut open: Vec<Option<usize>> = vec![None; pair_primes.len()];
 +    let mut scanned = 0usize;
-+    let offsets = match primed {
-+        Some((_, union)) => union.to_vec(),
-+        None => grid((low, high)),
-+    };
-+    for at in offsets {
-+        let given = |prime: isize| match match primed {
-+            Some((earlier, _)) => answer_after_primes(files, earlier, stack.resumed_by(at)),
-+            None => answer_at(
-+                files,
-+                call,
-+                (stack.resumed_by(prime), stack.resumed_by(at)),
-+                stack.resumed_by(io),
-+            ),
-+        } {
++    for at in grid((low, high)) {
++        let given = |prime: isize| match answer_at(
++            files,
++            call,
++            (stack.resumed_by(prime), stack.resumed_by(at)),
++            stack.resumed_by(io),
++        ) {
 +            Ok(given) => given,
 +            Err(error) => (json!({"scan_error": error.to_string()}), "scan_error".to_owned()),
 +        };
@@ -3270,6 +3296,133 @@ index 0000000000..a40c94562e
 +    Ok(out)
 +}
 +
++/// The runs `[high, low, answer, stage]` of `given`, one per offset of `union` from the highest down, with the answers
++/// in the second list.
++fn runs_of(union: &[isize], given: &[(Value, String)]) -> (Vec<Value>, Vec<Value>) {
++    let mut answers: Vec<Value> = Vec::new();
++    let mut runs: Vec<Value> = Vec::new();
++    for (at, (answered, stage)) in union.iter().zip(given) {
++        let index = answer_index(&mut answers, answered);
++        match runs.last_mut() {
++            Some(last) if last[2] == json!(index) && last[3] == json!(stage) => last[1] = json!(at),
++            _ => runs.push(json!([at, at, index, stage])),
++        }
++    }
++    (runs, answers)
++}
++
++/// A row naming its primes, each an earlier resolve of the case's process in order: every context scans the whole
++/// `union`, the case at each offset after the primes at that offset (`runs`, `found`), and after the primes at one
++/// offset per distinct thing they leave anywhere on `union` (`pairs`). Two offsets whose primes leave the same thing
++/// give the case the same answer, so a prime leaving what the primes at the case's own offset leave is not run again.
++/// A child exit's found offsets also take the primes at its own interval's offsets, since each resolve there samples
++/// its own room.
++fn scan_primed(
++    (files, earlier): (&Value, &[Value]),
++    stack: crate::NodeStack,
++    union: &[isize],
++    scans: &[Value],
++) -> Result<(Vec<Value>, Value, Value), Failure> {
++    let child = scans
++        .iter()
++        .find(|scan| scan["context"] == CHILD_EXIT)
++        .ok_or("no child exit scan")?;
++    let room = (whole(&child["low"], "no low")?, whole(&child["high"], "no high")?);
++    let mut outcomes: Vec<(isize, String)> = Vec::new();
++    for at in union {
++        outcomes.push((*at, primes_outcome(earlier, stack.resumed_by(*at))?));
++    }
++    let pair_primes = primes(&outcomes, (isize::MIN, isize::MAX));
++    let child_primes = primes(&outcomes, room);
++    let outcome_at = |at: isize| {
++        outcomes
++            .iter()
++            .find(|(seen, _)| *seen == at)
++            .map(|(_, outcome)| outcome)
++    };
++    let given = |prime: isize, at: isize| match answer_after_primes(
++        files,
++        earlier,
++        (stack.resumed_by(prime), stack.resumed_by(at)),
++    ) {
++        Ok(given) => given,
++        Err(error) => (json!({"scan_error": error.to_string()}), "scan_error".to_owned()),
++    };
++    // At each case offset: what it gives after the primes there, and after each representative prime.
++    let mut same: Vec<(Value, String)> = Vec::new();
++    let mut after: Vec<Vec<(Value, String)>> = vec![Vec::new(); pair_primes.len()];
++    for at in union {
++        let own = given(*at, *at);
++        for (slot, prime) in pair_primes.iter().enumerate() {
++            after[slot].push(if outcome_at(*prime) == outcome_at(*at) {
++                own.clone()
++            } else {
++                given(*prime, *at)
++            });
++        }
++        same.push(own);
++    }
++    // A prime in the child exit's room gives what the representative leaving the same thing gives.
++    let child_slots: Vec<usize> = child_primes
++        .iter()
++        .map(|prime| {
++            pair_primes
++                .iter()
++                .position(|seen| outcome_at(*seen) == outcome_at(*prime))
++                .ok_or("a child exit prime has no representative")
++        })
++        .collect::<Result<_, _>>()?;
++    let (runs, answers) = runs_of(union, &same);
++    let mut done = Vec::new();
++    for scan in scans {
++        let child_exit = scan["context"] == CHILD_EXIT;
++        let targets = scan["targets"].as_array().ok_or("no targets")?;
++        let mut found: Vec<Vec<isize>> = vec![Vec::new(); targets.len()];
++        for (row, at) in union.iter().enumerate() {
++            let mut witnesses = vec![&same[row]];
++            if child_exit {
++                witnesses.extend(child_slots.iter().map(|slot| &after[*slot][row]));
++            }
++            for (index, target) in targets.iter().enumerate() {
++                let witnessed = witnesses.iter().any(|(answered, stage)| {
++                    target[0] == *answered
++                        && match target[1].as_str() {
++                            None => true,
++                            Some(named) => named == stage.as_str(),
++                        }
++                });
++                if witnessed {
++                    found[index].push(*at);
++                }
++            }
++        }
++        let mut out = json!({
++            "context": scan["context"],
++            "found": found,
++            "scanned": union.len(),
++            "runs": runs,
++            "answers": answers,
++        });
++        if child_exit && !child_primes.is_empty() {
++            out["primes"] = json!(child_primes);
++        }
++        done.push(out);
++    }
++    let mut pair_answers: Vec<Value> = Vec::new();
++    let mut pairs: Vec<Value> = Vec::new();
++    for (prime, given) in pair_primes.iter().zip(&after) {
++        let (runs, answers) = runs_of(union, given);
++        for run in runs {
++            let index = answer_index(
++                &mut pair_answers,
++                &answers[usize::try_from(whole(&run[2], "no run answer")?)?],
++            );
++            pairs.push(json!([prime, run[0], run[1], index, run[3]]));
++        }
++    }
++    Ok((done, json!(pairs), json!(pair_answers)))
++}
++
 +fn scan(group: &Value) -> Result<Value, Failure> {
 +    let host = group["host"].as_str().ok_or("no host")?;
 +    let (_, profile) = HOSTS.iter().find(|(name, _)| *name == host).ok_or("unknown host")?;
@@ -3283,8 +3436,7 @@ index 0000000000..a40c94562e
 +        &scans.iter().find(|scan| scan["context"] == "io").ok_or("no io scan")?["high"],
 +        "no io high",
 +    )?;
-+    // A row naming its primes takes them as given: each runs as an earlier resolve of the case's own process, in order,
-+    // on the case's stack, and no pairs are walked.
++    // A row naming its primes takes them as given: each runs as an earlier resolve of the case's own process, in order.
 +    let earlier: Option<&[Value]> = match group.get("primes") {
 +        Some(listed) => Some(listed.as_array().ok_or("primes is not a list")?.as_slice()),
 +        None => None,
@@ -3299,16 +3451,23 @@ index 0000000000..a40c94562e
 +        union.sort_unstable_by(|left, right| right.cmp(left));
 +        union.dedup();
 +    }
-+    let outcomes = if earlier.is_none() {
-+        outcomes(&group["files"], stack, &union)?
-+    } else {
-+        Vec::new()
-+    };
++    if let Some(earlier) = earlier {
++        let (done, pairs, pair_answers) = scan_primed((&group["files"], earlier), stack, &union, scans)?;
++        let mut line = json!({"key": group["key"], "scans": done, "pairs": pairs, "pair_answers": pair_answers});
++        for label in ["family", "level", "prime", "primes"] {
++            if let Some(value) = group.get(label) {
++                line[label] = value.clone();
++            }
++        }
++        line["seconds"] = json!(started.elapsed().as_secs_f64());
++        return Ok(line);
++    }
++    let outcomes = outcomes(&group["files"], stack, &union)?;
 +    let pair_primes = primes(&outcomes, (isize::MIN, isize::MAX));
 +    let mut done = Vec::new();
 +    for scan in scans {
 +        done.push(context(
-+            (&group["files"], earlier.map(|earlier| (earlier, union.as_slice()))),
++            &group["files"],
 +            call,
 +            stack,
 +            io,
@@ -3317,15 +3476,7 @@ index 0000000000..a40c94562e
 +            &pair_primes,
 +        )?);
 +    }
-+    let mut line = json!({"key": group["key"], "scans": done, "seconds": started.elapsed().as_secs_f64()});
-+    if earlier.is_some() {
-+        for label in ["family", "level", "prime", "primes"] {
-+            if let Some(value) = group.get(label) {
-+                line[label] = value.clone();
-+            }
-+        }
-+    }
-+    Ok(line)
++    Ok(json!({"key": group["key"], "scans": done, "seconds": started.elapsed().as_secs_f64()}))
 +}
 +
 +#[test]

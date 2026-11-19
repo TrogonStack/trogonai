@@ -4021,6 +4021,19 @@ def mg37_organization(pair):
     return pair["id"].startswith("org_") == bool(GATE["WSL"])
 
 
+def mg37_outside_band8(pair_id, side, axis, margin):
+    """Ruling 48 rule 3: a margin no earlier evidence marks in band. margins8.json holds each side's clean margin from
+    the band8 rounds, with the extension and class-axis rounds of PLAN Updates 74 and 75 written into it; a level
+    inside that margin was never measured clean there, so a margins37 margin inside it moves out to it. A side
+    margins8 holds on another axis makes no claim on this one."""
+    with open(MG8_MARGINS, encoding="utf-8") as handle:
+        held = json.load(handle).get(HOST, {}).get(pair_id)
+    if held is None or held.get("axis") != axis or f"{side}_margin" not in held:
+        return margin
+    clean = held[f"{side}_margin"]
+    return min(margin, clean) if side == "near" else max(margin, clean)
+
+
 def mg37_margin_cases(port, profile, runs, hashes, memo):
     """Ruling 39 item 4: every pair this kernel records, located for this call position, with its edge equal to the
     one margins37 holds for the position, and its goldens at the union margins of both call positions, so both call
@@ -4048,8 +4061,9 @@ def mg37_margin_cases(port, profile, runs, hashes, memo):
             far = margins["sides"]["far"]
             if far["axis"] != pair["axis"] or set(margins["sides"]) != {"far"}:
                 raise Band8Stop(f"{pair['id']}: the limit pair's margins are not one far margin on its axis")
-            placed = list(pair["both_at"](far["union_margin"]))
-            sides = [(pair["near"], "near", far["union_margin"]), (pair["far"], "far", far["union_margin"])]
+            margin = mg37_outside_band8(pair["id"], "far", far["axis"], far["union_margin"])
+            placed = list(pair["both_at"](margin))
+            sides = [(pair["near"], "near", margin), (pair["far"], "far", margin)]
         else:
             placed, sides = [], []
             for side in ("near", "far"):
@@ -4066,7 +4080,7 @@ def mg37_margin_cases(port, profile, runs, hashes, memo):
                     moves.setdefault(mg8_case_key(level_case[1], port["case_startup"](level_case)), []).append(
                         {"pair": pair["id"], "side": side, "level": pair[f"{side}_level"], "retired": "ruling 41"})
                     continue
-                margin = held["union_margin"]
+                margin = mg37_outside_band8(pair["id"], side, held["axis"], held["union_margin"])
                 if held["axis"] == pair["axis"]:
                     placed.append(pair[side] if margin == pair[f"{side}_level"] else pair[f"{side}_at"](margin))
                 elif held["axis"] == "class" and pair["id"] == BAND39_FALLBACK:
@@ -4166,6 +4180,10 @@ def mg37_unit():
             limit_consistent = (split_far == f"org_cache_split_{level}" and by_name[limit_at[1]] == by_name[split_far]
                                 and by_name[limit_at[0]] == by_name[limit_at[1]])
             out["old"] = {"skipped": "no committed golden holds an organization case recorded under a WSL kernel"}
+        elif GATE["CALL"] != "first":
+            # Ruling 48 rule 2: the committed goldens are first-call answers, and the second call answers otherwise at
+            # the same margins (R42-4), so their conservation binds the first call only.
+            out["old"] = {"skipped": "the committed goldens hold first-call answers only"}
         else:
             out["old"] = mg8_old_gate(entries, moves, port["STARTUP_BYTES"])
 
