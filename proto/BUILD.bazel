@@ -130,6 +130,39 @@ py_binary(
     srcs = ["run_contract_validator.py"],
 )
 
+sh_test(
+    name = "session_proto_generated_test",
+    srcs = ["buf_test.sh"],
+    args = [
+        "$(rootpath //.config/bazel:buf)",
+        "$(rootpath :buf_cache)",
+        "rust-session",
+        _TROGONAI_PROTO + "/src/session_gen",
+        "$(rootpath //%s:Cargo.toml)" % _TROGONAI_PROTO,
+        "$(rootpath @mise//tools/protoc-gen-buffa)",
+        "$(rootpath @mise//tools/protoc-gen-buffa-packaging)",
+        "$(rootpath @mise_rust//:bin/rustfmt)",
+        "$(rootpath //rsworkspace:rustfmt.toml)",
+        "--",
+        "$(rootpaths //:buf.session.gen.yaml)",
+        "$(rootpaths //:buf.lock)",
+        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths :sources)",
+    ],
+    data = _WORKSPACE + [
+        ":buf_cache",
+        "//:buf.session.gen.yaml",
+        "//.config/bazel:buf",
+        "//%s:Cargo.toml" % _TROGONAI_PROTO,
+        "//%s:session_generated" % _TROGONAI_PROTO,
+        "//rsworkspace:rustfmt.toml",
+        "@mise//tools/protoc-gen-buffa",
+        "@mise//tools/protoc-gen-buffa-packaging",
+        "@mise_rust//:bin/rustfmt",
+        "@mise_rust//:rustc_lib",
+    ],
+)
+
 # Checks every fixture under tests/proto against the protovalidate rules the
 # way `mise run proto:validate` does. The validator reads the pinned Buf
 # version from the mise config and refuses any other.

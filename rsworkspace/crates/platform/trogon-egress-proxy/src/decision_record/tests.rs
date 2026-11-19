@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use buffa::EnumValue;
+use trogon_audit::constants::DESTINATION_TOO_LONG;
 use trogon_audit::{Obligation, Stamper};
 use trogon_std::time::SystemClock;
 use trogon_std::uuid::UuidV7Generator;
@@ -127,7 +128,7 @@ fn a_destination_too_long_for_an_audit_name_is_recorded_under_a_sentinel_target(
     let host = format!("{label}.{label}.{label}.{}", "a".repeat(61));
     let destination = destination(&format!("{host}:443"));
     let record = record_for(Some(&destination), Decision::Refused(Fault::NoPermit));
-    assert_eq!(gateway(&record).target, DESTINATION_TOO_LONG_TARGET);
+    assert_eq!(gateway(&record).target, DESTINATION_TOO_LONG);
 }
 
 #[test]

@@ -1,0 +1,126 @@
+edition = "2024";
+
+package trogonai.session.plans.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/agents/agents/v1alpha1/model_selection.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/configuration.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/identity.proto";
+import "trogonai/model_access/provider_connections/v1alpha1/protocol.proto";
+
+// No managed access does not mean no models. Native settings retain their
+// semantics; only a proven adapter may claim the managed profile. Live grants
+// and credential material are never part of this immutable value.
+message ModelAccessProfile {
+  oneof profile {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty no_managed_access = 1;
+    ManagedModels managed = 2;
+  }
+}
+
+message ManagedModels {
+  option (buf.validate.message).cel = {
+    id: "managed_models.roles_unique"
+    message: "auxiliary model roles must be unique"
+    expression: "this.auxiliary.map(value, value.role.name).unique()"
+  };
+
+  ResolvedModel primary = 1 [(buf.validate.field).required = true];
+  repeated AuxiliaryModel auxiliary = 2 [(buf.validate.field).repeated.max_items = 32];
+}
+
+message AuxiliaryModel {
+  option (buf.validate.message).cel = {
+    id: "auxiliary_model.role_bound"
+    message: "auxiliary model role must fit 128 UTF8 bytes"
+    expression: "!has(this.role) || size(bytes(this.role.name)) <= 128"
+  };
+
+  trogonai.agents.agents.v1alpha1.ModelRole role = 1 [(buf.validate.field).required = true];
+  ResolvedModel model = 2 [(buf.validate.field).required = true];
+}
+
+message ResolvedModel {
+  option (buf.validate.message).cel = {
+    id: "resolved_model.catalog_join"
+    message: "route catalog pin must match the model selection"
+    expression: "!has(this.selection) || !has(this.route.catalog_pin) || (this.route.catalog_pin.version_ref == this.selection.version_ref && this.route.catalog_pin.definition_digest == this.selection.definition_digest)"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_model.selection_bounds"
+    message: "model selection and parameter configuration must fit finite bounds"
+    expression: "!has(this.selection) || (size(bytes(this.selection.version_ref.model_id)) <= 128 && size(bytes(this.selection.version_ref.version)) <= 128 && this.selection.parameters.configuration_bytes.size() <= 32768 && size(bytes(this.selection.parameters.contract.message_type)) <= 512 && size(bytes(this.selection.parameters.contract.version)) <= 128)"
+  };
+
+  trogonai.agents.agents.v1alpha1.ModelSelection selection = 1 [(buf.validate.field).required = true];
+  ResolvedModelRoute route = 2 [(buf.validate.field).required = true];
+}
+
+// A driver release commits to code and exact translation semantics. The
+// actual registered owner proves the release and support, not this reference.
+message ModelDriverRef {
+  option (buf.validate.message).cel = {
+    id: "model_driver_ref.contract_bounds"
+    message: "driver translation contract must fit finite UTF8 bounds"
+    expression: "!has(this.translation_contract) || (size(bytes(this.translation_contract.message_type)) <= 512 && size(bytes(this.translation_contract.version)) <= 128)"
+  };
+
+  string driver_id = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_bytes: 1
+      max_bytes: 128
+    }
+  ];
+  string version = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_bytes: 1
+      max_bytes: 128
+    }
+  ];
+  trogonai.agents.agents.v1alpha1.Digest definition_digest = 3 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef translation_contract = 4 [(buf.validate.field).required = true];
+}
+
+// Exact nonsecret route facts; live connection/binding standing and original
+// provider validation remain mandatory at the actual model-access boundary.
+message ResolvedModelRoute {
+  option (buf.validate.message).cel = {
+    id: "resolved_model_route.contract_identity"
+    message: "model route contract must name ResolvedModelRoute version 1"
+    expression: "!has(this.contract) || (this.contract.message_type == 'trogonai.session.plans.v1alpha1.ResolvedModelRoute' && this.contract.version == '1')"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_model_route.identity_bounds"
+    message: "model route identities must fit finite UTF8 bounds"
+    expression: "(!has(this.provider_model) || size(bytes(this.provider_model.value)) <= 512) && (!has(this.connection_id) || size(bytes(this.connection_id.value)) <= 128) && (!has(this.credential_binding_id) || size(bytes(this.credential_binding_id.value)) <= 128) && (!has(this.provider_subject) || size(bytes(this.provider_subject.value)) <= 128) && (!has(this.catalog_pin) || (size(bytes(this.catalog_pin.version_ref.model_id)) <= 128 && size(bytes(this.catalog_pin.version_ref.version)) <= 128))"
+  };
+
+  uint32 contract_version = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint32.const = 1
+  ];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef contract = 2 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.Digest model_selection_digest = 3 [(buf.validate.field).required = true];
+  trogonai.model_access.provider_connections.v1alpha1.ProviderModelIdentifier provider_model = 4 [(buf.validate.field).required = true];
+  trogonai.model_access.provider_connections.v1alpha1.ProviderProtocol protocol = 5 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ModelDriverRef driver = 6 [(buf.validate.field).required = true];
+  trogonai.model_access.provider_connections.v1alpha1.ProviderConnectionId connection_id = 7 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.Digest connection_configuration_digest = 8 [(buf.validate.field).required = true];
+  trogonai.model_access.provider_connections.v1alpha1.CredentialBindingId credential_binding_id = 9 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.Digest credential_configuration_digest = 10 [(buf.validate.field).required = true];
+  trogonai.model_access.provider_connections.v1alpha1.ProviderSubjectFingerprint provider_subject = 11;
+  trogonai.model_access.provider_connections.v1alpha1.CatalogModelPin catalog_pin = 12 [(buf.validate.field).required = true];
+}
