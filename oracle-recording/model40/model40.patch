@@ -2370,10 +2370,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..0ea08b004d
+index 0000000000..86aac4e8a5
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,551 @@
+@@ -0,0 +1,582 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -2429,7 +2429,9 @@ index 0000000000..0ea08b004d
 +/// The grid the offsets of a caller sit on: V8 keeps its frames 16-byte aligned.
 +const STEP: isize = 16;
 +
-+/// The context whose room is a per-process sample, so no answer of it is the reference.
++/// The context whose room is a per-callback sample, so no answer of it is the reference. The recorder starts every
++/// resolve of it in the exit callback of its own child process (`resolveFrom` of the oracle), so a second call's prime
++/// and case each take their own sample of that room.
 +const CHILD_EXIT: &str = "child_exit";
 +
 +/// The offset of the callers that run straight from the module, the top level and a chain nested in another.
@@ -2685,10 +2687,16 @@ index 0000000000..0ea08b004d
 +}
 +
 +/// What `stack` answers for a recorded case at its call position, and its causal stage: a second call runs one
-+/// resolve with the same options first, as a long-lived process does, and answers with the one after it. A resolve of
-+/// an organization case that awaited a read of the machine policy goes on with `completion`, the stack of the I/O
++/// resolve with the same options first, on `prime`, as a long-lived process does, and answers with the one after it on
++/// `stack`. Both resolves share the process state, so what the prime compiled stays compiled. A resolve of an
++/// organization case that awaited a read of the machine policy goes on with `completion`, the stack of the I/O
 +/// completion that read ended on, whatever its caller was.
-+fn answer_at(files: &Value, call: &str, stack: NodeStack, completion: NodeStack) -> Result<(Value, String), Failure> {
++fn answer_at(
++    files: &Value,
++    call: &str,
++    (prime, stack): (NodeStack, NodeStack),
++    completion: NodeStack,
++) -> Result<(Value, String), Failure> {
 +    let Case {
 +        host,
 +        options,
@@ -2698,20 +2706,38 @@ index 0000000000..0ea08b004d
 +    let _ = node_stack_catch::take();
 +    let answered = match organization {
 +        Some(organization) => organization_answer(host, &options, drop_ins, organization, call, (stack, completion))?,
-+        None => {
-+            let state = ResolverState::new().with_node_stack(stack);
-+            match call {
-+                "first" => answer(&host, &options, &state)?,
-+                "second" => {
-+                    answer(&host, &options, &state)?;
-+                    answer(&host, &options, &state)?
-+                }
-+                _ => return Err("an answer names an unknown call position".into()),
++        None => match call {
++            "first" => answer(&host, &options, &ResolverState::new().with_node_stack(stack))?,
++            "second" => {
++                let state = ResolverState::new().with_node_stack(prime);
++                answer(&host, &options, &state)?;
++                answer(&host, &options, &state.with_node_stack(stack))?
 +            }
-+        }
++            _ => return Err("an answer names an unknown call position".into()),
++        },
 +    };
 +    let stage = stage(&node_stack_catch::take(), &answered);
 +    Ok((answered, stage))
++}
++
++/// What a second call's prime leaves for the case after it: the functions it compiled, with its answer and the
++/// catches it took, which the case's stage counts too. `None` for an organization case, whose prime goes on from the
++/// I/O completion of its policy read and not from its caller.
++fn prime_outcome(files: &Value, prime: NodeStack) -> Result<Option<String>, Failure> {
++    let Case {
++        host,
++        options,
++        organization,
++        ..
++    } = case(files)?;
++    if organization.is_some() {
++        return Ok(None);
++    }
++    let _ = node_stack_catch::take();
++    let state = ResolverState::new().with_node_stack(prime);
++    let answered = answer(&host, &options, &state)?;
++    let stage = stage(&node_stack_catch::take(), &answered);
++    Ok(Some(format!("{:?} {stage} {answered}", state.compiled().get())))
 +}
 +
 +/// What an organization case answers. The recorder resolves it twice in one process, sharing every cache: once as the
@@ -2843,7 +2869,12 @@ index 0000000000..0ea08b004d
 +    let at = checked_offset(answers, row, host, call, context)?;
 +    let completion = offset(&answers["offsets"][host][call]["io"])?;
 +    let stack = profile.with_startup_bytes(startup);
-+    let (answered, stage) = answer_at(files, call, stack.resumed_by(at), stack.resumed_by(completion))?;
++    let (answered, stage) = answer_at(
++        files,
++        call,
++        (stack.resumed_by(at), stack.resumed_by(at)),
++        stack.resumed_by(completion),
++    )?;
 +    let stage_matches = row[6].as_str().is_none_or(|named| named == stage);
 +    let unexplained = (answered != *expected || !stage_matches)
 +        .then(|| format!("{host} {call} {context} case {} at {at} ({}): {stage}", row[3], row[8]));
@@ -2927,14 +2958,17 @@ index 0000000000..0ea08b004d
 +mod scan45;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
 new file mode 100644
-index 0000000000..4f24b3c468
+index 0000000000..0e6b914347
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,180 @@
 +//! Scratch scan for the model40 job, never committed: for each group of a case, host, call position and startup,
 +//! the offsets of each context's interval on the 16-byte grid where the engine gives each recorded answer with its
 +//! stage. A context run in full lists every offset that gives each answer, with the runs of what the engine gives;
-+//! one that is not stops once every answer has a witness, and runs in full when one has none.
++//! one that is not stops once every answer has a witness, and runs in full when one has none. A second call in a child
++//! exit takes its prime at any offset of the interval, since each resolve there samples its own room: an offset is a
++//! witness when the case gives the answer after some prime, one per distinct thing a prime leaves behind (`primes`).
++//! The runs list what the case gives after a prime at its own offset.
 +
 +use std::{
 +    env, fs,
@@ -2949,7 +2983,7 @@ index 0000000000..4f24b3c468
 +
 +use serde_json::{Value, json};
 +
-+use super::{DEEP_STACK_BYTES, Failure, HOSTS, STEP, TestResult, answer_at};
++use super::{CHILD_EXIT, DEEP_STACK_BYTES, Failure, HOSTS, STEP, TestResult, answer_at, prime_outcome};
 +
 +fn whole(value: &Value, what: &'static str) -> Result<isize, Failure> {
 +    Ok(value
@@ -2958,8 +2992,31 @@ index 0000000000..4f24b3c468
 +        .ok_or(what)?)
 +}
 +
++/// One offset for each distinct thing a prime at an offset of `[low, high]` leaves behind, the highest that leaves it.
++fn primes(files: &Value, stack: crate::NodeStack, (low, high): (isize, isize)) -> Result<Vec<isize>, Failure> {
++    let mut seen: Vec<String> = Vec::new();
++    let mut offsets = Vec::new();
++    let mut at = high;
++    while at >= low {
++        let Some(outcome) = prime_outcome(files, stack.resumed_by(at))? else {
++            return Ok(Vec::new());
++        };
++        if !seen.contains(&outcome) {
++            seen.push(outcome);
++            offsets.push(at);
++        }
++        at -= STEP;
++    }
++    Ok(offsets)
++}
++
 +fn context(files: &Value, call: &str, stack: crate::NodeStack, io: isize, scan: &Value) -> Result<Value, Failure> {
 +    let (low, high) = (whole(&scan["low"], "no low")?, whole(&scan["high"], "no high")?);
++    let primes = if call == "second" && scan["context"] == CHILD_EXIT {
++        primes(files, stack, (low, high))?
++    } else {
++        Vec::new()
++    };
 +    let every = scan["all"].as_bool().ok_or("no all")?;
 +    let targets = scan["targets"].as_array().ok_or("no targets")?;
 +    let mut found: Vec<Vec<isize>> = vec![Vec::new(); targets.len()];
@@ -2968,14 +3025,26 @@ index 0000000000..4f24b3c468
 +    let mut at = high;
 +    let mut scanned = 0usize;
 +    while at >= low {
-+        let (answered, stage) = match answer_at(files, call, stack.resumed_by(at), stack.resumed_by(io)) {
++        let given = |prime: isize| match answer_at(
++            files,
++            call,
++            (stack.resumed_by(prime), stack.resumed_by(at)),
++            stack.resumed_by(io),
++        ) {
 +            Ok(given) => given,
 +            Err(error) => (json!({"scan_error": error.to_string()}), "scan_error".to_owned()),
 +        };
++        let (answered, stage) = given(at);
++        let mut witnesses = vec![(answered.clone(), stage.clone())];
++        for prime in primes.iter().filter(|prime| **prime != at) {
++            witnesses.push(given(*prime));
++        }
 +        scanned += 1;
 +        for (index, target) in targets.iter().enumerate() {
-+            let stage_matches = target[1].as_str().is_none_or(|named| named == stage);
-+            if target[0] == answered && stage_matches {
++            let witnessed = witnesses.iter().any(|(answered, stage)| {
++                target[0] == *answered && target[1].as_str().is_none_or(|named| named == stage.as_str())
++            });
++            if witnessed {
 +                found[index].push(at);
 +            }
 +        }
@@ -2996,6 +3065,9 @@ index 0000000000..4f24b3c468
 +    }
 +    let complete = found.iter().all(|offsets| !offsets.is_empty());
 +    let mut out = json!({"context": scan["context"], "found": found, "scanned": scanned});
++    if !primes.is_empty() {
++        out["primes"] = json!(primes);
++    }
 +    if every || !complete {
 +        out["runs"] = json!(runs);
 +        out["answers"] = json!(answers);
