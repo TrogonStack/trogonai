@@ -337,6 +337,16 @@ state, never the publisher's permission: the connection must belong to the
 verified tenant, the binding and audience must match, and the grant must be live,
 else `DENIED`.
 
+Release invalidations follow the same trusted-caller model. The holders that
+evict on them, the gateway and the egress proxy, are registered `PLATFORM`
+workloads that read the `PLATFORM` `SECRETS_INVALIDATION` stream through their
+own consumers, and no tenant account exports, imports or holds that stream
+until a tenant-account reader exists
+([ADR#0081](./0081-nats-tls-by-default-and-operator-mode-admission.md)
+Decision 3). A notice carries metadata only and no secret material, so reading
+every tenant's notices is platform trust and authorizes no resolve, refresh or
+sign.
+
 Optional trusted-adapter issuance is wholly inside `secrets/exchange`.
 `EnsureProviderAccessResponse` returns one atomic `SealedAccess` reply to the
 adapter's registered xkey, or a typed failure. There is no separate delivery
