@@ -2396,10 +2396,10 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..adbd253c71
+index 0000000000..299058b1f1
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,597 @@
+@@ -0,0 +1,629 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
@@ -2418,6 +2418,12 @@ index 0000000000..adbd253c71
 +//! process exit is not deterministic, since its room is a sample of each process: the reference run and the
 +//! cross-check run of one event answer differently in some events, so every answer a child exit gave is an `alt` row,
 +//! never a `ref` one. The fixture labels record that ruling and those events.
++//!
++//! A second call answers after a prime, one resolve with the same options earlier in the same process, and its stage
++//! counts the catches of both. The prime of a `ref` row, and of every first call's row, runs at the row's own offset.
++//! An `alt` row of a second call may name the prime's offset after its own, on the same union grid: under default
++//! flags a background compile can land between the prime and the case, so the prime may have resumed in other room
++//! than the case.
 +
 +use std::{collections::BTreeSet, thread};
 +
@@ -2848,6 +2854,17 @@ index 0000000000..adbd253c71
 +    }
 +}
 +
++/// Whether an offset lies inside the interval of some context of a host and call position: the union grid an `alt`
++/// row's offset and the prime it names sit on.
++fn on_union_grid(answers: &Value, host: &str, call: &str, at: isize) -> Result<bool, Failure> {
++    let mut any = false;
++    for context in CONTEXTS {
++        let (low, high) = interval(answers, host, call, context)?;
++        any |= low <= at && at <= high;
++    }
++    Ok(any)
++}
++
 +/// The offset a row is checked at. The reference answer is checked at the frozen offset of its context: 0 for the top
 +/// level and a nested chain, the one offset of a timer, an immediate or an I/O callback, which lies inside the
 +/// context's interval. Any other answer, and the answer of a child process exit, is checked at the offset the row
@@ -2859,18 +2876,11 @@ index 0000000000..adbd253c71
 +        (true, _) if SETTLED.contains(&context) => offset(&answers["offsets"][host][call][context])?,
 +        _ => offset(&row[7])?,
 +    };
-+    let held = |context: &str| -> Result<bool, Failure> {
-+        let (low, high) = interval(answers, host, call, context)?;
-+        Ok(low <= at && at <= high)
-+    };
 +    let on_grid = if reference {
-+        held(context)?
++        let (low, high) = interval(answers, host, call, context)?;
++        low <= at && at <= high
 +    } else {
-+        let mut any = false;
-+        for context in CONTEXTS {
-+            any |= held(context)?;
-+        }
-+        any
++        on_union_grid(answers, host, call, at)?
 +    };
 +    if !on_grid || at % STEP != 0 {
 +        let grid = if reference { context } else { "every context" };
@@ -2879,15 +2889,32 @@ index 0000000000..adbd253c71
 +    Ok(at)
 +}
 +
-+/// Checks one row of the fixture: its offset, then the model's answer and stage there. A description of the row when
-+/// the model answers otherwise, and the host, call position and context it covers.
++/// The offset a row's prime runs at, on the grid of every context of its host and call position. A second call's
++/// `alt` row may name it after its own offset, since a background compile under default flags can land between the
++/// prime and the case and leave each in other room; every other row primes at the offset `at` it is checked at.
++fn prime_offset(answers: &Value, row: &[Value], (host, call): (&str, &str), at: isize) -> Result<isize, Failure> {
++    let Some(named) = row.get(9) else {
++        return Ok(at);
++    };
++    if call != "second" || is_reference(row)? {
++        return Err(format!("{host} {call}: a row names a prime, but only a second call's alt row may").into());
++    }
++    let prime = offset(named)?;
++    if !on_union_grid(answers, host, call, prime)? || prime % STEP != 0 {
++        return Err(format!("{host} {call}: prime offset {prime} is off the grid of every context").into());
++    }
++    Ok(prime)
++}
++
++/// Checks one row of the fixture: its offset and its prime's, then the model's answer and stage there. A description
++/// of the row when the model answers otherwise, and the host, call position and context it covers.
 +fn check(answers: &Value, row: &Value) -> Result<(Option<String>, (String, String, String)), Failure> {
 +    let cases = answers["cases"].as_array().ok_or("the fixture has no cases")?;
 +    let recorded = answers["answers"].as_array().ok_or("the fixture has no answers")?;
 +    let row = row
 +        .as_array()
-+        .filter(|row| row.len() == 9)
-+        .ok_or("a row is not a list of nine")?;
++        .filter(|row| row.len() == 9 || row.len() == 10)
++        .ok_or("a row is not a list of nine or ten")?;
 +    let host = row[0].as_str().ok_or("a row names no host")?;
 +    let call = row[1].as_str().ok_or("a row names no call position")?;
 +    let context = row[2].as_str().ok_or("a row names no context")?;
@@ -2908,17 +2935,22 @@ index 0000000000..adbd253c71
 +        return Err("a child exit row is a ref, but a child exit answer is always an alt".into());
 +    }
 +    let at = checked_offset(answers, row, host, call, context)?;
++    let prime = prime_offset(answers, row, (host, call), at)?;
 +    let completion = offset(&answers["offsets"][host][call]["io"])?;
 +    let stack = profile.with_startup_bytes(startup);
 +    let (answered, stage) = answer_at(
 +        files,
 +        call,
-+        (stack.resumed_by(at), stack.resumed_by(at)),
++        (stack.resumed_by(prime), stack.resumed_by(at)),
 +        stack.resumed_by(completion),
 +    )?;
 +    let stage_matches = row[6].as_str().is_none_or(|named| named == stage);
-+    let unexplained = (answered != *expected || !stage_matches)
-+        .then(|| format!("{host} {call} {context} case {} at {at} ({}): {stage}", row[3], row[8]));
++    let unexplained = (answered != *expected || !stage_matches).then(|| {
++        format!(
++            "{host} {call} {context} case {} at {at} after a prime at {prime} ({}): {stage}",
++            row[3], row[8]
++        )
++    });
 +    Ok((unexplained, (host.to_owned(), call.to_owned(), context.to_owned())))
 +}
 +
@@ -2945,8 +2977,8 @@ index 0000000000..adbd253c71
 +    for row in rows {
 +        let row = row
 +            .as_array()
-+            .filter(|row| row.len() == 9)
-+            .ok_or("a row is not a list of nine")?;
++            .filter(|row| row.len() == 9 || row.len() == 10)
++            .ok_or("a row is not a list of nine or ten")?;
 +        let case = row[..4].iter().map(Value::to_string).collect::<Vec<_>>();
 +        if is_reference(row)? && !references.insert(case) {
 +            return Err("a case has two reference answers in one context".into());
@@ -2999,10 +3031,10 @@ index 0000000000..adbd253c71
 +mod scan45;
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
 new file mode 100644
-index 0000000000..0e6b914347
+index 0000000000..a2aad0e7a4
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_scan40_tests.rs
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,276 @@
 +//! Scratch scan for the model40 job, never committed: for each group of a case, host, call position and startup,
 +//! the offsets of each context's interval on the 16-byte grid where the engine gives each recorded answer with its
 +//! stage. A context run in full lists every offset that gives each answer, with the runs of what the engine gives;
@@ -3010,6 +3042,13 @@ index 0000000000..0e6b914347
 +//! exit takes its prime at any offset of the interval, since each resolve there samples its own room: an offset is a
 +//! witness when the case gives the answer after some prime, one per distinct thing a prime leaves behind (`primes`).
 +//! The runs list what the case gives after a prime at its own offset.
++//!
++//! A second call in any context may also take its prime at another offset of the union grid, every offset of the six
++//! contexts' intervals: under default flags a background compile can land between the prime and the case, so the two
++//! need not sit in the same room. For each such call the scan places a prime at one offset per distinct thing a prime
++//! anywhere on the union grid leaves behind, and records under `pairs` what the case gives at each offset it visits
++//! after each of those primes, as runs `[prime, high, low, answer, stage]` with the answers in `pair_answers`. The
++//! `found`, `runs` and `answers` keep their same-offset meaning, so the scoring that reads them is unchanged.
 +
 +use std::{
 +    env, fs,
@@ -3033,28 +3072,65 @@ index 0000000000..0e6b914347
 +        .ok_or(what)?)
 +}
 +
-+/// One offset for each distinct thing a prime at an offset of `[low, high]` leaves behind, the highest that leaves it.
-+fn primes(files: &Value, stack: crate::NodeStack, (low, high): (isize, isize)) -> Result<Vec<isize>, Failure> {
-+    let mut seen: Vec<String> = Vec::new();
++/// The offsets of `[low, high]` on the 16-byte grid, the highest first.
++fn grid((low, high): (isize, isize)) -> Vec<isize> {
 +    let mut offsets = Vec::new();
 +    let mut at = high;
 +    while at >= low {
-+        let Some(outcome) = prime_outcome(files, stack.resumed_by(at))? else {
-+            return Ok(Vec::new());
-+        };
-+        if !seen.contains(&outcome) {
-+            seen.push(outcome);
-+            offsets.push(at);
-+        }
++        offsets.push(at);
 +        at -= STEP;
 +    }
-+    Ok(offsets)
++    offsets
 +}
 +
-+fn context(files: &Value, call: &str, stack: crate::NodeStack, io: isize, scan: &Value) -> Result<Value, Failure> {
++/// What a prime at each of `offsets` leaves behind, in order; nothing for an organization case, which takes no prime.
++fn outcomes(files: &Value, stack: crate::NodeStack, offsets: &[isize]) -> Result<Vec<(isize, String)>, Failure> {
++    let mut outcomes = Vec::new();
++    for at in offsets {
++        let Some(outcome) = prime_outcome(files, stack.resumed_by(*at))? else {
++            return Ok(Vec::new());
++        };
++        outcomes.push((*at, outcome));
++    }
++    Ok(outcomes)
++}
++
++/// One offset for each distinct thing a prime at an offset of `[low, high]` leaves behind, the highest that leaves it.
++/// The `outcomes` run from the highest offset down.
++fn primes(outcomes: &[(isize, String)], (low, high): (isize, isize)) -> Vec<isize> {
++    let mut seen: Vec<&str> = Vec::new();
++    let mut offsets = Vec::new();
++    for (at, outcome) in outcomes {
++        if low <= *at && *at <= high && !seen.contains(&outcome.as_str()) {
++            seen.push(outcome.as_str());
++            offsets.push(*at);
++        }
++    }
++    offsets
++}
++
++/// The index of `answer` in `answers`, appending it when it is new.
++fn answer_index(answers: &mut Vec<Value>, answer: &Value) -> usize {
++    if let Some(index) = answers.iter().position(|seen| seen == answer) {
++        index
++    } else {
++        answers.push(answer.clone());
++        answers.len() - 1
++    }
++}
++
++fn context(
++    files: &Value,
++    call: &str,
++    stack: crate::NodeStack,
++    io: isize,
++    scan: &Value,
++    outcomes: &[(isize, String)],
++    pair_primes: &[isize],
++) -> Result<Value, Failure> {
 +    let (low, high) = (whole(&scan["low"], "no low")?, whole(&scan["high"], "no high")?);
 +    let primes = if call == "second" && scan["context"] == CHILD_EXIT {
-+        primes(files, stack, (low, high))?
++        primes(outcomes, (low, high))
 +    } else {
 +        Vec::new()
 +    };
@@ -3063,6 +3139,9 @@ index 0000000000..0e6b914347
 +    let mut found: Vec<Vec<isize>> = vec![Vec::new(); targets.len()];
 +    let mut answers: Vec<Value> = Vec::new();
 +    let mut runs: Vec<Value> = Vec::new();
++    let mut pair_answers: Vec<Value> = Vec::new();
++    let mut pairs: Vec<Value> = Vec::new();
++    let mut open: Vec<Option<usize>> = vec![None; pair_primes.len()];
 +    let mut at = high;
 +    let mut scanned = 0usize;
 +    while at >= low {
@@ -3076,9 +3155,17 @@ index 0000000000..0e6b914347
 +            Err(error) => (json!({"scan_error": error.to_string()}), "scan_error".to_owned()),
 +        };
 +        let (answered, stage) = given(at);
++        let mut primed: Vec<(isize, (Value, String))> = Vec::new();
++        for prime in primes.iter().chain(pair_primes) {
++            if *prime != at && !primed.iter().any(|(seen, _)| seen == prime) {
++                primed.push((*prime, given(*prime)));
++            }
++        }
 +        let mut witnesses = vec![(answered.clone(), stage.clone())];
-+        for prime in primes.iter().filter(|prime| **prime != at) {
-+            witnesses.push(given(*prime));
++        for (prime, primed_given) in &primed {
++            if primes.contains(prime) {
++                witnesses.push(primed_given.clone());
++            }
 +        }
 +        scanned += 1;
 +        for (index, target) in targets.iter().enumerate() {
@@ -3089,12 +3176,29 @@ index 0000000000..0e6b914347
 +                found[index].push(at);
 +            }
 +        }
-+        let index = if let Some(index) = answers.iter().position(|seen| *seen == answered) {
-+            index
-+        } else {
-+            answers.push(answered);
-+            answers.len() - 1
-+        };
++        for (slot, prime) in pair_primes.iter().enumerate() {
++            let (pair_answer, pair_stage) = if *prime == at {
++                (&answered, &stage)
++            } else {
++                let (_, (pair_answer, pair_stage)) = primed
++                    .iter()
++                    .find(|(seen, _)| seen == prime)
++                    .ok_or("no answer after a pair prime")?;
++                (pair_answer, pair_stage)
++            };
++            let index = answer_index(&mut pair_answers, pair_answer);
++            let current = open[slot];
++            match current {
++                Some(run) if pairs[run][3] == json!(index) && pairs[run][4] == json!(pair_stage) => {
++                    pairs[run][2] = json!(at);
++                }
++                _ => {
++                    pairs.push(json!([prime, at, at, index, pair_stage]));
++                    open[slot] = Some(pairs.len() - 1);
++                }
++            }
++        }
++        let index = answer_index(&mut answers, &answered);
 +        match runs.last_mut() {
 +            Some(last) if last[2] == json!(index) && last[3] == json!(stage) => last[1] = json!(at),
 +            _ => runs.push(json!([at, at, index, stage])),
@@ -3113,6 +3217,10 @@ index 0000000000..0e6b914347
 +        out["runs"] = json!(runs);
 +        out["answers"] = json!(answers);
 +    }
++    if !pair_primes.is_empty() {
++        out["pairs"] = json!(pairs);
++        out["pair_answers"] = json!(pair_answers);
++    }
 +    Ok(out)
 +}
 +
@@ -3129,11 +3237,31 @@ index 0000000000..0e6b914347
 +        &scans.iter().find(|scan| scan["context"] == "io").ok_or("no io scan")?["high"],
 +        "no io high",
 +    )?;
-+    let scans = scans
-+        .iter()
-+        .map(|scan| context(&group["files"], call, stack, io, scan))
-+        .collect::<Result<Vec<_>, _>>()?;
-+    Ok(json!({"key": group["key"], "scans": scans, "seconds": started.elapsed().as_secs_f64()}))
++    // A second call primes once per group: the union grid of the group's six contexts, highest first, with what a prime
++    // leaves behind at each offset. The child exit's own primes are the part of it inside its interval.
++    let mut union: Vec<isize> = Vec::new();
++    if call == "second" {
++        for scan in scans {
++            union.extend(grid((whole(&scan["low"], "no low")?, whole(&scan["high"], "no high")?)));
++        }
++        union.sort_unstable_by(|left, right| right.cmp(left));
++        union.dedup();
++    }
++    let outcomes = outcomes(&group["files"], stack, &union)?;
++    let pair_primes = primes(&outcomes, (isize::MIN, isize::MAX));
++    let mut done = Vec::new();
++    for scan in scans {
++        done.push(context(
++            &group["files"],
++            call,
++            stack,
++            io,
++            scan,
++            &outcomes,
++            &pair_primes,
++        )?);
++    }
++    Ok(json!({"key": group["key"], "scans": done, "seconds": started.elapsed().as_secs_f64()}))
 +}
 +
 +#[test]
