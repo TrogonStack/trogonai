@@ -67,12 +67,19 @@ where
     }
     for config in configs {
         let name = config.name.clone();
-        js.create_or_reconcile_stream(config, &[ProvisionedStreamField::Subjects])
+        let owned = js
+            .create_or_reconcile_stream_if_owned(config, &[ProvisionedStreamField::Subjects], namespace.as_str())
             .await
             .map_err(|source| ProvisionError::Reconcile {
                 stream: name.clone(),
                 source,
             })?;
+        if !owned {
+            return Err(ProvisionError::OwnershipMismatch {
+                stream: name,
+                prefix: prefix.clone(),
+            });
+        }
         info!(stream = %name, "Provisioned JetStream stream");
     }
     Ok(())

@@ -11,4 +11,8 @@ impl AcpSubjectNamespace {
     pub(crate) fn contains(&self, subject: &str) -> bool {
         subject.starts_with(&self.0)
     }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
 }

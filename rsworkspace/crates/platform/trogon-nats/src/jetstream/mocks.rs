@@ -345,6 +345,39 @@ impl JetStreamContext for MockJetStreamContext {
         *self.stream_writes.lock().unwrap() += 1;
         Ok(())
     }
+
+    async fn create_or_reconcile_stream_if_owned<S: Into<stream::Config> + Send>(
+        &self,
+        desired: S,
+        owned: &[ProvisionedStreamField],
+        subject_namespace: &str,
+    ) -> Result<bool, MockStreamProvisionError> {
+        let desired = desired.into();
+        if self.take_failure() {
+            return Err(MockStreamProvisionError::Reconciliation);
+        }
+        let mut streams = self.created_streams.lock().unwrap();
+        let Some(existing) = streams.iter_mut().find(|existing| existing.name == desired.name) else {
+            streams.push(desired);
+            *self.stream_writes.lock().unwrap() += 1;
+            return Ok(true);
+        };
+        if existing.subjects.is_empty()
+            || !existing
+                .subjects
+                .iter()
+                .all(|subject| subject.starts_with(subject_namespace))
+        {
+            return Ok(false);
+        }
+        let reconciled = reconciled_stream_config(existing, &desired, owned);
+        if reconciled == *existing {
+            return Ok(true);
+        }
+        *existing = reconciled;
+        *self.stream_writes.lock().unwrap() += 1;
+        Ok(true)
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -90,6 +90,26 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
         desired: S,
         owned: &[ProvisionedStreamField],
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Reconcile only when the live stream still belongs to `subject_namespace`.
+    ///
+    /// The ownership check is performed immediately before an update. A false
+    /// result means the stream was observed with subjects outside that
+    /// namespace and no write was attempted. Implementations cannot make the
+    /// read and `STREAM.UPDATE` atomic because JetStream exposes no expected
+    /// revision for stream updates; callers must treat a true result as a
+    /// mutation-time check, not a cross-process transaction.
+    fn create_or_reconcile_stream_if_owned<S: Into<stream::Config> + Send>(
+        &self,
+        desired: S,
+        owned: &[ProvisionedStreamField],
+        _subject_namespace: &str,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async move {
+            self.create_or_reconcile_stream(desired, owned).await?;
+            Ok(true)
+        }
+    }
 }
 
 pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {

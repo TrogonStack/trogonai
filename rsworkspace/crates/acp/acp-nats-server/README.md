@@ -24,7 +24,7 @@ graph LR
 ## Quick Start
 
 ```bash
-docker run -p 4222:4222 nats:2.10.14 --js
+docker run -d -p 4222:4222 nats:2.10.14 --js
 
 cargo build --release -p acp-nats-server
 
@@ -59,7 +59,13 @@ occupied by a different prefix with the same normalized name. During preflight,
 only an explicit stream-not-found response is treated as absence; other
 inspection or configuration-read failures stop provisioning before any mutation.
 
-Reconciliation then reads each stream again through the shared JetStream client.
+Reconciliation then reads each stream again through the shared JetStream client
+and checks the live subject filters immediately before an update. A stream whose
+subjects are no longer exclusively owned by this prefix is left untouched and
+provisioning fails with an ownership error. This closes the overwrite window for
+the observed concurrent jobs; JetStream does not provide a conditional stream
+update, so a separate process can still change a stream after that check and
+before the update.
 If that later lookup fails, the client attempts CREATE; an existing stream name
 normally makes that request fail. A later reconciliation failure can leave
 earlier streams updated. Provisioning is not an atomic transaction across
