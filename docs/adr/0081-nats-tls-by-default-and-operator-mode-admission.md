@@ -210,7 +210,8 @@ already makes 2.14 the minimum server version.
 > **Amended 2026-11-15** by the Decision 3 amendment that follows this
 > section. A `PLATFORM` subject that JetStream stores carries the tenant token
 > right after its literal protocol prefix, because the server refuses a stream
-> whose subjects start with a wildcard.
+> whose subjects start with a wildcard. The export of the invalidation subtree
+> is conditional on tenant-account readers.
 
 Tenant traffic reaches the shared workloads through imports, not through
 shared users. `PLATFORM` exports each protocol subtree with the account token
@@ -269,14 +270,74 @@ option.
 A subject that a `PLATFORM` stream stores therefore keeps its literal protocol
 prefix first and carries the tenant's account public key right after it, for
 example `secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}`. The
-stream lists `secrets.invalidation.v1.*.>`, and `PLATFORM` exports that
-subtree with `account_token_position` set to the tenant token, 4 in that
-example. The server authorizes an import only when the token at that position
-is the importing account's own public key, in the same way as at position 1
-(`checkAuth` in `server/accounts.go`), so each tenant still receives only its
-own messages. Everything else in this decision stands: the tenant token is the
+stream lists `secrets.invalidation.v1.*.>`. The tenant token is the
 56-character account public key, exempt from the lower_snake rule, and it
 costs the same bytes and token in the subject budget wherever it sits.
+
+Readers of that stream are shared `PLATFORM` workloads. The first planned
+readers, the gateway and the egress proxy, each run as a `PLATFORM` user
+allowed the JetStream calls the shipped client makes on the stream: stream
+info, creating and reading its own filtered consumer, and pulling from it.
+They read the `PLATFORM` stream directly, so `PLATFORM` does not export the
+subtree and no tenant account holds an import, a stream or a consumer for
+it. A notice carries metadata only, and reading every tenant's notices is
+platform trust under
+[ADR#0095](./0095-connection-credential-custody-and-refresh.md) Decision 5.
+
+Exporting the subtree is conditional on a reader that lives in a tenant
+account, such as the customer-run gateways of
+[ADR#0023](./0023-secret-management-and-key-custody-direction.md) Decision 7.
+When one arrives, the required shape is a durable source, not a subject
+export:
+
+- The operator provisions one push durable per tenant on the `PLATFORM`
+  `SECRETS_INVALIDATION` stream, named by the tenant's account public key
+  `A`, with filter `secrets.invalidation.v1.<A>.>` and deliver subject
+  `secrets.source.v1.<A>.notice`. The durable uses `ack_policy`
+  `flow_control` with flow control and an idle heartbeat enabled: the server
+  refuses to source from a durable with any other ack policy
+  (`NewJSMirrorConsumerRequiresAckFCError` in `server/stream.go`).
+- `PLATFORM` exports the stream `secrets.source.v1.*.notice` with
+  `account_token_position` 4, the service
+  `$JS.API.CONSUMER.RESET.SECRETS_INVALIDATION.*` with position 6, and the
+  service `$JS.FC.SECRETS_INVALIDATION.*.*` with position 4. The server
+  authorizes an import only when the token at that position is the importing
+  account's own public key (`checkAuth` in `server/accounts.go`), so each
+  tenant reaches only its own durable, reset and flow control.
+- Each tenant imports those three, mapping the reset service under the local
+  subject `SECRETS_SOURCE.CONSUMER.RESET.SECRETS_INVALIDATION.<A>`, and owns a
+  source-only `SECRETS_INVALIDATION` stream, with the same deny flags as the
+  `PLATFORM` stream, that sources from the durable. The stored subject is
+  unchanged, so the shipped client reads it as it does today.
+- A tenant reader must also confirm that the source still forwards. The
+  shipped client checks only its local consumer: gaps in what it is
+  delivered, and what the server says it delivered. A durable that stops
+  forwarding leaves that consumer owed nothing, so the reader would count
+  itself caught up while it holds a value revoked upstream. On each look, a
+  tenant reader therefore reads the local stream's info and finds the
+  durable source. If that source carries an `error`, or its `active` is -1
+  or older than a few idle heartbeats, the reader has lost its place. The
+  server refreshes `active` on every message and idle heartbeat the durable
+  delivers (`trySetupSourceConsumer` in `server/stream.go`). Having lost its
+  place, the reader holds no released value until the source reports active
+  again and the reader has caught up. The shipped client does not make this
+  check, so it lands before any tenant-account reader ships.
+- The flow-control route assumes the v1 subject format, which 2.15.3 uses
+  while the `js_ack_fc_v2` feature flag is off, its default. With the flag on,
+  flow control moves to
+  `$JS.FC.<domain>.<account hash>.SECRETS_INVALIDATION.<A>.*`, so enabling it
+  also requires the service export `$JS.FC.*.*.SECRETS_INVALIDATION.*.*` with
+  position 6 and the matching tenant import, verified against a broker before
+  the flag changes.
+- The NATS server must be 2.15.3 or later. The 2.14.2 image pinned today
+  created the tenant stream and delivered nothing. 2.14.4 fixed reset replies
+  through service imports (nats-server PR #8407), and 2.15.3 fixed recovery of
+  a durable source (nats-server PR #8802).
+
+A plain subject export with a tenant capture stream is rejected. A stream that
+captures an import stores only what is published after it exists, so notices
+published before the view was created, or while it was down, are lost, and the
+reader cannot see the gap.
 
 ### 4. Admission is PLATFORM credentials or the callout, and nothing else
 

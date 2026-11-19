@@ -11,6 +11,7 @@ workspace = true
 thiserror = { workspace = true }
 async-nats = { workspace = true, features = ["nkeys", "jetstream", "kv", "object-store", "server_2_10", "server_2_11", "server_2_12"] }
 bytes = { workspace = true }
+base64 = { workspace = true }
 nkeys = { workspace = true }
 log = { version = "=0.4.29", features = ["std"] }
 futures = { workspace = true }
@@ -48,4 +49,9 @@ test-support = ["dep:rcgen", "dep:tempfile", "dep:testcontainers-modules"]
 [[test]]
 name = "tls_handshake"
 path = "tests/tls_handshake.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "jetstream_network"
+path = "tests/jetstream_network.rs"
 required-features = ["test-support"]
