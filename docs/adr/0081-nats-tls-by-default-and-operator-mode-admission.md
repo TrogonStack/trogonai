@@ -309,6 +309,19 @@ export:
   source-only `SECRETS_INVALIDATION` stream, with the same deny flags as the
   `PLATFORM` stream, that sources from the durable. The stored subject is
   unchanged, so the shipped client reads it as it does today.
+- A tenant reader must also confirm that the source still forwards. The
+  shipped client checks only its local consumer: gaps in what it is
+  delivered, and what the server says it delivered. A durable that stops
+  forwarding leaves that consumer owed nothing, so the reader would count
+  itself caught up while it holds a value revoked upstream. On each look, a
+  tenant reader therefore reads the local stream's info and finds the
+  durable source. If that source carries an `error`, or its `active` is -1
+  or older than a few idle heartbeats, the reader has lost its place. The
+  server refreshes `active` on every message and idle heartbeat the durable
+  delivers (`trySetupSourceConsumer` in `server/stream.go`). Having lost its
+  place, the reader holds no released value until the source reports active
+  again and the reader has caught up. The shipped client does not make this
+  check, so it lands before any tenant-account reader ships.
 - The flow-control route assumes the v1 subject format, which 2.15.3 uses
   while the `js_ack_fc_v2` feature flag is off, its default. With the flag on,
   flow control moves to
