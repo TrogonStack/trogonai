@@ -236,6 +236,27 @@ Before a Session becomes runnable, create one SessionExecutionPlan:
       session-plan contract version
       resolved-model-route contract version
 
+The concrete version 1 content schema is
+`trogonai.session.plans.v1alpha1.SessionExecutionPlan`, separate from the
+Session store's opaque `StoredSessionExecutionPlan`. A protected registered
+contract selects its exact descriptor and semantic interpreter before decoding
+the retained original bytes; the contract tuple inside those bytes is a
+consistency check. Native settings and their effective projection retain their
+existing exact contract/bytes/digest envelopes. Complete typed dependency
+declarations accompany resolved references, including all `ResolvedConnectionUse`
+fields, and model and compaction capabilities are explicit profiles. Work input
+references keep their own contract, and checkout-relative working-directory
+interpretation remains bound to its registered filesystem contract.
+
+The descriptor bounds required fields, collections, identifiers, native payloads
+and local joins. The executable verifier separately checks total encoded size,
+recursive variable limits and schema agreement, original artifact hashes,
+registered interpretation, actual dependency closure and current authority.
+Representation does not supply an implementation owner: unsupported capability
+paths are refused until the real registered adapter and authoritative resources
+provide their required behavior. This concrete schema does not change this ADR's
+draft status or establish runtime admission by itself.
+
 The implementation and settings are bound to the pinned AgentConfiguration.
 When platform-managed model access is required, admission runs the pinned
 adapter against those settings and records its verified ModelSelection
