@@ -274,12 +274,14 @@ stream lists `secrets.invalidation.v1.*.>`. The tenant token is the
 56-character account public key, exempt from the lower_snake rule, and it
 costs the same bytes and token in the subject budget wherever it sits.
 
-The readers of that stream today are shared `PLATFORM` workloads, the gateway
-and the egress proxy, each a `PLATFORM` user whose permissions name the stream
-and its consumers. They read the `PLATFORM` stream directly, so `PLATFORM` does
-not export the subtree and no tenant account holds an import, a stream or a
-consumer for it. A notice carries metadata only, and reading every tenant's
-notices is platform trust under
+Readers of that stream are shared `PLATFORM` workloads. The first planned
+readers, the gateway and the egress proxy, each run as a `PLATFORM` user
+allowed the JetStream calls the shipped client makes on the stream: stream
+info, creating and reading its own filtered consumer, and pulling from it.
+They read the `PLATFORM` stream directly, so `PLATFORM` does not export the
+subtree and no tenant account holds an import, a stream or a consumer for
+it. A notice carries metadata only, and reading every tenant's notices is
+platform trust under
 [ADR#0095](./0095-connection-credential-custody-and-refresh.md) Decision 5.
 
 Exporting the subtree is conditional on a reader that lives in a tenant
@@ -291,7 +293,10 @@ export:
 - The operator provisions one push durable per tenant on the `PLATFORM`
   `SECRETS_INVALIDATION` stream, named by the tenant's account public key
   `A`, with filter `secrets.invalidation.v1.<A>.>` and deliver subject
-  `secrets.source.v1.<A>.notice`.
+  `secrets.source.v1.<A>.notice`. The durable uses `ack_policy`
+  `flow_control` with flow control and an idle heartbeat enabled: the server
+  refuses to source from a durable with any other ack policy
+  (`NewJSMirrorConsumerRequiresAckFCError` in `server/stream.go`).
 - `PLATFORM` exports the stream `secrets.source.v1.*.notice` with
   `account_token_position` 4, the service
   `$JS.API.CONSUMER.RESET.SECRETS_INVALIDATION.*` with position 6, and the
@@ -304,6 +309,13 @@ export:
   source-only `SECRETS_INVALIDATION` stream, with the same deny flags as the
   `PLATFORM` stream, that sources from the durable. The stored subject is
   unchanged, so the shipped client reads it as it does today.
+- The flow-control route assumes the v1 subject format, which 2.15.3 uses
+  while the `js_ack_fc_v2` feature flag is off, its default. With the flag on,
+  flow control moves to
+  `$JS.FC.<domain>.<account hash>.SECRETS_INVALIDATION.<A>.*`, so enabling it
+  also requires the service export `$JS.FC.*.*.SECRETS_INVALIDATION.*.*` with
+  position 6 and the matching tenant import, verified against a broker before
+  the flag changes.
 - The NATS server must be 2.15.3 or later. The 2.14.2 image pinned today
   created the tenant stream and delivered nothing. 2.14.4 fixed reset replies
   through service imports (nats-server PR #8407), and 2.15.3 fixed recovery of
