@@ -276,8 +276,9 @@ pub mod release_location {
 /// never enters a stream (ADR#0023 Decision 3).
 ///
 /// The request carries no tenant and no caller identity, and the service reads
-/// neither from a field or a header. The tenant is the importing account's
-/// token at the head of the subject (ADR#0081 Decision 3), and the runtime
+/// neither from a field or a header. The tenant is the token at the head of the
+/// subject, which the PLATFORM trusted caller names and the service authorizes
+/// from its own state (ADR#0095 Decision 5), and the runtime
 /// service is the `service.{id}` principal the subject carries (ADR#0082),
 /// which the service parses before it decodes this payload.
 ///
