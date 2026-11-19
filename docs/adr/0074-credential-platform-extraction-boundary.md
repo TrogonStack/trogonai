@@ -87,11 +87,10 @@ survives the relocation unchanged. They live in
 Every one of them binds to a secrets-service identity. `gateway_read` names
 the read the service performs on the gateway's behalf through
 `SecretStoreGet`; it is not a role the gateway process holds. The gateway's
-requests are authorized the way
-[ADR#0023](./0023-secret-management-and-key-custody-direction.md) Decision 3
-already prescribes, by the tenant-scoped NATS user JWT and the NATS account
-that scope its resolve subjects, so no OpenBao policy is attached to the
-gateway after the move.
+requests are authorized as a registered `PLATFORM` trusted caller whose
+subject names the tenant, which the secrets service authorizes from its own
+state ([ADR#0095](./0095-connection-credential-custody-and-refresh.md)), so no
+OpenBao policy is attached to the gateway after the move.
 
 ### 4. Four boundary questions, answered before extraction starts
 
