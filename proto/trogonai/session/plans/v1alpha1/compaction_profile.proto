@@ -1,0 +1,199 @@
+edition = "2024";
+
+package trogonai.session.plans.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/configuration_artifact.proto";
+import "trogonai/session/sessions/v1alpha1/compacted.proto";
+
+// Absence of the platform capability does not reinterpret native compaction.
+// The platform harness requires its exact registered policy, even if disabled.
+message CompactionProfile {
+  oneof profile {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty no_platform_compaction = 1;
+    PlatformCompaction platform = 2;
+  }
+}
+
+message PlatformCompaction {
+  option (buf.validate.message).cel = {
+    id: "platform_compaction.contract_bounds"
+    message: "compaction contracts must fit finite UTF8 bounds"
+    expression: "(!has(this.contract) || (size(bytes(this.contract.message_type)) <= 512 && size(bytes(this.contract.version)) <= 128)) && (!has(this.covered_input_contract) || (size(bytes(this.covered_input_contract.message_type)) <= 512 && size(bytes(this.covered_input_contract.version)) <= 128))"
+  };
+  option (buf.validate.message).cel = {
+    id: "platform_compaction.consistent_bounds"
+    message: "compaction summary tail and guidance limits must fit their admitted bounds"
+    expression: "this.summary_token_limit <= this.input_token_limit && this.retained_tail_token_limit <= this.input_token_limit && (!has(this.encoding_bounds) || this.guidance_utf8_limit == this.encoding_bounds.guidance_utf8_limit)"
+  };
+
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef contract = 1 [(buf.validate.field).required = true];
+  CompactionTriggerPolicy trigger = 2 [(buf.validate.field).required = true];
+  uint64 input_token_limit = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 16777216
+    }
+  ];
+  uint64 summary_token_limit = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 16777216
+    }
+  ];
+  uint64 guidance_utf8_limit = 5 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 retained_tail_token_limit = 6 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 16777216
+    }
+  ];
+  uint32 max_passes = 7 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint32 = {
+      gt: 0
+      lte: 16
+    }
+  ];
+  trogonai.agents.agents.v1alpha1.ConfigurationContractRef covered_input_contract = 8 [(buf.validate.field).required = true];
+  trogonai.session.sessions.v1alpha1.CompactionModelRole producer_role = 9 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  CompactionEncodingBounds encoding_bounds = 10 [(buf.validate.field).required = true];
+}
+
+message CompactionTriggerPolicy {
+  option (buf.validate.message).cel = {
+    id: "compaction_trigger_policy.positive_threshold"
+    message: "token threshold must be positive"
+    expression: "(!has(this.token_threshold) || this.token_threshold > 0u) && (!has(this.token_or_overflow) || this.token_or_overflow > 0u)"
+  };
+
+  oneof trigger {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty disabled = 1;
+    uint64 token_threshold = 2 [(buf.validate.field).uint64.lte = 16777216];
+    google.protobuf.Empty context_overflow = 3;
+    uint64 token_or_overflow = 4 [(buf.validate.field).uint64.lte = 16777216];
+  }
+}
+
+// Limits are checked with the exact registered encoder before admission;
+// token budgets alone cannot bound the stored summary, envelope or headers.
+message CompactionEncodingBounds {
+  uint64 summary_id_utf8_limit = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 guidance_utf8_limit = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 model_utf8_limit = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 execution_attempt_id_utf8_limit = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 session_id_utf8_limit = 5 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 source_session_id_utf8_limit = 6 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 digest_bytes_limit = 7 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 token_usage_bytes_limit = 8 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 131072
+    }
+  ];
+  uint64 event_type_utf8_limit = 9 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 event_id_utf8_limit = 10 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+  uint64 headers_encoded_limit = 11 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 131072
+    }
+  ];
+  uint64 envelope_encoded_limit = 12 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 131072
+    }
+  ];
+  uint64 maximum_record_encoded_limit = 13 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 131072
+    }
+  ];
+  uint64 summary_content_utf8_limit = 14 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64 = {
+      gt: 0
+      lte: 65536
+    }
+  ];
+}

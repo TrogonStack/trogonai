@@ -12,6 +12,27 @@ pub enum StaticConfigSecretInput {
     Env { name: String },
 }
 
+impl StaticConfigSecretInput {
+    pub(crate) fn resolve_plaintext(self, env: &impl ReadEnv) -> Result<SecretString, StaticConfigSecretStoreError> {
+        let raw_value = match self {
+            Self::Literal(value) => value,
+            Self::Env { name } => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(StaticConfigSecretStoreError::EmptyEnvName);
+                }
+                env.var(name).map_err(|error| match error {
+                    VarError::NotPresent => StaticConfigSecretStoreError::MissingEnv { name: name.to_string() },
+                    VarError::NotUnicode(_) => {
+                        StaticConfigSecretStoreError::InvalidUnicodeEnv { name: name.to_string() }
+                    }
+                })?
+            }
+        };
+        SecretString::new(raw_value).map_err(StaticConfigSecretStoreError::EmptySecretError)
+    }
+}
+
 /// A secret read from static configuration.
 ///
 /// It never enters the credential event stream, so it has no recorded identity
@@ -56,24 +77,7 @@ impl StaticConfigSecretStore {
         input: StaticConfigSecretInput,
         env: &impl ReadEnv,
     ) -> Result<StaticConfigSecret, StaticConfigSecretStoreError> {
-        let raw_value = match input {
-            StaticConfigSecretInput::Literal(value) => value,
-            StaticConfigSecretInput::Env { name } => {
-                let name = name.trim();
-                if name.is_empty() {
-                    return Err(StaticConfigSecretStoreError::EmptyEnvName);
-                }
-                env.var(name).map_err(|error| match error {
-                    VarError::NotPresent => StaticConfigSecretStoreError::MissingEnv { name: name.to_string() },
-                    VarError::NotUnicode(_) => {
-                        StaticConfigSecretStoreError::InvalidUnicodeEnv { name: name.to_string() }
-                    }
-                })?
-            }
-        };
-        let material = SecretString::new(raw_value)
-            .map(SecretMaterial::plaintext)
-            .map_err(StaticConfigSecretStoreError::EmptySecretError)?;
+        let material = SecretMaterial::plaintext(input.resolve_plaintext(env)?);
         let credential = PublicCredentialId::new(scope.owner_id(), &scope.scope_key(), kind);
 
         Ok(StaticConfigSecret::new(credential, material))
