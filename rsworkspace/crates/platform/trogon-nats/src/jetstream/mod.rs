@@ -64,10 +64,10 @@ pub use traits::{
 
 #[cfg(any(test, feature = "test-support"))]
 pub use mocks::{
-    AckKindSnapshot, AckKindValue, MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamContext,
-    MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublishMessage, MockJetStreamPublisher,
-    MockJetStreamPurger, MockJetStreamStream, MockJsMessage, MockKvEntryOutcome, MockKvGetOutcome, MockObjectStore,
-    MockPublishedOutboundMessage, MockStreamProvisionError,
+    AckKindSnapshot, AckKindValue, MockJetStreamClient, MockJetStreamConsumer, MockJetStreamConsumerFactory,
+    MockJetStreamContext, MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublishMessage,
+    MockJetStreamPublisher, MockJetStreamPurger, MockJetStreamStream, MockJsMessage, MockKvEntryOutcome,
+    MockKvGetOutcome, MockObjectStore, MockPublishedOutboundMessage, MockStreamProvisionError,
 };
 
 mod strict_stream;

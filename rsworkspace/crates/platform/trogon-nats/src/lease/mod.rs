@@ -273,3 +273,6 @@ where
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "test-support"))]
+mod integration_tests;

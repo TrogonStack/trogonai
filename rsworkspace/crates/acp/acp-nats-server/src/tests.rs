@@ -1,5 +1,6 @@
 use super::*;
 use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_ENDPOINT, ACP_PROTOCOL_VERSION_HEADER};
+use trogon_nats::jetstream::MockJetStreamClient;
 
 /// Upstream owns session-header routing now, so this lives with the tests.
 const ACP_SESSION_ID_HEADER: &str = "acp-session-id";
@@ -23,47 +24,6 @@ use trogon_nats::AdvancedMockNatsClient;
 /// ACP client ignores the response id, so a fixed id is enough here.
 fn canonical_result(result: &str) -> bytes::Bytes {
     format!(r#"{{"jsonrpc":"2.0","id":1,"result":{result}}}"#).into()
-}
-
-#[derive(Clone)]
-struct MockJs {
-    publisher: trogon_nats::jetstream::MockJetStreamPublisher,
-    consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory,
-}
-
-impl MockJs {
-    fn new() -> Self {
-        Self {
-            publisher: trogon_nats::jetstream::MockJetStreamPublisher::new(),
-            consumer_factory: trogon_nats::jetstream::MockJetStreamConsumerFactory::new(),
-        }
-    }
-}
-
-impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
-    type PublishError = trogon_nats::mocks::MockError;
-    type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
-
-    async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
-        &self,
-        subject: S,
-        headers: async_nats::HeaderMap,
-        payload: bytes::Bytes,
-    ) -> Result<Self::AckFuture, Self::PublishError> {
-        self.publisher.publish_with_headers(subject, headers, payload).await
-    }
-}
-
-impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
-    type Error = async_nats::jetstream::context::GetStreamError;
-    type Stream = trogon_nats::jetstream::MockJetStreamStream;
-
-    async fn get_stream<T: AsRef<str> + Send>(
-        &self,
-        stream_name: T,
-    ) -> Result<trogon_nats::jetstream::MockJetStreamStream, Self::Error> {
-        self.consumer_factory.get_stream(stream_name).await
-    }
 }
 
 fn test_config() -> Config {
@@ -1144,7 +1104,7 @@ fn build_upstream_app(nats_mock: AdvancedMockNatsClient) -> (axum::Router, watch
     // serves, so a layer or option that only exists on one side cannot hide here.
     let router = build_router(
         nats_mock,
-        MockJs::new(),
+        MockJetStreamClient::new(),
         test_config(),
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         &shutdown_tx,
@@ -1203,7 +1163,7 @@ async fn draining_closes_an_upstream_transport_connection_cleanly() {
 
     let component = crate::component::NatsAgentComponent::new(
         nats_mock,
-        MockJs::new(),
+        MockJetStreamClient::new(),
         test_config(),
         trogon_telemetry::meter("acp-nats-server"),
         shutdown_rx,
