@@ -60,7 +60,7 @@ schedules-descriptor)
   cd "$ws"
   exec "$buf" build -o "${check_args[0]}" --as-file-descriptor-set --path proto/trogonai/scheduler/schedules
   ;;
-rust)
+rust|rust-session)
   # CHECK_ARGS: OUT_DIR CARGO_TOML PROTOC_GEN_BUFFA PROTOC_GEN_BUFFA_PACKAGING RUSTFMT RUSTFMT_TOML
   out="${check_args[0]}"
   cargo_toml="${check_args[1]}"
@@ -75,14 +75,37 @@ rust)
   printf '#!/bin/sh\nplugin=$1\nshift\nexec "%s/bin/$plugin" "$@"\n' "$TEST_TMPDIR" >"$ws/.config/mise/lib/proto-plugin"
   chmod +x "$ws/.config/mise/lib/proto-plugin"
 
-  (cd "$ws" && "$buf" generate)
+  if [[ "$check" == "rust-session" ]]; then
+    (cd "$ws" && "$buf" generate --template buf.session.gen.yaml)
+    session_paths=()
+    while IFS= read -r line; do
+      case "$line" in
+        "      - proto/"*) session_paths+=(--path "${line#      - }") ;;
+      esac
+    done <"$ws/buf.session.gen.yaml"
+    if [[ ${#session_paths[@]} -eq 0 ]]; then
+      echo "Session generation requires explicit protobuf input paths" >&2
+      exit 1
+    fi
+    (cd "$ws" && "$buf" build --as-file-descriptor-set --exclude-source-info "${session_paths[@]}" -o "$out/contracts.json")
+    (cd "$ws" && "$buf" build --as-file-descriptor-set --exclude-source-info \
+      --path proto/trogonai/session/plans \
+      --path proto/trogonai/agents/agents/v1alpha1/agent.proto \
+      -o "$out/plan-contracts.json")
+  else
+    (cd "$ws" && "$buf" generate)
+  fi
 
   # proto:generate finishes with cargo fmt, which reaches the generated tree
   # through its mod.rs with the crate's edition and the workspace rustfmt.toml.
   edition="$(sed -n 's/^edition = "\(.*\)"$/\1/p' "$cargo_toml")"
   "$rustfmt" --edition "$edition" --config-path "$rustfmt_toml" "$ws/$out/mod.rs"
 
-  assert_generated "$out" "$ws/$out" "mise run proto:generate"
+  if [[ "$check" == "rust-session" ]]; then
+    assert_generated "$out" "$ws/$out" "mise run proto:generate-session"
+  else
+    assert_generated "$out" "$ws/$out" "mise run proto:generate"
+  fi
   ;;
 contracts)
   # CHECK_ARGS: RUNNER

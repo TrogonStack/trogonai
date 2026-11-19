@@ -479,6 +479,14 @@ nats-secrets-invalidation-provision runs the script as the PLATFORM user
 `secrets-invalidation-provisioner` once the accounts are pushed.
 `provision-secrets-invalidation.test.sh` checks it against a stand-in `nats`.
 
+The local bootstrap denies every PLATFORM user from publishing on
+`secrets.invalidation.v1.>`, so no user can forge a notice. Every user but the
+provisioner is also denied the stream's create, update, delete, purge, restore
+and message delete API subjects, so none can replace the stream or loosen its
+protections. A deployment that issues its own PLATFORM users must carry the
+same denies and add the secrets service's own publish grant.
+`secrets-invalidation-deny.test.sh` checks them against a running server.
+
 ## Where production keys live
 
 Production NATS material lives in OpenBao. The deployment reads it with its
