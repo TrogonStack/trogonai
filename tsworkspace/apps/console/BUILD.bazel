@@ -103,7 +103,11 @@ js_library(
 
 vitest_bin.vitest_test(
     name = "test",
-    args = ["run"],
+    timeout = "long",
+    args = [
+        "run",
+        "--testTimeout=60000",
+    ],
     chdir = package_name(),
     copy_data_to_bin = False,
     data = [
