@@ -14,7 +14,8 @@ use super::{InvalidationSourceError, TenantAccount};
 /// [`INVALIDATION_STREAM`].
 ///
 /// The subject starts with the account of the tenant holding the credential's
-/// owner, so only that account can import the notice (ADR#0081 Decision 3).
+/// owner. The notice stays in PLATFORM, where registered trusted callers read
+/// it (ADR#0095 Decision 5).
 /// The `Nats-Msg-Id` names the credential event behind the notice by the
 /// stream it was read from and its sequence there, so the stream keeps one
 /// notice however often that event is delivered, and services reading

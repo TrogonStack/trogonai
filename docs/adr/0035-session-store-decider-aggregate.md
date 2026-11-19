@@ -1085,6 +1085,25 @@ about the child's external side effects. The reverse ordering, a child claiming
 a parent that never dispatched it, is refused because verified parent dispatch
 is required before this saga can produce `ParentLinked`.
 
+The opt-in `trogon-session-store` and `trogon-session-plan` libraries implement a
+bounded creation and delegation profile for this sequence. They retain original
+nested encodings, deterministic creation event identities and live admission
+leases. An uncertain append can reconcile an authenticated exact original
+creation prefix written by another reconciler, including a different sealing
+nonce. That result observes the intended durable creation; it does not attribute
+which append committed. Missing or conflicting proof never authorizes an
+automatic retry with another identity.
+
+The application still supplies authoritative resource and policy adapters,
+canonical authenticated sealing and the protected native writer boundary. The
+native resolver rechecks current storage and subject protections on every
+access; it cannot prove that an operator never changed them earlier. Parent
+checks before and after child creation are separate observations, so a
+post-append refusal can leave a durable unlaunched child. These libraries do not
+write execution starts or Ready, launch a child, implement cascade or rewind
+repair, or establish complete Session-store conformance. This profile does not
+change the ADR's draft status.
+
 **Acyclicity by construction.** `DispatchDelegation` always mints a fresh
 `child_session_id`; `ParentLinked` is valid only inside the creation batch, so
 re-parenting an already-existing stream is rejected by `decide` (the stream
