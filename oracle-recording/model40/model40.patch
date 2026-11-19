@@ -1548,7 +1548,7 @@ index 0000000000..561c647178
 +    Tool,
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
-index f01219da74..bf10b3bc56 100644
+index f01219da74..e1b545f528 100644
 --- a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack.rs
 @@ -29,21 +29,26 @@
@@ -1624,7 +1624,7 @@ index f01219da74..bf10b3bc56 100644
 +/// budgets below, every path of the native reads of the login documents on the three profiles that the pins keep or
 +/// drop is explained by 256 or 272: the 1951 nested objects that fail on Linux on arm64 from a timer need more than
 +/// 240, the 2216 that macOS reads from a timer at most 272, and on Linux on x64 the 1644 that fail at the top level
-+/// need more than 184 and the 1643 read from an immediate at most 280. This is the least of the two.
++/// need more than 224 and the 1643 read from an immediate at most 320. This is the least of the two.
 +const LOGIN_FRAMES: usize = 256;
 +
 +/// A managed settings document the caller hands over as an object, which the policy cache (`pm` upstream) reads on
@@ -1795,8 +1795,8 @@ index f01219da74..bf10b3bc56 100644
 -    /// goldens do.
 +    /// evaluated, its copy 998826, the merge into its folder 958147 and the merge of the admin settings 960371: 2217
 +    /// nested objects or a root object holding 3268 nested arrays, 1941 nested arrays, 1241 levels and 1244 levels. The
-+    /// evaluation of the policy origin has 998944, 999245, 999914 and 959008 (2220 objects, 3271 and 1943 arrays, 1243
-+    /// levels), and the one that asks whether the machine policy loaded 999840, 1000141, 1000794 and 960016 (2222
++    /// evaluation of the policy origin has 998944, 999248, 999914 and 959248 (2220 objects, 3271 and 1943 arrays, 1243
++    /// levels), and the one that asks whether the machine policy loaded 999840, 1000176, 1000794 and 960016 (2222
 +    /// objects, 3274 and 1945 arrays, 1244 levels). The evaluation of the effective settings copies with 998394 (1940
 +    /// arrays). Each copy budget is the room Node has for nested arrays around `[null]` under `__proto__` in a drop-in,
 +    /// which the file cache copy enters and the merge skips: 1939 for the effective settings, 1940 for the sources,
@@ -1864,16 +1864,19 @@ index f01219da74..bf10b3bc56 100644
 +            effective_copy: 998_394,
              origin: PassBudgets {
                  walk: 998_944,
-                 clone: 999_245,
+-                clone: 999_245,
 -                copy: 999_488,
+-                folder_merge: 959_008,
++                clone: 999_248,
 +                copy: 999_914,
-                 folder_merge: 959_008,
++                folder_merge: 959_248,
              },
              machine_policy: PassBudgets {
                  walk: 999_840,
-                 clone: 1_000_141,
+-                clone: 1_000_141,
 -                copy: 1_000_576,
 -                folder_merge: 959_776,
++                clone: 1_000_176,
 +                copy: 1_000_794,
 +                folder_merge: 960_016,
              },
@@ -1908,7 +1911,7 @@ index f01219da74..bf10b3bc56 100644
          },
      };
  
-@@ -309,18 +499,35 @@ impl NodeStack {
+@@ -309,18 +499,37 @@ impl NodeStack {
      /// holding 3131 nested arrays for the reader, 1788 nested arrays for the copy, and 1252 levels around `null` for a
      /// merge.
      ///
@@ -1922,7 +1925,7 @@ index f01219da74..bf10b3bc56 100644
 +    /// evaluated, its copy 1000080, the merge into its folder 959904 and the merge of the admin settings 962064: 1952
 +    /// nested objects or a root object holding 3123 nested arrays, 1784 nested arrays, 1249 levels and 1251 levels. The
 +    /// evaluation of the policy origin has 1000704, 1001120, 1001168 and 961152 (1954 objects, 3127 and 1786 arrays,
-+    /// 1251 levels), and the one that asks whether the machine policy loaded 1001728, 1002080, 1002048 and 961872 (1956
++    /// 1251 levels), and the one that asks whether the machine policy loaded 1001712, 1002080, 1002048 and 961872 (1956
 +    /// objects, 3130 and 1788 arrays, 1252 levels). The evaluation of the effective settings copies with 999648: 1784
 +    /// nested arrays, as for the sources, and 1775 under 9 nested objects. Each copy budget is the room Node has for
 +    /// nested arrays around `[null]` under `__proto__` in a drop-in, which the file cache copy enters and the merge
@@ -1937,9 +1940,11 @@ index f01219da74..bf10b3bc56 100644
 +    ///
 +    /// The managed settings the caller hands over as an object go through the policy cache (`pm`) on the chain of the
 +    /// evaluation for the sources, outside any guard: the server-managed settings (`WP`) clone with 1000976, walk with
-+    /// 1000720 and copy the settings the schema kept with 1000368, and the managed settings a host passes in (`G7e`)
++    /// 1000736 and copy the settings the schema kept with 1000384, and the managed settings a host passes in (`G7e`)
 +    /// have 16 bytes less for each. Every clone between 1000960 and 1001279 gives the same answers, and 1000976 is the
-+    /// least that leaves the host's settings that range.
++    /// least that leaves the host's settings that range. The walk and the copy are the least that read and copy at the
++    /// top level the deepest settings Node read there, the server's and the host's alike, and stay under the next
++    /// step of 16 bytes, which Node rejects.
      ///
      /// The command line and environment take nothing from these budgets, so [`NodeStack::with_startup_bytes`] changes
      /// nothing here; the goldens were recorded with the same 4384 bytes as on macOS.
@@ -1950,7 +1955,7 @@ index f01219da74..bf10b3bc56 100644
          walk: PathCost {
              object: 512,
              array: 272,
-@@ -357,32 +564,62 @@ impl NodeStack {
+@@ -357,32 +566,62 @@ impl NodeStack {
          merge: MergeCost {
              level: 768,
              cold_assign: 416,
@@ -1982,7 +1987,8 @@ index f01219da74..bf10b3bc56 100644
                  folder_merge: 961_152,
              },
              machine_policy: PassBudgets {
-                 walk: 1_001_728,
+-                walk: 1_001_728,
++                walk: 1_001_712,
                  clone: 1_002_080,
 -                copy: 1_002_064,
 -                folder_merge: 961_824,
@@ -2013,15 +2019,15 @@ index f01219da74..bf10b3bc56 100644
 +                },
 +            },
 +            handed_over: CacheBudgets {
-+                walk: 1_000_720,
++                walk: 1_000_736,
 +                clone: 1_000_976,
-+                copy: 1_000_368,
++                copy: 1_000_384,
              },
 -            admin_merge: 961_920,
          },
      };
  
-@@ -391,19 +628,44 @@ impl NodeStack {
+@@ -391,19 +630,46 @@ impl NodeStack {
      /// The reader reads a settings file when every path from its root fits two passes: 608 bytes per object and 272
      /// per array out of 1002688, and 304 per object and per array out of 1002760. The file cache copy then takes 608
      /// per object and 640 per array out of 1002496. At the object or array that ends a path, the walk and the copy
@@ -2036,22 +2042,23 @@ index f01219da74..bf10b3bc56 100644
 +    /// the other profiles and a reach of 40656. Assigning a member once a merge of the process assigned one before
 +    /// takes 448 more past the stack. That is 1649 nested objects or a root object holding 3297 nested arrays for the
 +    /// reader, 1565 nested arrays for the copy, and 1307 levels around `null` for a merge.
++    ///
++    /// A managed settings document's reader has 1000032 and 1000312 for the same two passes when the sources are
++    /// evaluated, its copy 1000464, the merge into its folder 960320 and the merge of the admin settings 962432: 1644
++    /// nested objects or a root object holding 3289 nested arrays, 1562 nested arrays, 1304 levels and 1306 levels. The
++    /// evaluation of the policy origin has 1001072, 1001528, 1001520 and 961392 (1646 objects, 3293 and 1563 arrays,
++    /// 1306 levels), and the one that asks whether the machine policy loaded 1002160, 1002176, 1002400 and 962304 (1648
++    /// objects, 3295 and 1565 arrays, 1307 levels). The evaluation of the effective settings copies with 1000032 (1561
++    /// arrays). Each copy budget is the room Node has for nested arrays around `[null]` under `__proto__` in a drop-in,
++    /// which the file cache copy enters and the merge skips: 1559 for the effective settings, 1560 for the sources,
++    /// 1561 for the origin and 1563 for the machine policy.
      ///
-     /// A managed settings document's reader has 999992 and 1000312 for the same two passes when the sources are
+-    /// A managed settings document's reader has 999992 and 1000312 for the same two passes when the sources are
 -    /// evaluated, its copy 1000608, the merge into its folder 960320 and the merge of the admin settings 962320: 1644
 -    /// nested objects or a root object holding 3289 nested arrays, 1562 nested arrays, 1304 levels and 1306 levels.
 -    /// The evaluation of the policy origin has 1001072, 1001528, 1001688 and 961584 (1646 objects, 1305 levels), and
 -    /// the one that asks whether the machine policy loaded 1002288, 1002440, 1002528 and 962256 (1648 objects, 1565
 -    /// arrays, 1307 levels). No golden tells the origin's copy budget apart from the others, so it sits between them.
-+    /// evaluated, its copy 1000464, the merge into its folder 960320 and the merge of the admin settings 962320: 1644
-+    /// nested objects or a root object holding 3289 nested arrays, 1562 nested arrays, 1304 levels and 1306 levels. The
-+    /// evaluation of the policy origin has 1001072, 1001528, 1001520 and 961584 (1646 objects, 3293 and 1563 arrays,
-+    /// 1306 levels), and the one that asks whether the machine policy loaded 1002288, 1002136, 1002400 and 962256 (1648
-+    /// objects, 3295 and 1565 arrays, 1307 levels). The evaluation of the effective settings copies with 1000032 (1561
-+    /// arrays). Each copy budget is the room Node has for nested arrays around `[null]` under `__proto__` in a drop-in,
-+    /// which the file cache copy enters and the merge skips: 1559 for the effective settings, 1560 for the sources,
-+    /// 1561 for the origin and 1563 for the machine policy.
-+    ///
 +    /// The check of whether a managed folder keeps the user registry out reads with 986416 and 986480 when its chain
 +    /// resumed from a file system completion: 1622 nested objects or a root object holding 3244 nested arrays. When it
 +    /// resumed from a tool completion, Node runs the check in one of two stack states 17632 bytes apart from one
@@ -2068,14 +2075,16 @@ index f01219da74..bf10b3bc56 100644
 +    /// no edge of its own.
 +    ///
 +    /// The managed settings the caller hands over as an object go through the policy cache (`pm`) on the chain of the
-+    /// evaluation for the sources, outside any guard: the server-managed settings (`WP`) clone with 1001088, walk with
-+    /// 1001104 and copy the settings the schema kept with 1000720, and the managed settings a host passes in (`G7e`)
-+    /// have 16 bytes less for each. Every clone between 1001072 and 1001375 gives the same answers, and 1001088 is the
-+    /// least that leaves the host's settings that range.
++    /// evaluation for the sources, outside any guard: the server-managed settings (`WP`) clone with 1001280, walk with
++    /// 1001104 and copy the settings the schema kept with 1000736, and the managed settings a host passes in (`G7e`)
++    /// have 16 bytes less for each. The clone is the least that lets a timer callback clone the host's settings at
++    /// their edge, and the server-managed settings two arrays past theirs, which Node rejects at the top level, keep it
++    /// under 1001376. The copy is the least that copies at the top level the deepest settings Node copied there, and
++    /// stays under the next step of 16 bytes, which Node rejects.
      ///
      /// When a background compile lands while a merge runs, a merge after the one that compiled the `isIndex` pattern
      /// to bytecode can run out at 1362 levels instead of compiling the pattern there, and any `later_compile` from 337
-@@ -413,6 +675,7 @@ impl NodeStack {
+@@ -413,6 +679,7 @@ impl NodeStack {
      pub const NODE_24_LINUX_X64: Self = Self {
          startup: StartupShare::BesideStack,
          startup_bytes: 4384,
@@ -2083,7 +2092,7 @@ index f01219da74..bf10b3bc56 100644
          walk: PathCost {
              object: 608,
              array: 272,
-@@ -441,7 +704,7 @@ impl NodeStack {
+@@ -441,7 +708,7 @@ impl NodeStack {
              leaves: LeafCost {
                  empty_object: 144,
                  scalar_object: 608,
@@ -2092,7 +2101,7 @@ index f01219da74..bf10b3bc56 100644
                  scalar_array: 640,
              },
              budget: 1_002_496,
-@@ -449,8 +712,10 @@ impl NodeStack {
+@@ -449,32 +716,62 @@ impl NodeStack {
          merge: MergeCost {
              level: 736,
              cold_assign: 416,
@@ -2103,9 +2112,11 @@ index f01219da74..bf10b3bc56 100644
              descent_reach: 40_656,
              later_compile: 0,
          },
-@@ -459,22 +724,50 @@ impl NodeStack {
+         merge_budget: 962_848,
+         policy: PolicyBudgets {
              sources: PassBudgets {
-                 walk: 999_992,
+-                walk: 999_992,
++                walk: 1_000_032,
                  clone: 1_000_312,
 -                copy: 1_000_608,
 +                copy: 1_000_464,
@@ -2116,18 +2127,21 @@ index f01219da74..bf10b3bc56 100644
                  walk: 1_001_072,
                  clone: 1_001_528,
 -                copy: 1_001_688,
+-                folder_merge: 961_584,
 +                copy: 1_001_520,
-                 folder_merge: 961_584,
++                folder_merge: 961_392,
              },
              machine_policy: PassBudgets {
-                 walk: 1_002_288,
+-                walk: 1_002_288,
 -                clone: 1_002_440,
 -                copy: 1_002_528,
-+                clone: 1_002_136,
+-                folder_merge: 962_256,
++                walk: 1_002_160,
++                clone: 1_002_176,
 +                copy: 1_002_400,
-                 folder_merge: 962_256,
-             },
-             admin_merge: 962_320,
++                folder_merge: 962_304,
++            },
++            admin_merge: 962_432,
 +            held_check: HeldCheckBudgets {
 +                fs: ReaderBudgets {
 +                    walk: 986_416,
@@ -2152,13 +2166,14 @@ index f01219da74..bf10b3bc56 100644
 +            },
 +            handed_over: CacheBudgets {
 +                walk: 1_001_104,
-+                clone: 1_001_088,
-+                copy: 1_000_720,
-+            },
++                clone: 1_001_280,
++                copy: 1_000_736,
+             },
+-            admin_merge: 962_320,
          },
      };
  
-@@ -513,13 +806,44 @@ impl NodeStack {
+@@ -513,13 +810,44 @@ impl NodeStack {
          }
      }
  
@@ -2203,7 +2218,7 @@ index f01219da74..bf10b3bc56 100644
      /// The most nested arrays and objects a settings file the reader reads may hold.
      pub(crate) fn max_depth(self) -> usize {
          self.walk
-@@ -527,12 +851,12 @@ impl NodeStack {
+@@ -527,12 +855,12 @@ impl NodeStack {
              .min(self.clone.deepest(self.available(self.clone.budget)))
      }
  
@@ -2221,7 +2236,7 @@ index f01219da74..bf10b3bc56 100644
      }
  
      /// Whether the settings file reader walks and copies `document` without running out of stack.
-@@ -541,31 +865,58 @@ impl NodeStack {
+@@ -541,31 +869,58 @@ impl NodeStack {
              && self.clone.fits(self.available(self.clone.budget), document)
      }
  
@@ -2287,7 +2302,7 @@ index f01219da74..bf10b3bc56 100644
      pub(crate) fn merge_within(
          self,
          call: NodeMergeCall,
-@@ -573,10 +924,11 @@ impl NodeStack {
+@@ -573,10 +928,11 @@ impl NodeStack {
          destination: &mut Map<String, Value>,
          source: &Map<String, Value>,
          warmth: &Cell<MergeWarmth>,
@@ -2300,7 +2315,7 @@ index f01219da74..bf10b3bc56 100644
              NodeMergeCall::Admin => self.policy.admin_merge,
          };
          let room = MergeRoom {
-@@ -584,7 +936,9 @@ impl NodeStack {
+@@ -584,7 +940,9 @@ impl NodeStack {
              available: self.available(budget),
          };
          let mut ran = warmth.get();
@@ -2310,7 +2325,7 @@ index f01219da74..bf10b3bc56 100644
          warmth.set(ran);
          merged
      }
-@@ -618,3 +972,7 @@ fn is_container(value: &Value) -> bool {
+@@ -618,3 +976,7 @@ fn is_container(value: &Value) -> bool {
  #[cfg(test)]
  #[path = "node_stack_tests.rs"]
  mod tests;
