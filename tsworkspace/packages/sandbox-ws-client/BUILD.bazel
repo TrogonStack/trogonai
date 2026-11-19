@@ -1,0 +1,95 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
+load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
+load("@npm_tsworkspace//tsworkspace/packages/sandbox-ws-client:vitest/package_json.bzl", vitest_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(name = "package_metadata", srcs = ["package.json"])
+
+filegroup(name = "sources", srcs = glob(["src/**/*.ts"]))
+filegroup(name = "public_api_types", srcs = glob(["tests/types/**/*.ts"]))
+filegroup(name = "unit_tests", srcs = glob(["tests/**/*.test.ts", "tests/harness.ts"]))
+
+ts_project(
+    name = "build",
+    srcs = [":sources"],
+    declaration = True,
+    declaration_map = True,
+    out_dir = "dist",
+    resolve_json_module = True,
+    root_dir = "src",
+    source_map = True,
+    transpiler = "tsc",
+    tsconfig = "tsconfig.json",
+    deps = [":node_modules", ":package_metadata"],
+)
+
+ts_project(
+    name = "typecheck",
+    srcs = ["scripts/check-doc-snippets.ts", "vitest.config.ts", ":public_api_types", ":sources"],
+    declaration = True,
+    declaration_map = True,
+    extends = "tsconfig.json",
+    no_emit = True,
+    out_dir = "dist",
+    resolve_json_module = True,
+    root_dir = ".",
+    source_map = True,
+    tsconfig = "tsconfig.public-api.json",
+    deps = [":node_modules", ":package_metadata"],
+)
+
+alias(name = "typecheck_api", actual = ":typecheck")
+
+js_library(
+    name = "test_inputs",
+    srcs = ["package.json", "vitest.config.ts", ":sources", ":unit_tests"],
+)
+
+vitest_bin.vitest_test(
+    name = "test",
+    args = ["run", "--coverage"],
+    chdir = package_name(),
+    copy_data_to_bin = False,
+    data = [":node_modules", ":test_inputs", "//tsworkspace:node_modules/vitest"],
+    env = {"VITEST_MAX_WORKERS": "4", "VITE_ALLOW_OUTSIDE_ROOT": "1", "VITE_BAZEL_RUNFILES": "1"},
+    patch_node_fs = False,
+    tags = ["cpu:4"],
+)
+
+js_test(
+    name = "built_test",
+    chdir = package_name(),
+    data = ["package.json", ":build", ":build_types", ":node_modules", ":public_api_types"],
+    entry_point = "tests/build-smoke.mjs",
+)
+
+js_test(
+    name = "doc_snippets_test",
+    chdir = package_name(),
+    data = ["README.md", "docs/how-to/restore-managed-servers.md", "package.json", "tsconfig.json", ":node_modules", ":sources"],
+    entry_point = "scripts/check-doc-snippets.ts",
+)
+
+oxlint_bin.oxlint_test(
+    name = "lint",
+    args = ["--deny-warnings", "."],
+    chdir = package_name(),
+    data = ["scripts/check-doc-snippets.ts", "tests/build-smoke.mjs", "vitest.config.ts", ":public_api_types", ":sources", ":unit_tests"],
+)
+
+npm_package(
+    name = "pkg",
+    srcs = ["LICENSE", "README.md", "llms.txt", "package.json", ":build", ":build_types"] + glob(["docs/**"]),
+    package = "@trogonai/sandbox-ws-client",
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "fmt_inputs",
+    srcs = glob(["**/*.json", "**/*.mjs", "**/*.ts", "**/*.yaml"], allow_empty = True, exclude = ["coverage/**", "dist/**"]),
+    visibility = ["//tsworkspace:__pkg__"],
+)
