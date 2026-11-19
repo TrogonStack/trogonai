@@ -11,3 +11,5 @@ pub(crate) const MAX_STREAM_BYTES: i64 = 1024 * 1024;
 pub(crate) const STREAM_DUPLICATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
 pub(crate) const RECONNECT_QUARANTINE: std::time::Duration =
     trogon_workload_identity::constants::MAX_REGISTRATION_LIFETIME.saturating_add(OPERATION_TIMEOUT);
+pub(crate) const APPROVAL_WRAPPER_FRAMING_BYTES: usize = 70;
+pub(crate) const MAX_NATIVE_HEADER_BYTES: usize = 16 * 1024;
