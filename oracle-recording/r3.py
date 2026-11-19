@@ -4054,6 +4054,11 @@ def mg37_margin_cases(port, profile, runs, hashes, memo):
             placed, sides = [], []
             for side in ("near", "far"):
                 held = margins["sides"][side]
+                if "per_call" in held:
+                    # Ruling 42 item 4: a side whose union far margin lies outside one call's REF region carries a
+                    # margin per call position, each inside its own call's region; a call whose region cannot carry
+                    # one holds ruling 41 rows for that call instead.
+                    held = dict(held, **held["per_call"][GATE["CALL"]])
                 if "union_margin" not in held:
                     if not held.get("rows41"):
                         raise Band8Stop(f"{pair['id']} {side}: margins37 holds neither a margin nor ruling 41 rows")
@@ -4236,6 +4241,237 @@ def mg37_unit():
     return go
 
 
+# ---- j55: the held-out rows of Ruling 46 rule 2 (job 55, second call only) ----
+# j55_families.json: the families that missed in val45. Each one is recorded on this host at 7 levels round its
+# second-call edge in margins37.json, under six prime histories, from every caller context, MG37_RUNS-style runs each.
+J55_FAMILIES = os.path.join(HERE, "j55_families.json")
+J55_RELATIVE = tuple(range(-3, 4))
+J55_RUNS = 10
+J55_ANCHOR = "drop_merge_arrays"
+HIST43C = os.path.join(HERE, "hist43c.py")
+# The prime histories as hist43c registered them (its variant names): P0 no prime (B1), Pw the own-family prime at the
+# first-call edge -8 that merges and compiles BWe (W2), Pn the non-compiling prime of drop_merge_arrays at +10 (LGa),
+# Pc3, Pc4 and Pc30 the own-family primes caught at +3, +4 and +30 (C3, C4, C30), Pm the legacy second-call prime of
+# job 54 (main_merge at its first-call edge, rel 0, as the only prime: hist43c's M0 holds the prime of its J54 "JS"
+# PRIME_ROW (MM, 0)); it names no own-relative level, so every family takes it alike, fixed ones included.
+J55_PRIMES = (("P0", "B1"), ("Pw", "W2"), ("Pn", "LGa"), ("Pc3", "C3"), ("Pc4", "C4"), ("Pc30", "C30"),
+             ("Pm", "M0"))
+
+
+def j55_variants():
+    """hist43c's own VARIANTS table, read from its source (the file runs a job when imported), so the primes are the
+    ones it built and never a copy."""
+    with open(HIST43C, encoding="utf-8") as handle:
+        source = handle.read()
+    start, end = source.index('NO_FLUSH = "--no-flush-bytecode"'), source.index("# ---- the job 54 replica ----")
+    space = {"re": re, "subprocess": subprocess, "os": os}
+    exec(compile(source[start:end], HIST43C, "exec"), space)
+    return space["VARIANTS"]
+
+
+def j55_level(pairs, margins, family, prime, own_level):
+    """The level a hist43c prime stands at: `rel` from the family's first-call edge (hist43c's PROFILE), `n` the case's
+    level, `abs` the amount. A class-axis family steps by classes."""
+    if prime["how"] == "n":
+        return own_level
+    if prime["how"] == "abs":
+        return prime["amount"]
+    level, pair = margins[family]["edges"]["first"]["near_level"], pairs[family]
+    for _ in range(abs(prime["amount"])):
+        level = band8_next(pair, level, "far" if prime["amount"] > 0 else "near")
+    return level
+
+
+def j55_unit():
+    """Ruling 46 rule 2 and Ruling 47: the held-out job 55 rows. Every family of j55_families.json at its second-call
+    edge of margins37.json +-3 levels, with each prime history, recorded with the reference flags and observed
+    J55_RUNS times with the default flags from every caller context. Rows go to j55/rows.jsonl (never a golden)."""
+    def go(pool, quiet):
+        if GATE["CALL"] != "second":
+            return {"skipped": "first call"}
+        if not GATE["NATIVE"] or GATE["CONTEXT"] != BAND37_DEFAULT:
+            return {"error": f"j55 runs natively from the {BAND37_DEFAULT} context, not {GATE['CONTEXT']!r}"}
+        if GATE["WSL"]:
+            return {"skipped": "wsl kernel: margins37 holds no second-call edge located under it for these families"}
+        with open(J55_FAMILIES, encoding="utf-8") as handle:
+            families = sorted(json.load(handle)["families"])
+        with open(MG37_MARGINS, "rb") as handle:
+            margins_bytes = handle.read()
+        margins = json.loads(margins_bytes).get(HOST, {})
+        port = mg8_port()
+        fixed = dict(port["FIXED"])
+        absent = [name for name in families if name not in fixed
+                  and "second" not in margins.get(name, {}).get("edges", {})]
+        if absent:
+            return {"error": f"margins37 holds no second-call edge for the families {absent} on {HOST}"}
+        variants = j55_variants()
+        wanted = {label: variants.get(name) for label, name in J55_PRIMES}
+        if not all(wanted.values()):
+            return {"error": f"hist43c names no variant for {[l for l, v in wanted.items() if not v]}"}
+        needed = {prime["family"] for variant in wanted.values() for prime in variant["primes"]
+                  if prime["family"] != "own"}
+        if any(name in fixed for name in families):
+            needed.add(J55_ANCHOR)
+        out = {"call": GATE["CALL"], "wsl": False, "contexts": list(BAND40_CONTEXTS), "runs_per_row": J55_RUNS,
+               "levels": list(J55_RELATIVE), "primes": [label for label, _ in J55_PRIMES], "families": families,
+               "margins37_sha256": __import__("hashlib").sha256(margins_bytes).hexdigest(), "located": {}, "pm": {}}
+        failed = mg8_profile(pool, port, out)
+        if failed:
+            return {"error": failed, **out}
+        pairs = {pair["id"]: pair for pair in band8_pairs(port, out["profile"])}
+        out.pop("located", None)
+        lacking = [name for name in sorted((set(families) - set(fixed)) | needed)
+                   if name not in pairs or name not in margins]
+        if lacking:
+            return {"error": f"no pair or margins37 entry for {lacking}", **out}
+        places, content, option_places = port["PLACES"], port["content"], port["OPTION_PLACES"]
+
+        def disk(files):
+            if any(file[0] == "hklm" for file in files):
+                raise Band8Stop("j55 builds no registry file")
+            return {places[file[0]]: content(file) for file in files if file[0] not in option_places}
+
+        rows, cases, registry = [], [], {}
+        for family in families:
+            # A fixed case has no level axis: one level (rel 0) and the own-relative primes anchored on J55_ANCHOR.
+            if family in fixed:
+                steps, base, pair = ((0, None),), None, None
+            else:
+                pair, base = pairs[family], margins[family]["edges"]["second"]["near_level"]
+                steps = tuple((rel, rel) for rel in J55_RELATIVE)
+            for rel, _ in steps:
+                level = base
+                for _ in range(abs(rel)):
+                    level = band8_next(pair, level, "far" if rel > 0 else "near")
+                made = (family, fixed[family]) if family in fixed else pair["near_at"](level)
+                for label, _ in J55_PRIMES:
+                    primed = []
+                    for prime in wanted[label]["primes"]:
+                        of = family if prime["family"] == "own" else prime["family"]
+                        if family in fixed and prime["family"] == "own":
+                            if prime["how"] == "n":
+                                return {"error": f"{label} stands at the case's own level, a fixed case has none", **out}
+                            of = J55_ANCHOR
+                        plevel = j55_level(pairs, margins, of, prime, level)
+                        primed.append(pairs[of]["near_at"](plevel)[1])
+                    if family in fixed and label not in ("P0", "Pn", "Pm"):
+                        label = f"{label}@{J55_ANCHOR}"
+                    name = f"{made[0]}__{label}"
+                    case = (name, made[1]) + tuple(made[2:])
+                    registry[name] = primed
+                    cases.append(case)
+                    rows.append({"family": family, "rel": rel, "level": level, "prime": label, "case": made[0],
+                                 "startup": port["case_startup"](case), "files": [list(file) for file in made[1]],
+                                 "primes": [[list(file) for file in files] for files in primed]})
+        if len({case[0] for case in cases}) != len(cases):
+            return {"error": "two cases share a name", **out}
+        plain_prepare = port["prepare"]
+
+        def prepare_with_primes(name, files, folder=None):
+            """The recorder's spec with the case's primes: each resolve of the process lists its own files in full, a
+            path it does not use as null, and a second call with a list of primes runs only those (none for P0)."""
+            spec_path = plain_prepare(name, files, folder)
+            with open(spec_path, encoding="utf-8") as handle:
+                spec = json.load(handle)
+            if len(spec["cases"]) != 1:
+                raise Band8Stop(f"{name}: j55 builds single-step cases")
+            sets = [disk(files)] + [disk(prime) for prime in registry[name]]
+            paths = sorted(set().union(*sets))
+            full = [{path: one.get(path) for path in paths} for one in sets]
+            spec["cases"][0]["files"] = full[0]
+            spec["primes"] = [{"name": f"prime{index}", "options": "same", "gc": 0, "files": one}
+                              for index, one in enumerate(full[1:])]
+            with open(spec_path, "w", encoding="utf-8") as handle:
+                json.dump(spec, handle)
+            return spec_path
+        port["prepare"] = prepare_with_primes
+        version = subprocess.run([NODE, "--version"], capture_output=True, check=True, env={}).stdout.decode().strip()
+        port["LABEL"] = f"{version} {HOST}"
+        plain_run, current = port["run"], {"context": None}
+
+        def run_in_context(spec_path, node_flags, startup=port["STARTUP_BYTES"]):
+            GATE["in_context"](current["context"])
+            try:
+                return plain_run(spec_path, node_flags, startup)
+            finally:
+                GATE["in_context"](None)
+        port["run"] = run_in_context
+
+        def record(case):
+            try:
+                return port["reference"](*case)
+            except SystemExit:
+                return {"name": case[0], "failed": True}
+
+        entries = list(pool.map(record, cases))
+        out["reference_failed"] = [entry["name"] for entry in entries if entry.get("failed")]
+        out["rejected_otherwise"] = [entry["name"] for entry in entries if not entry.get("failed")
+                                     and entry.get("error") is not None and entry["error"].get("name") != "RangeError"]
+        kept = [(case, row, entry) for case, row, entry in zip(cases, rows, entries) if not entry.get("failed")]
+        port["CASES"] = [case for case, _, _ in kept]
+        entries = [entry for _, _, entry in kept]
+        host = MG8_HOSTS[HOST]
+        folder = os.path.join(os.path.dirname(OUT), "j55")
+        shutil.rmtree(folder, ignore_errors=True)
+        os.makedirs(folder, exist_ok=True)
+        rows_path = os.path.join(folder, "rows.jsonl")
+        written, missed_all, cases_keys = 0, {}, []
+        with open(rows_path, "w", encoding="utf-8") as sink:
+            for context in BAND40_CONTEXTS:
+                shutil.rmtree(port["FOLDER"], ignore_errors=True)
+                port["FOLDER"] = tempfile.mkdtemp()
+                current["context"] = context
+                seen, missed = port["observe"](entries, J55_RUNS, f"{host}, second call, {context} context")
+                current["context"] = None
+                shutil.rmtree(port["FOLDER"], ignore_errors=True)
+                missed_all[context] = len(missed)
+                banded = {band["name"]: band["outcomes"] for band in seen["bands"]}
+                # One run of every case with the reference flags in this context, the run the answers mark "ref" (as
+                # band40 marks its first run).
+                def ref_once(case):
+                    one = tempfile.mkdtemp()
+                    try:
+                        return port["run"](port["prepare"](case[0], case[1], one), port["REFERENCE_FLAGS"],
+                                           port["case_startup"](case))
+                    finally:
+                        shutil.rmtree(one, ignore_errors=True)
+                current["context"] = context
+                refs = list(pool.map(ref_once, port["CASES"]))
+                current["context"] = None
+                ref_of = {case[0]: {key: ref[key] for key in MG8_ANSWERS} for case, ref in zip(port["CASES"], refs)}
+                for (case, row, entry) in kept:
+                    outcomes = banded.get(case[0]) or [{**{key: entry[key] for key in MG8_ANSWERS}, "runs": J55_RUNS}]
+                    answers = [{"answer": {key: outcome[key] for key in MG8_ANSWERS}, "runs": outcome["runs"]}
+                               for outcome in outcomes]
+                    for answer in answers:
+                        if answer["answer"] == ref_of[case[0]]:
+                            answer["ref"] = True
+                            break
+                    else:
+                        answers.append({"answer": ref_of[case[0]], "runs": 0, "ref": True})
+                    startup = row["startup"]
+                    sha = band39_files_sha256((case[0], [tuple(file) for file in row["files"]]), startup)
+                    sink.write(json.dumps({
+                        "host": HOST, "wsl": False, "call": GATE["CALL"], "context": context, "family": row["family"],
+                        "level": row["level"], "rel": row["rel"], "prime": row["prime"], "case": row["case"],
+                        "startup": startup, "files": row["files"], "files_sha256": sha, "primes": row["primes"],
+                        "answers": answers}) + "\n")
+                    written += 1
+        for case, row, _ in kept:
+            cases_keys.append([row["family"], row["rel"], row["level"], row["prime"], row["case"], row["startup"],
+                               row["files"], row["primes"]])
+        with open(rows_path, "rb") as handle:
+            out["rows_sha256"] = __import__("hashlib").sha256(handle.read()).hexdigest()
+        out["cases_sha256"] = __import__("hashlib").sha256(json.dumps(sorted(cases_keys, key=json.dumps)).encode()).hexdigest()
+        out["cases"], out["rows"], out["missed_reference_answer"] = len(kept), written, missed_all
+        if out["reference_failed"]:
+            out["error"] = f"the reference and cross-check flags answer otherwise: {out['reference_failed'][:5]}"
+        elif out["rejected_otherwise"]:
+            out["error"] = f"a case rejects with something other than a RangeError: {out['rejected_otherwise'][:5]}"
+        return out
+    return go
+
+
 # ---- mg8x: the record of the entries the band8x and band8c rounds moved (PLAN Updates 74 and 75) ----
 # mg8x_moved.json: host -> pair -> list of {side, axis, level, case}; a pair moved on both sides lists both.
 MG8X_RUNS = MG8_OBSERVE_RUNS
@@ -4368,6 +4604,8 @@ def round8_units():
     out += [("rows41:fixture", rows41_unit())]
     # Every golden at its band37 union margin, observed from every caller context (ruling 37 B, PLAN Update 96).
     out += [("mg37:goldens", mg37_unit())]
+    # The held-out second-call rows of ruling 46 rule 2 (job 55), from margins37's second-call edges.
+    out += [("j55:rows", j55_unit())]
     return out
 
 

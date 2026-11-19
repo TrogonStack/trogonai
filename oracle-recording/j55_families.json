@@ -1,0 +1,241 @@
+{
+ "families": {
+  "admin_arrays": {
+   "misses_any_run": 3,
+   "hosts": [
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "admin_inner": {
+   "misses_any_run": 3,
+   "hosts": [
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "drop_merge": {
+   "misses_any_run": 10,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 11
+  },
+  "drop_merge_arrays": {
+   "misses_any_run": 12,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 12
+  },
+  "drop_read": {
+   "misses_any_run": 3,
+   "hosts": [
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "drop_read_arrays": {
+   "misses_any_run": 3,
+   "hosts": [
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "effective_ask": {
+   "misses_any_run": 2,
+   "hosts": [
+    "linux x86_64"
+   ],
+   "val45_rows": 7
+  },
+  "machine_after_held_array": {
+   "misses_any_run": 6,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "machine_after_held_arrays": {
+   "misses_any_run": 17,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 13
+  },
+  "machine_merge": {
+   "misses_any_run": 17,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 13
+  },
+  "machine_read": {
+   "misses_any_run": 6,
+   "hosts": [
+    "darwin arm64"
+   ],
+   "val45_rows": 6
+  },
+  "machine_read_arrays": {
+   "misses_any_run": 6,
+   "hosts": [
+    "darwin arm64"
+   ],
+   "val45_rows": 6
+  },
+  "main_merge": {
+   "misses_any_run": 3,
+   "hosts": [
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "main_merge_arrays": {
+   "misses_any_run": 3,
+   "hosts": [
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "main_read": {
+   "misses_any_run": 3,
+   "hosts": [
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "main_read_arrays": {
+   "misses_any_run": 3,
+   "hosts": [
+    "linux aarch64"
+   ],
+   "val45_rows": 6
+  },
+  "origin_copy": {
+   "misses_any_run": 2,
+   "hosts": [
+    "darwin arm64"
+   ],
+   "val45_rows": 7
+  },
+  "origin_merge": {
+   "misses_any_run": 13,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 11
+  },
+  "origin_read": {
+   "misses_any_run": 4,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64"
+   ],
+   "val45_rows": 8
+  },
+  "origin_read_arrays": {
+   "misses_any_run": 10,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 11
+  },
+  "proto_effective": {
+   "misses_any_run": 28,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 20
+  },
+  "proto_origin": {
+   "misses_any_run": 154,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 83
+  },
+  "proto_sources": {
+   "misses_any_run": 132,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 72
+  },
+  "sources_copy": {
+   "misses_any_run": 6,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 9
+  },
+  "surrogates_beside_private_use": {
+   "misses_any_run": 3,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 3
+  },
+  "surrogates_drop": {
+   "misses_any_run": 3,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 3
+  },
+  "surrogates_main": {
+   "misses_any_run": 3,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64",
+    "linux x86_64"
+   ],
+   "val45_rows": 3
+  },
+  "xp_login": {
+   "misses_any_run": 4,
+   "hosts": [
+    "darwin arm64",
+    "linux aarch64"
+   ],
+   "val45_rows": 2
+  }
+ },
+ "not_missed": [
+  "copy_arrays",
+  "drop_arrays",
+  "drop_objects",
+  "effective_ask_machine",
+  "effective_copy",
+  "machine_copy",
+  "main_arrays",
+  "main_objects",
+  "partial_drop",
+  "proto_machine"
+ ]
+}

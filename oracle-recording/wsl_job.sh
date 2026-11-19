@@ -91,7 +91,7 @@ case "$mode" in
     ;;
   mg37)
     # The organization goldens at their band40 margins, observed from every caller context (PLAN Update 107).
-    export R3_ONLY='^(pm8:|mg37:)'
+    export R3_ONLY='^(pm8:|mg37:|j55:)'
     "$py" -I oracle-recording/r3.py oracle-recording/native "$node_bin" ~/package "$out/r3.json" 1 1 \
       2> >(tee "$out/r3.log" >&2)
     ;;

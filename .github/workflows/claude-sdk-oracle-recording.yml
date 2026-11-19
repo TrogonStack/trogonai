@@ -1450,6 +1450,19 @@ jobs:
           mkdir -p "$RUNNER_TEMP/out"
           cargo test --release -p trogon-claude-agent-sdk --lib scan45 -- --nocapture 2> >(tee "$RUNNER_TEMP/out/cells.log" >&2)
 
+      - name: Scan the job 55 rows
+        # Ruling 46 rule 2 and Ruling 47: the held-out second-call rows with their primes, once job 55 has recorded them.
+        if: always() && hashFiles('scratch/oracle-recording/model40/j55.jsonl') != ''
+        working-directory: rsworkspace
+        env:
+          SCAN40_ROWS: ${{ github.workspace }}/scratch/oracle-recording/model40/j55.jsonl
+          SCAN40_OUT: ${{ runner.temp }}/out/j55-${{ matrix.shard }}.jsonl
+          SCAN40_SHARD: ${{ matrix.shard }}
+          SCAN40_SHARDS: "4"
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cargo test --release -p trogon-claude-agent-sdk --lib scan40 -- --nocapture 2> >(tee "$RUNNER_TEMP/out/j55.log" >&2)
+
       - name: Run the crate's own tests
         if: always()
         continue-on-error: true
@@ -1486,7 +1499,7 @@ jobs:
     env:
       R3_CALL: ${{ matrix.call }}
       R3_CONTEXT: toplevel
-      R3_ONLY: "^(pm8:|mg37:)"
+      R3_ONLY: "^(pm8:|mg37:|j55:)"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
