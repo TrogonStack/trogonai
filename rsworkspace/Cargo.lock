@@ -5572,6 +5572,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sandbox-command-supervisor"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "trogon-std",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
