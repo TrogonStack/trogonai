@@ -39,6 +39,12 @@ fn logging_starts_without_otel_when_the_exporters_cannot_be_built() {
         .args(["--exact", TEST_NAME, "--nocapture"])
         .env(CHILD_MARKER, "1")
         .env("OTEL_EXPORTER_OTLP_ENDPOINT", "not a uri")
+        // Signal-specific endpoints override the generic one, and RUST_LOG could filter out
+        // the warning this test looks for, so neither may leak in from the caller.
+        .env_remove("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+        .env_remove("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+        .env_remove("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+        .env("RUST_LOG", "info")
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);

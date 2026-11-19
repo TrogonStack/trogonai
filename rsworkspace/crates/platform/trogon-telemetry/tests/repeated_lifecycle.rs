@@ -8,7 +8,7 @@ use trogon_std::fs::MemFs;
 use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 #[test]
-fn a_second_init_keeps_the_first_providers_and_a_second_shutdown_reports_every_provider() {
+fn a_second_shutdown_reports_every_provider_after_a_repeated_init() {
     let env = InMemoryEnv::new();
     env.set("TROGON_LOG_DIR", "/tmp/test-repeated-lifecycle");
     let fs = MemFs::new();

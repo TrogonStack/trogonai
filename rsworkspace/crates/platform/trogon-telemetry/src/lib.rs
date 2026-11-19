@@ -117,16 +117,20 @@ where
     match try_init_otel(service_name, resource_attributes, env) {
         Ok((tracer_provider, meter_provider, logger_provider)) => {
             opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
-            opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
             let tracer = tracer_provider.tracer(service_name.as_str().to_owned());
             let otel_trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-            if trace::TRACER_PROVIDER.set(tracer_provider).is_err() {
+            // Install a provider globally only when it is the one `shutdown_otel` will stop;
+            // otherwise a repeated init would route telemetry through a provider nobody flushes.
+            if trace::TRACER_PROVIDER.set(tracer_provider.clone()).is_ok() {
+                opentelemetry::global::set_tracer_provider(tracer_provider);
+            } else {
                 eprintln!("WARN: tracer provider already initialized");
             }
 
-            opentelemetry::global::set_meter_provider(meter_provider.clone());
-            if metric::METER_PROVIDER.set(meter_provider).is_err() {
+            if metric::METER_PROVIDER.set(meter_provider.clone()).is_ok() {
+                opentelemetry::global::set_meter_provider(meter_provider);
+            } else {
                 eprintln!("WARN: meter provider already initialized");
             }
 
