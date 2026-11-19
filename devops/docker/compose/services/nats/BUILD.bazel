@@ -23,12 +23,19 @@ sh_test(
     tags = ["requires-network"],
 )
 
-# Drives provision-audit.sh against a stand-in `nats` CLI, so it needs no
-# server, no container and no copy; jq comes from the host like Docker does.
+# Each drives its provisioning script against a stand-in `nats` CLI, so it
+# needs no server, no container and no copy; jq comes from the host like
+# Docker does.
 sh_test(
     name = "provision_audit_test",
     srcs = ["provision-audit.test.sh"],
     data = ["provision-audit.sh"],
+)
+
+sh_test(
+    name = "provision_secrets_invalidation_test",
+    srcs = ["provision-secrets-invalidation.test.sh"],
+    data = ["provision-secrets-invalidation.sh"],
 )
 
 # Each sources the install helper it checks and stages files in a temporary
