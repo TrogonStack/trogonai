@@ -1,0 +1,146 @@
+edition = "2024";
+
+package trogonai.session.plans.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/agents/agents/v1alpha1/agent_revision.proto";
+import "trogonai/agents/agents/v1alpha1/dependencies.proto";
+import "trogonai/agents/agents/v1alpha1/digest.proto";
+import "trogonai/connections/admission/v1alpha1/resolution.proto";
+import "trogonai/library/memories/v1alpha1/claim_check.proto";
+import "trogonai/library/memories/v1alpha1/memory_id.proto";
+import "trogonai/library/memories/v1alpha1/memory_kind.proto";
+
+// Retains each complete declaration beside its typed resolution. Admission
+// joins it to the original declaring resource, validates exact closure and
+// current authority, and refuses unsupported or undeclared integrations.
+message ResolvedDependency {
+  option (buf.validate.message).cel = {
+    id: "resolved_dependency.binding_matches"
+    message: "dependency binding name must match its declaration"
+    expression: "(has(this.skill_declaration) && this.binding_name == this.skill_declaration.binding_name) || (has(this.tool_declaration) && this.binding_name == this.tool_declaration.binding_name) || (has(this.delegate_declaration) && this.binding_name == this.delegate_declaration.binding_name) || (has(this.memory_declaration) && this.binding_name == this.memory_declaration.binding_name) || (has(this.connection_declaration) && this.binding_name == this.connection_declaration.binding_name)"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_dependency.resolution_kind"
+    message: "resolution must match the declaration kind"
+    expression: "has(this.unavailable) || (has(this.skill_declaration) && has(this.skill)) || (has(this.tool_declaration) && has(this.tool)) || (has(this.delegate_declaration) && has(this.delegate)) || (has(this.memory_declaration) && has(this.memory)) || (has(this.connection_declaration) && has(this.connection))"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_dependency.optional_absence"
+    message: "only eligible optional declarations may be unavailable"
+    expression: "!has(this.unavailable) || (has(this.tool_declaration) && this.tool_declaration.requirement == 2) || (has(this.delegate_declaration) && this.delegate_declaration.requirement == 2) || (has(this.memory_declaration) && this.memory_declaration.requirement == 2) || (has(this.connection_declaration) && this.connection_declaration.requirement == 2)"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_dependency.exact_pins"
+    message: "resolved exact pins must preserve the declared resource and digest"
+    expression: "(!has(this.skill) || !has(this.skill_declaration) || (this.skill.version_ref == this.skill_declaration.version_ref && this.skill.content_digest == this.skill_declaration.content_digest)) && (!has(this.tool) || !has(this.tool_declaration.exact_pin) || this.tool == this.tool_declaration.exact_pin) && (!has(this.delegate) || !has(this.delegate_declaration.exact_pin) || this.delegate == this.delegate_declaration.exact_pin)"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_dependency.connection_binding"
+    message: "resolved connection binding must preserve the declared name"
+    expression: "!has(this.connection) || this.connection.binding_name == this.binding_name"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_dependency.memory_required"
+    message: "required memory resolution must contain an instance"
+    expression: "!has(this.memory) || !has(this.memory_declaration) || this.memory_declaration.requirement != 1 || this.memory.instances.size() > 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_dependency.memory_kind"
+    message: "memory instances must match the declared kind"
+    expression: "!has(this.memory) || !has(this.memory_declaration) || this.memory.instances.all(instance, instance.kind.value == this.memory_declaration.selector.kind)"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_dependency.pin_bounds"
+    message: "resolved dependency identifiers and versions must fit finite UTF8 bounds"
+    expression: "(!has(this.tool) || (size(bytes(this.tool.tool_id)) <= 128 && size(bytes(this.tool.version)) <= 128)) && (!has(this.delegate) || size(bytes(this.delegate.agent_id)) <= 128) && (!has(this.memory_declaration) || size(bytes(this.memory_declaration.selector.kind)) <= 128)"
+  };
+
+  DependencyDeclarer declaring_resource = 1 [(buf.validate.field).required = true];
+  string binding_name = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {
+      min_bytes: 1
+      max_bytes: 128
+    }
+  ];
+  oneof declaration {
+    option (buf.validate.oneof).required = true;
+
+    trogonai.agents.agents.v1alpha1.SkillDeclaration skill_declaration = 3;
+    trogonai.agents.agents.v1alpha1.ToolDeclaration tool_declaration = 4;
+    trogonai.agents.agents.v1alpha1.DelegateDeclaration delegate_declaration = 5;
+    trogonai.agents.agents.v1alpha1.MemoryDeclaration memory_declaration = 6;
+    trogonai.agents.agents.v1alpha1.ConnectionDeclaration connection_declaration = 7;
+  }
+  oneof resolution {
+    option (buf.validate.oneof).required = true;
+
+    ResolvedSkill skill = 8;
+    trogonai.agents.agents.v1alpha1.ExactToolVersionPin tool = 9;
+    trogonai.agents.agents.v1alpha1.ExactDelegateRevisionPin delegate = 10;
+    ResolvedMemorySet memory = 11;
+    trogonai.connections.admission.v1alpha1.ResolvedConnectionUse connection = 12;
+    // Only an unavailable eligible optional resource permits this outcome.
+    google.protobuf.Empty unavailable = 13;
+  }
+}
+
+// Actual immutable resource identity defines closure nodes and cycle checks;
+// request-supplied graph node IDs are not accepted as declaring identities.
+message DependencyDeclarer {
+  option (buf.validate.message).cel = {
+    id: "dependency_declarer.identity_bounds"
+    message: "declaring resource identifiers and versions must fit finite UTF8 bounds"
+    expression: "(!has(this.agent) || size(bytes(this.agent.agent_id)) <= 128) && (!has(this.tool) || (size(bytes(this.tool.tool_id)) <= 128 && size(bytes(this.tool.version)) <= 128)) && (!has(this.delegate) || size(bytes(this.delegate.agent_id)) <= 128)"
+  };
+
+  oneof resource {
+    option (buf.validate.oneof).required = true;
+
+    trogonai.agents.agents.v1alpha1.AgentRevisionRef agent = 1;
+    trogonai.agents.agents.v1alpha1.ExactToolVersionPin tool = 2;
+    trogonai.agents.agents.v1alpha1.ExactDelegateRevisionPin delegate = 3;
+    ResolvedSkill skill = 4;
+  }
+}
+
+message ResolvedSkill {
+  option (buf.validate.message).cel = {
+    id: "resolved_skill.identity_bounds"
+    message: "skill identifiers and versions must fit finite UTF8 bounds"
+    expression: "!has(this.version_ref) || (size(bytes(this.version_ref.skill_id.value)) <= 128 && size(bytes(this.version_ref.version)) <= 128)"
+  };
+
+  trogonai.agents.agents.v1alpha1.SkillVersionRef version_ref = 1 [(buf.validate.field).required = true];
+  trogonai.agents.agents.v1alpha1.Digest content_digest = 2 [(buf.validate.field).required = true];
+}
+
+// A declared kind may resolve to several exact entries. Source owners verify
+// the retained content and supersede history; a tuple is not snapshot authority.
+message ResolvedMemorySet {
+  option (buf.validate.message).cel = {
+    id: "resolved_memory_set.unique_instances"
+    message: "memory snapshot identities must be unique"
+    expression: "this.instances.map(instance, instance.memory_id.value).unique()"
+  };
+
+  repeated ResolvedMemory instances = 1 [(buf.validate.field).repeated.max_items = 128];
+}
+
+message ResolvedMemory {
+  option (buf.validate.message).cel = {
+    id: "resolved_memory.identity_bounds"
+    message: "memory identity kind and content locator must fit finite UTF8 bounds"
+    expression: "(!has(this.memory_id) || size(bytes(this.memory_id.value)) <= 128) && (!has(this.kind) || size(bytes(this.kind.value)) <= 128) && (!has(this.content) || size(bytes(this.content.storage_ref.value)) <= 2048)"
+  };
+
+  trogonai.library.memories.v1alpha1.MemoryId memory_id = 1 [(buf.validate.field).required = true];
+  uint64 source_revision = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  trogonai.library.memories.v1alpha1.MemoryKind kind = 3 [(buf.validate.field).required = true];
+  trogonai.library.memories.v1alpha1.ClaimCheck content = 4 [(buf.validate.field).required = true];
+}
