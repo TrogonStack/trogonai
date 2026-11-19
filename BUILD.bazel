@@ -3,6 +3,7 @@
 exports_files(
     [
         "buf.gen.yaml",
+        "buf.session.gen.yaml",
         "buf.lock",
         "buf.yaml",
     ],
