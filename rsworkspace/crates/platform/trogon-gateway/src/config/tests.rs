@@ -251,6 +251,28 @@ webhook_secret = { env = "TROGON_GATEWAY_TEST_WEBHOOK_SECRET" }
 }
 
 #[test]
+fn whatsapp_resolves_distinct_credential_references() {
+    let file = write_toml(
+        r#"
+[sources.whatsapp.integrations.support.webhook]
+waba_id = "100"
+phone_number_id = "101"
+verify_token = { env = "WHATSAPP_TEST_VERIFY_TOKEN" }
+app_secret = { env = "WHATSAPP_TEST_APP_SECRET" }
+"#,
+    );
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("WHATSAPP_TEST_VERIFY_TOKEN", "test-verification");
+    env.set("WHATSAPP_TEST_APP_SECRET", "test-signing");
+    let input = load_config::<GatewayConfig>(Some(file.path())).unwrap();
+    let config = resolve(input, &NatsArgs::default(), &env).unwrap();
+    let webhook = &config.whatsapp[0].config.webhook;
+
+    assert_eq!(webhook.verify_token.as_str(), "test-verification");
+    assert_eq!(webhook.app_secret.as_str(), "test-signing");
+}
+
+#[test]
 fn webhook_secret_missing_env_is_invalid() {
     let toml = r#"
 [sources.github.integrations.primary.webhook]
