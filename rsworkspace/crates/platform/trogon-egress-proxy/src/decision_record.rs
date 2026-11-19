@@ -21,6 +21,7 @@
 //! Live snapshots bind their configured bucket and incarnation in the policy
 //! source and retain the observed producer generation as the projection revision.
 
+use trogon_audit::constants::DESTINATION_TOO_LONG;
 use trogon_audit::{
     Actor, AuditName, AuditNameError, DecisionFacts, DecisionOutcome, Enforcement, ReasonCode, Record, RecordScope,
     Stamp, Surface, TlsMode,
@@ -29,7 +30,7 @@ use trogon_nats::NatsToken;
 
 use crate::audit::{AuditEvent, Decision};
 use crate::audit_error::AuditError;
-use crate::constants::{DESTINATION_TOO_LONG_TARGET, NO_DESTINATION_TARGET};
+use crate::constants::NO_DESTINATION_TARGET;
 use crate::destination::Destination;
 use crate::policy_source::PolicySource;
 
@@ -85,7 +86,7 @@ fn target(destination: Option<&Destination>) -> Result<AuditName, AuditNameError
     let Some(destination) = destination else {
         return AuditName::new(NO_DESTINATION_TARGET);
     };
-    AuditName::new(destination.to_string()).or_else(|_| AuditName::new(DESTINATION_TOO_LONG_TARGET))
+    AuditName::new(destination.to_string()).or_else(|_| AuditName::new(DESTINATION_TOO_LONG))
 }
 
 #[cfg(test)]
