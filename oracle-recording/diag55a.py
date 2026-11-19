@@ -287,7 +287,10 @@ def finish(code):
 try:
     result["pm8"] = freeze_units()
     save()
-    built = define_builder()(None, None)
+    # The build text profiles through mg8_profile(pool, ...), so it gets the same two pools r3.py's main hands a unit.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=G["WORKERS"]) as build_pool, \
+            concurrent.futures.ThreadPoolExecutor(max_workers=G["QUIET"]) as build_quiet:
+        built = define_builder()(build_pool, build_quiet)
 except (Exception, SystemExit) as error:
     result["stops"].append(f"build: {error!r}"[:600])
     finish(1)
