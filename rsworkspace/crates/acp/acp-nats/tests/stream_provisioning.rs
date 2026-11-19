@@ -147,6 +147,17 @@ impl JetStreamContext for InspectionContext {
     ) -> Result<(), Self::Error> {
         self.writes.create_or_reconcile_stream(config, owned).await
     }
+
+    async fn create_or_reconcile_stream_if_owned<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+        owned: &[ProvisionedStreamField],
+        subject_namespace: &str,
+    ) -> Result<bool, Self::Error> {
+        self.writes
+            .create_or_reconcile_stream_if_owned(config, owned, subject_namespace)
+            .await
+    }
 }
 
 impl JetStreamGetStream for InspectionContext {

@@ -78,9 +78,11 @@ async fn provisioning_reconciles_owned_fields_and_preserves_operator_configurati
         max_age: Duration::from_secs(90),
         ..Default::default()
     };
-    JetStreamContext::create_or_reconcile_stream(&broker.client, desired.clone(), &owned)
-        .await
-        .expect("reconcile stream");
+    assert!(
+        JetStreamContext::create_or_reconcile_stream_if_owned(&broker.client, desired.clone(), &owned, "jobs.")
+            .await
+            .expect("reconcile owned stream")
+    );
     let live = JetStreamGetStream::get_stream(&broker.client, "RECONCILED")
         .await
         .expect("reconciled stream");

@@ -103,13 +103,8 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
         &self,
         desired: S,
         owned: &[ProvisionedStreamField],
-        _subject_namespace: &str,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async move {
-            self.create_or_reconcile_stream(desired, owned).await?;
-            Ok(true)
-        }
-    }
+        subject_namespace: &str,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
 pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {

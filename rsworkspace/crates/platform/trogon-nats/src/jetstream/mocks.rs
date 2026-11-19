@@ -229,6 +229,7 @@ pub enum MockStreamProvisionError {
 pub struct MockJetStreamContext {
     created_streams: Arc<Mutex<Vec<stream::Config>>>,
     should_fail: Arc<Mutex<bool>>,
+    should_refuse_owned: Arc<Mutex<bool>>,
     stream_writes: Arc<Mutex<usize>>,
 }
 
@@ -237,6 +238,7 @@ impl MockJetStreamContext {
         Self {
             created_streams: Arc::new(Mutex::new(Vec::new())),
             should_fail: Arc::new(Mutex::new(false)),
+            should_refuse_owned: Arc::new(Mutex::new(false)),
             stream_writes: Arc::new(Mutex::new(0)),
         }
     }
@@ -256,8 +258,22 @@ impl MockJetStreamContext {
         *self.should_fail.lock().unwrap() = true;
     }
 
+    pub fn refuse_next_owned_reconciliation(&self) {
+        *self.should_refuse_owned.lock().unwrap() = true;
+    }
+
     fn take_failure(&self) -> bool {
         let mut flag = self.should_fail.lock().unwrap();
+        if *flag {
+            *flag = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn take_owned_refusal(&self) -> bool {
+        let mut flag = self.should_refuse_owned.lock().unwrap();
         if *flag {
             *flag = false;
             true
@@ -355,6 +371,9 @@ impl JetStreamContext for MockJetStreamContext {
         let desired = desired.into();
         if self.take_failure() {
             return Err(MockStreamProvisionError::Reconciliation);
+        }
+        if self.take_owned_refusal() {
+            return Ok(false);
         }
         let mut streams = self.created_streams.lock().unwrap();
         let Some(existing) = streams.iter_mut().find(|existing| existing.name == desired.name) else {
