@@ -2381,27 +2381,28 @@ index 0000000000..c588df1e8c
 +}
 diff --git a/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
 new file mode 100644
-index 0000000000..86aac4e8a5
+index 0000000000..adbd253c71
 --- /dev/null
 +++ b/rsworkspace/crates/platform/trogon-claude-agent-sdk/src/node_stack_contexts_tests.rs
-@@ -0,0 +1,582 @@
+@@ -0,0 +1,597 @@
 +//! Each answer the pinned TypeScript `resolveSettings` gave for a managed settings case at and around the edges of the
 +//! goldens, from each caller context the recorder awaits it in: the top level of a module, a chain nested in another,
 +//! and the callback of a timer, an immediate, an I/O completion and a child process exit. The caller's frames sit
 +//! under the chain of microtasks the resolve resumes on, so each context gives the resolve its own room: the timer,
 +//! immediate and I/O callbacks the same room on every run, a child process exit a room that moves from one process to
 +//! the next. Each answer must be the model's answer, with the same `catch` blocks taking the `RangeError`, at an offset
-+//! inside the interval the refit measured for its host, call position and context, on the 16-byte grid; one offset
++//! on the 16-byte grid of the intervals the refit measured for its host, call position and contexts; one offset
 +//! explains every case of a timer, an immediate or an I/O callback.
 +//!
 +//! A case can give more than one answer in a context, since the runs of one context do not all land on the same
 +//! frames. The answer the reference run gave is the row labeled `ref`: the model must give it exactly at the frozen
 +//! offset of its context, which is 0 for the top level and a nested chain and the one offset of a timer, an immediate
-+//! or an I/O callback. Every other answer the runs gave is a row labeled `alt`: the model must give it at some offset of
-+//! the context's grid, which the row names. A child process exit is not deterministic, since its room is a sample of
-+//! each process: the reference run and the cross-check run of one event answer differently in some events, so every
-+//! answer a child exit gave is an `alt` row, never a `ref` one, and the model must give it at some offset inside the
-+//! interval of child exits. The fixture labels record that ruling and those events.
++//! or an I/O callback. Every other answer the runs gave is a row labeled `alt`: the timing of the engine that gave it
++//! takes stack the way a caller context does, so the model must give it at some offset, which the row names, of the
++//! union of the grids of every context of its host and call position, the interval of child exits among them. A child
++//! process exit is not deterministic, since its room is a sample of each process: the reference run and the
++//! cross-check run of one event answer differently in some events, so every answer a child exit gave is an `alt` row,
++//! never a `ref` one. The fixture labels record that ruling and those events.
 +
 +use std::{collections::BTreeSet, thread};
 +
@@ -2833,18 +2834,32 @@ index 0000000000..86aac4e8a5
 +}
 +
 +/// The offset a row is checked at. The reference answer is checked at the frozen offset of its context: 0 for the top
-+/// level and a nested chain, the one offset of a timer, an immediate or an I/O callback. Any other answer, and the
-+/// answer of a child process exit, is checked at the offset the row names. It must lie inside the context's interval,
-+/// on the grid.
++/// level and a nested chain, the one offset of a timer, an immediate or an I/O callback, which lies inside the
++/// context's interval. Any other answer, and the answer of a child process exit, is checked at the offset the row
++/// names, which lies inside the interval of some context of its host and call position. Either is on the grid.
 +fn checked_offset(answers: &Value, row: &[Value], host: &str, call: &str, context: &str) -> Result<isize, Failure> {
-+    let at = match (is_reference(row)?, context) {
++    let reference = is_reference(row)?;
++    let at = match (reference, context) {
 +        (true, "toplevel" | "nested") => MODULE_OFFSET,
 +        (true, _) if SETTLED.contains(&context) => offset(&answers["offsets"][host][call][context])?,
 +        _ => offset(&row[7])?,
 +    };
-+    let (low, high) = interval(answers, host, call, context)?;
-+    if at < low || at > high || at % STEP != 0 {
-+        return Err(format!("{host} {call} {context}: offset {at} is off the grid of [{low}, {high}]").into());
++    let held = |context: &str| -> Result<bool, Failure> {
++        let (low, high) = interval(answers, host, call, context)?;
++        Ok(low <= at && at <= high)
++    };
++    let on_grid = if reference {
++        held(context)?
++    } else {
++        let mut any = false;
++        for context in CONTEXTS {
++            any |= held(context)?;
++        }
++        any
++    };
++    if !on_grid || at % STEP != 0 {
++        let grid = if reference { context } else { "every context" };
++        return Err(format!("{host} {call} {context}: offset {at} is off the grid of {grid}").into());
 +    }
 +    Ok(at)
 +}
