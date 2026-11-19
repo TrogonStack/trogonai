@@ -24,3 +24,8 @@ pub const RESUME_SCHEDULE_TYPE_URL: &str = v1::ResumeSchedule::TYPE_URL;
 /// therefore hand a native snapshot to the guest frame and have `decode_snapshot` accept it
 /// instead of trapping on a tag mismatch.
 pub const SCHEDULES_STATE_SCHEMA_VERSION: &str = <state_v1::State as buffa::MessageName>::FULL_NAME;
+#[cfg(feature = "session-contracts")]
+pub const FILE_DESCRIPTOR_SET_JSON: &[u8] = include_bytes!("session_gen/contracts.json");
+
+#[cfg(feature = "session-contracts")]
+pub const PLAN_DESCRIPTOR_SET_JSON: &[u8] = include_bytes!("session_gen/plan-contracts.json");
