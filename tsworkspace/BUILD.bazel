@@ -22,6 +22,7 @@ oxfmt_bin.oxfmt_test(
         "$(rootpaths :fmt_inputs)",
         "$(rootpaths //tsworkspace/apps/console:fmt_inputs)",
         "$(rootpaths //tsworkspace/packages/proto:fmt_inputs)",
+        "$(rootpaths //tsworkspace/packages/sandbox-ws-client:fmt_inputs)",
         "$(rootpaths //tsworkspace/packages/slack-bolt-fixtures:fmt_inputs)",
     ],
     data = [
@@ -29,6 +30,7 @@ oxfmt_bin.oxfmt_test(
         ":fmt_inputs",
         "//tsworkspace/apps/console:fmt_inputs",
         "//tsworkspace/packages/proto:fmt_inputs",
+        "//tsworkspace/packages/sandbox-ws-client:fmt_inputs",
         "//tsworkspace/packages/slack-bolt-fixtures:fmt_inputs",
     ],
 )
