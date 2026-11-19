@@ -26,6 +26,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::{CreateDirAll, OpenAppendFile};
 
+static LOGGER_INITIALIZED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
 #[derive(Debug, thiserror::Error)]
 #[error("{}", self.fmt_errors())]
 pub struct TelemetryShutdownError {
@@ -110,6 +112,13 @@ where
     F: CreateDirAll + OpenAppendFile,
     A: IntoIterator<Item = ResourceAttribute>,
 {
+    // The providers and the subscriber are process-wide. A second call would build exporters
+    // nobody stops and a subscriber that cannot be installed, so only the first call runs.
+    if LOGGER_INITIALIZED.set(()).is_err() {
+        eprintln!("WARN: logger already initialized");
+        return;
+    }
+
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let stderr_layer = tracing_subscriber::fmt::layer()
@@ -133,24 +142,15 @@ where
 
             let tracer = tracer_provider.tracer(service_name.as_str().to_owned());
             let otel_trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-            // Install a provider globally only when it is the one `shutdown_otel` will stop;
-            // otherwise a repeated init would route telemetry through a provider nobody flushes.
-            if trace::TRACER_PROVIDER.set(tracer_provider.clone()).is_ok() {
-                opentelemetry::global::set_tracer_provider(tracer_provider);
-            } else {
-                eprintln!("WARN: tracer provider already initialized");
-            }
+            // The guard above makes this the only call that reaches here, so the cells are empty.
+            opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+            let _ = trace::TRACER_PROVIDER.set(tracer_provider);
 
-            if metric::METER_PROVIDER.set(meter_provider.clone()).is_ok() {
-                opentelemetry::global::set_meter_provider(meter_provider);
-            } else {
-                eprintln!("WARN: meter provider already initialized");
-            }
+            opentelemetry::global::set_meter_provider(meter_provider.clone());
+            let _ = metric::METER_PROVIDER.set(meter_provider);
 
             let otel_logs_layer = OpenTelemetryTracingBridge::new(&logger_provider);
-            if log::LOGGER_PROVIDER.set(logger_provider).is_err() {
-                eprintln!("WARN: logger provider already initialized");
-            }
+            let _ = log::LOGGER_PROVIDER.set(logger_provider);
 
             if let Err(e) = tracing_subscriber::registry()
                 .with(env_filter)
