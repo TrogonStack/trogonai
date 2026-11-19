@@ -263,7 +263,7 @@ jobs:
   goldens:
     # Every golden recorder natively, through record.py, starting from the committed golden of the host so each
     # change shows as a diff.
-    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') && !contains(github.event.head_commit.message, '[score55]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -370,7 +370,7 @@ jobs:
 
   wsl-goldens:
     # The managed organization goldens under a real WSL 2 kernel, starting from the committed linux x64 golden.
-    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') && !contains(github.event.head_commit.message, '[score55]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1477,6 +1477,61 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: model40-${{ matrix.shard }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 7
+
+  score55:
+    # Runs only when the head commit asks for it with `[score55]`: the job 55 rows of model40 shards 1 and 2, which the
+    # scoring run lost to the job timeout, rescanned as evidence only. The rows are split into 16 shards by the same
+    # index rule as scan40; shards 1, 2, 5, 6, 9, 10, 13 and 14 of 16 hold exactly the rows of shards 1 and 2 of 4.
+    # Only the scan runs, and its output is kept before anything else, so no shard reaches the job timeout.
+    if: contains(github.event.head_commit.message, '[score55]')
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 5, 6, 9, 10, 13, 14]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: cbd2b2fc3ce8d4d9513efc9d09e1aa755987f971
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: scratch
+          persist-credentials: false
+
+      - name: Apply the goldens patch
+        run: |
+          git apply scratch/oracle-recording/model40/model40.patch
+          git status --short | wc -l
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Scan the job 55 rows
+        working-directory: rsworkspace
+        env:
+          SCAN40_ROWS: ${{ runner.temp }}/j55.jsonl
+          SCAN40_OUT: ${{ runner.temp }}/out/j55-${{ matrix.shard }}.jsonl
+          SCAN40_SHARD: ${{ matrix.shard }}
+          SCAN40_SHARDS: "16"
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          gunzip -c "$GITHUB_WORKSPACE/scratch/oracle-recording/model40/j55.jsonl.gz" > "$SCAN40_ROWS"
+          cargo test --release -p trogon-claude-agent-sdk --lib scan40 -- --nocapture 2> >(tee "$RUNNER_TEMP/out/j55.log" >&2)
+
+      - name: Keep the model output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: score55-${{ matrix.shard }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 7
