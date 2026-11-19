@@ -408,3 +408,93 @@ async fn scope_reports_a_failed_disconnect_after_a_body_that_succeeded() -> Test
     server.await??;
     Ok(())
 }
+
+async fn serve_until_pending_control_closes(
+    process: ScriptedProcessHarness,
+    received: tokio::sync::oneshot::Sender<String>,
+) -> Result<(), std::io::Error> {
+    let mut lines = BufReader::new(process.stdin).lines();
+    let mut stdout = process.stdout;
+    let stderr = process.stderr;
+    let first = lines
+        .next_line()
+        .await?
+        .ok_or_else(|| std::io::Error::other("missing initialize"))?;
+    let initialize: Value = serde_json::from_str(&first)?;
+    let mut reply = serde_json::to_vec(&json!({"type":"control_response","response":{
+        "subtype":"success","request_id":initialize["request_id"],"response":{}}}))?;
+    reply.push(b'\n');
+    stdout.write_all(&reply).await?;
+    let request = lines
+        .next_line()
+        .await?
+        .ok_or_else(|| std::io::Error::other("missing pending control"))?;
+    let request: Value = serde_json::from_str(&request)?;
+    let subtype = request["request"]["subtype"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("missing control subtype"))?;
+    received
+        .send(subtype.to_owned())
+        .map_err(|_| std::io::Error::other("control receipt receiver closed"))?;
+    assert!(lines.next_line().await?.is_none());
+    drop(stdout);
+    drop(stderr);
+    process.observer.complete(0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn python_close_preserves_pending_controls_until_the_caller_cancels() -> TestResult {
+    for operation in [ControlOperation::Initialize, ControlOperation::Interrupt] {
+        let (process, harness) = ScriptedProcessSpawner::new();
+        let (received, receipt) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(serve_until_pending_control_closes(harness, received));
+        let options = ClaudeAgentOptions {
+            cli_path: Some("claude".into()),
+            argv_style: ArgvStyle::Python,
+            ..ClaudeAgentOptions::default()
+        };
+        assert!(options.limits.control_timeout.is_none());
+        let client = ClaudeSdkClient::connect_with_adapters(
+            options,
+            RuntimeAdapters {
+                environment: FixedEnvironment {
+                    directory: PathBuf::from("unused-directory"),
+                    variables: BTreeMap::new(),
+                },
+                process,
+                filesystem: NativeFileSystem,
+            },
+        )
+        .await?;
+        let handle = client.handle();
+        let mut waiting = Box::pin(async move {
+            match operation {
+                ControlOperation::Initialize => handle.reinitialize().await.map(|_| ()),
+                _ => handle.interrupt().await.map(|_| ()),
+            }
+        });
+        let subtype = tokio::select! {
+            receipt = tokio::time::timeout(Duration::from_secs(10), receipt) => receipt??,
+            result = &mut waiting => return Err(format!("{operation:?} completed before close: {result:?}").into()),
+        };
+        assert_eq!(
+            subtype,
+            if operation == ControlOperation::Initialize {
+                "initialize"
+            } else {
+                "interrupt"
+            }
+        );
+        client.close();
+        tokio::time::timeout(Duration::from_secs(10), client.disconnect()).await??;
+        tokio::time::timeout(Duration::from_secs(10), server).await???;
+        assert!(
+            futures_util::poll!(&mut waiting).is_pending(),
+            "{operation:?} completed when Python closed"
+        );
+        drop(waiting);
+        tokio::task::yield_now().await;
+    }
+    Ok(())
+}
