@@ -1,0 +1,90 @@
+# @trogonai/sandbox-ws-client
+
+> TypeScript client for sandbox-ws-gateway. Lease an isolated sandbox, run commands, move files, read usage and limits, then release it. ESM only, Node >= 22.7 or any runtime with global `fetch` and `WebSocket`. Dependencies: `ws`, `zod`.
+
+Two layers. `SandboxWsClient` is the connection and the wire-level calls. `Sandbox` wraps one lease and is what you normally use. Import both from `@trogonai/sandbox-ws-client`.
+
+## Minimal flow
+
+```ts
+import { Sandbox, SandboxWsClient, tenantId } from '@trogonai/sandbox-ws-client';
+
+const client = await SandboxWsClient.connect({
+  gatewayHttpUrl: process.env.SANDBOX_GATEWAY_HTTP_URL!,
+  gatewayWsUrl: process.env.SANDBOX_GATEWAY_WS_URL!,
+  apiKey: process.env.SANDBOX_API_KEY!,
+});
+try {
+  const sandbox = await Sandbox.create(client, { tenant: tenantId('acme'), providerPref: ['local_docker'], timeoutMs: 300_000 });
+  try {
+    const result = await sandbox.runCommand('sh', ['-c', 'echo hello']);
+    result.throwIfFailed();
+  } finally {
+    await sandbox.delete();
+  }
+} finally {
+  client.close();
+}
+```
+
+Always release the lease in a `finally`. Native Node 22 does not parse `await using`; that syntax needs a supporting runtime or compiler. `sandbox[Symbol.asyncDispose]()` is available explicitly and stops named sandboxes or deletes unnamed ones. An undeleted lease runs until its timeout.
+
+## Connect
+
+- `SandboxWsClient.connect({ gatewayHttpUrl, gatewayWsUrl, apiKey })` for servers. The API key never belongs in a browser.
+- `SandboxWsClient.connectWithToken({ gatewayWsUrl, token })` for browsers. Mint the token on your backend with `POST {gatewayHttpUrl}/v1/sessions` and header `X-Sandbox-API-Key`; the response is `{ token, expires_at }`. Tokens do not refresh: reconnect with a new one.
+- `client.close()` ends the session.
+
+## Lease
+
+- Failed multi-server restoration rolls back only its new unnamed executions, confirms termination, and preserves adopted/potentially reused processes and the primary failure. Extensible errors carry `restoreCleanup` with stopped/incomplete execution IDs. Inspect incomplete or unknown cleanup before retrying.
+
+- `snapshot({ expiresInMs })` is explicitly refused before capture: invalid values use `invalid_request`; valid values, including `0`, use `unsupported` because the broker owns retention. `preview(port)` returns a signed root URL; resolve relative paths against it to retain the gateway prefix. `waitMs` checks the port, and `startServer({ path })` supplies guest-side HTTP path readiness.
+- Retire provider-native receipts with `Sandbox.deleteNativeSnapshot(client, receipt.reference)`: `true` means deletion, `false` means confirmed prior deletion. `client.nativeSnapshotDelete(reference)` returns `deleted`, `not_found` or `unsupported`; denials are typed errors. Tenant identity comes from the authenticated gateway. Expired references remain valid cleanup input. Memory native deletion is unsupported; use `Sandbox.deleteSnapshot(client, digest)` for its OCI-style captures.
+
+- `Sandbox.create(client, opts)` options: `tenant` (required, use `tenantId(...)`), `image`, `size` (`small`, `medium`, `large`), `vcpus`, `memoryMib`, `diskMib`, `name`, `tags`, `env`, `timeoutMs`, `idleTimeoutMs`, `networkPolicy` (`'allow-all'`, `'deny-all'` or a policy object), `persistent`, `ports`, `secrets`, `providerPref`, `idempotencyKey`.
+- Creation `signal` requires `client.operationCapabilities().supports_create_cancellation` before dispatch. The SDK supplies a fresh operation id and calls `client.cancelOperation(id, { compensateCreated: true })`. The broker can compensate only a verified newly-owned allocation, preserving reused leases and the original immutable operation outcome. `client.getOperation(id)` exposes optional `compensation: 'pending' | 'cleaned'` beside the original state. Plain `cancelOperation(id)` does not opt into cleanup of completed creates. `OperationCancellationError` exposes `operationId`, `canceled`, `cleanupPending`, known `leaseId` and the signal reason as cause. An already-completed create that cannot be retired is reported explicitly. Repeat cancellation with the same opt-in to reconcile pending compensation; a signal fired after creation returns does nothing. The memory client reports create cancellation unsupported. Other in-flight lifecycle cancellation remains outside this contract. `requiredCapabilities` routes by validated worker requirements. `browser: true` adds `needs_browser` and requires an explicit operator-supported browser image.
+- Default image is `docker.io/library/alpine:latest`. It has no git or compiler. For coding work, pass an operator-supported image that ships them.
+- `providerPref` lists providers such as `'local_docker'`. An empty list is denied by the broker, so pass one that can run commands.
+- `Sandbox.get(client, { name })` finds a named sandbox and throws if absent. `Sandbox.list(client, { tags })` lists. `Sandbox.fork(client, { sourceSandbox })` forks. `Sandbox.deleteByName(client, name)` deletes a named sandbox even when it has no active lease.
+- `sandbox.stop()` keeps a named sandbox resumable. `sandbox.delete()` releases it for good. `sandbox.extendTimeout(ms)` pushes the deadline out.
+
+## Run commands
+
+- `sandbox.start({ cmd, name, readiness, readyTimeoutMs })` gets or starts a named process; default names are stable hashes of the command and arguments. Running names reuse their existing execution and configuration. `process(name)` discovers a handle, and `processes()` preserves worker inventory fields. The handle exposes `command`, `wait`, `stop`, `restart`, `logPage` and `logs`; restart uses the worker's recorded specification. Readiness uses `tcp_port` or literal `output_contains`; HTTP checks and preview setup use `startServer`. Failed or aborted named setup cleans up only provider-confirmed `origin: 'created'`; reused and unknown executions are preserved. `command.origin` exposes that evidence. The memory fake models named reuse/discovery/restart but refuses readiness probes and durable logs.
+
+- `await sandbox.runCommand('cmd', ['arg'])` or `runCommand({ cmd, args, cwd, env, timeoutSeconds, signal, user, stdin })` returns `CommandFinished` with `exitCode`, `stdout()`, `stderr()`, `timedOut`, `truncated`. A non-zero exit code is a result, not a throw: check it.
+- `runCommand({ ..., detached: true })` returns a `Command` with `wait()`, `kill(signal)`, `cancel({ timeoutMs })`, `logs()` and `stream()` for long jobs. Verified `cancel` requires `command_cancellation` and returns `CommandFinished` after exact completion evidence; concurrent callers share one cancellation.
+- Commands run with `CI=1`, `DEBIAN_FRONTEND=noninteractive`, `GIT_TERMINAL_PROMPT=0`, `PAGER=cat` merged under your `env`. Pass `nonInteractive: false` to send only your `env`.
+- `runCommand({ signal })` requires advertised `command_cancellation`. Providers also advertising `command_launch_cancellation` retain a launch key before dispatch and set `require_launch_cancellation`, allowing abort to cancel through a permanently lost start reply. Named signal requests require both capabilities; only positively created executions can be stopped. Reused work reports `CommandCancellationError` with `code: 'command_preserved'` and `preserved: true`, which does not claim process completion. Foreground calls obtain a detached execution identity and wait for completion. `cleanupPending` and `outcomeUnknown` expose uncertainty; `launchKey` remains available on cancellation and uncertain start transport errors for explicit `client.cancelCommandLaunch(sandboxId, key)` reconciliation. That control returns canceled, preserved, pending or unsupported. The original signal reason is the cancellation error cause. `cancellationTimeoutMs` defaults to 10000 and accepts integers from 1 to 60000, also for creation. Providers lacking the launch capability still need a trusted acknowledgement before owned cleanup. The memory client does not advertise verified command cancellation.
+
+## Files
+
+- `sandbox.writeFiles([{ path, content, mode }])`, `sandbox.readFile({ path })` (null when missing), `sandbox.readFileToBuffer({ path })`, `sandbox.mkDir(path)`.
+- `sandbox.fs`: `ls`, `stat`, `mkdir`, `rm`, `mv`, `cp`, `chmod`, `exists`, `readlink`, `symlink`.
+- `sandbox.git`: `clone`, `status`, `diff`, `commit`, `push`, `checkout`. These run the `git` binary, so the image must ship it.
+
+## Preview, usage, limits
+
+- `sandbox.domain(port)` and `sandbox.preview(port)` resolve ports on workers that support previews. Declare ports at creation where the provider requires it; expose-after-create support varies by worker.
+- `sandbox.startServer({ cmd, args?, port, path?, timeoutMs?, name?, preview? })` starts a detached process, waits until `port` accepts connections (and `path` answers over HTTP, probed with `curl` or `wget` inside the sandbox), and resolves `{ command, name, port, url, expiresAt }`. It throws `ServerExitedError` (with the process output) if the process dies first and `TimeoutError` (with recent output when the broker keeps durable logs) on timeout, killing the process in the timeout case. Port readiness needs worker exec and `bash` or `nc` in the image. The result also has `restart()` and `stop()`; `resume()` and `wake()` restart registered servers whose process is gone (opt out with `restartOnResume: false`).
+- `sandbox.snapshot()` attaches optional caller-owned `clientState` for registered servers; `Sandbox.fromSnapshot` restores them automatically and waits for readiness. Plans allow at most 32 servers and 64 KiB and contain environment names, never values. Pass replacement `env` when restoring. `exportClientState()` lets your trusted host store the plan for `connect(client, id, { clientState, env })` or `get(client, { name, clientState, env })`. A plain name/id lookup does not recover server intent. Known disk-only native Vercel/Modal/Fly snapshots replay servers; memory-preserving or unknown formats need authoritative identity or original-execution exit evidence. [Restore managed servers](docs/how-to/restore-managed-servers.md).
+- `sandbox.usage()` returns counters (commands run, bytes moved, running and paused seconds) and cpu and memory gauges where the provider reports them.
+- `client.limits()` returns the tenant's limits next to current consumption: `active_leases` and `max_active_leases`, monthly cpu and wall seconds used and capped, per-request cpu and memory caps, and `per_tag` when a per-tag cap applies. Read it before creating a lease to check capacity.
+- `client.tenantUsage()` sums usage over the tenant's live leases.
+
+## Errors
+
+Gateway and transport failures extend `SandboxWsError` and have a `code`. Subclasses include `LeaseDeniedError`, `TenantMismatchError`, `TimeoutError`, `PreviewNotReadyError`, `TransportError`, `StdinError`, `GitCommandError`, `CommandCancellationError` and `OperationCancellationError`. Each carries `retryable`, `outcomeUnknown`, `hint` and, for broker denials, `variant` (such as `quota_exceeded`). Local validation can throw `RangeError` or `TypeError`. Pre-aborted calls and file-transfer cancellation preserve the signal reason; dispatched command and operation cancellation report their cleanup state and carry that reason as cause. Retry only when `retryable`, and when `outcomeUnknown` reuse the same `idempotencyKey` or check state first. Gateway messages are scrubbed of credentials.
+
+## Testing without a gateway
+
+`MemorySandboxClient` is an in-memory fake with the same surface for the calls it models. `MEMORY_CAPABILITIES` lists what it supports and what it does not.
+
+## Docs
+
+- [Package README](README.md): usage, cancellation, browser tokens, bundling
+- [Hono guide](docs/hono.md) and [Next.js guide](docs/nextjs.md): backend token minting and routes
+
+## Optional
+
