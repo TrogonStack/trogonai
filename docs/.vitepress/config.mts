@@ -89,6 +89,7 @@ export default async () => {
                 items: [
                   { text: "Agent Platform", link: "/architecture/agent-platform" },
                   { text: "Workflows", link: "/architecture/workflows" },
+                  { text: "Sandbox Client", link: "/architecture/sandbox-foundation" },
                 ],
               },
             ],

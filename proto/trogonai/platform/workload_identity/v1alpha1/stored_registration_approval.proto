@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.platform.workload_identity.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// Exact original public approval bytes retained for historical evidence.
+message StoredRegistrationApprovalV1 {
+  bytes approval_payload = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 262144
+    }
+  ];
+  bytes approval_signature = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes = {len: 64}
+  ];
+}
