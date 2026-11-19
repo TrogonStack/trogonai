@@ -23,12 +23,34 @@ sh_test(
     tags = ["requires-network"],
 )
 
-# Drives provision-audit.sh against a stand-in `nats` CLI, so it needs no
-# server, no container and no copy; jq comes from the host like Docker does.
+# Starts a nats-server on the generated operator configuration and checks what
+# each PLATFORM user can reach, in containers that share one network namespace.
+sh_test(
+    name = "secrets_invalidation_deny_test",
+    srcs = ["run_from_copy.sh"],
+    args = [
+        "secrets-invalidation-deny.test.sh",
+        "$(rootpaths :bootstrap)",
+    ],
+    data = [":bootstrap"],
+    # A fresh bootstrap, two reruns and about forty containers.
+    timeout = "long",
+    tags = ["requires-network"],
+)
+
+# Each drives its provisioning script against a stand-in `nats` CLI, so it
+# needs no server, no container and no copy; jq comes from the host like
+# Docker does.
 sh_test(
     name = "provision_audit_test",
     srcs = ["provision-audit.test.sh"],
     data = ["provision-audit.sh"],
+)
+
+sh_test(
+    name = "provision_secrets_invalidation_test",
+    srcs = ["provision-secrets-invalidation.test.sh"],
+    data = ["provision-secrets-invalidation.sh"],
 )
 
 # Each sources the install helper it checks and stages files in a temporary
