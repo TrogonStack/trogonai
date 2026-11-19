@@ -16,10 +16,7 @@ pub enum SignatureError {
     Mismatch,
 }
 
-/// Verifies a GitHub webhook signature using constant-time comparison.
-///
-/// GitHub sends `X-Hub-Signature-256: sha256=<hex>`. This function validates
-/// the HMAC-SHA256 of the raw request body against that header value.
+/// Verifies an `X-Hub-Signature-256: sha256=<hex>` signature over the raw request body.
 pub fn verify(secret: &str, body: &[u8], signature_header: &str) -> Result<(), SignatureError> {
     let hex_sig = signature_header
         .strip_prefix("sha256=")
