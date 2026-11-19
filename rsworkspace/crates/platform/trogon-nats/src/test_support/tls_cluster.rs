@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use async_nats::jetstream::stream::{Config, StorageType};
+use async_nats::jetstream::{
+    Error as JetStreamError, ErrorCode,
+    context::RequestErrorKind,
+    stream::{ClusterInfo, Config, InfoError, StorageType},
+};
 use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, KeyPair};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -14,6 +18,9 @@ use crate::{ClientCertificate, Location, NatsAuth, NatsConfig, NatsTls, NatsToke
 
 mod constants;
 mod quorum;
+
+#[cfg(test)]
+mod tests;
 
 use constants::{ADMIN, NATS_CLUSTER_IMAGE_TAG, QUORUM_STREAM, WAIT};
 use quorum::wait_for_quorum;
@@ -168,12 +175,7 @@ impl TlsJetStreamCluster {
                     })
                     .await
                     .ok()?;
-                stream
-                    .get_info()
-                    .await
-                    .expect("inspect quorum probe stream")
-                    .cluster
-                    .clone()
+                quorum_observation(stream.get_info().await.map(|info| info.cluster))
             })
             .await;
             context
@@ -184,4 +186,16 @@ impl TlsJetStreamCluster {
         .await
         .expect("three verified TLS JetStream replicas become current");
     }
+}
+
+fn quorum_observation(result: Result<Option<ClusterInfo>, InfoError>) -> Option<ClusterInfo> {
+    if result.as_ref().is_err_and(|error| {
+        error.kind() == RequestErrorKind::Other
+            && std::error::Error::source(error)
+                .and_then(|source| source.downcast_ref::<JetStreamError>())
+                .is_some_and(|source| source.error_code() == ErrorCode::STREAM_NOT_FOUND)
+    }) {
+        return None;
+    }
+    result.expect("inspect quorum probe stream")
 }

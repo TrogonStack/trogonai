@@ -450,14 +450,29 @@ curl -sS "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/recovery/s
 The create, rotate, and revoke responses return credential refs, lifecycle
 state, and stream position. They must not echo the submitted secret value.
 
-To inspect an API-created value directly in local OpenBao, use the returned
-owner id and opaque credential id in
-`trogonai/{owner_id}/credentials/{credential_id}`. Set `CREDENTIAL_ID` to the
-id returned by the management API:
+To inspect an API-created credential in local OpenBao, use its owner id and
+internal UUID in `trogonai/{owner_id}/credentials/{credential_id}`. The
+management response's `credential_ref.id` identifies the public owner/scope/kind
+slot; it is not the storage UUID.
+
+Set `STREAM_POSITION` to the `stream_position` from a successful management
+response. Read that event with the `PLATFORM` NATS identity supplied by
+`nats-box`, then extract the UUID from the final token of its subject:
+
+```bash
+CREDENTIAL_ID="$(
+  docker compose --profile tools run --rm -T nats-box \
+    nats stream get CREDENTIAL_EVENTS "${STREAM_POSITION}" --json |
+    jq -er '.subject | split(".") | last'
+)"
+```
+
+For the `tenant-1` credential in the examples above, inspect its metadata,
+which remains available after revocation and contains no secret value:
 
 ```bash
 docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
-  bao kv get -format=json -mount=secret \
+  bao kv metadata get -format=json -mount=secret \
   "trogonai/tenant-1/credentials/${CREDENTIAL_ID}"
 ```
 

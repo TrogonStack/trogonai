@@ -34,6 +34,13 @@ pub const HEADER_WRITER: &str = "Trogon-Audit-Writer";
 pub const HEADER_SEQUENCE: &str = "Trogon-Audit-Seq";
 pub const HEADER_CHAIN: &str = "Trogon-Audit-Chain";
 
+/// The name a record carries in place of a destination longer than
+/// [`MAX_NAME_BYTES`] (a 250 byte host and a port do not fit). Every writer
+/// spells it alike, so both records of the dual audit (ADR#0023 Decision 6)
+/// name such a destination the same way. The record is still written; only the
+/// spelling of where is replaced.
+pub const DESTINATION_TOO_LONG: &str = "destination_too_long";
+
 /// Longest name a record may carry. A target, a resource name or a host is a
 /// name; content does not fit in this and is rejected on character set first.
 pub const MAX_NAME_BYTES: usize = 256;
