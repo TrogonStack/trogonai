@@ -263,7 +263,7 @@ jobs:
   goldens:
     # Every golden recorder natively, through record.py, starting from the committed golden of the host so each
     # change shows as a diff.
-    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') && !contains(github.event.head_commit.message, '[score55]') && !contains(github.event.head_commit.message, '[pair55]') && !contains(github.event.head_commit.message, '[diag55a]') && !contains(github.event.head_commit.message, '[diagsa]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[wsl-only]') && !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') && !contains(github.event.head_commit.message, '[score55]') && !contains(github.event.head_commit.message, '[pair55]') && !contains(github.event.head_commit.message, '[diag55a]') && !contains(github.event.head_commit.message, '[diagsa]') && !contains(github.event.head_commit.message, '[diagpm]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -370,7 +370,7 @@ jobs:
 
   wsl-goldens:
     # The managed organization goldens under a real WSL 2 kernel, starting from the committed linux x64 golden.
-    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') && !contains(github.event.head_commit.message, '[score55]') && !contains(github.event.head_commit.message, '[pair55]') && !contains(github.event.head_commit.message, '[diag55a]') && !contains(github.event.head_commit.message, '[diagsa]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[windows-only]') && !contains(github.event.head_commit.message, '[band37]') && !contains(github.event.head_commit.message, '[band39]') && !contains(github.event.head_commit.message, '[band40]') && !contains(github.event.head_commit.message, '[model40]') && !contains(github.event.head_commit.message, '[mg37]') && !contains(github.event.head_commit.message, '[rows41]') && !contains(github.event.head_commit.message, '[hist43]') && !contains(github.event.head_commit.message, '[hist43b]') && !contains(github.event.head_commit.message, '[hist43c]') && !contains(github.event.head_commit.message, '[replay54]') && !contains(github.event.head_commit.message, '[score55]') && !contains(github.event.head_commit.message, '[pair55]') && !contains(github.event.head_commit.message, '[diag55a]') && !contains(github.event.head_commit.message, '[diagsa]') && !contains(github.event.head_commit.message, '[diagpm]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1604,6 +1604,120 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: diagsa-${{ matrix.host.label }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 14
+
+  diagpm:
+    # Runs only when the head commit asks for it with `[diagpm]`: the direct measurement of every pass budget, every caller
+    # context offset and `shallow_array` (ruling 50 rules 1, 2 and 4), discovery only (R43-6) and never a golden. One job per
+    # host takes the driver from this commit, then checks out 71e5304c (the commit job 55 ran) in the same workspace and runs
+    # that tree's own r3.py code and round 8 port. The driver runs first-call micro-cases in processes of their own, sweeping
+    # the stack room in byte steps. See r50/diagpm_design.md.
+    if: contains(github.event.head_commit.message, '[diagpm]')
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - { runner: macos-latest, label: darwin-arm64 }
+          - { runner: ubuntu-latest, label: linux-x64 }
+          - { runner: ubuntu-24.04-arm, label: linux-arm64 }
+    runs-on: ${{ matrix.host.runner }}
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    env:
+      # First-call micro-cases from the toplevel context (frozen offset 0).
+      R3_CALL: first
+      R3_CONTEXT: toplevel
+      DIAG_BUDGET_SECONDS: "12000"
+    steps:
+      # The driver comes from this commit; the tree the process runs from is job 55's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Keep the driver outside the tree
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag-driver"
+          cp oracle-recording/diagpm.py "$RUNNER_TEMP/diag-driver/"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 71e5304ce74194cdd876f0f9a1a99c002bdc71c5
+          persist-credentials: false
+
+      - name: Check the tree is job 55's
+        run: |
+          test "$(git rev-parse HEAD)" = 71e5304ce74194cdd876f0f9a1a99c002bdc71c5
+          test ! -e oracle-recording/diagpm.py
+
+      # The steps below are the setup steps of job 55 (the mg37 job), unchanged.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.13.1
+
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install: false
+          cache: false
+
+      - name: Locate tools
+        run: |
+          # Outside the checkout, so mise reads no repository config.
+          cd "$RUNNER_TEMP"
+          mise install "python@$R3_PYTHON"
+          py="$(mise exec "python@$R3_PYTHON" -- python3 -c 'import sys; print(sys.executable)' 2>/dev/null \
+            || mise exec "python@$R3_PYTHON" -- python -c 'import sys; print(sys.executable)')"
+          {
+            echo "PY=$py"
+            echo "NODE_BIN=$(node -p 'process.execPath')"
+            echo "OUT=$RUNNER_TEMP/out"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/out"
+
+      - name: Install reg.exe at the WSL path
+        if: runner.os == 'Linux'
+        run: |
+          command -v rustc >/dev/null || { sudo apt-get update && sudo apt-get install -y rustc; }
+          rustc --edition 2021 -O -o "$RUNNER_TEMP/reg.exe" "$NATIVE_LIB/registry_stand_in.rs"
+          sudo install -D -m 0755 "$RUNNER_TEMP/reg.exe" /mnt/c/Windows/System32/reg.exe
+
+      - name: Check the fixture bytes
+        run: |
+          bash oracle-recording/check_fixture_bytes.sh "$GITHUB_WORKSPACE" "$OUT"
+
+      - name: Describe the host
+        run: |
+          {
+            node -p 'JSON.stringify({version: process.version, platform: process.platform, arch: process.arch, v8: process.versions.v8, now: Date.now()})'
+            "$PY" --version
+            uname -a || true
+            ls -l /mnt/c/Windows/System32/reg.exe /usr/bin/plutil 2>/dev/null || true
+          } | tee "$OUT/host.txt"
+
+      - name: Fetch the pinned package
+        run: |
+          "$PY" -I "$FETCH_LIB/fetch_pinned_typescript.py" "$RUNNER_TEMP/package"
+
+      - name: Describe the V8 flags
+        run: |
+          # The stack size default and the regexp trace flag, as this Node lists them (the driver reads them again).
+          node --v8-options > "$OUT/v8-options.txt"
+          grep -n -E -A1 '^ +--(stack-size|trace-regexp-tier-up)( |$)' "$OUT/v8-options.txt" | tee "$OUT/v8-flags.txt"
+          test "$(grep -c -E '^ +--stack-size( |$)' "$OUT/v8-options.txt")" = 1
+
+      - name: Run the parameter measurement
+        run: |
+          "$PY" -I "$RUNNER_TEMP/diag-driver/diagpm.py" "$NATIVE_LIB" "$NODE_BIN" "$RUNNER_TEMP/package" "$OUT/diagpm.json" "$GITHUB_WORKSPACE" 2> >(tee "$OUT/diagpm.log" >&2)
+
+      - name: Keep the oracle output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diagpm-${{ matrix.host.label }}
           path: ${{ runner.temp }}/out
           if-no-files-found: warn
           retention-days: 14
