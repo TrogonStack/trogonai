@@ -1,0 +1,31 @@
+[package]
+name = "trogon-session-plan"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "time"] }
+trogon-identity-types = { workspace = true }
+trogon-session-store = { path = "../trogon-session-store" }
+trogon-decider-runtime = { workspace = true }
+trogon-proto-preflight = { path = "../../platform/trogon-proto-preflight" }
+trogonai-proto = { workspace = true, features = ["session-contracts"] }
+
+[dev-dependencies]
+trogon-std = { workspace = true }
+serde_json = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
+trogon-decider-nats = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+base64 = { workspace = true }
