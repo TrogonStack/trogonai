@@ -16,8 +16,6 @@ use crate::{
         OTEL_EXACT, OTEL_PREFIXES, PARENT_RESTRICT_FALSE_KEYS, PARENT_RESTRICT_TRUE_KEYS, PARENT_SETTINGS_BEHAVIOR_KEY,
         POLICY_META_KEYS, SETTINGS_FILE_MAX_BYTES,
     },
-    node_managed_pass::ManagedPass,
-    node_merge::NodeMerge,
     node_text_file::read_node_text,
     settings_managed_reader::ManagedReader,
     settings_policy_content::{has_authored_value, has_policy_content},
@@ -31,7 +29,7 @@ use crate::{
     settings_resolve_restrict::{js_equal, restrict_policy_document},
     settings_resolve_state::ResolverState,
     settings_resolve_tier::{LoadState, TierRead},
-    settings_resolve_values::{SettingsMap, in_schema_order, omit, pick},
+    settings_resolve_values::{SettingsMap, in_schema_order, merge, omit, pick},
     settings_resolve_writable_document::{DocumentProbe, user_can_write},
     settings_schema::schema,
     settings_strings::reserve_text,
@@ -47,7 +45,7 @@ fn read_policy_file<H: ReadFile<Error = io::Error>>(
     host: &H,
     path: &Path,
     reader: ManagedReader<'_>,
-) -> (TierRead, bool) {
+) -> Result<(TierRead, bool), ResolveSettingsError> {
     reader.read_file(path, |reader| read_policy_bytes(host, path, reader))
 }
 
@@ -56,22 +54,22 @@ fn read_policy_bytes<H: ReadFile<Error = io::Error>>(
     host: &H,
     path: &Path,
     reader: ManagedReader<'_>,
-) -> (TierRead, bool) {
+) -> Result<(TierRead, bool), ResolveSettingsError> {
     let bytes = match host.read_file(path) {
         Ok(bytes) => bytes,
-        Err(error) if is_absent(&error) => return (TierRead::absent(), false),
+        Err(error) if is_absent(&error) => return Ok((TierRead::absent(), false)),
         Err(_) => {
             let mut tier = TierRead::did_not_load(true);
             tier.settings = None;
-            return (tier, false);
+            return Ok((tier, false));
         }
     };
     if bytes.len() > SETTINGS_FILE_MAX_BYTES {
         let mut tier = TierRead::did_not_load(true);
         tier.settings = None;
-        return (tier, false);
+        return Ok((tier, false));
     }
-    (reader.read(&bytes, path), true)
+    Ok((reader.read(&bytes, path)?, true))
 }
 
 /// Reserves the private-use code points of every managed settings document [`resolve_policy`] may read for `kind`,
@@ -149,9 +147,9 @@ impl Folder {
         }
     }
 
-    /// Merges the `settings` a document kept into the folder (`UP` upstream). A merge that runs out of stack or
-    /// throws keeps what it wrote and leaves the rest of the folder as it was.
-    fn merge(&mut self, document: &TierRead, settings: Option<SettingsMap>, reader: ManagedReader<'_>) -> NodeMerge {
+    /// Merges the `settings` a document kept into the folder (`UP` upstream). A merge that throws keeps what it wrote
+    /// and leaves the rest of the folder as it was.
+    fn merge(&mut self, document: &TierRead, settings: Option<SettingsMap>) -> Result<(), ResolveSettingsError> {
         if let Some(mut settings) = settings
             && !settings.is_empty()
         {
@@ -159,17 +157,14 @@ impl Folder {
                 self.floored =
                     schema.hold_default_mode_floor(&self.merged, &mut settings, document.floored, self.floored);
             }
-            let merged = reader.merge_into_folder(&mut self.merged, &settings);
-            if merged != NodeMerge::Merged {
-                return merged;
-            }
+            merge(&mut self.merged, &settings)?;
             self.found = true;
             self.authored |= has_authored_value(&settings) && !document.only_substitutes;
         }
         self.content |= document.holds_policy_content();
         self.unreadable |= document.unreadable;
         self.state = self.state.combine(document.load_state);
-        NodeMerge::Merged
+        Ok(())
     }
 
     /// The `catch` around the drop-ins in `um` upstream: the folder did not load, and keeps what merged before.
@@ -193,9 +188,9 @@ impl Folder {
 }
 
 /// `um` upstream: the held registry documents, then the managed settings file of `directory` plus its sorted
-/// drop-ins, merged after `filter` saw each. A held document or the managed settings file the cache copy or the merge
-/// runs out of stack on, or whose merge throws, rejects the resolve; a drop-in ends the drop-ins as an unreadable
-/// folder does.
+/// drop-ins, merged after `filter` saw each. A document nested at the settings depth bound or deeper rejects the
+/// resolve, and so does a held document or the managed settings file whose merge throws; a drop-in whose merge throws
+/// ends the drop-ins as an unreadable folder does.
 fn read_managed_directory<H: SettingsHost>(
     host: &H,
     directory: Option<&Path>,
@@ -206,21 +201,12 @@ fn read_managed_directory<H: SettingsHost>(
     let mut folder = Folder::new();
     for document in held {
         let settings = filter(document, Rewritable::Always);
-        if let Some(error) = folder.merge(document, settings, reader).rejection() {
-            return Err(error);
-        }
+        folder.merge(document, settings)?;
     }
     let Some(directory) = directory else {
         return Ok(folder.finish());
     };
-    let (document, opened) = read_policy_file(host, &directory.join(MANAGED_SETTINGS_FILE), reader);
-    if document
-        .settings
-        .as_ref()
-        .is_some_and(|settings| reader.copy_overflows(settings))
-    {
-        return Err(ResolveSettingsError::MaximumCallStack);
-    }
+    let (document, opened) = read_policy_file(host, &directory.join(MANAGED_SETTINGS_FILE), reader)?;
     let probe = (document.load_state != LoadState::Absent).then(|| DocumentProbe {
         root: directory,
         components: vec![MANAGED_SETTINGS_FILE.to_owned()],
@@ -228,9 +214,7 @@ fn read_managed_directory<H: SettingsHost>(
         opened,
     });
     let settings = filter(&document, probe.as_ref().map_or(Rewritable::Never, Rewritable::Ask));
-    if let Some(error) = folder.merge(&document, settings, reader).rejection() {
-        return Err(error);
-    }
+    folder.merge(&document, settings)?;
     let drop_ins = directory.join(MANAGED_SETTINGS_DROP_IN_DIRECTORY);
     match host.read_directory(&drop_ins) {
         Ok(entries) => {
@@ -242,15 +226,7 @@ fn read_managed_directory<H: SettingsHost>(
                 .collect();
             listed.sort_by(|left, right| utf16_order(&left.0, &right.0));
             for (name, linked) in listed {
-                let (document, opened) = read_policy_file(host, &drop_ins.join(&name), reader);
-                if document
-                    .settings
-                    .as_ref()
-                    .is_some_and(|settings| reader.copy_overflows(settings))
-                {
-                    folder.abandon();
-                    break;
-                }
+                let (document, opened) = read_policy_file(host, &drop_ins.join(&name), reader)?;
                 let probe = (document.load_state != LoadState::Absent).then(|| DocumentProbe {
                     root: directory,
                     components: vec![MANAGED_SETTINGS_DROP_IN_DIRECTORY.to_owned(), name],
@@ -258,7 +234,7 @@ fn read_managed_directory<H: SettingsHost>(
                     opened,
                 });
                 let settings = filter(&document, probe.as_ref().map_or(Rewritable::Never, Rewritable::Ask));
-                if folder.merge(&document, settings, reader) != NodeMerge::Merged {
+                if folder.merge(&document, settings).is_err() {
                     folder.abandon();
                     break;
                 }
@@ -477,15 +453,6 @@ pub(crate) struct PolicyResolution {
     pub(crate) origin: Option<PolicyOrigin>,
     pub(crate) key_order: PolicyKeyOrder,
     pub(crate) mdm_did_not_load: bool,
-    pub(crate) file_did_not_load: bool,
-    /// The evaluation of the sources left the managed file tier unloaded on a Node stack, so the policy origin and
-    /// whether the machine policy loaded come from [`reevaluate_policy`], after the sources merge.
-    pub(crate) reevaluates: bool,
-}
-
-/// The policy origin and whether the managed file tier did not load, from evaluations of their own.
-pub(crate) struct PolicyReevaluation {
-    pub(crate) origin: Option<PolicyOrigin>,
     pub(crate) file_did_not_load: bool,
 }
 
@@ -906,15 +873,13 @@ fn compose(
 }
 
 /// `QP` upstream for the default configuration: no policy helper, no host-managed provider. `reader` reads the
-/// managed settings documents, and in the TypeScript dialect a document or merge that runs out of the Node stack
-/// rejects with [`ResolveSettingsError::MaximumCallStack`] where `resolveSettings` does, and a merge that throws with
-/// what it throws, such as [`ResolveSettingsError::InvalidRegularExpression`].
+/// managed settings documents, and in the TypeScript dialect a document nested at the settings depth bound or deeper
+/// rejects with [`ResolveSettingsError::MaximumCallStack`], and a merge that throws rejects with what it throws, such
+/// as [`ResolveSettingsError::InvalidArrayLength`].
 ///
 /// `resolveSettings` evaluates the managed settings once for the settings, once more for their origin, and once
-/// more to ask whether the machine policy loaded, both after it merged the sources. On a Node stack the later
-/// evaluations have more room and read the drop-ins the first one never reached, so when the first one leaves the
-/// managed file tier unloaded, the resolution says so and [`reevaluate_policy`] evaluates the origin and the machine
-/// policy on their own.
+/// more to ask whether the machine policy loaded. Every evaluation reads the same documents and merges them the same
+/// way, so one evaluation answers all three.
 pub(crate) fn resolve_policy<H: SettingsHost>(
     host: &H,
     state: &ResolverState,
@@ -929,7 +894,6 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
     let composition = compose(kind, parent_managed, remote, evaluation, &file, &held);
     let origin = composition.origin(kind, evaluation);
     let file_did_not_load = file.load_state == LoadState::DidNotLoad;
-    let reevaluates = reader.has_stack() && file_did_not_load;
     // Every tier lists its keys in schema order as it is read, and `iE` never sorts the admin it builds from them, so
     // a value a demoted tier binds more restrictively follows the keys of the tier that won.
     let admin_order = if composition.admin.is_some() {
@@ -972,11 +936,9 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
             PolicyKeyOrder::Composed => kept,
         };
         // Upstream merges the parent's slice and the admin settings in one lodash merge
-        // (`On({}, a ?? {}, $n(i ?? {}, g), ao)`), which stops at the first source it runs out of stack on.
+        // (`On({}, a ?? {}, $n(i ?? {}, g), ao)`), which stops at the first source whose merge throws.
         for part in [&parent_part, &kept] {
-            if let Some(error) = reader.merge_admin(&mut merged, part).rejection() {
-                return Err(error);
-            }
+            merge(&mut merged, part)?;
         }
         if let Some(slice) = &slice {
             for key in ["availableModelsMatch"] {
@@ -1045,37 +1007,6 @@ pub(crate) fn resolve_policy<H: SettingsHost>(
         key_order,
         mdm_did_not_load,
         file_did_not_load,
-        reevaluates,
-    })
-}
-
-/// The evaluations of the managed settings for their origin and for whether the machine policy loaded, which
-/// `resolveSettings` runs after it merged the sources, each on a stack of its own, when [`resolve_policy`] says it
-/// [`reevaluates`](PolicyResolution::reevaluates). `reader` reads the documents with what the first evaluation
-/// parsed and what the merges before ran.
-pub(crate) fn reevaluate_policy<H: SettingsHost>(
-    host: &H,
-    state: &ResolverState,
-    kind: PlatformKind,
-    parent_managed: Option<&SettingsMap>,
-    remote: Option<&TierRead>,
-    evaluation: &MdmEvaluation,
-    reader: ManagedReader<'_>,
-) -> Result<PolicyReevaluation, ResolveSettingsError> {
-    let parent_managed = parent_managed.filter(|parent| !parent.is_empty());
-    let (origin_file, origin_held) =
-        read_managed_file(host, state, kind, evaluation, reader.in_pass(ManagedPass::Origin))?;
-    let origin = compose(kind, parent_managed, remote, evaluation, &origin_file, &origin_held).origin(kind, evaluation);
-    let (machine, _) = read_managed_file(
-        host,
-        state,
-        kind,
-        evaluation,
-        reader.in_pass(ManagedPass::MachinePolicy),
-    )?;
-    Ok(PolicyReevaluation {
-        origin,
-        file_did_not_load: machine.load_state == LoadState::DidNotLoad,
     })
 }
 
