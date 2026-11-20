@@ -1,4 +1,5 @@
 use std::io;
+use std::net::SocketAddr;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,8 +16,30 @@ enum FixtureError {
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error(transparent)]
     SystemTime(#[from] std::time::SystemTimeError),
-    #[error("HTTP runtime exited during startup: {0}")]
-    ProcessExited(ExitStatus),
+    #[error("invalid startup configuration unexpectedly served HTTP")]
+    UnexpectedHttpReady,
+    #[error("HTTP runtime ({mode}) exited during startup: {status}; stdout: {stdout:?}; stderr: {stderr:?}")]
+    ProcessExited {
+        mode: RuntimeMode,
+        status: ExitStatus,
+        stdout: io::Result<String>,
+        stderr: io::Result<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeMode {
+    Direct,
+    Gateway,
+}
+
+impl std::fmt::Display for RuntimeMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Direct => "direct",
+            Self::Gateway => "gateway",
+        })
+    }
 }
 
 struct RuntimeProcess(Child);
@@ -37,6 +60,30 @@ impl RuntimeProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         command.spawn().map(Self)
+    }
+
+    async fn wait_for_http(
+        &mut self,
+        address: SocketAddr,
+        mode: RuntimeMode,
+    ) -> Result<tokio::net::TcpStream, FixtureError> {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                if let Ok(socket) = tokio::net::TcpStream::connect(address).await {
+                    return Ok(socket);
+                }
+                if let Some(status) = self.0.try_wait()? {
+                    return Err(FixtureError::ProcessExited {
+                        mode,
+                        status,
+                        stdout: Ok(String::new()),
+                        stderr: Ok(String::new()),
+                    });
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?
     }
 
     async fn wait(&mut self) -> Result<ExitStatus, FixtureError> {
@@ -84,6 +131,53 @@ impl Drop for RuntimeProcess {
             let _ = self.0.wait();
         }
     }
+}
+
+#[tokio::test]
+async fn early_startup_exit_retains_mode_status_and_output() -> Result<(), FixtureError> {
+    let address = SocketAddr::from(([127, 0, 0, 1], 0));
+    for mode in [RuntimeMode::Direct, RuntimeMode::Gateway] {
+        let gateway = match mode {
+            RuntimeMode::Direct => "false",
+            RuntimeMode::Gateway => "true",
+        };
+        let mut process = RuntimeProcess::start(&[
+            ("A2A_AGENT_ID", "worker"),
+            ("A2A_CALLER_JWT", "malformed"),
+            ("A2A_USE_GATEWAY", gateway),
+            ("NATS_URL", "invalid://server"),
+        ])?;
+        let error = process
+            .wait_for_http(address, mode)
+            .await
+            .err()
+            .ok_or(FixtureError::UnexpectedHttpReady)?;
+        let FixtureError::ProcessExited {
+            mode: actual_mode,
+            status,
+            ref stdout,
+            ref stderr,
+        } = error
+        else {
+            return Err(error);
+        };
+        assert_eq!(actual_mode, mode);
+        assert_eq!(status.code(), Some(1));
+        assert!(
+            stdout
+                .as_ref()
+                .is_ok_and(|output| output.contains("invalid caller JWT")),
+            "{error}"
+        );
+        assert!(stderr.as_ref().is_ok_and(String::is_empty), "{error}");
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains(&mode.to_string()), "{diagnostic}");
+        assert!(diagnostic.contains(&status.to_string()), "{diagnostic}");
+        assert!(diagnostic.contains("invalid caller JWT"), "{diagnostic}");
+        assert!(diagnostic.contains("stdout:"), "{diagnostic}");
+        assert!(diagnostic.contains("stderr:"), "{diagnostic}");
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -206,18 +300,12 @@ async fn serves_http_and_gracefully_stops_in_direct_and_gateway_modes() -> Resul
             settings.push(("A2A_USE_GATEWAY", "true"));
         }
         let mut process = RuntimeProcess::start(&settings)?;
-        let mut socket = tokio::time::timeout(Duration::from_secs(15), async {
-            loop {
-                if let Ok(socket) = tokio::net::TcpStream::connect(address).await {
-                    return Ok::<_, FixtureError>(socket);
-                }
-                if let Some(status) = process.0.try_wait()? {
-                    return Err(FixtureError::ProcessExited(status));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await??;
+        let mode = if gateway {
+            RuntimeMode::Gateway
+        } else {
+            RuntimeMode::Direct
+        };
+        let mut socket = process.wait_for_http(address, mode).await?;
         socket
             .write_all(b"GET /missing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
             .await?;
