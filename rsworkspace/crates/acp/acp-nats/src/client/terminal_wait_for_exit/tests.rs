@@ -249,7 +249,7 @@ async fn handle_success_flush_failure_exercises_warn_path() {
 #[test]
 fn error_code_and_message_invalid_params() {
     let err = TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(-32602, "bad params"));
-    let (code, msg) = error_code_and_message(&err);
+    let agent_client_protocol::Error { code, message: msg, .. } = agent_client_protocol::Error::from(&err);
     assert_eq!(i32::from(code), -32602);
     assert_eq!(msg, "bad params");
 }
@@ -257,7 +257,7 @@ fn error_code_and_message_invalid_params() {
 #[test]
 fn error_code_and_message_timed_out() {
     let err = TerminalWaitForExitError::TimedOut;
-    let (code, msg) = error_code_and_message(&err);
+    let agent_client_protocol::Error { code, message: msg, .. } = agent_client_protocol::Error::from(&err);
     assert_eq!(code, ErrorCode::INTERNAL_ERROR);
     assert_eq!(msg, "Timed out waiting for terminal exit");
 }
@@ -265,7 +265,7 @@ fn error_code_and_message_timed_out() {
 #[test]
 fn error_code_and_message_client_error() {
     let err = TerminalWaitForExitError::ClientError(agent_client_protocol::Error::new(-32603, "client failed"));
-    let (code, msg) = error_code_and_message(&err);
+    let agent_client_protocol::Error { code, message: msg, .. } = agent_client_protocol::Error::from(&err);
     assert_eq!(i32::from(code), -32603);
     assert_eq!(msg, "client failed");
 }
