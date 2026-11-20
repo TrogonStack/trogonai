@@ -35,6 +35,8 @@ pub(crate) struct Reading {
     pub(crate) evaluation: MdmEvaluation,
     pub(crate) hklm: Option<CommandOutcome>,
     pub(crate) hkcu: Option<CommandOutcome>,
+    /// A policy text of the read is nested [`SETTINGS_DEPTH_BOUND`](crate::SETTINGS_DEPTH_BOUND) levels or deeper.
+    pub(crate) too_deep: bool,
 }
 
 /// A read of the host and the instant, in host milliseconds, it ended.
@@ -50,11 +52,13 @@ fn read_host<H: SettingsHost>(host: &H, kind: PlatformKind, started: i128) -> Fi
     let read = read_policy(host);
     let evaluation = evaluate_policy(host, kind, &read);
     let took = i128::try_from(read.elapsed_ms).unwrap_or(i128::MAX);
+    let too_deep = read.too_deep();
     Finished {
         reading: Reading {
             evaluation,
             hklm: read.hklm_outcome,
             hkcu: read.hkcu_outcome,
+            too_deep,
         },
         at: epoch_millis(host).max(started.saturating_add(took)),
     }
