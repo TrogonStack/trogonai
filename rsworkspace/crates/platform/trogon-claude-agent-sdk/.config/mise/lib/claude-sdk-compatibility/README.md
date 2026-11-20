@@ -113,7 +113,10 @@ mapping alone does not establish runtime parity.
   that does not end with the owner's rustls decision under ADR 0015. The one
   other accepted adaptation is `m18-python-system-proxy-undefined-reads`,
   whose upstream behavior is a crash or an uninitialized read. Rust does not
-  copy a defect, and that row's reason must end with `DEFECT_REASON`.
+  copy a defect, and that row's reason must end with `DEFECT_REASON`. The
+  other is `r33-typescript-settings-file-depth`, whose bound the owner fixed
+  instead of matching the depth V8 reaches, and its reason must end with
+  `DEPTH_REASON`.
 - A behavior row has no contracts.
 - `openssl`, `openssl-sys`, `openssl-src` or `native-tls` is reachable from the
   SDK in the workspace `Cargo.lock`.
