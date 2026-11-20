@@ -108,12 +108,6 @@ mod message_decode;
 mod message_id;
 mod message_origin;
 mod model_name;
-mod node_managed_pass;
-mod node_merge;
-mod node_merge_call;
-mod node_merge_cost;
-mod node_merge_room;
-mod node_merge_warmth;
 #[cfg_attr(
     not(test),
     allow(
@@ -123,7 +117,6 @@ mod node_merge_warmth;
 )]
 mod node_path;
 mod node_path_join;
-mod node_stack;
 mod node_text_file;
 mod option_error;
 mod options;
@@ -220,12 +213,14 @@ mod session_subpath;
 mod session_summary;
 mod session_transcript;
 mod setting_source;
+mod settings_depth;
 mod settings_dialect;
 mod settings_exact;
 mod settings_input;
 mod settings_json;
 mod settings_load_error;
 mod settings_managed_reader;
+mod settings_merge;
 mod settings_merge_spec;
 mod settings_numbers;
 mod settings_option;
@@ -400,7 +395,7 @@ pub use client::{
 pub use client_app::{format_client_app, normalize_client_app};
 pub use client_app_derivation::{BundledCli, ClientAppDerivation};
 pub use config_value::ConfigValue;
-pub use constants::{DEFAULT_ENTRYPOINT, MINIMUM_CLAUDE_CODE_VERSION, SDK_VERSION};
+pub use constants::{DEFAULT_ENTRYPOINT, MINIMUM_CLAUDE_CODE_VERSION, SDK_VERSION, SETTINGS_DEPTH_BOUND};
 pub use control::{
     ConnectionInfo, ContextUsageCategory, ContextUsageDetail, ContextUsageResponse, ControlReply, FeatureSupport,
     InterruptReceipt, MaxThinkingTokensDisplay, McpEnabled, McpPermissionModeOverride, McpSetServersResult,
@@ -451,7 +446,6 @@ pub use message_id::MessageId;
 pub use message_origin::{MessageOrigin, MessageOriginError};
 pub use model_name::ModelName;
 pub use node_path::NodePathDialect;
-pub use node_stack::NodeStack;
 pub use option_error::OptionError;
 pub use options::{
     ClaudeAgentOptions, ContinueConversation, Customizations, DuplicateControlRequests, EndWithoutResult,
