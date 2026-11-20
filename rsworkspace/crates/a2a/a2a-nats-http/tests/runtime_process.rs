@@ -8,6 +8,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use trogon_nats::test_support::CoreTestServer;
 use trogon_std::env::{EnumerateEnv, SystemEnv};
 
+const STARTUP_OUTPUT_LIMIT: u64 = 64 * 1024;
+
 #[derive(Debug, thiserror::Error)]
 enum FixtureError {
     #[error(transparent)]
@@ -76,8 +78,8 @@ impl RuntimeProcess {
                     return Err(FixtureError::ProcessExited {
                         mode,
                         status,
-                        stdout: Ok(String::new()),
-                        stderr: Ok(String::new()),
+                        stdout: capture_startup_output(self.0.stdout.take()),
+                        stderr: capture_startup_output(self.0.stderr.take()),
                     });
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -122,6 +124,14 @@ impl RuntimeProcess {
         assert!(self.wait().await?.success());
         Ok(())
     }
+}
+
+fn capture_startup_output(pipe: Option<impl io::Read>) -> io::Result<String> {
+    let mut output = Vec::new();
+    if let Some(pipe) = pipe {
+        io::Read::read_to_end(&mut io::Read::take(pipe, STARTUP_OUTPUT_LIMIT), &mut output)?;
+    }
+    Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
 impl Drop for RuntimeProcess {
@@ -170,12 +180,10 @@ async fn early_startup_exit_retains_mode_status_and_output() -> Result<(), Fixtu
             "{error}"
         );
         assert!(stderr.as_ref().is_ok_and(String::is_empty), "{error}");
-        let diagnostic = error.to_string();
-        assert!(diagnostic.contains(&mode.to_string()), "{diagnostic}");
-        assert!(diagnostic.contains(&status.to_string()), "{diagnostic}");
-        assert!(diagnostic.contains("invalid caller JWT"), "{diagnostic}");
-        assert!(diagnostic.contains("stdout:"), "{diagnostic}");
-        assert!(diagnostic.contains("stderr:"), "{diagnostic}");
+        assert_eq!(
+            format!("{error}"),
+            format!("HTTP runtime ({mode}) exited during startup: {status}; stdout: {stdout:?}; stderr: {stderr:?}")
+        );
     }
     Ok(())
 }
