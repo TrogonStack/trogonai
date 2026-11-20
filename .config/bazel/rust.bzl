@@ -326,6 +326,7 @@ def _crate_targets(
         "CARGO_BIN_EXE_" + binary: "$(rootpath :{})".format(target)
         for binary, target in binary_targets.items()
     }
+    binary_coverage_env = {"RUST_COVERAGE_OBJECTS": "\n".join(binary_env.values())} if binary_targets else {}
 
     test_settings = _target_settings("integration_tests", integration_tests, crate["integration_tests"])
     for test in crate["integration_tests"]:
@@ -340,7 +341,7 @@ def _crate_targets(
             crate_root = test["root"],
             data = _dedupe(data + binary_data + _files(settings["data"])),
             edition = edition,
-            env = test_env,
+            env = test_env | binary_coverage_env,
             proc_macro_deps = lib_proc_macro_deps + normal_proc_macro_deps + test_proc_macro_deps,
             rustc_env = rustc_env | binary_env | _env(settings["rustc_env"]),
             lint_config = lint_config,
