@@ -49,5 +49,17 @@ async fn provision_is_idempotent() {
     let ctx = MockJetStreamContext::new();
     provision_streams(&ctx, &p("acp")).await.unwrap();
     provision_streams(&ctx, &p("acp")).await.unwrap();
-    assert_eq!(ctx.created_streams().len(), 10);
+    assert_eq!(ctx.created_streams().len(), 5);
+    assert_eq!(ctx.stream_writes(), 5);
+}
+
+#[tokio::test]
+async fn provision_reports_a_mutation_time_ownership_refusal() {
+    let ctx = MockJetStreamContext::new();
+    provision_streams(&ctx, &p("acp")).await.unwrap();
+    ctx.refuse_next_owned_reconciliation();
+
+    let error = provision_streams(&ctx, &p("acp")).await.unwrap_err();
+
+    assert!(matches!(error, ProvisionError::OwnershipMismatch { stream, .. } if stream == "ACP_COMMANDS"));
 }
