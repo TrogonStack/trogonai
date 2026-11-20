@@ -3,6 +3,9 @@ use super::*;
 use crate::{ProtocolError, SignalNumber, SignalRequestId};
 use std::process::{Child, Command as Process, Stdio};
 
+#[path = "tests/read_interruption.rs"]
+mod read_interruption;
+
 #[expect(
     clippy::expect_used,
     reason = "A fixed valid identity is required to arrange the private state contract"
@@ -1283,11 +1286,6 @@ pub(in crate::linux) fn worker_interrupted_setup_reads_retry_before_observing_ex
                 .as_mut()
                 .ok_or_else(|| io::Error::other("held root"))?
                 .setup = read;
-            unsafe {
-                disposition(libc::SIGUSR1, remember_signal as *const () as libc::sighandler_t)?;
-            }
-            let reader = unsafe { libc::pthread_self() };
-            let thread = unsafe { libc::syscall(libc::SYS_gettid) };
             let descriptor = guard
                 .state
                 .root
@@ -1295,35 +1293,15 @@ pub(in crate::linux) fn worker_interrupted_setup_reads_retry_before_observing_ex
                 .ok_or_else(|| io::Error::other("held root"))?
                 .setup
                 .as_raw_fd();
-            let observer = std::thread::spawn(move || -> Result<(), io::Error> {
-                let deadline = Instant::now() + Duration::from_secs(1);
-                loop {
-                    let state = std::fs::read_to_string(format!("/proc/self/task/{thread}/syscall"))?;
-                    let mut fields = state.split_whitespace();
-                    if fields.next().and_then(|value| value.parse::<libc::c_long>().ok()) == Some(libc::SYS_read)
-                        && fields
-                            .next()
-                            .and_then(|value| u32::from_str_radix(value.trim_start_matches("0x"), 16).ok())
-                            == Some(descriptor as u32)
-                    {
-                        break;
-                    }
-                    if Instant::now() >= deadline {
-                        return Err(io::Error::other("setup reader never entered its blocking read"));
-                    }
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                let result = unsafe { libc::pthread_kill(reader, libc::SIGUSR1) };
-                if result != 0 {
-                    return Err(io::Error::from_raw_os_error(result));
-                }
-                std::thread::sleep(Duration::from_millis(30));
-                std::io::Write::write_all(&mut std::fs::File::from(write), &[1, 2, 0, 0, 0])
-            });
+            let observer = read_interruption::interrupt_then_read_packet(descriptor, write)?;
             guard.state.observe_exec();
-            observer
+            let observed = observer
                 .join()
                 .map_err(|_| io::Error::other("setup read observer panicked"))??;
+            require(
+                observed == 2,
+                "setup read did not receive interruption followed by packet continuation",
+            )?;
             let events = queued_events(&mut guard.state.writer)?;
             require(
                 events.iter().any(|event| {

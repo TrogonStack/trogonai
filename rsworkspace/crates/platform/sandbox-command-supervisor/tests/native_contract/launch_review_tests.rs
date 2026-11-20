@@ -9,11 +9,12 @@ fn path_case(
     let marker = directory.path().join("executed");
     let tools = directory.path().join("tools");
     std::fs::create_dir(&tools)?;
+    let fixture = std::fs::canonicalize(env!("CARGO_BIN_EXE_supervisor-test-fixture"))?;
     for worker in [
         directory.path().join("launch-review-worker"),
         tools.join("launch-review-worker"),
     ] {
-        std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_supervisor-test-fixture"), worker)?;
+        std::os::unix::fs::symlink(&fixture, worker)?;
     }
     let mut helper = Harness::start();
     helper.send(Command::Init {
