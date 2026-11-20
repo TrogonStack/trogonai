@@ -1,5 +1,5 @@
 use super::Bridge;
-use crate::nats::{self, FlushClient, PublishClient, commands, parsing::SessionAgentMethod, responses};
+use crate::nats::{self, FlushClient, PublishClient, commands, parsing::SessionAgentMethod};
 use crate::session_id::AcpSessionId;
 use crate::wire::encode_notification;
 use agent_client_protocol::v1::schema::CancelNotification;
@@ -59,15 +59,6 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
             "Failed to publish cancel notification to backend"
         );
         bridge.metrics.record_error("cancel", "cancel_publish_failed");
-    }
-
-    let cancelled_subject = responses::CancelledSubject::new(prefix, &session_id);
-    if let Err(e) = bridge
-        .nats()
-        .publish_with_headers(cancelled_subject, async_nats::HeaderMap::new(), bytes::Bytes::new())
-        .await
-    {
-        warn!(session_id = %args.session_id, error = %e, "Failed to publish session_cancelled broadcast");
     }
 
     bridge.metrics.record_request(
