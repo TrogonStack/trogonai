@@ -124,6 +124,75 @@ async fn provisioning_reconciles_owned_fields_and_preserves_operator_configurati
     );
 }
 
+#[tokio::test]
+async fn owned_provisioning_refuses_foreign_subjects_without_writing() {
+    let broker = Broker::start().await;
+    let initial = stream::Config {
+        name: "OWNED".to_owned(),
+        subjects: vec!["jobs.old".to_owned()],
+        storage: stream::StorageType::Memory,
+        max_bytes: 1_048_576,
+        description: Some("operator-managed storage".to_owned()),
+        ..Default::default()
+    };
+    let owned = [ProvisionedStreamField::Subjects];
+    assert!(
+        JetStreamContext::create_or_reconcile_stream_if_owned(&broker.client, initial, &owned, "jobs.")
+            .await
+            .expect("create owned stream")
+    );
+    let desired = stream::Config {
+        name: "OWNED".to_owned(),
+        subjects: vec!["jobs.current".to_owned()],
+        ..Default::default()
+    };
+    assert!(
+        JetStreamContext::create_or_reconcile_stream_if_owned(&broker.client, desired.clone(), &owned, "jobs.")
+            .await
+            .expect("reconcile owned stream")
+    );
+    let live = JetStreamGetStream::get_stream(&broker.client, "OWNED")
+        .await
+        .expect("reconciled owned stream");
+    let config = &live.cached_info().config;
+    assert_eq!(config.subjects, ["jobs.current"]);
+    assert_eq!(config.storage, stream::StorageType::Memory);
+    assert_eq!(config.max_bytes, 1_048_576);
+    assert_eq!(config.description.as_deref(), Some("operator-managed storage"));
+
+    let mut updates = broker
+        .connection
+        .subscribe("$JS.API.STREAM.UPDATE.OWNED")
+        .await
+        .expect("observe owned update requests");
+    broker.connection.flush().await.expect("subscribe before provisioning");
+    let foreign = stream::Config {
+        subjects: vec!["other.current".to_owned()],
+        ..desired.clone()
+    };
+    assert!(
+        !JetStreamContext::create_or_reconcile_stream_if_owned(&broker.client, foreign, &owned, "other.")
+            .await
+            .expect("refuse foreign ownership")
+    );
+    assert!(
+        JetStreamContext::create_or_reconcile_stream_if_owned(&broker.client, desired, &owned, "jobs.")
+            .await
+            .expect("already reconciled owned stream")
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), updates.next())
+            .await
+            .is_err(),
+        "foreign or unchanged provisioning must not send STREAM.UPDATE"
+    );
+    let after = JetStreamGetStream::get_stream(&broker.client, "OWNED")
+        .await
+        .expect("unchanged owned stream");
+    assert_eq!(after.cached_info().config, *config);
+    assert_eq!(after.cached_info().created, live.cached_info().created);
+}
+
 fn headers(id: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert("Nats-Msg-Id", id);
