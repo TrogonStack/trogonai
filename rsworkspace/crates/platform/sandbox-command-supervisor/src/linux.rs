@@ -33,6 +33,21 @@ struct RootStatus {
 }
 
 impl RootStatus {
+    fn from_siginfo(info: &libc::siginfo_t) -> Result<Self, ErrorCode> {
+        let value = unsafe { info.si_status() };
+        match info.si_code {
+            libc::CLD_EXITED => Ok(Self {
+                code: Some(value),
+                signal: None,
+            }),
+            libc::CLD_KILLED | libc::CLD_DUMPED => Ok(Self {
+                code: None,
+                signal: Some(value),
+            }),
+            _ => Err(ErrorCode::IdentityUnknown),
+        }
+    }
+
     fn from_raw(status: i32) -> Option<Self> {
         if libc::WIFEXITED(status) {
             Some(Self {
@@ -568,24 +583,25 @@ impl Supervisor {
 
     fn read_output(&mut self, stream: Stream) {
         for _ in 0..8 {
-            let descriptor = self.root.as_ref().and_then(|root| match stream {
+            let Some(root) = &mut self.root else {
+                return;
+            };
+            let descriptor = match stream {
                 Stream::Stdout => root.stdout.as_ref(),
                 Stream::Stderr => root.stderr.as_ref(),
-            });
+            };
             let Some(descriptor) = descriptor else {
                 return;
             };
             let mut bytes = [0_u8; MAX_DATA_BYTES];
             let count = unsafe { libc::read(descriptor.as_raw_fd(), bytes.as_mut_ptr().cast(), bytes.len()) };
             if count == 0 {
-                if let Some(root) = &mut self.root {
-                    match stream {
-                        Stream::Stdout => {
-                            root.stdout.take();
-                        }
-                        Stream::Stderr => {
-                            root.stderr.take();
-                        }
+                match stream {
+                    Stream::Stdout => {
+                        root.stdout.take();
+                    }
+                    Stream::Stderr => {
+                        root.stderr.take();
                     }
                 }
                 return;
@@ -626,7 +642,6 @@ impl Supervisor {
             self.hard_signal()?;
         }
         let children = direct_children(self.family_limit)?;
-        let root_pid = self.root.as_ref().map(|root| root.pid);
         if children.has_more {
             self.process_limit();
             self.hard_signal()?;
@@ -647,26 +662,9 @@ impl Supervisor {
             if unsafe { info.si_pid() } == 0 {
                 continue;
             }
-            if Some(*child) == root_pid {
-                let Some(root) = self.root.as_mut() else {
-                    return Err(ErrorCode::IdentityUnknown);
-                };
+            if let Some(root) = self.root.as_mut().filter(|root| root.pid == *child) {
                 if root.status.is_none() && readable(&root.pidfd)? {
-                    let code = info.si_code;
-                    let value = unsafe { info.si_status() };
-                    let status = if code == libc::CLD_EXITED {
-                        RootStatus {
-                            code: Some(value),
-                            signal: None,
-                        }
-                    } else if code == libc::CLD_KILLED || code == libc::CLD_DUMPED {
-                        RootStatus {
-                            code: None,
-                            signal: Some(value),
-                        }
-                    } else {
-                        return Err(ErrorCode::IdentityUnknown);
-                    };
+                    let status = RootStatus::from_siginfo(&info)?;
                     root.status = Some(status);
                     if self.released {
                         let _ = self.writer.queue(Event::RootExited {
@@ -759,6 +757,21 @@ impl Supervisor {
             stderr_truncated: self.writer.stderr_truncated.into(),
         })?;
         Ok(())
+    }
+
+    fn start(&mut self, environment: BTreeMap<String, String>) -> i32 {
+        if self
+            .writer
+            .queue(Event::Hello {
+                version: VERSION,
+                execution_id: self.execution.clone(),
+                environment,
+            })
+            .is_err()
+        {
+            return 74;
+        }
+        self.run_loop()
     }
 
     fn run_loop(&mut self) -> i32 {
@@ -862,18 +875,10 @@ impl Supervisor {
 }
 
 pub fn run(execution: ExecutionId, family_limit: usize) -> i32 {
-    let mut supervisor = Supervisor::new(execution.clone(), family_limit);
+    let mut supervisor = Supervisor::new(execution, family_limit);
     if let Err(code) = probe().and_then(|_| nonblocking(0)).and_then(|_| nonblocking(1)) {
-        let event = Event::Error {
-            execution_id: execution,
-            code,
-            uncertain: false.into(),
-        };
-        if let Ok(frame) = encode_event(&event) {
-            unsafe {
-                libc::write(1, frame.as_ptr().cast(), frame.len());
-            }
-        }
+        supervisor.error(code, false);
+        supervisor.writer.flush();
         return 78;
     }
     let environment: Result<BTreeMap<_, _>, ErrorCode> = SystemEnv
@@ -894,18 +899,7 @@ pub fn run(execution: ExecutionId, family_limit: usize) -> i32 {
             return 64;
         }
     };
-    if supervisor
-        .writer
-        .queue(Event::Hello {
-            version: VERSION,
-            execution_id: execution,
-            environment,
-        })
-        .is_err()
-    {
-        return 74;
-    }
-    supervisor.run_loop()
+    supervisor.start(environment)
 }
 
 #[cfg(test)]

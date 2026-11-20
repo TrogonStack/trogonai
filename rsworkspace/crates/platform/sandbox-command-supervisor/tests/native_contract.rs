@@ -1032,6 +1032,12 @@ fn native_signal_request_retries_do_not_repeat_effects_or_change_signal() {
 #[path = "native_contract/overflow_tests.rs"]
 mod overflow_tests;
 
+#[path = "native_contract/fixture_tests.rs"]
+mod fixture_tests;
+
+#[path = "native_contract/syscall_notifications.rs"]
+mod syscall_notifications;
+
 fn coverage_environment() -> BTreeMap<std::ffi::OsString, std::ffi::OsString> {
     #[cfg(coverage)]
     {

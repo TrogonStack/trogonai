@@ -109,6 +109,20 @@ unsafe fn child_error(descriptor: RawFd, error: i32) -> ! {
     }
 }
 
+struct Launch {
+    gate_read: OwnedFd,
+    gate_write: OwnedFd,
+    out_read: OwnedFd,
+    out_write: OwnedFd,
+    err_read: OwnedFd,
+    err_write: OwnedFd,
+    setup_read: OwnedFd,
+    setup_write: OwnedFd,
+    null: OwnedFd,
+    argv: Vec<*const libc::c_char>,
+    environment: Vec<*const libc::c_char>,
+}
+
 pub(super) fn spawn(prepared: &Prepared) -> Result<Root, ErrorCode> {
     let (gate_read, gate_write) = pipe()?;
     let (out_read, out_write) = pipe()?;
@@ -135,6 +149,39 @@ pub(super) fn spawn(prepared: &Prepared) -> Result<Root, ErrorCode> {
     if pid < 0 {
         return Err(ErrorCode::SetupFailed);
     }
+    after_fork(
+        pid,
+        prepared,
+        Launch {
+            gate_read,
+            gate_write,
+            out_read,
+            out_write,
+            err_read,
+            err_write,
+            setup_read,
+            setup_write,
+            null,
+            argv,
+            environment,
+        },
+    )
+}
+
+fn after_fork(pid: i32, prepared: &Prepared, launch: Launch) -> Result<Root, ErrorCode> {
+    let Launch {
+        gate_read,
+        gate_write,
+        out_read,
+        out_write,
+        err_read,
+        err_write,
+        setup_read,
+        setup_write,
+        null,
+        argv,
+        environment,
+    } = launch;
     if pid == 0 {
         unsafe {
             // Duplicate away from 0..4 before replacing any inherited descriptor.
@@ -249,3 +296,6 @@ pub(super) fn spawn(prepared: &Prepared) -> Result<Root, ErrorCode> {
         reaped: false,
     })
 }
+
+#[cfg(test)]
+mod tests;
