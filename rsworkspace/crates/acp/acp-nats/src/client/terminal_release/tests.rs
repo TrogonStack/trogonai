@@ -202,7 +202,7 @@ async fn handle_success_flush_failure_exercises_warn_path() {
 #[test]
 fn error_code_and_message_invalid_request_returns_invalid_params() {
     let tr_err = TerminalReleaseError::InvalidRequest("bad".to_string());
-    let (code, message) = error_code_and_message(&tr_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&tr_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "bad");
 }
@@ -211,7 +211,7 @@ fn error_code_and_message_invalid_request_returns_invalid_params() {
 fn error_code_and_message_client_error_preserves_code_and_message() {
     let inner = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "params is null");
     let tr_err = TerminalReleaseError::ClientError(inner);
-    let (code, message) = error_code_and_message(&tr_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&tr_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "params is null");
 }
@@ -220,7 +220,7 @@ fn error_code_and_message_client_error_preserves_code_and_message() {
 fn error_code_and_message_client_error_preserves_client_code() {
     let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "denied");
     let tr_err = TerminalReleaseError::ClientError(client_err);
-    let (code, message) = error_code_and_message(&tr_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&tr_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "denied");
 }
