@@ -162,6 +162,7 @@ google-cloud-pubsub = "=1.7.0"
 
 # Discord
 twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }
+twilight-http = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }
 twilight-model = "=0.17.1"
 
 # Error handling
