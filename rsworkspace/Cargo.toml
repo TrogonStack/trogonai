@@ -69,6 +69,7 @@ trogon-webhooks = { path = "crates/platform/trogon-webhooks" }
 trogon-policy-eval = { path = "crates/policy/trogon-policy-eval" }
 trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
+channel-acp-port = { path = "crates/channel/channel-acp-port" }
 channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
 trogon-credential-aggregate = { path = "crates/credential/trogon-credential-aggregate" }
 trogon-credential-domain = { path = "crates/credential/trogon-credential-domain" }

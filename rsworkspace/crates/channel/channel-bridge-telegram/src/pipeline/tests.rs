@@ -43,7 +43,7 @@ impl AgentPortError for FakeError {
 /// Simulates the agent side: mints sessions, records prompts, and streams a
 /// reply into the renderer the way real session notifications would.
 struct FakePort {
-    renderer: Rc<TelegramRenderClient>,
+    renderer: Rc<BufferedRenderClient>,
     reply: String,
     sessions_created: RefCell<u32>,
     prompted: RefCell<Vec<(String, String)>>,
@@ -94,7 +94,7 @@ fn scripted(counter: &RefCell<u32>) -> bool {
 }
 
 impl FakePort {
-    fn new(renderer: Rc<TelegramRenderClient>, reply: &str) -> Self {
+    fn new(renderer: Rc<BufferedRenderClient>, reply: &str) -> Self {
         Self {
             renderer,
             reply: reply.to_string(),
@@ -382,7 +382,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -524,7 +524,7 @@ async fn pipeline_redeems_a_claim_checked_update() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -618,7 +618,7 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -697,7 +697,7 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -866,7 +866,7 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -970,7 +970,7 @@ async fn pipeline_hands_back_a_first_session_it_could_not_record() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -1081,7 +1081,7 @@ async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -1183,7 +1183,7 @@ async fn pipeline_leaves_no_partial_reply_behind_when_a_turn_fails() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();

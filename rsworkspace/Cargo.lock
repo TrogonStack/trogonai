@@ -1388,6 +1388,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "channel-acp-port"
+version = "0.1.0"
+dependencies = [
+ "acp-nats",
+ "agent-client-protocol",
+ "async-nats",
+ "async-trait",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "trogon-channel",
+ "trogon-nats",
+ "trogon-std",
+ "trogon-telemetry",
+]
+
+[[package]]
 name = "channel-bridge-telegram"
 version = "0.1.0"
 dependencies = [
@@ -1397,6 +1417,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "axum",
+ "channel-acp-port",
  "futures",
  "serde",
  "serde_json",

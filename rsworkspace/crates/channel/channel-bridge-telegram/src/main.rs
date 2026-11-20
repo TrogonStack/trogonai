@@ -10,7 +10,6 @@
 //! nothing else.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-mod acp_port;
 mod config;
 mod constants;
 mod outbound;
@@ -23,16 +22,15 @@ mod main_tests;
 
 use {
     acp_nats::AgentHandler,
-    acp_port::{AcpBridge, AcpPort, SessionMethods},
     agent_client_protocol::schema::ProtocolVersion,
     agent_client_protocol::v1::schema::InitializeRequest,
     anyhow::Context as _,
     async_nats::jetstream::consumer::DeliverPolicy,
+    channel_acp_port::{AcpBridge, AcpPort, BufferedRenderClient, SessionMethods},
     config::BridgeConfig,
     futures::StreamExt,
     outbound::TelegramOutbound,
     pipeline::Pipeline,
-    render::TelegramRenderClient,
     std::sync::Arc,
     teloxide::Bot,
     tracing::{error, info, warn},
@@ -161,7 +159,7 @@ where
         &meter,
         config.acp.clone(),
     ));
-    let renderer = Arc::new(TelegramRenderClient::new());
+    let renderer = Arc::new(BufferedRenderClient::new());
 
     let mut client_task = tokio::task::spawn_local(acp_nats::client::run(
         nats_client.clone(),
