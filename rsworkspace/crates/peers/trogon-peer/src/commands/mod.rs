@@ -2,6 +2,7 @@ mod constants;
 pub mod domain;
 mod enroll;
 mod evolve_error;
+mod peer_state;
 pub mod state;
 mod state_values;
 

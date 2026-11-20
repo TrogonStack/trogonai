@@ -1,5 +1,5 @@
 use super::{AcceptedMessage, accepted_outbox::AcceptedOutbox, domain::*, evolve_error::EvolveError, state_values};
-use crate::commands::state::PeerState;
+use crate::commands::peer_state::PeerState;
 use trogonai_proto::peers::v1alpha1 as proto;
 
 use super::message_values::value;
