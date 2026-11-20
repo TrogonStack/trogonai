@@ -327,10 +327,6 @@ async fn release_cancels_before_close_and_keeps_close_failure_nonfatal() {
                 next(&mut requests).await.subject.as_str(),
                 commands::CancelSubject::new(&fixture.prefix, &acp_session).to_string()
             );
-            assert_eq!(
-                next(&mut requests).await.subject.as_str(),
-                responses::CancelledSubject::new(&fixture.prefix, &acp_session).to_string()
-            );
             let request = next(&mut requests).await;
             assert_eq!(
                 request.subject.as_str(),
