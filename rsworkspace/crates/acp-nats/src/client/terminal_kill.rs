@@ -1,7 +1,7 @@
+use crate::acp::{Client, ErrorCode, KillTerminalRequest, KillTerminalResponse, Request, Response};
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, ErrorCode, KillTerminalRequest, KillTerminalResponse, Request, Response};
 use bytes::Bytes;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
@@ -9,8 +9,8 @@ use trogon_std::JsonSerialize;
 #[derive(Debug)]
 pub enum TerminalKillError {
     MalformedJson(serde_json::Error),
-    InvalidParams(agent_client_protocol::Error),
-    ClientError(agent_client_protocol::Error),
+    InvalidParams(crate::acp::Error),
+    ClientError(crate::acp::Error),
 }
 
 impl std::fmt::Display for TerminalKillError {
@@ -34,7 +34,7 @@ impl std::error::Error for TerminalKillError {
 }
 
 fn invalid_params_error(message: impl Into<String>) -> TerminalKillError {
-    TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
+    TerminalKillError::InvalidParams(crate::acp::Error::new(
         i32::from(ErrorCode::InvalidParams),
         message.into(),
     ))
@@ -75,7 +75,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
     match forward_to_client(payload, client, expected_session_id).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
+                .to_vec(&Response::<_>::Result {
                     id: request_id.clone(),
                     result: response,
                 })
@@ -142,10 +142,9 @@ mod tests {
     async fn handle_success_publishes_response_to_reply_subject() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalRequest::new(crate::acp::SessionId::from("sess-1"), "term-001".to_string());
         let envelope = Request {
-            id: agent_client_protocol::RequestId::Number(1),
+            id: crate::acp::RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(request),
         };
@@ -173,10 +172,9 @@ mod tests {
     async fn handle_no_reply_does_not_call_client_or_publish() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalRequest::new(crate::acp::SessionId::from("sess-1"), "term-001".to_string());
         let envelope = Request {
-            id: agent_client_protocol::RequestId::Number(1),
+            id: crate::acp::RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(request),
         };
@@ -217,10 +215,9 @@ mod tests {
     async fn handle_session_id_mismatch_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-b"), "term-001".to_string());
+        let request = KillTerminalRequest::new(crate::acp::SessionId::from("sess-b"), "term-001".to_string());
         let envelope = Request {
-            id: agent_client_protocol::RequestId::Number(1),
+            id: crate::acp::RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(request),
         };
@@ -243,10 +240,9 @@ mod tests {
     async fn handle_client_error_publishes_error_reply() {
         let nats = MockNatsClient::new();
         let client = TerminalKillFailingClient;
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalRequest::new(crate::acp::SessionId::from("sess-1"), "term-001".to_string());
         let envelope = Request {
-            id: agent_client_protocol::RequestId::Number(1),
+            id: crate::acp::RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(request),
         };
@@ -277,10 +273,9 @@ mod tests {
         let nats = MockNatsClient::new();
         let client = MockClient::new();
         let serializer = FailNextSerialize::new(1);
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalRequest::new(crate::acp::SessionId::from("sess-1"), "term-001".to_string());
         let envelope = Request {
-            id: agent_client_protocol::RequestId::Number(1),
+            id: crate::acp::RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(request),
         };
@@ -296,10 +291,9 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_publish();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalRequest::new(crate::acp::SessionId::from("sess-1"), "term-001".to_string());
         let envelope = Request {
-            id: agent_client_protocol::RequestId::Number(1),
+            id: crate::acp::RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(request),
         };
@@ -323,10 +317,9 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         nats.fail_next_flush();
         let client = MockClient::new();
-        let request =
-            KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+        let request = KillTerminalRequest::new(crate::acp::SessionId::from("sess-1"), "term-001".to_string());
         let envelope = Request {
-            id: agent_client_protocol::RequestId::Number(1),
+            id: crate::acp::RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(request),
         };
@@ -347,7 +340,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let err = TerminalKillError::ClientError(agent_client_protocol::Error::new(
+        let err = TerminalKillError::ClientError(crate::acp::Error::new(
             ErrorCode::InvalidParams.into(),
             "bad terminal id",
         ));
@@ -371,16 +364,12 @@ mod tests {
             TerminalKillError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
         assert!(malformed.to_string().contains("malformed JSON"));
 
-        let invalid_params = TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "bad params",
-        ));
+        let invalid_params =
+            TerminalKillError::InvalidParams(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "bad params"));
         assert!(invalid_params.to_string().contains("invalid params"));
 
-        let client_err = TerminalKillError::ClientError(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "client fail",
-        ));
+        let client_err =
+            TerminalKillError::ClientError(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "client fail"));
         assert!(client_err.to_string().contains("client error"));
     }
 
@@ -390,16 +379,12 @@ mod tests {
             TerminalKillError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
         assert!(malformed.source().is_some());
 
-        let invalid_params = TerminalKillError::InvalidParams(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "bad params",
-        ));
+        let invalid_params =
+            TerminalKillError::InvalidParams(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "bad params"));
         assert!(invalid_params.source().is_some());
 
-        let client_err = TerminalKillError::ClientError(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "client fail",
-        ));
+        let client_err =
+            TerminalKillError::ClientError(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "client fail"));
         assert!(client_err.source().is_some());
     }
 }

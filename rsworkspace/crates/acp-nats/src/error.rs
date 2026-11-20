@@ -1,4 +1,4 @@
-use agent_client_protocol::{Error, ErrorCode};
+use crate::acp::{Error, ErrorCode};
 use tracing::warn;
 use trogon_nats::NatsError;
 
@@ -53,7 +53,7 @@ pub fn map_nats_error(e: NatsError) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::ErrorCode;
+    use crate::acp::ErrorCode;
     use trogon_nats::{NatsError, PublishOperationError};
 
     #[test]

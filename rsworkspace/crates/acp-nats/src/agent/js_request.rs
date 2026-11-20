@@ -1,4 +1,4 @@
-use agent_client_protocol::{Error, ErrorCode};
+use crate::acp::{Error, ErrorCode};
 use async_nats::jetstream::AckKind;
 use bytes::Bytes;
 use futures::StreamExt;
@@ -27,7 +27,7 @@ pub async fn js_request<J, Req, Res, S>(
     session_id: &crate::session_id::AcpSessionId,
     req_id: &ReqId,
     operation_timeout: Duration,
-) -> agent_client_protocol::Result<Res>
+) -> crate::acp::Result<Res>
 where
     J: JetStreamPublisher + JetStreamGetStream,
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
@@ -102,7 +102,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::PromptResponse;
+    use crate::acp::PromptResponse;
     use trogon_nats::jetstream::mocks::*;
 
     use crate::agent::test_support::MockJs;
@@ -135,14 +135,14 @@ mod tests {
         let (consumer, tx) = MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(consumer);
 
-        let response = PromptResponse::new(agent_client_protocol::StopReason::EndTurn);
+        let response = PromptResponse::new(crate::acp::StopReason::EndTurn);
         let msg = MockJsMessage::new(make_nats_msg(&serde_json::to_vec(&response).unwrap()));
         tx.unbounded_send(Ok(msg)).unwrap();
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -152,7 +152,7 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().stop_reason, agent_client_protocol::StopReason::EndTurn);
+        assert_eq!(result.unwrap().stop_reason, crate::acp::StopReason::EndTurn);
     }
 
     #[tokio::test]
@@ -162,10 +162,10 @@ mod tests {
         js.consumer_factory.add_consumer(consumer);
         js.publisher.fail_next_js_publish();
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -182,10 +182,10 @@ mod tests {
     async fn js_request_consumer_creation_failure() {
         let js = MockJs::new();
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -204,10 +204,10 @@ mod tests {
         let failing_consumer = MockJetStreamConsumer::failing();
         js.consumer_factory.add_consumer(failing_consumer);
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -229,10 +229,10 @@ mod tests {
         let msg = MockJsMessage::new(make_nats_msg(b"not json"));
         tx.unbounded_send(Ok(msg)).unwrap();
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -251,10 +251,10 @@ mod tests {
         let (consumer, _tx) = MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(consumer);
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -273,8 +273,7 @@ mod tests {
         let (consumer, tx) = MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(consumer);
 
-        let agent_err =
-            agent_client_protocol::Error::new(agent_client_protocol::ErrorCode::InternalError.into(), "agent failed");
+        let agent_err = crate::acp::Error::new(crate::acp::ErrorCode::InternalError.into(), "agent failed");
         let msg = MockJsMessage::new(async_nats::Message {
             subject: "test".into(),
             reply: None,
@@ -286,10 +285,10 @@ mod tests {
         });
         tx.unbounded_send(Ok(msg)).unwrap();
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -311,10 +310,10 @@ mod tests {
 
         drop(tx);
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -336,10 +335,10 @@ mod tests {
         tx.unbounded_send(Err(trogon_nats::mocks::MockError("stream error".to_string())))
             .unwrap();
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::StdJsonSerialize,
             &test_prefix(),
             &test_sid("s1"),
@@ -358,10 +357,10 @@ mod tests {
         let (consumer, _tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
         js.consumer_factory.add_consumer(consumer);
 
-        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        let result: crate::acp::Result<PromptResponse> = js_request(
             &js,
             "acp.session.s1.agent.prompt",
-            &agent_client_protocol::PromptRequest::new("s1", vec![]),
+            &crate::acp::PromptRequest::new("s1", vec![]),
             &trogon_std::FailNextSerialize::new(1),
             &test_prefix(),
             &test_sid("s1"),

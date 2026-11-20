@@ -28,7 +28,7 @@ trogon-source-twitter = { path = "crates/trogon-source-twitter" }
 trogon-std = { path = "crates/trogon-std" }
 
 # ACP
-agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
+agent-client-protocol = { version = "=5.4.0" }
 
 # Async runtime & networking
 async-compat = "=0.2.5"

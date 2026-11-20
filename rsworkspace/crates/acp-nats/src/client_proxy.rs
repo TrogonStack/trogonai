@@ -1,13 +1,13 @@
-use crate::acp_prefix::AcpPrefix;
-use crate::nats::session;
-use crate::session_id::AcpSessionId;
-use agent_client_protocol::{
+use crate::acp::{
     Client, CreateTerminalRequest, CreateTerminalResponse, Error, ErrorCode, KillTerminalRequest, KillTerminalResponse,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionRequest, RequestPermissionResponse, Result, SessionNotification, TerminalOutputRequest,
     TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
 };
+use crate::acp_prefix::AcpPrefix;
+use crate::nats::session;
+use crate::session_id::AcpSessionId;
 use std::time::Duration;
 use trogon_nats::{FlushClient, PublishClient, RequestClient, publish, request_with_timeout};
 
@@ -119,7 +119,7 @@ impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
+    use crate::acp::{
         Client, ContentBlock, ContentChunk, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
         SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
     };
@@ -199,7 +199,7 @@ mod tests {
     #[tokio::test]
     async fn write_text_file_publishes_to_correct_subject() {
         let nats = AdvancedMockNatsClient::new();
-        let response = agent_client_protocol::WriteTextFileResponse::default();
+        let response = crate::acp::WriteTextFileResponse::default();
         nats.set_response(
             "acp.session.s1.client.fs.write_text_file",
             serde_json::to_vec(&response).unwrap().into(),
@@ -276,7 +276,7 @@ mod tests {
     #[tokio::test]
     async fn wait_for_terminal_exit_publishes_to_correct_subject() {
         let nats = AdvancedMockNatsClient::new();
-        let response = WaitForTerminalExitResponse::new(agent_client_protocol::TerminalExitStatus::new());
+        let response = WaitForTerminalExitResponse::new(crate::acp::TerminalExitStatus::new());
         nats.set_response(
             "acp.session.s1.client.terminal.wait_for_exit",
             serde_json::to_vec(&response).unwrap().into(),

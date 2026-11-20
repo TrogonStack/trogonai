@@ -15,7 +15,6 @@ mod prompt;
 mod resume_session;
 mod set_session_config_option;
 mod set_session_mode;
-mod set_session_model;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -27,11 +26,11 @@ mod tests {
     use std::sync::Arc;
 
     use super::Bridge;
-    use crate::agent::test_support::MockJs;
-    use crate::config::Config;
-    use agent_client_protocol::{
+    use crate::acp::{
         Agent, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
     };
+    use crate::agent::test_support::MockJs;
+    use crate::config::Config;
     use tokio::sync::mpsc;
     use trogon_nats::AdvancedMockNatsClient;
 
@@ -100,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn ext_method_returns_agent_unavailable_when_nats_fails() {
-        use agent_client_protocol::ErrorCode;
+        use crate::acp::ErrorCode;
 
         let (_mock, _js, bridge) = mock_bridge();
         let err = bridge

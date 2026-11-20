@@ -1,5 +1,5 @@
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::{AgentSideConnection, SessionNotification};
+use acp_nats::{acp::SessionNotification, ide::AgentSideConnection};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
@@ -49,9 +49,7 @@ pub async fn handle<N, J>(
         notification_tx,
     ));
 
-    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
-        tokio::task::spawn_local(fut);
-    });
+    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming);
 
     let connection = Rc::new(connection);
 

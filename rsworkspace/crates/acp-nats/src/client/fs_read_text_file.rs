@@ -1,7 +1,7 @@
+use crate::acp::{Client, ErrorCode, ReadTextFileRequest, ReadTextFileResponse, Request, Response};
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, ErrorCode, ReadTextFileRequest, ReadTextFileResponse, Request, Response};
 use bytes::Bytes;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -10,7 +10,7 @@ use trogon_std::JsonSerialize;
 #[derive(Debug)]
 pub enum FsReadTextFileError {
     InvalidRequest(serde_json::Error),
-    ClientError(agent_client_protocol::Error),
+    ClientError(crate::acp::Error),
 }
 
 impl std::fmt::Display for FsReadTextFileError {
@@ -67,7 +67,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
     match forward_to_client(payload, client).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
+                .to_vec(&Response::<_>::Result {
                     id: request_id.clone(),
                     result: response,
                 })
@@ -111,7 +111,7 @@ async fn forward_to_client<C: Client>(payload: &[u8], client: &C) -> Result<Read
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
+    use crate::acp::{
         ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, Request, RequestId,
         RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
     };
@@ -134,21 +134,18 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> crate::acp::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new(self.content.clone()))
         }
     }
@@ -157,22 +154,19 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
-            Err(agent_client_protocol::Error::new(
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> crate::acp::Result<ReadTextFileResponse> {
+            Err(crate::acp::Error::new(
                 i32::from(ErrorCode::InvalidParams),
                 "file not found",
             ))
@@ -182,10 +176,7 @@ mod tests {
     #[tokio::test]
     async fn fs_read_text_file_forwards_request_and_returns_response() {
         let client = MockClient::new("hello world");
-        let request = ReadTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/tmp/foo.txt".to_string(),
-        );
+        let request = ReadTextFileRequest::new(crate::acp::SessionId::from("sess-1"), "/tmp/foo.txt".to_string());
         let envelope = Request {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
@@ -235,7 +226,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/missing.txt".to_string(),
             )),
         };
@@ -255,7 +246,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/path.txt".to_string(),
             )),
         };
@@ -274,7 +265,7 @@ mod tests {
             id: RequestId::Number(42),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/path/to/file.txt".to_string(),
             )),
         };
@@ -301,7 +292,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -339,7 +330,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/missing.txt".to_string(),
             )),
         };
@@ -358,7 +349,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/missing.txt".to_string(),
             )),
         };
@@ -388,7 +379,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         let (code, message) = error_code_and_message(&fs_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -404,7 +395,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/path/file.txt".to_string(),
             )),
         };
@@ -432,7 +423,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/path/file.txt".to_string(),
             )),
         };
@@ -460,7 +451,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/missing.txt".to_string(),
             )),
         };
@@ -500,7 +491,7 @@ mod tests {
         let fs_err = FsReadTextFileError::InvalidRequest(err);
         assert!(fs_err.to_string().contains("invalid request"));
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         assert!(fs_err.to_string().contains("client error"));
     }
@@ -511,7 +502,7 @@ mod tests {
         let fs_err = FsReadTextFileError::InvalidRequest(err);
         assert!(fs_err.source().is_some());
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let fs_err = FsReadTextFileError::ClientError(client_err);
         assert!(fs_err.source().is_some());
     }

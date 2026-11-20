@@ -1,9 +1,7 @@
+use crate::acp::{Client, ErrorCode, Request, RequestPermissionRequest, RequestPermissionResponse, Response};
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{
-    Client, ErrorCode, Request, RequestPermissionRequest, RequestPermissionResponse, Response,
-};
 use bytes::Bytes;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -12,7 +10,7 @@ use trogon_std::JsonSerialize;
 #[derive(Debug)]
 pub enum RequestPermissionError {
     InvalidRequest(serde_json::Error),
-    ClientError(agent_client_protocol::Error),
+    ClientError(crate::acp::Error),
 }
 
 impl std::fmt::Display for RequestPermissionError {
@@ -72,7 +70,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
     match forward_to_client(payload, client, session_id).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
+                .to_vec(&Response::<_>::Result {
                     id: request_id.clone(),
                     result: response,
                 })
@@ -129,7 +127,7 @@ async fn forward_to_client<C: Client>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
+    use crate::acp::{
         ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestId, RequestPermissionOutcome,
         RequestPermissionResponse, SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
     };
@@ -149,14 +147,14 @@ mod tests {
 
     #[async_trait::async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+        ) -> crate::acp::Result<RequestPermissionResponse> {
             Ok(RequestPermissionResponse::new(self.outcome.clone()))
         }
     }
@@ -165,15 +163,15 @@ mod tests {
 
     #[async_trait::async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(
                 i32::from(ErrorCode::InvalidParams),
                 "permission denied",
             ))
@@ -285,7 +283,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "denied");
         let rp_err = RequestPermissionError::ClientError(client_err);
         let (code, message) = error_code_and_message(&rp_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -298,7 +296,7 @@ mod tests {
         let rp_err = RequestPermissionError::InvalidRequest(err);
         assert!(rp_err.to_string().contains("invalid request"));
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
         let rp_err = RequestPermissionError::ClientError(client_err);
         assert!(rp_err.to_string().contains("client error"));
     }
@@ -309,7 +307,7 @@ mod tests {
         let rp_err = RequestPermissionError::InvalidRequest(err);
         assert!(rp_err.source().is_some());
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "denied");
         let rp_err = RequestPermissionError::ClientError(client_err);
         assert!(rp_err.source().is_some());
     }

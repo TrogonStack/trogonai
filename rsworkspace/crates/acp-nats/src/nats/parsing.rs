@@ -19,7 +19,6 @@ pub enum SessionAgentMethod {
     Cancel,
     SetMode,
     SetConfigOption,
-    SetModel,
     Fork,
     Resume,
     Close,
@@ -49,7 +48,6 @@ impl SessionAgentMethod {
             "cancel" => Some(Self::Cancel),
             "set_mode" => Some(Self::SetMode),
             "set_config_option" => Some(Self::SetConfigOption),
-            "set_model" => Some(Self::SetModel),
             "fork" => Some(Self::Fork),
             "resume" => Some(Self::Resume),
             "close" => Some(Self::Close),
@@ -261,14 +259,6 @@ mod tests {
         assert_eq!(
             parse_agent_subject("acp.session.s1.agent.set_config_option").unwrap(),
             session("s1", SessionAgentMethod::SetConfigOption)
-        );
-    }
-
-    #[test]
-    fn parse_session_agent_set_model() {
-        assert_eq!(
-            parse_agent_subject("acp.session.s1.agent.set_model").unwrap(),
-            session("s1", SessionAgentMethod::SetModel)
         );
     }
 

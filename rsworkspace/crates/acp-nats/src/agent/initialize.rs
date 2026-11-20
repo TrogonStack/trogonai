@@ -1,7 +1,7 @@
 use super::Bridge;
+use crate::acp::{InitializeRequest, InitializeResponse, Result};
 use crate::error::map_nats_error;
 use crate::nats::{self, RequestClient, agent};
-use agent_client_protocol::{InitializeRequest, InitializeResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
 
@@ -42,12 +42,10 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 #[cfg(test)]
 mod tests {
     use super::Bridge;
+    use crate::acp::{Agent, ErrorCode, Implementation, InitializeRequest, InitializeResponse, ProtocolVersion};
     use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use crate::config::Config;
     use crate::error::AGENT_UNAVAILABLE;
-    use agent_client_protocol::{
-        Agent, ErrorCode, Implementation, InitializeRequest, InitializeResponse, ProtocolVersion,
-    };
     use trogon_nats::AdvancedMockNatsClient;
 
     #[tokio::test]

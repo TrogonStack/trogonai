@@ -11,12 +11,12 @@ pub(crate) mod terminal_output;
 pub(crate) mod terminal_release;
 pub(crate) mod terminal_wait_for_exit;
 
+use crate::acp::{Client, ErrorCode};
 use crate::agent::Bridge;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::in_flight_slot_guard::InFlightSlotGuard;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, parse_client_subject};
-use agent_client_protocol::{Client, ErrorCode};
 use async_nats::Message;
 use bytes::Bytes;
 use futures::StreamExt;
@@ -291,8 +291,7 @@ async fn dispatch_client_method<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session_id::AcpSessionId;
-    use agent_client_protocol::{
+    use crate::acp::{
         ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest,
         KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
         ReleaseTerminalResponse, Request, RequestId, RequestPermissionOutcome, RequestPermissionRequest,
@@ -300,6 +299,7 @@ mod tests {
         TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
         WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
     };
+    use crate::session_id::AcpSessionId;
     use async_trait::async_trait;
     use std::cell::RefCell;
     use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
@@ -344,10 +344,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(
-            &self,
-            n: agent_client_protocol::SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, n: crate::acp::SessionNotification) -> crate::acp::Result<()> {
             self.notifications.borrow_mut().push(format!("{:?}", n));
             Ok(())
         }
@@ -355,48 +352,33 @@ mod tests {
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> crate::acp::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
-        async fn write_text_file(
-            &self,
-            _: WriteTextFileRequest,
-        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+        async fn write_text_file(&self, _: WriteTextFileRequest) -> crate::acp::Result<WriteTextFileResponse> {
             Ok(WriteTextFileResponse::new())
         }
 
-        async fn create_terminal(
-            &self,
-            _: CreateTerminalRequest,
-        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+        async fn create_terminal(&self, _: CreateTerminalRequest) -> crate::acp::Result<CreateTerminalResponse> {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> crate::acp::Result<KillTerminalResponse> {
             *self.kill_terminal_calls.borrow_mut() += 1;
             Ok(KillTerminalResponse::new())
         }
 
-        async fn terminal_output(
-            &self,
-            _: TerminalOutputRequest,
-        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+        async fn terminal_output(&self, _: TerminalOutputRequest) -> crate::acp::Result<TerminalOutputResponse> {
             *self.terminal_output_calls.borrow_mut() += 1;
             Ok(TerminalOutputResponse::new("mock output".to_string(), false))
         }
 
-        async fn release_terminal(
-            &self,
-            _: ReleaseTerminalRequest,
-        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+        async fn release_terminal(&self, _: ReleaseTerminalRequest) -> crate::acp::Result<ReleaseTerminalResponse> {
             *self.terminal_release_calls.borrow_mut() += 1;
             Ok(ReleaseTerminalResponse::new())
         }
@@ -404,7 +386,7 @@ mod tests {
         async fn wait_for_terminal_exit(
             &self,
             _: WaitForTerminalExitRequest,
-        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+        ) -> crate::acp::Result<WaitForTerminalExitResponse> {
             *self.wait_for_terminal_exit_calls.borrow_mut() += 1;
             Ok(WaitForTerminalExitResponse::new(
                 TerminalExitStatus::new().exit_code(0u32),
@@ -555,7 +537,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -595,7 +577,7 @@ mod tests {
             id: RequestId::Number(42),
             method: std::sync::Arc::from("fs/write_text_file"),
             params: Some(WriteTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/test.txt".to_string(),
                 "content".to_string(),
             )),
@@ -646,7 +628,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/write_text_file"),
             params: Some(WriteTextFileRequest::new(
-                agent_client_protocol::SessionId::from("session-001"),
+                crate::acp::SessionId::from("session-001"),
                 "/tmp/test.txt".to_string(),
                 "content".to_string(),
             )),
@@ -755,7 +737,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -1479,7 +1461,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -1578,7 +1560,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/write_text_file"),
             params: Some(WriteTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
                 "content".to_string(),
             )),
@@ -1678,7 +1660,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -1777,7 +1759,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/write_text_file"),
             params: Some(WriteTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
                 "content".to_string(),
             )),
@@ -1813,7 +1795,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/write_text_file"),
             params: Some(WriteTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
                 "content".to_string(),
             )),
@@ -1849,7 +1831,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/write_text_file"),
             params: Some(WriteTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
                 "content".to_string(),
             )),
@@ -2037,7 +2019,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -2386,7 +2368,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -2420,7 +2402,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-b"),
+                crate::acp::SessionId::from("sess-b"),
                 "term-001".to_string(),
             )),
         };
@@ -2509,10 +2491,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for TerminalKillFailingClient {
-        async fn session_notification(
-            &self,
-            n: agent_client_protocol::SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, n: crate::acp::SessionNotification) -> crate::acp::Result<()> {
             let _ = n;
             Ok(())
         }
@@ -2520,53 +2499,32 @@ mod tests {
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> crate::acp::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
-        async fn write_text_file(
-            &self,
-            _: WriteTextFileRequest,
-        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+        async fn write_text_file(&self, _: WriteTextFileRequest) -> crate::acp::Result<WriteTextFileResponse> {
             Ok(WriteTextFileResponse::new())
         }
 
-        async fn create_terminal(
-            &self,
-            _: CreateTerminalRequest,
-        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+        async fn create_terminal(&self, _: CreateTerminalRequest) -> crate::acp::Result<CreateTerminalResponse> {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
-            Err(agent_client_protocol::Error::new(-32603, "mock kill_terminal failure"))
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> crate::acp::Result<KillTerminalResponse> {
+            Err(crate::acp::Error::new(-32603, "mock kill_terminal failure"))
         }
 
-        async fn terminal_output(
-            &self,
-            _: TerminalOutputRequest,
-        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "mock terminal_output failure",
-            ))
+        async fn terminal_output(&self, _: TerminalOutputRequest) -> crate::acp::Result<TerminalOutputResponse> {
+            Err(crate::acp::Error::new(-32603, "mock terminal_output failure"))
         }
 
-        async fn release_terminal(
-            &self,
-            _: ReleaseTerminalRequest,
-        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "mock release_terminal failure",
-            ))
+        async fn release_terminal(&self, _: ReleaseTerminalRequest) -> crate::acp::Result<ReleaseTerminalResponse> {
+            Err(crate::acp::Error::new(-32603, "mock release_terminal failure"))
         }
     }
 
@@ -2574,10 +2532,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for TerminalReleaseFailingClient {
-        async fn session_notification(
-            &self,
-            n: agent_client_protocol::SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, n: crate::acp::SessionNotification) -> crate::acp::Result<()> {
             let _ = n;
             Ok(())
         }
@@ -2585,56 +2540,38 @@ mod tests {
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> crate::acp::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
-        async fn write_text_file(
-            &self,
-            _: WriteTextFileRequest,
-        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+        async fn write_text_file(&self, _: WriteTextFileRequest) -> crate::acp::Result<WriteTextFileResponse> {
             Ok(WriteTextFileResponse::new())
         }
 
-        async fn create_terminal(
-            &self,
-            _: CreateTerminalRequest,
-        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+        async fn create_terminal(&self, _: CreateTerminalRequest) -> crate::acp::Result<CreateTerminalResponse> {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> crate::acp::Result<KillTerminalResponse> {
             Ok(KillTerminalResponse::new())
         }
 
-        async fn terminal_output(
-            &self,
-            _: TerminalOutputRequest,
-        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+        async fn terminal_output(&self, _: TerminalOutputRequest) -> crate::acp::Result<TerminalOutputResponse> {
             Ok(TerminalOutputResponse::new("mock output".to_string(), false))
         }
 
-        async fn release_terminal(
-            &self,
-            _: ReleaseTerminalRequest,
-        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "mock release_terminal failure",
-            ))
+        async fn release_terminal(&self, _: ReleaseTerminalRequest) -> crate::acp::Result<ReleaseTerminalResponse> {
+            Err(crate::acp::Error::new(-32603, "mock release_terminal failure"))
         }
 
         async fn wait_for_terminal_exit(
             &self,
             _: WaitForTerminalExitRequest,
-        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+        ) -> crate::acp::Result<WaitForTerminalExitResponse> {
             Ok(WaitForTerminalExitResponse::new(
                 TerminalExitStatus::new().exit_code(0u32),
             ))
@@ -2645,10 +2582,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for TerminalWaitForExitFailingClient {
-        async fn session_notification(
-            &self,
-            n: agent_client_protocol::SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, n: crate::acp::SessionNotification) -> crate::acp::Result<()> {
             let _ = n;
             Ok(())
         }
@@ -2656,57 +2590,39 @@ mod tests {
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> crate::acp::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
-        async fn write_text_file(
-            &self,
-            _: WriteTextFileRequest,
-        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+        async fn write_text_file(&self, _: WriteTextFileRequest) -> crate::acp::Result<WriteTextFileResponse> {
             Ok(WriteTextFileResponse::new())
         }
 
-        async fn create_terminal(
-            &self,
-            _: CreateTerminalRequest,
-        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+        async fn create_terminal(&self, _: CreateTerminalRequest) -> crate::acp::Result<CreateTerminalResponse> {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> crate::acp::Result<KillTerminalResponse> {
             Ok(KillTerminalResponse::new())
         }
 
-        async fn terminal_output(
-            &self,
-            _: TerminalOutputRequest,
-        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+        async fn terminal_output(&self, _: TerminalOutputRequest) -> crate::acp::Result<TerminalOutputResponse> {
             Ok(TerminalOutputResponse::new("mock output".to_string(), false))
         }
 
-        async fn release_terminal(
-            &self,
-            _: ReleaseTerminalRequest,
-        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+        async fn release_terminal(&self, _: ReleaseTerminalRequest) -> crate::acp::Result<ReleaseTerminalResponse> {
             Ok(ReleaseTerminalResponse::new())
         }
 
         async fn wait_for_terminal_exit(
             &self,
             _: WaitForTerminalExitRequest,
-        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "mock wait_for_terminal_exit failure",
-            ))
+        ) -> crate::acp::Result<WaitForTerminalExitResponse> {
+            Err(crate::acp::Error::new(-32603, "mock wait_for_terminal_exit failure"))
         }
     }
 
@@ -2714,10 +2630,7 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for TerminalWaitForExitTimeoutClient {
-        async fn session_notification(
-            &self,
-            n: agent_client_protocol::SessionNotification,
-        ) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, n: crate::acp::SessionNotification) -> crate::acp::Result<()> {
             let _ = n;
             Ok(())
         }
@@ -2725,53 +2638,38 @@ mod tests {
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> crate::acp::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("mock file content".to_string()))
         }
 
-        async fn write_text_file(
-            &self,
-            _: WriteTextFileRequest,
-        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+        async fn write_text_file(&self, _: WriteTextFileRequest) -> crate::acp::Result<WriteTextFileResponse> {
             Ok(WriteTextFileResponse::new())
         }
 
-        async fn create_terminal(
-            &self,
-            _: CreateTerminalRequest,
-        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+        async fn create_terminal(&self, _: CreateTerminalRequest) -> crate::acp::Result<CreateTerminalResponse> {
             Ok(CreateTerminalResponse::new("term-001"))
         }
 
-        async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
+        async fn kill_terminal(&self, _: KillTerminalRequest) -> crate::acp::Result<KillTerminalResponse> {
             Ok(KillTerminalResponse::new())
         }
 
-        async fn terminal_output(
-            &self,
-            _: TerminalOutputRequest,
-        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+        async fn terminal_output(&self, _: TerminalOutputRequest) -> crate::acp::Result<TerminalOutputResponse> {
             Ok(TerminalOutputResponse::new("mock output".to_string(), false))
         }
 
-        async fn release_terminal(
-            &self,
-            _: ReleaseTerminalRequest,
-        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+        async fn release_terminal(&self, _: ReleaseTerminalRequest) -> crate::acp::Result<ReleaseTerminalResponse> {
             Ok(ReleaseTerminalResponse::new())
         }
 
         async fn wait_for_terminal_exit(
             &self,
             _: WaitForTerminalExitRequest,
-        ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+        ) -> crate::acp::Result<WaitForTerminalExitResponse> {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             Ok(WaitForTerminalExitResponse::new(
                 TerminalExitStatus::new().exit_code(0u32),
@@ -2789,7 +2687,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -2842,7 +2740,7 @@ mod tests {
             id: RequestId::Number(42),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -2891,7 +2789,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -2932,7 +2830,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -2973,7 +2871,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -3014,7 +2912,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("terminal/kill"),
             params: Some(KillTerminalRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "term-001".to_string(),
             )),
         };
@@ -3081,7 +2979,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -3197,7 +3095,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -3238,7 +3136,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -3273,32 +3171,26 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for RpcMockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+        ) -> crate::acp::Result<RequestPermissionResponse> {
             Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }
 
-        async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {
+        async fn read_text_file(&self, _: ReadTextFileRequest) -> crate::acp::Result<ReadTextFileResponse> {
             Ok(ReadTextFileResponse::new("file contents".to_string()))
         }
 
-        async fn write_text_file(
-            &self,
-            _: WriteTextFileRequest,
-        ) -> agent_client_protocol::Result<WriteTextFileResponse> {
+        async fn write_text_file(&self, _: WriteTextFileRequest) -> crate::acp::Result<WriteTextFileResponse> {
             Ok(WriteTextFileResponse::new())
         }
 
-        async fn terminal_output(
-            &self,
-            _: TerminalOutputRequest,
-        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+        async fn terminal_output(&self, _: TerminalOutputRequest) -> crate::acp::Result<TerminalOutputResponse> {
             Ok(TerminalOutputResponse::new("rpc mock output".to_string(), false))
         }
     }
@@ -3340,7 +3232,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -3378,7 +3270,7 @@ mod tests {
 
         let request = RequestPermissionRequest::new(
             "sess-1",
-            agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
+            crate::acp::ToolCallUpdate::new("call-1", crate::acp::ToolCallUpdateFields::new()),
             vec![],
         );
         let envelope = Request {
@@ -3420,7 +3312,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/write_text_file"),
             params: Some(WriteTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess-1"),
+                crate::acp::SessionId::from("sess-1"),
                 "/tmp/foo.txt".to_string(),
                 "content".to_string(),
             )),
@@ -3456,7 +3348,7 @@ mod tests {
 
         let request = RequestPermissionRequest::new(
             "sess-1",
-            agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
+            crate::acp::ToolCallUpdate::new("call-1", crate::acp::ToolCallUpdateFields::new()),
             vec![],
         );
         let envelope = Request {
@@ -3498,7 +3390,7 @@ mod tests {
 
         let request = RequestPermissionRequest::new(
             "sess-1",
-            agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
+            crate::acp::ToolCallUpdate::new("call-1", crate::acp::ToolCallUpdateFields::new()),
             vec![],
         );
         let envelope = Request {
@@ -3541,7 +3433,7 @@ mod tests {
 
         let request = RequestPermissionRequest::new(
             "sess-1",
-            agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
+            crate::acp::ToolCallUpdate::new("call-1", crate::acp::ToolCallUpdateFields::new()),
             vec![],
         );
         let envelope = Request {
@@ -3625,7 +3517,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess1"),
+                crate::acp::SessionId::from("sess1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -3652,7 +3544,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess1"),
+                crate::acp::SessionId::from("sess1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -3679,7 +3571,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess1"),
+                crate::acp::SessionId::from("sess1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -3706,7 +3598,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess1"),
+                crate::acp::SessionId::from("sess1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };
@@ -3733,7 +3625,7 @@ mod tests {
             id: RequestId::Number(1),
             method: std::sync::Arc::from("fs/read_text_file"),
             params: Some(ReadTextFileRequest::new(
-                agent_client_protocol::SessionId::from("sess1"),
+                crate::acp::SessionId::from("sess1"),
                 "/tmp/foo.txt".to_string(),
             )),
         };

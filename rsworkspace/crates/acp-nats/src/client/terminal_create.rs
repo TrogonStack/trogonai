@@ -1,7 +1,7 @@
+use crate::acp::{Client, CreateTerminalRequest, CreateTerminalResponse, ErrorCode, Request, Response};
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, CreateTerminalRequest, CreateTerminalResponse, ErrorCode, Request, Response};
 use bytes::Bytes;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -10,7 +10,7 @@ use trogon_std::JsonSerialize;
 #[derive(Debug)]
 pub enum TerminalCreateError {
     InvalidRequest(serde_json::Error),
-    ClientError(agent_client_protocol::Error),
+    ClientError(crate::acp::Error),
 }
 
 impl std::fmt::Display for TerminalCreateError {
@@ -67,7 +67,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
     match forward_to_client(payload, client, session_id).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
+                .to_vec(&Response::<_>::Result {
                     id: request_id.clone(),
                     result: response,
                 })
@@ -122,7 +122,7 @@ async fn forward_to_client<C: Client>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
+    use crate::acp::{
         ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse, Request, RequestId,
         RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
     };
@@ -145,24 +145,18 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn create_terminal(
-            &self,
-            _: CreateTerminalRequest,
-        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
+        async fn create_terminal(&self, _: CreateTerminalRequest) -> crate::acp::Result<CreateTerminalResponse> {
             Ok(CreateTerminalResponse::new(self.terminal_id.clone()))
         }
     }
@@ -171,28 +165,19 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn create_terminal(
-            &self,
-            _: CreateTerminalRequest,
-        ) -> agent_client_protocol::Result<CreateTerminalResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "mock create_terminal failure",
-            ))
+        async fn create_terminal(&self, _: CreateTerminalRequest) -> crate::acp::Result<CreateTerminalResponse> {
+            Err(crate::acp::Error::new(-32603, "mock create_terminal failure"))
         }
     }
 
@@ -292,7 +277,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "file not found");
         let tc_err = TerminalCreateError::ClientError(client_err);
         let (code, message) = error_code_and_message(&tc_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -301,7 +286,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_other_code() {
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InternalError.into(), "internal");
+        let client_err = crate::acp::Error::new(ErrorCode::InternalError.into(), "internal");
         let tc_err = TerminalCreateError::ClientError(client_err);
         let (code, _) = error_code_and_message(&tc_err);
         assert_eq!(code, ErrorCode::InternalError);
@@ -386,7 +371,7 @@ mod tests {
         let tc_err = TerminalCreateError::InvalidRequest(err);
         assert!(tc_err.to_string().contains("invalid request"));
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "create failed");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "create failed");
         let tc_err = TerminalCreateError::ClientError(client_err);
         assert!(tc_err.to_string().contains("client error"));
     }
@@ -397,7 +382,7 @@ mod tests {
         let tc_err = TerminalCreateError::InvalidRequest(err);
         assert!(tc_err.source().is_some());
 
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "create failed");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "create failed");
         let tc_err = TerminalCreateError::ClientError(client_err);
         assert!(tc_err.source().is_some());
     }

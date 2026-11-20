@@ -191,7 +191,7 @@ mod tests {
     use super::*;
     use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER};
     use acp_nats::Config;
-    use agent_client_protocol::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
+    use acp_nats::acp::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
     use axum::body::{Body, to_bytes};
     use axum::http::header::{ACCEPT, CONTENT_TYPE};
     use axum::http::{Request, StatusCode};

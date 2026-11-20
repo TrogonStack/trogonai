@@ -4,8 +4,9 @@ use crate::constants::{
     ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER, HTTP_CHANNEL_CAPACITY,
     X_ACCEL_BUFFERING_HEADER,
 };
+use acp_nats::acp::{ProtocolVersion, RequestId, SessionNotification};
+use acp_nats::ide::AgentSideConnection;
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::{AgentSideConnection, ProtocolVersion, RequestId, SessionNotification};
 use axum::extract::FromRequestParts;
 use axum::extract::Request;
 use axum::extract::State;
@@ -1037,9 +1038,7 @@ pub async fn run_http_connection<N, J>(
         notification_tx,
     ));
 
-    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
-        tokio::task::spawn_local(fut);
-    });
+    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming);
 
     let connection = Rc::new(connection);
     spawn_notification_forwarder(connection.clone(), notification_rx);
@@ -1191,7 +1190,7 @@ pub async fn run_http_connection<N, J>(
                         let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                         get_listeners.push(stream_tx);
                         let _ = response.send(Ok(HttpGetOutcome {
-                            protocol_version: protocol_version.clone(),
+                            protocol_version,
                             stream: stream_rx,
                         }));
                     }
@@ -1207,7 +1206,7 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
 
-                        let _ = response.send(Ok(protocol_version.clone()));
+                        let _ = response.send(Ok(protocol_version));
                         break;
                     }
                 }
@@ -1241,7 +1240,7 @@ pub async fn run_http_connection<N, J>(
                     if let Some(PendingRequest::Initialize { response, .. }) = pending_request.take() {
                         let _ = response.send(Ok(HttpPostOutcome::Json {
                             connection_id: connection_id.clone(),
-                            protocol_version: protocol_version.clone(),
+                            protocol_version,
                             body: response_body,
                         }));
                     }

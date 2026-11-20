@@ -1,7 +1,7 @@
+use crate::acp::{Client, ErrorCode, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, Response};
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, ErrorCode, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, Response};
 use bytes::Bytes;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
@@ -9,8 +9,8 @@ use trogon_std::JsonSerialize;
 #[derive(Debug)]
 pub enum TerminalReleaseError {
     MalformedJson(serde_json::Error),
-    InvalidParams(agent_client_protocol::Error),
-    ClientError(agent_client_protocol::Error),
+    InvalidParams(crate::acp::Error),
+    ClientError(crate::acp::Error),
 }
 
 impl std::fmt::Display for TerminalReleaseError {
@@ -34,7 +34,7 @@ impl std::error::Error for TerminalReleaseError {
 }
 
 fn invalid_params_error(message: impl Into<String>) -> TerminalReleaseError {
-    TerminalReleaseError::InvalidParams(agent_client_protocol::Error::new(
+    TerminalReleaseError::InvalidParams(crate::acp::Error::new(
         i32::from(ErrorCode::InvalidParams),
         message.into(),
     ))
@@ -77,7 +77,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
     match forward_to_client(payload, client, session_id).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
+                .to_vec(&Response::<_>::Result {
                     id: request_id.clone(),
                     result: response,
                 })
@@ -134,7 +134,7 @@ async fn forward_to_client<C: Client>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
+    use crate::acp::{
         ContentBlock, ContentChunk, Request, RequestId, RequestPermissionRequest, RequestPermissionResponse,
         SessionNotification, SessionUpdate,
     };
@@ -153,24 +153,18 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn release_terminal(
-            &self,
-            _: ReleaseTerminalRequest,
-        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+        async fn release_terminal(&self, _: ReleaseTerminalRequest) -> crate::acp::Result<ReleaseTerminalResponse> {
             Ok(ReleaseTerminalResponse::new())
         }
     }
@@ -179,28 +173,19 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "not implemented in test mock",
-            ))
+        ) -> crate::acp::Result<RequestPermissionResponse> {
+            Err(crate::acp::Error::new(-32603, "not implemented in test mock"))
         }
 
-        async fn release_terminal(
-            &self,
-            _: ReleaseTerminalRequest,
-        ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
-            Err(agent_client_protocol::Error::new(
-                -32603,
-                "mock release_terminal failure",
-            ))
+        async fn release_terminal(&self, _: ReleaseTerminalRequest) -> crate::acp::Result<ReleaseTerminalResponse> {
+            Err(crate::acp::Error::new(-32603, "mock release_terminal failure"))
         }
     }
 
@@ -428,7 +413,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_invalid_params_preserves_code_and_message() {
-        let inner = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "params is null");
+        let inner = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "params is null");
         let tr_err = TerminalReleaseError::InvalidParams(inner);
         let (code, message) = error_code_and_message(&tr_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -437,7 +422,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error_preserves_client_code() {
-        let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "denied");
+        let client_err = crate::acp::Error::new(ErrorCode::InvalidParams.into(), "denied");
         let tr_err = TerminalReleaseError::ClientError(client_err);
         let (code, message) = error_code_and_message(&tr_err);
         assert_eq!(code, ErrorCode::InvalidParams);
@@ -450,16 +435,12 @@ mod tests {
             TerminalReleaseError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
         assert!(malformed.to_string().contains("malformed JSON"));
 
-        let invalid_params = TerminalReleaseError::InvalidParams(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "bad params",
-        ));
+        let invalid_params =
+            TerminalReleaseError::InvalidParams(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "bad params"));
         assert!(invalid_params.to_string().contains("invalid params"));
 
-        let client_err = TerminalReleaseError::ClientError(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "client fail",
-        ));
+        let client_err =
+            TerminalReleaseError::ClientError(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "client fail"));
         assert!(client_err.to_string().contains("client error"));
     }
 
@@ -469,16 +450,12 @@ mod tests {
             TerminalReleaseError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
         assert!(malformed.source().is_some());
 
-        let invalid_params = TerminalReleaseError::InvalidParams(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "bad params",
-        ));
+        let invalid_params =
+            TerminalReleaseError::InvalidParams(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "bad params"));
         assert!(invalid_params.source().is_some());
 
-        let client_err = TerminalReleaseError::ClientError(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "client fail",
-        ));
+        let client_err =
+            TerminalReleaseError::ClientError(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "client fail"));
         assert!(client_err.source().is_some());
     }
 

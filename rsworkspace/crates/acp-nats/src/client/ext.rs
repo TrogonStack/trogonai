@@ -1,7 +1,7 @@
+use crate::acp::{Client, ErrorCode, ExtNotification, ExtRequest, ExtResponse, Request, Response};
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, ErrorCode, ExtNotification, ExtRequest, ExtResponse, Request, Response};
 use bytes::Bytes;
 use serde_json::value::RawValue;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use trogon_std::JsonSerialize;
 pub enum ExtError {
     MalformedJson(serde_json::Error),
     MissingParams,
-    ClientError(agent_client_protocol::Error),
+    ClientError(crate::acp::Error),
 }
 
 impl std::fmt::Display for ExtError {
@@ -78,7 +78,7 @@ async fn handle_request<N: PublishClient + FlushClient, C: Client, S: JsonSerial
     match forward_request(payload, client, ext_method_name).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
+                .to_vec(&Response::<_>::Result {
                     id: request_id.clone(),
                     result: response,
                 })
@@ -132,7 +132,7 @@ async fn forward_request<C: Client>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
+    use crate::acp::{
         ExtRequest, ExtResponse, RequestId, RequestPermissionOutcome, RequestPermissionRequest,
         RequestPermissionResponse, SessionNotification,
     };
@@ -160,23 +160,23 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+        ) -> crate::acp::Result<RequestPermissionResponse> {
             Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }
 
-        async fn ext_method(&self, _: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
+        async fn ext_method(&self, _: ExtRequest) -> crate::acp::Result<ExtResponse> {
             let raw = RawValue::from_string(r#"{"status":"ok"}"#.to_string()).unwrap();
             Ok(ExtResponse::new(raw.into()))
         }
 
-        async fn ext_notification(&self, args: ExtNotification) -> agent_client_protocol::Result<()> {
+        async fn ext_notification(&self, args: ExtNotification) -> crate::acp::Result<()> {
             self.notifications.borrow_mut().push(args.method.to_string());
             Ok(())
         }
@@ -186,26 +186,26 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for FailingClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+        ) -> crate::acp::Result<RequestPermissionResponse> {
             Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }
 
-        async fn ext_method(&self, _: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
-            Err(agent_client_protocol::Error::new(
+        async fn ext_method(&self, _: ExtRequest) -> crate::acp::Result<ExtResponse> {
+            Err(crate::acp::Error::new(
                 ErrorCode::InternalError.into(),
                 "ext method failed",
             ))
         }
 
-        async fn ext_notification(&self, _: ExtNotification) -> agent_client_protocol::Result<()> {
-            Err(agent_client_protocol::Error::new(-1, "notification failed"))
+        async fn ext_notification(&self, _: ExtNotification) -> crate::acp::Result<()> {
+            Err(crate::acp::Error::new(-1, "notification failed"))
         }
     }
 
@@ -427,10 +427,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error() {
-        let err = ExtError::ClientError(agent_client_protocol::Error::new(
-            ErrorCode::InvalidParams.into(),
-            "bad request",
-        ));
+        let err = ExtError::ClientError(crate::acp::Error::new(ErrorCode::InvalidParams.into(), "bad request"));
         let (code, msg) = error_code_and_message(&err);
         assert_eq!(code, ErrorCode::InvalidParams);
         assert_eq!(msg, "bad request");
@@ -444,7 +441,7 @@ mod tests {
         let missing = ExtError::MissingParams;
         assert!(missing.to_string().contains("params is null or missing"));
 
-        let client = ExtError::ClientError(agent_client_protocol::Error::new(-1, "fail"));
+        let client = ExtError::ClientError(crate::acp::Error::new(-1, "fail"));
         assert!(client.to_string().contains("client error"));
     }
 
@@ -456,7 +453,7 @@ mod tests {
         let missing = ExtError::MissingParams;
         assert!(missing.source().is_none());
 
-        let client = ExtError::ClientError(agent_client_protocol::Error::new(-1, "fail"));
+        let client = ExtError::ClientError(crate::acp::Error::new(-1, "fail"));
         assert!(client.source().is_some());
     }
 

@@ -1,9 +1,7 @@
+use crate::acp::{Client, ErrorCode, Request, Response, WaitForTerminalExitRequest, WaitForTerminalExitResponse};
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{
-    Client, ErrorCode, Request, Response, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-};
 use bytes::Bytes;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -13,9 +11,9 @@ use trogon_std::JsonSerialize;
 #[derive(Debug)]
 pub enum TerminalWaitForExitError {
     MalformedJson(serde_json::Error),
-    InvalidParams(agent_client_protocol::Error),
+    InvalidParams(crate::acp::Error),
     TimedOut,
-    ClientError(agent_client_protocol::Error),
+    ClientError(crate::acp::Error),
 }
 
 impl std::fmt::Display for TerminalWaitForExitError {
@@ -41,7 +39,7 @@ impl std::error::Error for TerminalWaitForExitError {
 }
 
 fn invalid_params_error(message: impl Into<String>) -> TerminalWaitForExitError {
-    TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(
+    TerminalWaitForExitError::InvalidParams(crate::acp::Error::new(
         i32::from(ErrorCode::InvalidParams),
         message.into(),
     ))
@@ -91,7 +89,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
     match forward_to_client(payload, client, expected_session_id, operation_timeout).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
+                .to_vec(&Response::<_>::Result {
                     id: request_id.clone(),
                     result: response,
                 })
@@ -177,7 +175,7 @@ fn parse_request(
 mod tests {
     use super::super::tests::{MockClient, TerminalWaitForExitFailingClient, TerminalWaitForExitTimeoutClient};
     use super::*;
-    use agent_client_protocol::{Request, RequestId, WaitForTerminalExitRequest};
+    use crate::acp::{Request, RequestId, WaitForTerminalExitRequest};
     use std::error::Error;
     use std::time::Duration;
     use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
@@ -482,7 +480,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_invalid_params() {
-        let err = TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(-32602, "bad params"));
+        let err = TerminalWaitForExitError::InvalidParams(crate::acp::Error::new(-32602, "bad params"));
         let (code, msg) = error_code_and_message(&err);
         assert_eq!(i32::from(code), -32602);
         assert_eq!(msg, "bad params");
@@ -498,7 +496,7 @@ mod tests {
 
     #[test]
     fn error_code_and_message_client_error() {
-        let err = TerminalWaitForExitError::ClientError(agent_client_protocol::Error::new(-32603, "client failed"));
+        let err = TerminalWaitForExitError::ClientError(crate::acp::Error::new(-32603, "client failed"));
         let (code, msg) = error_code_and_message(&err);
         assert_eq!(i32::from(code), -32603);
         assert_eq!(msg, "client failed");
@@ -510,11 +508,9 @@ mod tests {
         assert!(err.to_string().contains("Timed out"));
         let json_err = TerminalWaitForExitError::MalformedJson(serde_json::from_str::<()>("{").unwrap_err());
         assert!(json_err.to_string().contains("malformed JSON"));
-        let params_err =
-            TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(-32602, "bad params"));
+        let params_err = TerminalWaitForExitError::InvalidParams(crate::acp::Error::new(-32602, "bad params"));
         assert!(params_err.to_string().contains("invalid params"));
-        let client_err =
-            TerminalWaitForExitError::ClientError(agent_client_protocol::Error::new(-32603, "client failed"));
+        let client_err = TerminalWaitForExitError::ClientError(crate::acp::Error::new(-32603, "client failed"));
         assert!(client_err.to_string().contains("client error"));
     }
 
@@ -524,11 +520,9 @@ mod tests {
         assert!(err.source().is_none());
         let json_err = TerminalWaitForExitError::MalformedJson(serde_json::from_str::<()>("{").unwrap_err());
         assert!(json_err.source().is_some());
-        let params_err =
-            TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(-32602, "bad params"));
+        let params_err = TerminalWaitForExitError::InvalidParams(crate::acp::Error::new(-32602, "bad params"));
         assert!(params_err.source().is_some());
-        let client_err =
-            TerminalWaitForExitError::ClientError(agent_client_protocol::Error::new(-32603, "client failed"));
+        let client_err = TerminalWaitForExitError::ClientError(crate::acp::Error::new(-32603, "client failed"));
         assert!(client_err.source().is_some());
     }
 }

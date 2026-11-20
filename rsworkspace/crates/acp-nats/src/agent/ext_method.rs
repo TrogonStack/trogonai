@@ -1,8 +1,8 @@
 use super::Bridge;
+use crate::acp::{Error, ErrorCode, ExtRequest, ExtResponse, Result};
 use crate::error::map_nats_error;
 use crate::ext_method_name::ExtMethodName;
 use crate::nats::{self, RequestClient, agent};
-use agent_client_protocol::{Error, ErrorCode, ExtRequest, ExtResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
 
@@ -48,10 +48,10 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
 #[cfg(test)]
 mod tests {
+    use crate::acp::{Agent, ErrorCode, ExtRequest, ExtResponse};
     use crate::agent::test_support::{
         has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
     };
-    use agent_client_protocol::{Agent, ErrorCode, ExtRequest, ExtResponse};
     use serde_json::value::RawValue;
 
     #[tokio::test]

@@ -1,4 +1,4 @@
-use agent_client_protocol::SessionId;
+use crate::acp::SessionId;
 use serde::{Deserialize, Serialize};
 
 /// Published by the bridge after successfully sending a `session/new` or

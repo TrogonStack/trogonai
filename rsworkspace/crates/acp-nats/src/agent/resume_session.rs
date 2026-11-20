@@ -1,7 +1,7 @@
 use super::Bridge;
+use crate::acp::{Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse};
 use crate::nats::{FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse};
 use tracing::{info, instrument};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
@@ -52,10 +52,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::acp::{Agent, ErrorCode, ResumeSessionRequest, ResumeSessionResponse};
     use crate::agent::test_support::{
         has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_js_response,
     };
-    use agent_client_protocol::{Agent, ErrorCode, ResumeSessionRequest, ResumeSessionResponse};
     use std::time::Duration;
 
     #[tokio::test]

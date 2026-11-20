@@ -23,7 +23,7 @@ pub mod session {
     pub mod agent {
         pub use super::super::commands::{
             CancelSubject, CloseSubject, ForkSubject, LoadSubject, PromptSubject, ResumeSubject,
-            SetConfigOptionSubject, SetModeSubject, SetModelSubject,
+            SetConfigOptionSubject, SetModeSubject,
         };
         pub use super::super::responses::{
             CancelledSubject, ExtReadySubject, PromptResponseSubject, ResponseSubject, UpdateSubject,
@@ -185,14 +185,6 @@ mod tests {
         assert_eq!(
             session::agent::SetConfigOptionSubject::new(&p("acp"), &sid("s1")).to_string(),
             "acp.session.s1.agent.set_config_option"
-        );
-    }
-
-    #[test]
-    fn session_agent_set_model() {
-        assert_eq!(
-            session::agent::SetModelSubject::new(&p("acp"), &sid("s1")).to_string(),
-            "acp.session.s1.agent.set_model"
         );
     }
 
@@ -409,7 +401,6 @@ mod tests {
             session::agent::SetConfigOptionSubject::STREAM,
             Some(AcpStream::Commands)
         );
-        assert_eq!(session::agent::SetModelSubject::STREAM, Some(AcpStream::Commands));
 
         assert_eq!(agent::InitializeSubject::STREAM, Some(AcpStream::Global));
         assert_eq!(agent::AuthenticateSubject::STREAM, Some(AcpStream::Global));
@@ -524,11 +515,6 @@ mod tests {
                 .starts_with(&expected)
         );
         assert!(
-            session::agent::SetModelSubject::new(&prefix, &session_id)
-                .to_string()
-                .starts_with(&expected)
-        );
-        assert!(
             session::agent::ForkSubject::new(&prefix, &session_id)
                 .to_string()
                 .starts_with(&expected)
@@ -634,12 +620,6 @@ mod tests {
                 .to_subject()
                 .as_str(),
             "acp.session.s1.agent.set_config_option"
-        );
-        assert_eq!(
-            session::agent::SetModelSubject::new(&prefix, &sid)
-                .to_subject()
-                .as_str(),
-            "acp.session.s1.agent.set_model"
         );
         // ExtNotifySubject doesn't impl ToSubject — verify via Display
         assert_eq!(

@@ -1,6 +1,6 @@
 //! Pass-thru helpers for JSON-RPC using agent_client_protocol types.
 
-use agent_client_protocol::{Request, RequestId};
+use crate::acp::{Request, RequestId};
 
 /// Extract the request ID from a JSON-RPC payload without fully deserializing params.
 pub fn extract_request_id(payload: &[u8]) -> RequestId {

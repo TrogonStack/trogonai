@@ -59,10 +59,10 @@ impl std::ops::Deref for AcpSessionId {
     }
 }
 
-impl TryFrom<&agent_client_protocol::SessionId> for AcpSessionId {
+impl TryFrom<&crate::acp::SessionId> for AcpSessionId {
     type Error = SessionIdError;
 
-    fn try_from(session_id: &agent_client_protocol::SessionId) -> Result<Self, Self::Error> {
+    fn try_from(session_id: &crate::acp::SessionId) -> Result<Self, Self::Error> {
         AcpSessionId::new(session_id.to_string().as_str())
     }
 }
@@ -70,7 +70,7 @@ impl TryFrom<&agent_client_protocol::SessionId> for AcpSessionId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::SessionId;
+    use crate::acp::SessionId;
 
     #[test]
     fn acp_session_id_too_long_returns_err() {

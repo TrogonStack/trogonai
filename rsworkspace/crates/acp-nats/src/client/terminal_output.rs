@@ -1,7 +1,7 @@
+use crate::acp::{Client, ErrorCode, Request, Response, TerminalOutputRequest};
 use crate::client::rpc_reply;
 use crate::jsonrpc::extract_request_id;
 use crate::nats::{FlushClient, PublishClient};
-use agent_client_protocol::{Client, ErrorCode, Request, Response, TerminalOutputRequest};
 use bytes::Bytes;
 use tracing::{instrument, warn};
 use trogon_std::JsonSerialize;
@@ -45,7 +45,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client, S: JsonSerialize>
     match client.terminal_output(request).await {
         Ok(response) => {
             let (response_bytes, content_type) = serializer
-                .to_vec(&Response::Result {
+                .to_vec(&Response::<_>::Result {
                     id: request_id.clone(),
                     result: response,
                 })
@@ -101,7 +101,7 @@ fn parse_request(payload: &[u8], expected_session_id: &str) -> Result<TerminalOu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
+    use crate::acp::{
         RequestId, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
         TerminalOutputResponse,
     };
@@ -111,7 +111,7 @@ mod tests {
     use trogon_std::{FailNextSerialize, StdJsonSerialize};
 
     struct MockClient {
-        terminal_output_result: agent_client_protocol::Result<TerminalOutputResponse>,
+        terminal_output_result: crate::acp::Result<TerminalOutputResponse>,
     }
 
     impl MockClient {
@@ -123,28 +123,25 @@ mod tests {
 
         fn failing() -> Self {
             Self {
-                terminal_output_result: Err(agent_client_protocol::Error::new(-32603, "mock failure")),
+                terminal_output_result: Err(crate::acp::Error::new(-32603, "mock failure")),
             }
         }
     }
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, _: SessionNotification) -> crate::acp::Result<()> {
             Ok(())
         }
 
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+        ) -> crate::acp::Result<RequestPermissionResponse> {
             Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }
 
-        async fn terminal_output(
-            &self,
-            _: TerminalOutputRequest,
-        ) -> agent_client_protocol::Result<TerminalOutputResponse> {
+        async fn terminal_output(&self, _: TerminalOutputRequest) -> crate::acp::Result<TerminalOutputResponse> {
             self.terminal_output_result.clone()
         }
     }
@@ -328,7 +325,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_client_trait_methods_exercise_coverage() {
-        use agent_client_protocol::{ContentBlock, ContentChunk, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields};
+        use crate::acp::{ContentBlock, ContentChunk, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields};
 
         let client = MockClient::success();
         let notification = SessionNotification::new(

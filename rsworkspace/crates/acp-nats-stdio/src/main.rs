@@ -1,7 +1,7 @@
 mod config;
 
 use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::{AgentSideConnection, SessionNotification};
+use acp_nats::{acp::SessionNotification, ide::AgentSideConnection};
 use std::rc::Rc;
 use tracing::{error, info};
 use trogon_std::time::SystemClock;
@@ -67,8 +67,8 @@ where
     N: acp_nats::RequestClient + acp_nats::PublishClient + acp_nats::FlushClient + acp_nats::SubscribeClient + 'static,
     J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
-    W: futures::AsyncWrite + Unpin + 'static,
-    R: futures::AsyncRead + Unpin + 'static,
+    W: futures::AsyncWrite + Unpin + Send + 'static,
+    R: futures::AsyncRead + Unpin + Send + 'static,
 {
     let meter = acp_telemetry::meter("acp-io-bridge-nats");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
@@ -81,9 +81,7 @@ where
         notification_tx,
     ));
 
-    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), stdout, stdin, |fut| {
-        tokio::task::spawn_local(fut);
-    });
+    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), stdout, stdin);
 
     let connection = Rc::new(connection);
 

@@ -1,4 +1,4 @@
-use agent_client_protocol::{Client, SessionNotification};
+use crate::acp::{Client, SessionNotification};
 use tracing::{instrument, warn};
 
 #[instrument(name = "acp.client.session.update", skip(payload, client))]
@@ -21,7 +21,7 @@ pub async fn handle<C: Client>(payload: &[u8], client: &C, has_reply: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{
+    use crate::acp::{
         ContentBlock, ContentChunk, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
         SessionUpdate,
     };
@@ -55,9 +55,9 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Client for MockClient {
-        async fn session_notification(&self, notification: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, notification: SessionNotification) -> crate::acp::Result<()> {
             if self.should_fail {
-                return Err(agent_client_protocol::Error::new(-1, "mock failure"));
+                return Err(crate::acp::Error::new(-1, "mock failure"));
             }
             self.notifications_received
                 .borrow_mut()
@@ -68,7 +68,7 @@ mod tests {
         async fn request_permission(
             &self,
             _: RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+        ) -> crate::acp::Result<RequestPermissionResponse> {
             Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
         }
     }
@@ -122,7 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_client_trait_coverage() {
-        use agent_client_protocol::{ToolCallUpdate, ToolCallUpdateFields};
+        use crate::acp::{ToolCallUpdate, ToolCallUpdateFields};
 
         let client = MockClient::new();
         let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());

@@ -1,5 +1,13 @@
 use std::cell::RefCell;
 
+use crate::acp::{
+    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
+    ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, Result,
+    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+};
 use crate::config::Config;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
@@ -7,15 +15,6 @@ use crate::nats::{
 };
 use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
-use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-    ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, Result,
-    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
-    SetSessionModelResponse,
-};
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -26,7 +25,7 @@ use trogon_std::time::GetElapsed;
 use super::{
     authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize, js_request,
     list_sessions, load_session, logout, new_session, prompt, resume_session, set_session_config_option,
-    set_session_mode, set_session_model,
+    set_session_mode,
 };
 
 use crate::constants::SESSION_READY_DELAY;
@@ -214,10 +213,6 @@ where
         args: SetSessionConfigOptionRequest,
     ) -> Result<SetSessionConfigOptionResponse> {
         set_session_config_option::handle(self, args).await
-    }
-
-    async fn set_session_model(&self, args: SetSessionModelRequest) -> Result<SetSessionModelResponse> {
-        set_session_model::handle(self, args).await
     }
 
     async fn fork_session(&self, args: ForkSessionRequest) -> Result<ForkSessionResponse> {

@@ -1,7 +1,7 @@
 use super::Bridge;
+use crate::acp::{CancelNotification, Error, ErrorCode, Result};
 use crate::nats::{self, FlushClient, PublishClient, session};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
 use trogon_std::time::GetElapsed;
 
@@ -74,9 +74,9 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
 #[cfg(test)]
 mod tests {
     use super::Bridge;
+    use crate::acp::{Agent, CancelNotification, ErrorCode};
     use crate::agent::test_support::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
     use crate::config::Config;
-    use agent_client_protocol::{Agent, CancelNotification, ErrorCode};
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_std::time::MockClock;
 

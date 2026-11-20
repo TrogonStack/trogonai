@@ -1,7 +1,7 @@
 use super::Bridge;
+use crate::acp::{NewSessionRequest, NewSessionResponse, Result};
 use crate::error::map_nats_error;
 use crate::nats::{self, FlushClient, PublishClient, RequestClient, agent};
-use agent_client_protocol::{NewSessionRequest, NewSessionResponse, Result};
 use tracing::{Span, info, instrument};
 use trogon_std::time::GetElapsed;
 
@@ -46,11 +46,11 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 
 #[cfg(test)]
 mod tests {
+    use crate::acp::{Agent, ErrorCode, NewSessionRequest, NewSessionResponse, SessionId};
     use crate::agent::test_support::{
         has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
     };
     use crate::error::AGENT_UNAVAILABLE;
-    use agent_client_protocol::{Agent, ErrorCode, NewSessionRequest, NewSessionResponse, SessionId};
     use std::time::Duration;
 
     #[tokio::test]

@@ -1,4 +1,4 @@
-use agent_client_protocol::{Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification, StopReason};
+use crate::acp::{Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification, StopReason};
 use async_nats::jetstream::AckKind;
 use bytes::Bytes;
 use futures::StreamExt;
@@ -28,7 +28,7 @@ pub async fn handle<N, C, J, S>(
     bridge: &Bridge<N, C, J>,
     args: PromptRequest,
     serializer: &S,
-) -> agent_client_protocol::Result<PromptResponse>
+) -> crate::acp::Result<PromptResponse>
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: trogon_std::time::GetElapsed,
@@ -63,7 +63,7 @@ async fn handle_js<N, C, J, S>(
     session_id: &AcpSessionId,
     prefix: &crate::acp_prefix::AcpPrefix,
     req_id: &ReqId,
-) -> agent_client_protocol::Result<PromptResponse>
+) -> crate::acp::Result<PromptResponse>
 where
     N: SubscribeClient,
     C: trogon_std::time::GetElapsed,
@@ -369,8 +369,8 @@ mod tests {
 
         let notification = SessionNotification::new(
             "s1",
-            agent_client_protocol::SessionUpdate::AgentThoughtChunk(agent_client_protocol::ContentChunk::new(
-                agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("thinking...")),
+            crate::acp::SessionUpdate::AgentThoughtChunk(crate::acp::ContentChunk::new(
+                crate::acp::ContentBlock::Text(crate::acp::TextContent::new("thinking...")),
             )),
         );
         let notif_msg =
@@ -650,8 +650,8 @@ mod tests {
 
         let notification = SessionNotification::new(
             "s1",
-            agent_client_protocol::SessionUpdate::AgentThoughtChunk(agent_client_protocol::ContentChunk::new(
-                agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("thinking...")),
+            crate::acp::SessionUpdate::AgentThoughtChunk(crate::acp::ContentChunk::new(
+                crate::acp::ContentBlock::Text(crate::acp::TextContent::new("thinking...")),
             )),
         );
         let notif_msg =

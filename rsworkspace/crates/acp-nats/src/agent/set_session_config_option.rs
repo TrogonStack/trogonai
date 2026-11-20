@@ -1,7 +1,7 @@
 use super::Bridge;
+use crate::acp::{Error, ErrorCode, Result, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
 use crate::nats::{FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{Error, ErrorCode, Result, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
 use tracing::{info, instrument};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
@@ -48,8 +48,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::acp::{Agent, ErrorCode, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
     use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response};
-    use agent_client_protocol::{Agent, ErrorCode, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
 
     #[tokio::test]
     async fn set_session_config_option_forwards_request_and_returns_response() {

@@ -1,7 +1,7 @@
 use super::Bridge;
+use crate::acp::{LogoutRequest, LogoutResponse, Result};
 use crate::error::map_nats_error;
 use crate::nats::{self, RequestClient, agent};
-use agent_client_protocol::{LogoutRequest, LogoutResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
 
@@ -33,9 +33,9 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
 #[cfg(test)]
 mod tests {
+    use crate::acp::{Agent, ErrorCode, LogoutRequest, LogoutResponse};
     use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
     use crate::error::AGENT_UNAVAILABLE;
-    use agent_client_protocol::{Agent, ErrorCode, LogoutRequest, LogoutResponse};
 
     #[tokio::test]
     async fn logout_forwards_request_and_returns_response() {

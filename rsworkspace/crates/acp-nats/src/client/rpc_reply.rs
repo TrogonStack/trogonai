@@ -1,6 +1,6 @@
+use crate::acp::{Error, ErrorCode, RequestId, Response};
 pub use crate::constants::{CONTENT_TYPE_JSON, CONTENT_TYPE_PLAIN};
 use crate::nats::{FlushClient, PublishClient, headers_with_trace_context};
-use agent_client_protocol::{Error, ErrorCode, RequestId, Response};
 use bytes::Bytes;
 use tracing::warn;
 use trogon_std::JsonSerialize;
@@ -60,7 +60,7 @@ pub fn error_response_bytes<S: JsonSerialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{ErrorCode, RequestId};
+    use crate::acp::{ErrorCode, RequestId};
     use trogon_std::{FailNextSerialize, StdJsonSerialize};
 
     #[test]

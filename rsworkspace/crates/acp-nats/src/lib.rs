@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod acp_prefix;
 pub mod agent;
 pub mod client;
@@ -6,6 +7,7 @@ pub mod config;
 pub mod constants;
 pub mod error;
 pub mod ext_method_name;
+pub mod ide;
 pub(crate) mod in_flight_slot_guard;
 pub mod jetstream;
 pub(crate) mod jsonrpc;
@@ -33,8 +35,8 @@ pub use trogon_nats::{NatsAuth, NatsConfig};
 pub use trogon_std::StdJsonSerialize;
 
 pub fn spawn_notification_forwarder(
-    client: impl agent_client_protocol::Client + 'static,
-    mut rx: tokio::sync::mpsc::Receiver<agent_client_protocol::SessionNotification>,
+    client: impl crate::acp::Client + 'static,
+    mut rx: tokio::sync::mpsc::Receiver<crate::acp::SessionNotification>,
 ) {
     tokio::task::spawn_local(async move {
         while let Some(notif) = rx.recv().await {
@@ -48,7 +50,7 @@ pub fn spawn_notification_forwarder(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{SessionNotification, SessionUpdate};
+    use crate::acp::{SessionNotification, SessionUpdate};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -67,20 +69,20 @@ mod tests {
     }
 
     #[async_trait::async_trait(?Send)]
-    impl agent_client_protocol::Client for MockClient {
+    impl crate::acp::Client for MockClient {
         async fn request_permission(
             &self,
-            _args: agent_client_protocol::RequestPermissionRequest,
-        ) -> agent_client_protocol::Result<agent_client_protocol::RequestPermissionResponse> {
-            Err(agent_client_protocol::Error::internal_error())
+            _args: crate::acp::RequestPermissionRequest,
+        ) -> crate::acp::Result<crate::acp::RequestPermissionResponse> {
+            Err(crate::acp::Error::internal_error())
         }
 
-        async fn session_notification(&self, args: SessionNotification) -> agent_client_protocol::Result<()> {
+        async fn session_notification(&self, args: SessionNotification) -> crate::acp::Result<()> {
             let count = self.received.borrow().len();
             if let Some(limit) = self.fail_after
                 && count >= limit
             {
-                return Err(agent_client_protocol::Error::internal_error());
+                return Err(crate::acp::Error::internal_error());
             }
             self.received.borrow_mut().push(args);
             Ok(())
@@ -100,9 +102,9 @@ mod tests {
 
                 let notif = SessionNotification::new(
                     "s1",
-                    SessionUpdate::AgentMessageChunk(agent_client_protocol::ContentChunk::new(
-                        agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("hello")),
-                    )),
+                    SessionUpdate::AgentMessageChunk(crate::acp::ContentChunk::new(crate::acp::ContentBlock::Text(
+                        crate::acp::TextContent::new("hello"),
+                    ))),
                 );
                 tx.send(notif).await.unwrap();
                 drop(tx);
@@ -117,7 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_client_request_permission_returns_error() {
-        use agent_client_protocol::{Client, RequestPermissionRequest, ToolCallUpdate, ToolCallUpdateFields};
+        use crate::acp::{Client, RequestPermissionRequest, ToolCallUpdate, ToolCallUpdateFields};
         let client = MockClient::new(None);
         let tool_call = ToolCallUpdate::new("id", ToolCallUpdateFields::new());
         let result = client
@@ -139,9 +141,9 @@ mod tests {
 
                 let notif = SessionNotification::new(
                     "s1",
-                    SessionUpdate::AgentMessageChunk(agent_client_protocol::ContentChunk::new(
-                        agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("hello")),
-                    )),
+                    SessionUpdate::AgentMessageChunk(crate::acp::ContentChunk::new(crate::acp::ContentBlock::Text(
+                        crate::acp::TextContent::new("hello"),
+                    ))),
                 );
                 let _ = tx.send(notif).await;
                 drop(tx);

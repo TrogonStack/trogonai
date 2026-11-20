@@ -7,17 +7,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-agent-client-protocol = { workspace = true, features = [
-    "unstable_auth_methods",
-    "unstable_boolean_config",
-    "unstable_cancel_request",
-    "unstable_message_id",
-    "unstable_session_close",
-    "unstable_session_fork",
-    "unstable_session_model",
-    "unstable_session_resume",
-    "unstable_session_usage",
-] }
+agent-client-protocol = { workspace = true, features = ["unstable_session_fork"] }
 opentelemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
@@ -33,6 +23,7 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 
 [dev-dependencies]
+async-compat = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "metrics", "testing"] }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }

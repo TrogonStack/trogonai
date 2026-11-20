@@ -14,7 +14,7 @@ graph LR
 ```rust
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
-use agent_client_protocol::*;
+use acp_nats::acp::*;
 
 struct MyAgent;
 

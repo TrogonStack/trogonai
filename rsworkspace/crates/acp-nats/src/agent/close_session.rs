@@ -1,7 +1,7 @@
 use super::Bridge;
+use crate::acp::{CloseSessionRequest, CloseSessionResponse, Error, ErrorCode, Result};
 use crate::nats::{FlushClient, PublishClient, RequestClient, session};
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{CloseSessionRequest, CloseSessionResponse, Error, ErrorCode, Result};
 use tracing::{info, instrument};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
@@ -48,8 +48,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::acp::{Agent, CloseSessionRequest, CloseSessionResponse, ErrorCode};
     use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response};
-    use agent_client_protocol::{Agent, CloseSessionRequest, CloseSessionResponse, ErrorCode};
 
     #[tokio::test]
     async fn close_session_forwards_request_and_returns_response() {

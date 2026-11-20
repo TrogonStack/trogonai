@@ -1,8 +1,8 @@
 use super::Bridge;
+use crate::acp::{PromptResponse, SessionId};
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::pending_prompt_waiters::PromptToken;
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{PromptResponse, SessionId};
 use tracing::{error, instrument, warn};
 use trogon_std::time::GetElapsed;
 
@@ -121,9 +121,9 @@ fn extract_prompt_token_from_raw(payload: &[u8]) -> Option<PromptToken> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::acp::StopReason;
     use crate::agent::Bridge;
     use crate::config::Config;
-    use agent_client_protocol::StopReason;
     use trogon_nats::MockNatsClient;
     use trogon_std::time::MockClock;
 

@@ -48,7 +48,6 @@ impl AcpStream {
                 format!("{p}.session.*.agent.load"),
                 format!("{p}.session.*.agent.set_mode"),
                 format!("{p}.session.*.agent.set_config_option"),
-                format!("{p}.session.*.agent.set_model"),
                 format!("{p}.session.*.agent.fork"),
                 format!("{p}.session.*.agent.resume"),
                 format!("{p}.session.*.agent.close"),

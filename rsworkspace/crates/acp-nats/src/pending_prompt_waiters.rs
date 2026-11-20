@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
-use agent_client_protocol::{PromptResponse, SessionId};
+use crate::acp::{PromptResponse, SessionId};
 use tokio::sync::oneshot;
 use trogon_std::time::GetElapsed;
 
@@ -125,7 +125,7 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
 mod tests {
     use std::time::Duration;
 
-    use agent_client_protocol::{PromptResponse, SessionId, StopReason};
+    use crate::acp::{PromptResponse, SessionId, StopReason};
     use trogon_std::time::{GetNow, MockClock, MockInstant};
 
     use super::*;
