@@ -55,6 +55,7 @@ impl FixtureDiagnostics {
         let image = match request.descriptor().as_str() {
             "nats:2.10.14" => "nats:2.10.14",
             "nats:2.14.2" => "nats:2.14.2",
+            "nats:2.14.2-alpine" => "nats:2.14.2-alpine",
             _ => return None,
         };
         let mut command = request.cmd();
