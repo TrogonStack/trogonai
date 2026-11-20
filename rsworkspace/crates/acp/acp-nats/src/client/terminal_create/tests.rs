@@ -134,7 +134,7 @@ async fn handle_client_error_publishes_error_reply() {
 fn error_code_and_message_invalid_request_returns_invalid_params() {
     let err = serde_json::from_slice::<CreateTerminalRequest>(b"not json").unwrap_err();
     let tc_err = TerminalCreateError::InvalidRequest(err);
-    let (code, message) = error_code_and_message(&tc_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&tc_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert!(message.contains("Invalid terminal/create request"));
 }
@@ -143,7 +143,7 @@ fn error_code_and_message_invalid_request_returns_invalid_params() {
 fn error_code_and_message_client_error_preserves_client_code() {
     let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "file not found");
     let tc_err = TerminalCreateError::ClientError(client_err);
-    let (code, message) = error_code_and_message(&tc_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&tc_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "file not found");
 }
@@ -152,7 +152,7 @@ fn error_code_and_message_client_error_preserves_client_code() {
 fn error_code_and_message_client_error_preserves_other_code() {
     let client_err = agent_client_protocol::Error::new(ErrorCode::INTERNAL_ERROR, "internal");
     let tc_err = TerminalCreateError::ClientError(client_err);
-    let (code, _) = error_code_and_message(&tc_err);
+    let agent_client_protocol::Error { code, .. } = agent_client_protocol::Error::from(&tc_err);
     assert_eq!(code, ErrorCode::INTERNAL_ERROR);
 }
 
