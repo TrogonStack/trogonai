@@ -16,10 +16,12 @@ pub enum TerminalReleaseError {
     ClientError(#[source] agent_client_protocol::Error),
 }
 
-pub fn error_code_and_message(e: &TerminalReleaseError) -> (ErrorCode, String) {
-    match e {
-        TerminalReleaseError::InvalidRequest(message) => (ErrorCode::INVALID_PARAMS, message.clone()),
-        TerminalReleaseError::ClientError(inner) => (inner.code, inner.message.clone()),
+impl From<&TerminalReleaseError> for agent_client_protocol::Error {
+    fn from(error: &TerminalReleaseError) -> Self {
+        match error {
+            TerminalReleaseError::InvalidRequest(message) => Self::new(ErrorCode::INVALID_PARAMS, message.clone()),
+            TerminalReleaseError::ClientError(inner) => inner.clone(),
+        }
     }
 }
 
@@ -49,21 +51,14 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
             rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "terminal_release reply").await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let error = agent_client_protocol::Error::from(&e);
             warn!(
                 error = %e,
                 session_id = %session_id,
                 "Failed to handle terminal/release"
             );
-            rpc_reply::publish_error_reply(
-                nats,
-                reply_to,
-                response_id,
-                code,
-                &message,
-                "terminal_release error reply",
-            )
-            .await;
+            rpc_reply::publish_agent_error_reply(nats, reply_to, response_id, &error, "terminal_release error reply")
+                .await;
         }
     }
 }
