@@ -1,7 +1,7 @@
 use serde_json::{Map, Value, json};
 
-use super::{SETTINGS_DEPTH_BOUND, check_object, check_text, depth, object_depth};
-use crate::settings_resolve_error::ResolveSettingsError;
+use super::{check_object, check_text, object_depth};
+use crate::{constants::SETTINGS_DEPTH_BOUND, settings_resolve_error::ResolveSettingsError};
 
 /// `levels` nested arrays around `null`.
 fn arrays(levels: usize) -> Value {
@@ -26,37 +26,36 @@ fn the_bound_is_the_largest_multiple_of_a_hundred_within_half_the_smallest_recor
     assert_eq!(SETTINGS_DEPTH_BOUND, half / 100 * 100);
 }
 
+/// The depth of an object holding `value` under `a`, one level deeper than `value` itself.
+fn holding(value: Value) -> usize {
+    object_depth(&Map::from_iter([("a".to_owned(), value)]))
+}
+
 #[test]
-fn a_scalar_is_depth_zero_and_an_empty_container_is_depth_one() {
-    assert_eq!(depth(&json!(null)), 0);
-    assert_eq!(depth(&json!("text")), 0);
-    assert_eq!(depth(&json!({})), 1);
-    assert_eq!(depth(&json!([])), 1);
+fn an_object_of_scalars_is_depth_one_and_each_empty_container_in_it_adds_a_level() {
+    assert_eq!(object_depth(&Map::new()), 1);
+    assert_eq!(holding(json!(null)), 1);
+    assert_eq!(holding(json!("text")), 1);
+    assert_eq!(holding(json!({})), 2);
+    assert_eq!(holding(json!([])), 2);
 }
 
 #[test]
 fn each_array_or_object_around_the_deepest_value_adds_a_level() {
-    assert_eq!(depth(&json!({"a": {}})), 2);
-    assert_eq!(depth(&json!({"a": 1, "b": [[], [[1]]], "c": {"d": 2}})), 4);
-    assert_eq!(depth(&json!([1, [2, [3]], {"a": 4}])), 3);
-    assert_eq!(depth(&arrays(7)), 7);
-    assert_eq!(depth(&objects(7)), 7);
-}
-
-#[test]
-fn an_object_is_one_level_deeper_than_the_deepest_of_its_members() {
-    let empty = Map::new();
-    assert_eq!(object_depth(&empty), 1);
-    assert_eq!(object_depth(&Map::from_iter([("a".to_owned(), json!(1))])), 1);
+    assert_eq!(holding(json!({"a": {}})), 3);
+    assert_eq!(holding(json!({"a": 1, "b": [[], [[1]]], "c": {"d": 2}})), 5);
+    assert_eq!(holding(json!([1, [2, [3]], {"a": 4}])), 4);
+    assert_eq!(holding(arrays(7)), 8);
+    assert_eq!(holding(objects(7)), 8);
     assert_eq!(object_depth(&Map::from_iter([("a".to_owned(), json!([[]]))])), 3);
 }
 
 #[test]
 fn counting_stops_at_the_bound() {
-    assert_eq!(depth(&arrays(SETTINGS_DEPTH_BOUND - 1)), SETTINGS_DEPTH_BOUND - 1);
-    assert_eq!(depth(&arrays(SETTINGS_DEPTH_BOUND)), SETTINGS_DEPTH_BOUND);
-    assert_eq!(depth(&arrays(SETTINGS_DEPTH_BOUND + 1)), SETTINGS_DEPTH_BOUND);
-    assert_eq!(depth(&objects(4 * SETTINGS_DEPTH_BOUND)), SETTINGS_DEPTH_BOUND);
+    assert_eq!(holding(arrays(SETTINGS_DEPTH_BOUND - 2)), SETTINGS_DEPTH_BOUND - 1);
+    assert_eq!(holding(arrays(SETTINGS_DEPTH_BOUND - 1)), SETTINGS_DEPTH_BOUND);
+    assert_eq!(holding(arrays(SETTINGS_DEPTH_BOUND)), SETTINGS_DEPTH_BOUND);
+    assert_eq!(holding(objects(4 * SETTINGS_DEPTH_BOUND)), SETTINGS_DEPTH_BOUND);
 }
 
 #[test]

@@ -4,7 +4,8 @@
 use serde_json::{Map, Value};
 
 use crate::{
-    settings_depth::{SETTINGS_DEPTH_BOUND, check_text},
+    constants::SETTINGS_DEPTH_BOUND,
+    settings_depth::check_text,
     settings_parse::parse_json,
     settings_parse_deep::{nests_past_serde_json, parse_json_deep},
     settings_resolve_error::ResolveSettingsError,

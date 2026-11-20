@@ -181,7 +181,7 @@ fn a_managed_document_that_is_not_an_object_does_not_load() {
 }
 
 fn nested(depth: usize) -> String {
-    format!("{}null{}", "{\"x\":".repeat(depth - 1), "}".repeat(depth - 1))
+    format!("{}null{}", "{\"x\":".repeat(depth), "}".repeat(depth))
 }
 
 #[test]

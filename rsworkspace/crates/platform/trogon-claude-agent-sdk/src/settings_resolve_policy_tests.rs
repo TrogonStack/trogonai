@@ -72,7 +72,7 @@ fn read(answer: Answer) -> (TierRead, bool) {
 #[test]
 fn a_typescript_managed_document_nested_at_the_bound_fails_the_read() {
     let depth = crate::SETTINGS_DEPTH_BOUND;
-    let text = format!("{}null{}", "{\"x\":".repeat(depth - 1), "}".repeat(depth - 1));
+    let text = format!("{}null{}", "{\"x\":".repeat(depth), "}".repeat(depth));
     let error = read_in(SettingsDialect::TypeScript, Answer::Bytes(text.into_bytes())).err();
     assert!(matches!(error, Some(ResolveSettingsError::MaximumCallStack)));
 }

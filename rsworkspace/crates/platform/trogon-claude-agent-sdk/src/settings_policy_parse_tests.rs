@@ -4,7 +4,7 @@ use super::parse_policy_text;
 use crate::{ResolveSettingsError, SETTINGS_DEPTH_BOUND};
 
 fn nested(depth: usize) -> String {
-    format!("{}null{}", "{\"x\":".repeat(depth - 1), "}".repeat(depth - 1))
+    format!("{}null{}", "{\"x\":".repeat(depth), "}".repeat(depth))
 }
 
 #[test]

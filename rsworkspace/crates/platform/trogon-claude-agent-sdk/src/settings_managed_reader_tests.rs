@@ -13,7 +13,7 @@ use crate::{
 };
 
 fn nested(depth: usize) -> Vec<u8> {
-    format!("{}null{}", "{\"x\":".repeat(depth - 1), "}".repeat(depth - 1)).into_bytes()
+    format!("{}null{}", "{\"x\":".repeat(depth), "}".repeat(depth)).into_bytes()
 }
 
 #[test]

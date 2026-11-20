@@ -395,7 +395,7 @@ pub use client::{
 pub use client_app::{format_client_app, normalize_client_app};
 pub use client_app_derivation::{BundledCli, ClientAppDerivation};
 pub use config_value::ConfigValue;
-pub use constants::{DEFAULT_ENTRYPOINT, MINIMUM_CLAUDE_CODE_VERSION, SDK_VERSION};
+pub use constants::{DEFAULT_ENTRYPOINT, MINIMUM_CLAUDE_CODE_VERSION, SDK_VERSION, SETTINGS_DEPTH_BOUND};
 pub use control::{
     ConnectionInfo, ContextUsageCategory, ContextUsageDetail, ContextUsageResponse, ControlReply, FeatureSupport,
     InterruptReceipt, MaxThinkingTokensDisplay, McpEnabled, McpPermissionModeOverride, McpSetServersResult,
@@ -535,7 +535,6 @@ pub use session_subpath::{SessionSubpath, SessionSubpathError};
 pub use session_summary::{SessionSummaryEntry, fold_session_summary, summary_entry_to_sdk_info};
 pub use session_transcript::{MessageExtras, MessagePage, SessionMessage, SessionMessageKind};
 pub use setting_source::SettingSource;
-pub use settings_depth::SETTINGS_DEPTH_BOUND;
 pub use settings_dialect::SettingsDialect;
 pub use settings_exact::js_stringify_exact;
 pub use settings_input::SettingsInput;

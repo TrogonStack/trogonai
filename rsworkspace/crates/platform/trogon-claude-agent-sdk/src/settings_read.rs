@@ -5,11 +5,12 @@
 use serde_json::{Map, Value};
 
 use crate::{
+    constants::SETTINGS_DEPTH_BOUND,
     js_object_order::js_ordered_object,
     python_c_stack::PythonCStack,
     python_json_load::loads_text,
     session_prompt::js_trim,
-    settings_depth::{SETTINGS_DEPTH_BOUND, check_text},
+    settings_depth::check_text,
     settings_dialect::SettingsDialect,
     settings_numbers::{normalize_numbers, python_value},
     settings_parse::parse_json,
