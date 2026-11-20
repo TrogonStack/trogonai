@@ -1,25 +1,12 @@
 use buffa::MessageField;
-use std::ops::{Deref, DerefMut};
-use trogon_decider::{Evolve, StateSnapshot};
-use trogonai_proto::peers::{PeerEventCase, state_v1alpha1, v1alpha1 as proto};
+use trogon_decider::Evolve;
+use trogonai_proto::peers::{PeerEventCase, v1alpha1 as proto};
 
 pub use super::evolve_error::EvolveError;
+pub use super::peer_state::PeerState;
 pub(super) use super::state_values::{
     parse_enrollment, read_time, required, timestamp_seconds_supported, validate_attachment,
 };
-
-#[repr(transparent)]
-#[derive(Debug, Clone, PartialEq)]
-pub struct PeerState(state_v1alpha1::PeerState);
-
-impl Default for PeerState {
-    fn default() -> Self {
-        Self(state_v1alpha1::PeerState {
-            next_intake_ordinal: Some(1),
-            ..Default::default()
-        })
-    }
-}
 
 impl Evolve<proto::PeerEvent> for PeerState {
     type Error = EvolveError;
@@ -27,42 +14,6 @@ impl Evolve<proto::PeerEvent> for PeerState {
     fn evolve(self, event: &proto::PeerEvent) -> Result<Self, Self::Error> {
         transition(self, event).map(|transition| transition.state)
     }
-}
-
-impl Deref for PeerState {
-    type Target = state_v1alpha1::PeerState;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for PeerState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl From<state_v1alpha1::PeerState> for PeerState {
-    fn from(value: state_v1alpha1::PeerState) -> Self {
-        Self(value)
-    }
-}
-
-impl From<PeerState> for state_v1alpha1::PeerState {
-    fn from(value: PeerState) -> Self {
-        value.0
-    }
-}
-
-impl AsRef<state_v1alpha1::PeerState> for PeerState {
-    fn as_ref(&self) -> &state_v1alpha1::PeerState {
-        &self.0
-    }
-}
-
-impl StateSnapshot for PeerState {
-    type Payload = state_v1alpha1::PeerState;
 }
 
 pub fn initial_state() -> PeerState {
