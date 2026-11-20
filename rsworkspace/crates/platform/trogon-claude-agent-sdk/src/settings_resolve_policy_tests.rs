@@ -1,7 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::{
-    cell::Cell,
     io,
     path::{Path, PathBuf},
 };
@@ -17,10 +16,9 @@ use crate::{
         MCP_SERVER_ALLOW_LIST_KEY, PARENT_MANAGED_FILE, REGISTRY_USER_FILE, REMOTE_MANAGED_FILE,
         SETTINGS_FILE_MAX_BYTES,
     },
-    node_merge_warmth::MergeWarmth,
-    node_stack::NodeStack,
     settings_dialect::SettingsDialect,
     settings_managed_reader::{ManagedReader, ParsedFiles},
+    settings_resolve_error::ResolveSettingsError,
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_tier::{LoadState, TierRead},
     settings_resolve_values::SettingsMap,
@@ -58,14 +56,25 @@ impl ReadFile for OneFile {
     }
 }
 
-fn read(answer: Answer) -> (TierRead, bool) {
+fn read_in(dialect: SettingsDialect, answer: Answer) -> Result<(TierRead, bool), ResolveSettingsError> {
     let parsed = ParsedFiles::default();
-    let warmth = Cell::new(MergeWarmth::default());
     read_policy_file(
         &OneFile(answer),
         &PathBuf::from("/etc/claude-code/managed-settings.json"),
-        ManagedReader::new(SettingsDialect::Python, NodeStack::default(), &parsed, &warmth),
+        ManagedReader::new(dialect, &parsed),
     )
+}
+
+fn read(answer: Answer) -> (TierRead, bool) {
+    read_in(SettingsDialect::Python, answer).expect("reads")
+}
+
+#[test]
+fn a_typescript_managed_document_nested_at_the_bound_fails_the_read() {
+    let depth = crate::SETTINGS_DEPTH_BOUND;
+    let text = format!("{}null{}", "{\"x\":".repeat(depth - 1), "}".repeat(depth - 1));
+    let error = read_in(SettingsDialect::TypeScript, Answer::Bytes(text.into_bytes())).err();
+    assert!(matches!(error, Some(ResolveSettingsError::MaximumCallStack)));
 }
 
 #[test]

@@ -4,23 +4,19 @@ use serde_json::Value;
 
 use super::{read_document, read_policy_document, sanitize_policy_document};
 use crate::{
-    constants::SETTINGS_SCHEMA_JSON, node_stack::NodeStack, python_c_stack::PythonCStack,
+    ResolveSettingsError, SETTINGS_DEPTH_BOUND, constants::SETTINGS_SCHEMA_JSON, python_c_stack::PythonCStack,
     settings_dialect::SettingsDialect, settings_json::js_stringify, settings_numbers::infinities_to_null,
 };
 
 /// The document `read_document` yields as the resolver prints it, with each infinity as `null`.
 fn printed(text: &str) -> Option<Value> {
-    read_document(
-        text,
-        SettingsDialect::TypeScript,
-        PythonCStack::MODULE,
-        NodeStack::NODE_24_DARWIN_ARM64,
-    )
-    .map(|document| {
-        let mut document = Value::Object(document);
-        infinities_to_null(&mut document);
-        document
-    })
+    read_document(text, SettingsDialect::TypeScript, PythonCStack::MODULE)
+        .expect("reads")
+        .map(|document| {
+            let mut document = Value::Object(document);
+            infinities_to_null(&mut document);
+            document
+        })
 }
 
 /// Compares like JavaScript output: key order matters, and a number must be the same kind (integer or float) with
@@ -95,13 +91,9 @@ fn a_finite_number_with_the_value_of_an_infinity_marker_prints_like_the_pinned_r
 #[test]
 fn the_python_dialect_keeps_large_integers_exact() {
     let document = |text: &str| {
-        read_document(
-            text,
-            SettingsDialect::Python,
-            PythonCStack::MODULE,
-            NodeStack::NODE_24_DARWIN_ARM64,
-        )
-        .map(Value::Object)
+        read_document(text, SettingsDialect::Python, PythonCStack::MODULE)
+            .expect("reads")
+            .map(Value::Object)
     };
     assert_eq!(
         serialized(document(r#"{"n":12345678901234567890}"#).as_ref()),
@@ -186,4 +178,25 @@ fn a_managed_document_that_is_not_an_object_does_not_load() {
         assert_eq!(read.has_policy_content, None, "{text:?}");
         assert!(!read.loaded, "{text:?}");
     }
+}
+
+fn nested(depth: usize) -> String {
+    format!("{}null{}", "{\"x\":".repeat(depth - 1), "}".repeat(depth - 1))
+}
+
+#[test]
+fn a_typescript_document_reads_past_serde_json_and_fails_at_the_bound() {
+    let read = |depth| read_document(&nested(depth), SettingsDialect::TypeScript, PythonCStack::MODULE);
+    assert!(read(200).expect("reads").is_some());
+    assert!(read(SETTINGS_DEPTH_BOUND - 1).expect("reads").is_some());
+    assert!(matches!(
+        read(SETTINGS_DEPTH_BOUND),
+        Err(ResolveSettingsError::MaximumCallStack)
+    ));
+}
+
+#[test]
+fn a_blank_document_reads_as_empty_settings() {
+    let read = read_document(" \n", SettingsDialect::TypeScript, PythonCStack::MODULE);
+    assert!(read.expect("reads").is_some_and(|settings| settings.is_empty()));
 }

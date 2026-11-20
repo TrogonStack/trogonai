@@ -11,9 +11,17 @@ pub enum ResolveSettingsError {
     HomeDirectory(#[source] crate::HomeDirectoryError),
     #[error("the settings reader thread could not start")]
     Thread(#[source] std::io::Error),
-    /// The `RangeError` `resolveSettings` rejects with in the TypeScript dialect when copying a deeply nested
-    /// settings file into its file cache, or merging it, runs out of the stack [`ResolverState::with_node_stack`](crate::ResolverState::with_node_stack)
-    /// describes.
+    /// The `RangeError` `resolveSettings` rejects with in the TypeScript dialect when a settings document is nested
+    /// [`SETTINGS_DEPTH_BOUND`](crate::SETTINGS_DEPTH_BOUND) levels (500) or deeper, as Node runs out of stack
+    /// reading, copying and merging it.
+    ///
+    /// Node fails at a depth that depends on the tier V8 runs each function in, which functions it has compiled,
+    /// the stack of the caller and what the process ran before, so no depth is the same in two runs. The SDK
+    /// fails every document at the bound instead, on every host and for every state: the largest multiple of 100
+    /// within half the smallest margin any recorded Node run leaves. The bound holds for every settings document
+    /// the TypeScript dialect reads: the user, project and local settings, the managed settings file and its
+    /// drop-ins, the machine policy read from the profile, the property list or the registry, and the managed and
+    /// server-managed settings passed in the options. The Python dialect has no bound of this kind.
     #[error("Maximum call stack size exceeded")]
     MaximumCallStack,
     /// The `RangeError` `resolveSettings` rejects with in the TypeScript dialect when a merge sets the `length` of
@@ -27,9 +35,4 @@ pub enum ResolveSettingsError {
     /// resolves where the holes merges leave in arrays alone would print that long, one `null` each.
     #[error("Invalid string length")]
     InvalidStringLength,
-    /// The `SyntaxError` `resolveSettings` rejects with in the TypeScript dialect when V8 runs out of the stack
-    /// [`ResolverState::with_node_stack`](crate::ResolverState::with_node_stack) describes while it compiles the regular expression lodash `isIndex` tests
-    /// the indexes of a merged array with, which it does on its first two tests in the process.
-    #[error("Invalid regular expression: /^(?:0|[1-9]\\d*)$/: Stack overflow")]
-    InvalidRegularExpression,
 }

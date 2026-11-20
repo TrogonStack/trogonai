@@ -4,50 +4,29 @@
 use serde_json::{Map, Value};
 
 use crate::{
-    node_managed_pass::ManagedPass,
-    node_stack::NodeStack,
+    settings_depth::{SETTINGS_DEPTH_BOUND, check_text},
     settings_parse::parse_json,
-    settings_parse_deep::{nests_past_serde_json, parse_json_deep, parses_as_object},
+    settings_parse_deep::{nests_past_serde_json, parse_json_deep},
+    settings_resolve_error::ResolveSettingsError,
     settings_strings::stand_in_escapes,
 };
 
-/// A managed settings document's text, read.
-#[derive(Debug, PartialEq)]
-pub(crate) enum PolicyParse {
-    /// The document object, each lone surrogate held by its stand-in.
-    Object(Map<String, Value>),
-    /// `JSON.parse` rejects the text or reads something other than an object (`gE` upstream).
-    NotObject,
-    /// The reader runs out of stack copying or checking the object, which it reports as a file it could not read
-    /// (`Q7e` upstream).
-    Overflow,
-}
-
-/// Reads a managed settings document's text, not blank, as the reader does on the stack of `node` in `pass`:
-/// `JSON.parse` at any depth after a leading byte order mark, then the copy and the schema check, which run out of
-/// stack on a document nested too deep.
-pub(crate) fn parse_policy_text(text: &str, node: NodeStack, pass: ManagedPass) -> PolicyParse {
+/// Reads a managed settings document's text, not blank: `JSON.parse` after a leading byte order mark, at any depth below
+/// [`SETTINGS_DEPTH_BOUND`](crate::SETTINGS_DEPTH_BOUND). The document object has each lone surrogate held by its
+/// stand-in. `None` when `JSON.parse` rejects the text or reads something other than an object (`gE` upstream). An object
+/// document nested at the bound or deeper fails with [`ResolveSettingsError::MaximumCallStack`].
+pub(crate) fn parse_policy_text(text: &str) -> Result<Option<Map<String, Value>>, ResolveSettingsError> {
+    check_text(text)?;
     let text = stand_in_escapes(text.strip_prefix('\u{feff}').unwrap_or(text));
     let parsed = if nests_past_serde_json(&text) {
-        match parse_json_deep(&text, node.policy_max_depth(pass)) {
-            Some(parsed) => parsed,
-            None if parses_as_object(&text) == Some(true) => return PolicyParse::Overflow,
-            None => return PolicyParse::NotObject,
-        }
+        parse_json_deep(&text, SETTINGS_DEPTH_BOUND)
     } else {
-        match parse_json(&text) {
-            Ok(parsed) => parsed,
-            Err(_) => return PolicyParse::NotObject,
-        }
+        parse_json(&text).ok()
     };
-    let Value::Object(document) = parsed else {
-        return PolicyParse::NotObject;
-    };
-    if node.reads_policy(pass, &document) {
-        PolicyParse::Object(document)
-    } else {
-        PolicyParse::Overflow
-    }
+    Ok(match parsed {
+        Some(Value::Object(document)) => Some(document),
+        _ => None,
+    })
 }
 
 #[cfg(test)]
