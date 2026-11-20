@@ -1,4 +1,4 @@
-use std::{cell::Cell, panic, path::PathBuf, sync::LazyLock, thread};
+use std::{panic, path::PathBuf, sync::LazyLock, thread};
 
 use serde_json::{Map, Value};
 
@@ -9,9 +9,8 @@ use crate::{
         SETTINGS_ENGINE_STACK_BYTES, SOURCE_ORDER, STRICT_ESCALATING_DEFAULT_MODES, V8_MAX_STRING_LENGTH,
     },
     js_array::{StringTooLong, settle},
-    node_merge_call::NodeMergeCall,
-    node_merge_warmth::MergeWarmth,
     python_json_value::PythonJsonValue,
+    settings_depth::{check_object, check_text},
     settings_dialect::SettingsDialect,
     settings_exact::js_exact_value,
     settings_json::js_stringify,
@@ -21,15 +20,13 @@ use crate::{
     settings_resolve_connector::skips_repository_settings,
     settings_resolve_error::ResolveSettingsError,
     settings_resolve_platform::asks_organization,
-    settings_resolve_policy::{
-        PolicyKeyOrder, PolicyReevaluation, PolicyResolution, reevaluate_policy, reserve_managed_texts, resolve_policy,
-    },
+    settings_resolve_policy::{PolicyKeyOrder, PolicyResolution, reserve_managed_texts, resolve_policy},
     settings_resolve_sources::{
         local_settings_path, project_settings_path, read_settings_text, resolve_cwd, user_settings_path,
     },
     settings_resolve_state::ResolverState,
     settings_resolve_tier::TierRead,
-    settings_resolve_values::{SettingsMap, in_schema_order, merge_unbounded, merge_within},
+    settings_resolve_values::{SettingsMap, in_schema_order, merge},
     settings_strings::{
         SurrogateStandIns, approximate_strings, array_mark, escape_stand_ins, reserve_text, reserve_value,
     },
@@ -228,9 +225,12 @@ pub fn resolve_settings_in_dialect_with<H: SettingsHost>(
 /// integer past 64 bits holds its nearest double; [`resolve_python_settings_with_state`] keeps it exact. The Python
 /// dialect reads a settings file as deeply as `json.loads` does where [`ResolverState::with_python_c_stack`] says,
 /// and runs on a thread of its own whose stack holds a walk that deep. The TypeScript dialect reads and merges a
-/// settings file as deeply as the Node process [`ResolverState::with_node_stack`] describes, on such a thread too,
-/// and fails with [`ResolveSettingsError::MaximumCallStack`] where `resolveSettings` rejects with that `RangeError`,
-/// or with [`ResolveSettingsError::InvalidRegularExpression`] where it rejects with that `SyntaxError`.
+/// settings document as deeply as [`SETTINGS_DEPTH_BOUND`](crate::SETTINGS_DEPTH_BOUND) (500) allows, on such a
+/// thread too. A document nested that deep or deeper, whichever it is (a settings file, a managed settings file or
+/// drop-in, the machine policy of the profile, the property list or the registry, or the managed and server-managed
+/// settings in the options), fails the whole resolve with [`ResolveSettingsError::MaximumCallStack`], where
+/// `resolveSettings` rejects with that `RangeError` at a depth that depends on V8's tier and compile state and so
+/// differs from run to run. Below the bound the answer is Node's, field by field.
 /// A string or key that holds a lone surrogate in either dialect holds U+FFFD for each one;
 /// [`resolve_settings_exact_in_dialect_with_state`] keeps it.
 pub fn resolve_settings_in_dialect_with_state<H: SettingsHost>(
@@ -276,7 +276,7 @@ pub fn resolve_python_settings_with_state<H: SettingsHost>(
 
 /// Runs `work` on a thread with [`SETTINGS_ENGINE_STACK_BYTES`] of stack. The engine walks a settings document
 /// recursively, once per level at several steps, the Python dialect reads documents nested almost as deep as
-/// CPython's C recursion limit, and the TypeScript dialect documents a few thousand levels deep. A panic in `work` resumes on the calling thread.
+/// CPython's C recursion limit, and the TypeScript dialect documents up to the settings depth bound. A panic in `work` resumes on the calling thread.
 pub(crate) fn on_engine_stack<T: Send>(
     work: impl FnOnce() -> Result<T, ResolveSettingsError> + Send,
 ) -> Result<T, ResolveSettingsError> {
@@ -327,21 +327,28 @@ fn resolve_core<H: SettingsHost>(
 ) -> Result<Value, ResolveSettingsError> {
     let cwd = resolve_cwd(host, options.cwd.as_deref()).map_err(ResolveSettingsError::CurrentDirectory)?;
     let stack = state.python_c_stack();
-    let node = state.node_stack();
     let allowed = allowed_sources(options);
     // Upstream takes both as the raw objects the caller passes and reads them key by key below, so a value its
     // declared `Settings` type would refuse, such as a number for `model`, still reaches that read.
-    let parent = options.managed_settings.clone().map(|parent| {
-        let mut parent = parent.into_object();
-        parent.shift_remove("organizationFreeFormSettings");
-        parent
-    });
+    let parent = options.managed_settings.clone().map(crate::DeepJsonObject::into_object);
     let remote = options
         .server_managed_settings
         .clone()
         .map(crate::DeepJsonObject::into_object);
+    if dialect == SettingsDialect::TypeScript {
+        for document in [parent.as_ref(), remote.as_ref()].into_iter().flatten() {
+            check_object(document)?;
+        }
+    }
+    let parent = parent.map(|mut parent| {
+        parent.shift_remove("organizationFreeFormSettings");
+        parent
+    });
     let kind = state.platform(host);
     let reading = state.policy_reading(host);
+    if dialect == SettingsDialect::TypeScript && reading.too_deep {
+        return Err(ResolveSettingsError::MaximumCallStack);
+    }
     let evaluation = reading.evaluation.in_effect(asks_organization(host));
     let outcome_lost = reading.hklm.as_ref().map(|outcome| outcome.lost_the_answer());
     let mut texts: Vec<(&str, Option<PathBuf>, Option<String>)> = Vec::new();
@@ -370,6 +377,11 @@ fn resolve_core<H: SettingsHost>(
             }
             _ => (None, None),
         };
+        if dialect == SettingsDialect::TypeScript
+            && let Some(text) = &text
+        {
+            check_text(text)?;
+        }
         texts.push((name, path, text));
     }
     reserve_text(&cwd.to_string_lossy());
@@ -396,14 +408,12 @@ fn resolve_core<H: SettingsHost>(
         .map(|remote| TierRead::from_pm(remote, dialect, REMOTE_MANAGED_FILE));
 
     let parsed = ParsedFiles::default();
-    let warmth = Cell::new(MergeWarmth::default());
     let PolicyResolution {
         settings: policy_settings,
         origin: settings_origin,
         key_order,
         mdm_did_not_load,
         file_did_not_load,
-        reevaluates,
     } = resolve_policy(
         host,
         state,
@@ -411,7 +421,7 @@ fn resolve_core<H: SettingsHost>(
         parent.as_ref(),
         remote.as_ref(),
         evaluation,
-        ManagedReader::new(dialect, node, &parsed, &warmth),
+        ManagedReader::new(dialect, &parsed),
     )?;
     let policy_settings = policy_settings.map(|mut settings| {
         for entry in settings.values_mut() {
@@ -431,12 +441,11 @@ fn resolve_core<H: SettingsHost>(
     for (name, path, text) in texts {
         let settings = match name {
             "policySettings" => policy_settings.clone(),
-            _ => text.and_then(|text| read_document(&text, dialect, stack, node)),
+            _ => text
+                .map(|text| read_document(&text, dialect, stack))
+                .transpose()?
+                .flatten(),
         };
-        let copied_by_cache = dialect == SettingsDialect::TypeScript && name != "policySettings";
-        if copied_by_cache && settings.as_ref().is_some_and(|settings| node.copy_overflows(settings)) {
-            return Err(ResolveSettingsError::MaximumCallStack);
-        }
         let parsed_by_schema = name != "policySettings" || key_order == PolicyKeyOrder::Schema;
         let settings = settings.map(|settings| {
             if parsed_by_schema {
@@ -451,37 +460,10 @@ fn resolve_core<H: SettingsHost>(
     let mut effective = SettingsMap::new();
     for (_, _, settings) in &per_source {
         if let Some(settings) = settings {
-            let merged = match dialect {
-                SettingsDialect::Python => merge_unbounded(&mut effective, settings),
-                SettingsDialect::TypeScript => {
-                    merge_within(node, NodeMergeCall::Source, &warmth, &mut effective, settings)
-                }
-            };
-            if let Some(error) = merged.rejection() {
-                return Err(error);
-            }
+            merge(&mut effective, settings)?;
         }
     }
-    // The evaluations for the policy origin and the machine policy run after the sources merge, with what those
-    // merges left V8 having run.
-    let (origin, file_did_not_load) = if reevaluates {
-        let PolicyReevaluation {
-            origin,
-            file_did_not_load,
-        } = reevaluate_policy(
-            host,
-            state,
-            kind,
-            parent.as_ref(),
-            remote.as_ref(),
-            evaluation,
-            ManagedReader::new(dialect, node, &parsed, &warmth),
-        )?;
-        (origin, file_did_not_load)
-    } else {
-        (settings_origin, file_did_not_load)
-    };
-    let origin = origin.map(|origin| origin.as_str());
+    let origin = settings_origin.map(|origin| origin.as_str());
     if let Some(policy) = &policy_settings {
         for key in ["availableModels", "enforceAvailableModels", "modelPicker"] {
             if let Some(value) = policy.get(key) {

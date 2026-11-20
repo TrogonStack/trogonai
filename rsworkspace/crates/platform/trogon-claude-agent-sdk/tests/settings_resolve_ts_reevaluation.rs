@@ -1,12 +1,10 @@
-#![allow(clippy::expect_used, clippy::unwrap_used)]
-
-//! The evaluations of the managed settings `resolveSettings` runs for their origin and for whether the machine policy
-//! loaded, after it merged the sources. Each one lists the managed folders again, so a folder that changed since the
-//! first evaluation can lead it to a managed settings file the first evaluation never read, and a file the file cache
-//! runs out of stack copying rejects the resolve there as it does in the first evaluation.
+//! Repeated resolves of the managed settings. `resolveSettings` evaluates them for the settings, for their origin and
+//! for whether the machine policy loaded, and Node runs out of stack at a depth that depends on what ran before. The
+//! engine reads every managed document once and fails each one nested `SETTINGS_DEPTH_BOUND` levels or deeper, so the
+//! answer to a resolve is the same on a fresh state, on a state that resolved before, and however often it repeats.
 
 use trogon_claude_agent_sdk::{
-    NodeStack, ResolveSettingsError, ResolveSettingsOptions, ResolverState, resolve_settings_with_state,
+    ResolveSettingsError, ResolveSettingsOptions, ResolverState, SETTINGS_DEPTH_BOUND, resolve_settings_with_state,
 };
 
 #[path = "support/fake_settings_host.rs"]
@@ -21,18 +19,18 @@ const INHERITS: &str = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\ClaudeCode\r
 const WINDOWS_DROP_INS: &str = "/mnt/c/Program Files/ClaudeCode/managed-settings.d";
 const LINUX_MANAGED: &str = "/etc/claude-code/managed-settings.json";
 
-/// Nested arrays under one key: past what the file cache copies in every evaluation of the managed settings on the
-/// Node stack `NodeStack::NODE_24_DARWIN_ARM64` describes, and within what each of them reads.
-const LINUX_ARRAYS: usize = 2000;
+/// Nested arrays under one key that make a document one level below the bound.
+const WITHIN: usize = SETTINGS_DEPTH_BOUND - 2;
+
+/// Nested arrays under one key that make a document as deep as the bound.
+const AT_BOUND: usize = SETTINGS_DEPTH_BOUND - 1;
 
 /// A WSL session whose machine policy only asks to inherit the Windows managed settings, whose Windows drop-in folder
 /// cannot be listed for the next `unlistable` listings and is gone after them, and whose Linux managed settings file
-/// is too deep for the file cache to copy. A resolve lists the Windows drop-in folder once to reserve the texts of the
-/// managed documents and once in each evaluation of the managed settings. An unreadable drop-in folder leaves the
-/// Windows side unloaded, which keeps the evaluation there; a Windows side that holds nothing sends it to the Linux
-/// managed settings file.
-fn host(unlistable: usize) -> FakeHost {
-    let linux = format!("{{\"x\":{}null{}}}", "[".repeat(LINUX_ARRAYS), "]".repeat(LINUX_ARRAYS));
+/// holds `arrays` nested arrays under one key. An unreadable drop-in folder leaves the Windows side unloaded, which
+/// keeps the evaluation there; a Windows side that holds nothing sends it to the Linux managed settings file.
+fn host(arrays: usize, unlistable: usize) -> FakeHost {
+    let linux = format!("{{\"x\":{}null{}}}", "[".repeat(arrays), "]".repeat(arrays));
     FakeHost::linux()
         .variable("WSL_DISTRO_NAME", "Ubuntu")
         .command(MACHINE, ok(INHERITS))
@@ -41,28 +39,61 @@ fn host(unlistable: usize) -> FakeHost {
         .unlistable(WINDOWS_DROP_INS, unlistable)
 }
 
-fn resolve(unlistable: usize) -> Result<(), ResolveSettingsError> {
-    let options: ResolveSettingsOptions = serde_json::from_str(r#"{"settingSources":[]}"#).expect("options");
-    let state = ResolverState::new().with_node_stack(NodeStack::NODE_24_DARWIN_ARM64);
-    resolve_settings_with_state(&host(unlistable), &options, &state).map(drop)
+type TestResult = Result<(), serde_json::Error>;
+
+/// Options that read no settings file of the user or the project, so only the managed settings decide the answer.
+fn managed_only() -> Result<ResolveSettingsOptions, serde_json::Error> {
+    serde_json::from_str(r#"{"settingSources":[]}"#)
+}
+
+fn resolve_on(
+    arrays: usize,
+    unlistable: usize,
+    options: &ResolveSettingsOptions,
+    state: &ResolverState,
+) -> Result<(), ResolveSettingsError> {
+    resolve_settings_with_state(&host(arrays, unlistable), options, state).map(drop)
+}
+
+fn resolve(arrays: usize, unlistable: usize, options: &ResolveSettingsOptions) -> Result<(), ResolveSettingsError> {
+    resolve_on(arrays, unlistable, options, &ResolverState::new())
 }
 
 #[test]
-fn a_windows_drop_in_folder_that_stays_unreadable_keeps_every_evaluation_off_the_linux_managed_file() {
-    assert!(resolve(usize::MAX).is_ok());
+fn a_windows_drop_in_folder_that_stays_unreadable_keeps_every_evaluation_off_the_linux_managed_file() -> TestResult {
+    let options = managed_only()?;
+    assert!(resolve(AT_BOUND, usize::MAX, &options).is_ok());
+    Ok(())
 }
 
 #[test]
-fn the_first_evaluation_rejects_a_linux_managed_file_the_file_cache_runs_out_of_stack_copying() {
-    assert!(matches!(resolve(0), Err(ResolveSettingsError::MaximumCallStack)));
+fn a_linux_managed_file_as_deep_as_the_bound_rejects_the_resolve() -> TestResult {
+    let options = managed_only()?;
+    assert!(matches!(
+        resolve(AT_BOUND, 0, &options),
+        Err(ResolveSettingsError::MaximumCallStack)
+    ));
+    Ok(())
 }
 
 #[test]
-fn the_origin_evaluation_rejects_a_linux_managed_file_the_first_evaluation_never_read() {
-    assert!(matches!(resolve(2), Err(ResolveSettingsError::MaximumCallStack)));
+fn a_linux_managed_file_below_the_bound_resolves() -> TestResult {
+    let options = managed_only()?;
+    assert!(resolve(WITHIN, 0, &options).is_ok());
+    Ok(())
 }
 
 #[test]
-fn the_machine_policy_evaluation_rejects_a_linux_managed_file_the_earlier_evaluations_never_read() {
-    assert!(matches!(resolve(3), Err(ResolveSettingsError::MaximumCallStack)));
+fn repeated_resolves_on_one_state_answer_as_resolves_on_a_fresh_state_do() -> TestResult {
+    let options = managed_only()?;
+    let state = ResolverState::new();
+    for _ in 0..3 {
+        assert!(matches!(
+            resolve_on(AT_BOUND, 0, &options, &state),
+            Err(ResolveSettingsError::MaximumCallStack)
+        ));
+        assert!(resolve_on(WITHIN, 0, &options, &state).is_ok());
+        assert!(resolve_on(AT_BOUND, usize::MAX, &options, &state).is_ok());
+    }
+    Ok(())
 }
