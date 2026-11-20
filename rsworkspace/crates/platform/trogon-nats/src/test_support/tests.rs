@@ -8,6 +8,12 @@ use testcontainers_modules::testcontainers::{
 use super::*;
 use trogon_std::env::ReadEnv;
 
+#[test]
+fn default_jetstream_request_enables_failure_diagnostics() {
+    let request = image(&NatsServerCmd::default().with_jetstream());
+    assert!(FixtureDiagnostics::for_request(&request).is_some());
+}
+
 // Fault injection needs the private, test-owned container handle. Public callers cannot
 // change a fixture's filesystem or readiness conditions.
 #[tokio::test]
