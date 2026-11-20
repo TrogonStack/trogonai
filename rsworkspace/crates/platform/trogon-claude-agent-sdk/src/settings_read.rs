@@ -5,17 +5,19 @@
 use serde_json::{Map, Value};
 
 use crate::{
+    constants::SETTINGS_DEPTH_BOUND,
     js_object_order::js_ordered_object,
-    node_stack::NodeStack,
     python_c_stack::PythonCStack,
     python_json_load::loads_text,
     session_prompt::js_trim,
+    settings_depth::check_text,
     settings_dialect::SettingsDialect,
     settings_numbers::{normalize_numbers, python_value},
     settings_parse::parse_json,
     settings_parse_deep::{nests_past_serde_json, parse_json_deep},
     settings_read_hooks::{declares_guard_hooks_outside_hooks, sanitize_hooks},
     settings_read_spec::ReadSpec,
+    settings_resolve_error::ResolveSettingsError,
     settings_resolve_values::SettingsMap,
     settings_schema::{SettingsSchema, schema},
     settings_schema_permission_rule::is_valid_permission_rule,
@@ -24,18 +26,22 @@ use crate::{
 
 /// Reads one settings document. `None` stands for a file that does not load: invalid JSON, not an
 /// object, a fatal sanitizer finding, or a schema failure. `dialect` picks the number semantics of the parse. In the
-/// Python dialect `stack` is where `json.loads` runs, and in the TypeScript dialect `node` is the stack of the Node
-/// process, which set how deeply the text may nest.
+/// Python dialect `stack` is where `json.loads` runs. In the TypeScript dialect a document nested
+/// [`SETTINGS_DEPTH_BOUND`](crate::SETTINGS_DEPTH_BOUND) levels or deeper fails with
+/// [`ResolveSettingsError::MaximumCallStack`], before anything is built from it.
 pub(crate) fn read_document(
     text: &str,
     dialect: SettingsDialect,
     stack: PythonCStack,
-    node: NodeStack,
-) -> Option<SettingsMap> {
+) -> Result<Option<SettingsMap>, ResolveSettingsError> {
     if js_trim(text).is_empty() {
-        return Some(SettingsMap::new());
+        return Ok(Some(SettingsMap::new()));
     }
-    let mut document = parse_object(text, dialect, stack, node)?;
+    Ok(parse_object(text, dialect, stack)?.and_then(read_object))
+}
+
+/// What the reader makes of a settings document that parsed as an object.
+fn read_object(mut document: Map<String, Value>) -> Option<SettingsMap> {
     let schema = schema()?;
     let spec = schema.read_spec();
     for key in &spec.managed_only {
@@ -49,36 +55,34 @@ pub(crate) fn read_document(
 }
 
 /// The document object of a settings text, with numbers the way JavaScript prints them (`Ya` plus `Tr`) for the dialect.
-/// The Python dialect reads as deeply as `json.loads` does at `stack`. The TypeScript dialect reads at any depth, as
-/// `JSON.parse` does, and skips a document the reader runs out of `node` stack walking or copying (`Q7e` upstream).
+/// The Python dialect reads as deeply as `json.loads` does at `stack`. The TypeScript dialect reads as deeply as
+/// [`SETTINGS_DEPTH_BOUND`](crate::SETTINGS_DEPTH_BOUND) allows, past what `serde_json` reads, and fails with
+/// [`ResolveSettingsError::MaximumCallStack`] for an object document at that depth or deeper. `None` for text that is
+/// not an object.
 fn parse_object(
     text: &str,
     dialect: SettingsDialect,
     stack: PythonCStack,
-    node: NodeStack,
-) -> Option<Map<String, Value>> {
+) -> Result<Option<Map<String, Value>>, ResolveSettingsError> {
     let parsed = match dialect {
         SettingsDialect::TypeScript => {
+            check_text(text)?;
             let text = stand_in_escapes(text.strip_prefix('\u{feff}').unwrap_or(text));
-            let parsed = if nests_past_serde_json(&text) {
-                parse_json_deep(&text, node.max_depth())?
+            if nests_past_serde_json(&text) {
+                parse_json_deep(&text, SETTINGS_DEPTH_BOUND)
             } else {
-                parse_json(&text).ok()?
-            };
-            if !node.reads(&parsed) {
-                return None;
+                parse_json(&text).ok()
             }
-            parsed
         }
-        SettingsDialect::Python => python_value(loads_text(text, stack.json_depth()).ok()?)?,
+        SettingsDialect::Python => loads_text(text, stack.json_depth()).ok().and_then(python_value),
     };
-    let Value::Object(mut document) = parsed else {
-        return None;
+    let Some(Value::Object(mut document)) = parsed else {
+        return Ok(None);
     };
     for entry in document.values_mut() {
         normalize_numbers(entry, dialect);
     }
-    Some(document)
+    Ok(Some(document))
 }
 
 /// `cm`. With `policy_source` it reads a managed settings document (`skipMcpServerEntryFilter` and
@@ -330,12 +334,9 @@ fn filter_mcp_lists(document: &mut Map<String, Value>, schema: &SettingsSchema, 
 /// A managed settings document after the policy sanitizers, before the policy schema parse.
 #[cfg(test)]
 pub(crate) fn sanitize_policy_document(text: &str) -> Option<SettingsMap> {
-    let mut document = parse_object(
-        text,
-        SettingsDialect::TypeScript,
-        PythonCStack::MODULE,
-        NodeStack::NODE_24_DARWIN_ARM64,
-    )?;
+    let mut document = parse_object(text, SettingsDialect::TypeScript, PythonCStack::MODULE)
+        .ok()
+        .flatten()?;
     let schema = schema()?;
     sanitize(&mut document, schema, schema.read_spec(), true);
     Some(js_ordered_object(document))
@@ -368,12 +369,9 @@ pub(crate) fn read_policy_document(text: &str, file: Option<&str>) -> PolicyRead
             only_substitutes: false,
         };
     }
-    let raw = parse_object(
-        text,
-        SettingsDialect::TypeScript,
-        PythonCStack::MODULE,
-        NodeStack::NODE_24_DARWIN_ARM64,
-    );
+    let raw = parse_object(text, SettingsDialect::TypeScript, PythonCStack::MODULE)
+        .ok()
+        .flatten();
     let Some(read) = raw.and_then(|raw| read_policy_object(raw, file)) else {
         return not_loaded;
     };
