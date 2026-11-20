@@ -7,6 +7,8 @@
 //! document of the TypeScript dialect at that depth or deeper fails the resolve the same way on every host, in every
 //! caller context and after any history of earlier resolves.
 
+use std::borrow::Cow;
+
 use serde_json::{Map, Value};
 
 use crate::{
@@ -53,10 +55,40 @@ pub(crate) fn check_object(entries: &Map<String, Value>) -> Result<(), ResolveSe
 /// anything but an object, is no document and passes.
 pub(crate) fn check_text(text: &str) -> Result<(), ResolveSettingsError> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    if nests_past(text, SETTINGS_DEPTH_BOUND - 1) && parses_as_object(text) == Some(true) {
+    if nests_past(text, SETTINGS_DEPTH_BOUND - 1) && parses_as_object(&without_surrogate_escapes(text)) == Some(true) {
         return Err(ResolveSettingsError::MaximumCallStack);
     }
     Ok(())
+}
+
+/// `text` with each `\uXXXX` escape of a surrogate spelled as the escape of U+FFFD. `JSON.parse` reads a lone
+/// surrogate escape, which `serde_json` rejects, so only the respelled text tells whether `JSON.parse` reads an object.
+/// Outside a string every backslash makes the text invalid either way, so escapes are found without tracking strings.
+fn without_surrogate_escapes(text: &str) -> Cow<'_, str> {
+    if !text.contains("\\u") {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('\\') {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        let surrogate = tail
+            .strip_prefix("\\u")
+            .and_then(|after| after.get(..4))
+            .and_then(|digits| u16::from_str_radix(digits, 16).ok())
+            .is_some_and(|unit| (0xD800..=0xDFFF).contains(&unit));
+        let length = if surrogate {
+            6
+        } else {
+            tail.chars().take(2).map(char::len_utf8).sum()
+        };
+        let (escape, after) = tail.split_at(length);
+        out.push_str(if surrogate { "\\ufffd" } else { escape });
+        rest = after;
+    }
+    out.push_str(rest);
+    Cow::Owned(out)
 }
 
 #[cfg(test)]

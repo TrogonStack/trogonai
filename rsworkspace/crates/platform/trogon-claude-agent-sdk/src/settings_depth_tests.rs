@@ -89,6 +89,22 @@ fn text_that_reads_as_an_object_fails_from_the_bound_and_not_before() {
 }
 
 #[test]
+fn text_holding_escapes_of_lone_surrogates_fails_from_the_bound_as_json_parse_reads_it() {
+    let holding = |levels: usize, leaf: &str| format!("{}{leaf}{}", "{\"a\":".repeat(levels), "}".repeat(levels));
+    let leaf = r#"["\ud800", "\udc00\u0041", "\ud83d\ude00", "\\ud800", "\u00e9\n", "é"]"#;
+    assert!(check_text(&holding(SETTINGS_DEPTH_BOUND - 2, leaf)).is_ok());
+    assert!(matches!(
+        check_text(&holding(SETTINGS_DEPTH_BOUND - 1, leaf)),
+        Err(ResolveSettingsError::MaximumCallStack)
+    ));
+    assert!(matches!(
+        check_text(&holding(SETTINGS_DEPTH_BOUND + 20, r#""\udfff""#)),
+        Err(ResolveSettingsError::MaximumCallStack)
+    ));
+    assert!(check_text(&holding(SETTINGS_DEPTH_BOUND, r#""\ud800"#)).is_ok());
+}
+
+#[test]
 fn text_that_is_no_object_document_passes_at_any_depth() {
     let deep = SETTINGS_DEPTH_BOUND + 10;
     assert!(check_text(&"[".repeat(deep)).is_ok());

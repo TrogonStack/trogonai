@@ -182,22 +182,36 @@ fn resolve_json(files: &[(String, String)]) -> Result<Result<String, ResolveSett
 }
 
 /// The depth of the deepest file of a case, which is below the bound where `serde_json` can read every file.
-fn case_depth(files: &[(String, String)]) -> Result<usize, Failure> {
-    let filler = private_use();
-    let mut deepest = 0;
-    for (_, text) in files {
-        let value: Value = serde_json::from_str(&text.replace(FILLER, &filler))?;
-        deepest = deepest.max(value_depth(&value));
-    }
-    Ok(deepest)
+/// The deepest nesting of arrays and objects in any of `files`, read from the text so an escaped lone surrogate,
+/// which `serde_json` rejects, is counted as `JSON.parse` reads it.
+fn case_depth(files: &[(String, String)]) -> usize {
+    files.iter().map(|(_, text)| text_depth(text)).max().unwrap_or(0)
 }
 
-fn value_depth(value: &Value) -> usize {
-    match value {
-        Value::Array(items) => 1usize.saturating_add(items.iter().map(value_depth).max().unwrap_or(0)),
-        Value::Object(members) => 1usize.saturating_add(members.values().map(value_depth).max().unwrap_or(0)),
-        _ => 0,
+fn text_depth(text: &str) -> usize {
+    let (mut open, mut deepest) = (0usize, 0usize);
+    let (mut in_string, mut escaped) = (false, false);
+    for byte in text.bytes() {
+        if in_string {
+            match (escaped, byte) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                open += 1;
+                deepest = deepest.max(open);
+            }
+            b'}' | b']' => open = open.saturating_sub(1),
+            _ => {}
+        }
     }
+    deepest
 }
 
 /// The `effective` member of the typed result in `dialect`, printed by `JSON.stringify`, or the error.
@@ -235,7 +249,7 @@ fn a_stand_in_past_the_basic_multilingual_plane_resolves_as_resolve_settings_doe
         ));
         let files = case_files(entry)?;
         assert!(
-            case_depth(&files)? < SETTINGS_DEPTH_BOUND,
+            case_depth(&files) < SETTINGS_DEPTH_BOUND,
             "case {name} is as deep as the bound"
         );
         actual.push((name.to_owned(), json_outcome(&files)?));

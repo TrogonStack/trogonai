@@ -120,15 +120,22 @@ fn a_managed_drop_in_below_the_bound_reaches_effective_and_one_at_it_fails() -> 
     })
 }
 
+/// A state keeps the machine policy it read until it reads it again, as upstream keeps it for the process, so each
+/// machine resolves on states of its own: one state never reads two machines.
 #[test]
 fn a_registry_policy_below_the_bound_resolves_and_one_at_it_fails() -> TestResult {
     deep(|| {
         let plain = options("{}")?;
-        bounded(
-            &registry(&document(BELOW)),
-            &registry(&document(SETTINGS_DEPTH_BOUND)),
-            &plain,
-        )?;
+        let below = registry(&document(BELOW));
+        let at = registry(&document(SETTINGS_DEPTH_BOUND));
+        let fresh = resolve(&below, &plain, &ResolverState::new())?;
+        let held = ResolverState::new();
+        assert_eq!(resolve(&below, &plain, &held)?, fresh);
+        assert_eq!(resolve(&below, &plain, &held)?, fresh);
+        let rejecting = ResolverState::new();
+        assert!(rejected(&resolve(&at, &plain, &rejecting)));
+        assert!(rejected(&resolve(&at, &plain, &rejecting)));
+        assert!(rejected(&resolve(&at, &plain, &ResolverState::new())));
         Ok(())
     })
 }
