@@ -318,7 +318,7 @@ fn await_readiness(setup: &OwnedFd, child: &OwnedFd) -> Result<(), SpawnError> {
             revents: 0,
         };
         if unsafe { libc::poll(&mut poll, 1, 10) } > 0 {
-            let remaining = if received == 0 { 1 } else { message.len() - received };
+            let remaining = message.len() - received;
             let result = unsafe { libc::read(setup.as_raw_fd(), message[received..].as_mut_ptr().cast(), remaining) };
             if result < 0 {
                 let error = io::Error::last_os_error();

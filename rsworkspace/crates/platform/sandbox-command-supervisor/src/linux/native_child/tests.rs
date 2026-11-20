@@ -451,7 +451,7 @@ fn absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root() -
 pub(in crate::linux) fn worker_interrupted_readiness_retries_within_the_original_deadline() -> TestResult {
     deadline_refusal(
         "linux::native_child::tests::interrupted_readiness_retries_within_the_original_deadline",
-        || refuse_argument(libc::SYS_read, 2, 1, libc::EINTR),
+        || refuse_argument(libc::SYS_read, 2, 5, libc::EINTR),
     )
 }
 
@@ -614,7 +614,7 @@ pub(in crate::linux) fn worker_failed_readiness_read_preserves_the_native_io_err
     setup_error_source(
         "linux::native_child::tests::failed_readiness_read_preserves_the_native_io_error",
         libc::EIO,
-        || refuse_argument(libc::SYS_read, 2, 1, libc::EIO),
+        || refuse_argument(libc::SYS_read, 2, 5, libc::EIO),
     )
 }
 
