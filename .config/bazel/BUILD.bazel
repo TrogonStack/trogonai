@@ -1,9 +1,74 @@
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(":coverage.bzl", "node_coverage_tools", "rust_coverage_tools")
+
+node_coverage_tools(
+    name = "node_coverage_tools",
+    testonly = True,
+)
+
+py_test(
+    name = "js_coverage_test",
+    srcs = ["js_coverage_test.py"],
+    args = [
+        "--bootstrap=$(rootpath @aspect_rules_js//js/private/node-bootstrap:coverage.cjs)",
+        "--reporter=$(rootpath @aspect_rules_js//js/private/coverage:coverage.js)",
+        "--parent=$(rootpath :coverage_test_parent.cjs)",
+        "--child=$(rootpath :coverage_test_child.cjs)",
+        "--tools=$(rootpath :node_coverage_tools)",
+    ],
+    data = [
+        "coverage_test_child.cjs",
+        "coverage_test_parent.cjs",
+        ":node_coverage_tools",
+        "@aspect_rules_js//js/private/coverage:coverage.js",
+        "@aspect_rules_js//js/private/node-bootstrap:coverage.cjs",
+        "@aspect_rules_js//js/private/node-bootstrap:util.cjs",
+    ],
+)
+
+rust_binary(
+    name = "coverage_test_runner",
+    testonly = True,
+    srcs = ["coverage_test_runner.rs"],
+    edition = "2024",
+    rustc_flags = ["-Cinstrument-coverage"],
+)
+
+rust_binary(
+    name = "coverage_test_child",
+    testonly = True,
+    srcs = ["coverage_test_child.rs"],
+    edition = "2024",
+    rustc_flags = ["-Cinstrument-coverage"],
+)
+
+rust_coverage_tools(
+    name = "coverage_tools",
+    testonly = True,
+)
+
+py_test(
+    name = "rust_coverage_test",
+    srcs = ["rust_coverage_test.py"],
+    args = [
+        "--collector=$(rootpath @rules_rust//rust/coverage:collect_rust_coverage)",
+        "--runner=$(rootpath :coverage_test_runner)",
+        "--child=$(rootpath :coverage_test_child)",
+        "--tools=$(rootpath :coverage_tools)",
+    ],
+    data = [
+        ":coverage_test_child",
+        ":coverage_test_runner",
+        ":coverage_tools",
+        "@rules_rust//rust/coverage:collect_rust_coverage",
+    ],
+)
 
 exports_files([
-    "patches/rules_rust-child-binary-coverage.patch",
     "patches/rules_rust-native-coverage-filter.patch",
     "compiler_failures.py",
     "compiler_failures_test.py",

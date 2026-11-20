@@ -22,7 +22,38 @@ diff --git a/rust/coverage/collect_rust_coverage.rs b/rust/coverage/collect_rust
  use std::path::Path;
  use std::path::PathBuf;
  use std::process;
-@@ -106,6 +111,61 @@
+@@ -48,10 +53,10 @@
+     runfiles_dir.join(path)
+ }
+-
++
+-fn find_test_binary(execroot: &Path, runfiles_dir: &Path) -> PathBuf {
++fn find_runfiles_binary(execroot: &Path, runfiles_dir: &Path, binary_path: &str) -> PathBuf {
+     let test_binary = runfiles_dir
+         .join(env::var("TEST_WORKSPACE").unwrap())
+-        .join(env::var("TEST_BINARY").unwrap());
++        .join(binary_path);
+-
++
+     if !test_binary.exists() {
+         let configuration = runfiles_dir
+@@ -72,11 +77,9 @@
+                 path
+             });
+-
++
+-        let test_binary = execroot
+-            .join(configuration)
+-            .join(env::var("TEST_BINARY").unwrap());
++        let test_binary = execroot.join(configuration).join(binary_path);
+-
++
+         debug_log!(
+-            "TEST_BINARY is not found in runfiles. Falling back to: {}",
++            "Coverage binary is not found in runfiles. Falling back to: {}",
+             test_binary.display()
+         );
+@@ -106,6 +109,61 @@
          .join("bin")
  }
 -
@@ -85,16 +116,27 @@ diff --git a/rust/coverage/collect_rust_coverage.rs b/rust/coverage/collect_rust
  fn main() {
      let coverage_dir = PathBuf::from(env::var("COVERAGE_DIR").unwrap());
      let execroot = PathBuf::from(env::var("ROOT").unwrap());
-@@ -152,6 +212,8 @@
+@@ -142,7 +200,7 @@
+         None => execroot.join(&llvm_profdata_path),
+     };
+     let test_binary = match runfiles_dir {
+-        Some(ref rd) => find_test_binary(&execroot, rd),
++        Some(ref rd) => find_runfiles_binary(&execroot, rd, &env::var("TEST_BINARY").unwrap()),
+         None => {
+             let bin_dir = config_bin_dir(&execroot, &coverage_dir);
+             let test_binary = execroot
+@@ -152,7 +210,9 @@
              test_binary
          }
      };
+-    let profraw_files: Vec<PathBuf> = fs::read_dir(coverage_dir)
 +    let coverage_objects = find_coverage_objects(&execroot, runfiles_dir.as_deref(), &coverage_dir)
 +        .expect("Invalid declared coverage objects");
-     let profraw_files: Vec<PathBuf> = fs::read_dir(coverage_dir)
++    let profraw_files: Vec<PathBuf> = fs::read_dir(&coverage_dir)
          .unwrap()
          .flatten()
-@@ -206,6 +268,10 @@
+         .filter_map(|entry| {
+@@ -206,6 +266,10 @@
          .stdout(process::Stdio::piped())
          .stderr(process::Stdio::piped());
 -
@@ -130,3 +172,16 @@ diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
 +
      providers = [
          DefaultInfo(
+diff --git a/crate_universe/extensions.bzl b/crate_universe/extensions.bzl
+--- a/crate_universe/extensions.bzl
++++ b/crate_universe/extensions.bzl
+@@ -651,7 +651,8 @@
+             config_path = config_file,
+             output_dir = tag_path.get_child("splicing-output"),
+             debug_workspace_dir = tag_path.get_child("splicing-workspace"),
+-            skip_cargo_lockfile_overwrite = cfg.skip_cargo_lockfile_overwrite,
++            # Normalize the synthetic workspace here; suppress source writeback in generate.
++            skip_cargo_lockfile_overwrite = False,
+             nonhermetic_root_bazel_workspace_dir = nonhermetic_root_bazel_workspace_dir,
+             repository_name = cfg.name,
+         )

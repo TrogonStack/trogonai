@@ -6,13 +6,12 @@ bazel_dep(name = "rules_rust", version = "0.75.0")
 # their C code with coverage, which embeds timestamps and changes every
 # downstream Rust cache key. Not reported upstream yet; drop the patch once
 # rules_rust skips coverage for uninstrumented build scripts.
-# Child process coverage also needs the declared executable objects during export.
 single_version_override(
     module_name = "rules_rust",
     patch_strip = 1,
     patches = [
         "//.config/bazel:patches/rules_rust-native-coverage-filter.patch",
-        "//.config/bazel:patches/rules_rust-child-binary-coverage.patch",
+        "//.config/bazel:rules_rust_coverage.patch",
     ],
 )
 
@@ -20,6 +19,13 @@ bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "gazelle", version = "0.54.0")
 bazel_dep(name = "aspect_rules_js", version = "3.6.1")
+single_version_override(
+    module_name = "aspect_rules_js",
+    patch_strip = 1,
+    patches = ["//.config/bazel:aspect_rules_js_coverage.patch"],
+    version = "3.6.1",
+)
+
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
 bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
 bazel_dep(name = "rules_python", version = "1.7.0")
@@ -109,6 +115,7 @@ crate.from_cargo(
     cargo_lockfile = "//rsworkspace:Cargo.lock",
     host_tools = "@mise_rust//:ROOT",
     manifests = ["//rsworkspace:Cargo.toml"],
+    skip_cargo_lockfile_overwrite = True,
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-unknown-linux-gnu",
