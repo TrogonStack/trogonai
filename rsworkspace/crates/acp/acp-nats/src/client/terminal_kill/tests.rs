@@ -140,7 +140,7 @@ fn error_code_and_message_client_error_preserves_client_code() {
         ErrorCode::INVALID_PARAMS,
         "bad terminal id",
     ));
-    let (code, message) = error_code_and_message(&err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "bad terminal id");
 }
@@ -151,7 +151,7 @@ fn error_code_and_message_invalid_params() {
         ErrorCode::INVALID_PARAMS,
         "bad params",
     ));
-    let (code, message) = error_code_and_message(&err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "bad params");
 }

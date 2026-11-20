@@ -114,6 +114,31 @@ async fn reconciling_a_stream_that_already_matches_writes_nothing() {
 }
 
 #[tokio::test]
+async fn owned_reconciliation_refuses_foreign_subjects_without_writing() {
+    let ctx = MockJetStreamContext::new();
+    let foreign = stream::Config {
+        name: "ACP_COMMANDS".to_owned(),
+        subjects: vec!["other.v1.session.*.agent.prompt".to_owned()],
+        ..Default::default()
+    };
+    ctx.get_or_create_stream(foreign).await.unwrap();
+    let desired = stream::Config {
+        name: "ACP_COMMANDS".to_owned(),
+        subjects: vec!["acp.v1.session.*.agent.prompt".to_owned()],
+        ..Default::default()
+    };
+
+    let owned = ctx
+        .create_or_reconcile_stream_if_owned(&desired, &[ProvisionedStreamField::Subjects], "acp.v1.")
+        .await
+        .unwrap();
+
+    assert!(!owned);
+    assert_eq!(ctx.stream_writes(), 1);
+    assert_eq!(ctx.created_streams()[0].subjects, ["other.v1.session.*.agent.prompt"]);
+}
+
+#[tokio::test]
 async fn mock_publisher_records_publishes() {
     let pub_mock = MockJetStreamPublisher::new();
     let ack = pub_mock
