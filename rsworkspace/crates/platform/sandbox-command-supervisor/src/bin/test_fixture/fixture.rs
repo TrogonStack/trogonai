@@ -43,6 +43,10 @@ fn escaped(path: &Path, root_exits: bool, root_handles_term: bool) -> i32 {
     }
     let middle = unsafe { libc::fork() };
     assert!(middle >= 0);
+    escaped_after_fork(path, root_exits, middle)
+}
+
+fn escaped_after_fork(path: &Path, root_exits: bool, middle: i32) -> i32 {
     if middle == 0 {
         unsafe {
             if libc::setsid() < 0 {
@@ -52,17 +56,7 @@ fn escaped(path: &Path, root_exits: bool, root_handles_term: bool) -> i32 {
             libc::signal(libc::SIGTERM, libc::SIG_IGN);
             libc::signal(libc::SIGINT, libc::SIG_IGN);
             let leaf = libc::fork();
-            if leaf < 0 {
-                fixture_exit(92);
-            }
-            if leaf > 0 {
-                fixture_exit(0);
-            }
-        }
-        record(path);
-        linger();
-        unsafe {
-            fixture_exit(0);
+            escaped_leaf_after_fork(path, leaf);
         }
     }
     let mut status = 0;
@@ -72,6 +66,18 @@ fn escaped(path: &Path, root_exits: bool, root_handles_term: bool) -> i32 {
     }
     linger();
     0
+}
+
+fn escaped_leaf_after_fork(path: &Path, leaf: i32) -> ! {
+    if leaf < 0 {
+        unsafe { fixture_exit(92) }
+    }
+    if leaf > 0 {
+        unsafe { fixture_exit(0) }
+    }
+    record(path);
+    linger();
+    unsafe { fixture_exit(0) }
 }
 
 extern "C" fn cloned(pointer: *mut libc::c_void) -> i32 {
@@ -104,19 +110,7 @@ fn churn(path: &Path) -> i32 {
                 let until = Instant::now() + Duration::from_secs(10);
                 while Instant::now() < until {
                     let child = unsafe { libc::fork() };
-                    if child == 0 {
-                        unsafe {
-                            libc::setsid();
-                            libc::usleep(30_000);
-                            fixture_exit(0);
-                        }
-                    }
-                    if child > 0 {
-                        let mut status = 0;
-                        unsafe {
-                            libc::waitpid(child, &mut status, 0);
-                        }
-                    }
+                    churn_after_fork(child);
                 }
             })
         })
@@ -126,6 +120,22 @@ fn churn(path: &Path) -> i32 {
         let _ = thread.join();
     }
     0
+}
+
+fn churn_after_fork(child: i32) {
+    if child == 0 {
+        unsafe {
+            libc::setsid();
+            libc::usleep(30_000);
+            fixture_exit(0);
+        }
+    }
+    if child > 0 {
+        let mut status = 0;
+        unsafe {
+            libc::waitpid(child, &mut status, 0);
+        }
+    }
 }
 
 fn wait_file(path: &Path) {
@@ -143,6 +153,10 @@ fn overflow(path: &Path) -> i32 {
     assert_eq!(unsafe { libc::pipe2(gate.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
     let middle = unsafe { libc::fork() };
     assert!(middle >= 0);
+    overflow_after_fork(path, gate, middle)
+}
+
+fn overflow_after_fork(path: &Path, gate: [i32; 2], middle: i32) -> i32 {
     if middle == 0 {
         unsafe {
             libc::close(gate[1]);
@@ -151,20 +165,7 @@ fn overflow(path: &Path) -> i32 {
         for index in 0..10 {
             let leaf = unsafe { libc::fork() };
             assert!(leaf >= 0);
-            if leaf == 0 {
-                unsafe {
-                    libc::close(gate[0]);
-                    libc::setsid();
-                    libc::clearenv();
-                    libc::signal(libc::SIGTERM, libc::SIG_IGN);
-                    libc::signal(libc::SIGINT, libc::SIG_IGN);
-                }
-                record(&path.join(format!("leaf-{index}")));
-                linger();
-                unsafe {
-                    fixture_exit(0);
-                }
-            }
+            overflow_leaf_after_fork(path, gate[0], index, leaf);
         }
         let mut release = [0_u8];
         let received = unsafe { libc::read(gate[0], release.as_mut_ptr().cast(), 1) };
@@ -188,6 +189,23 @@ fn overflow(path: &Path) -> i32 {
     assert_eq!(unsafe { libc::waitpid(middle, &mut status, 0) }, middle);
     linger();
     0
+}
+
+fn overflow_leaf_after_fork(path: &Path, gate: i32, index: usize, leaf: i32) {
+    if leaf == 0 {
+        unsafe {
+            libc::close(gate);
+            libc::setsid();
+            libc::clearenv();
+            libc::signal(libc::SIGTERM, libc::SIG_IGN);
+            libc::signal(libc::SIGINT, libc::SIG_IGN);
+        }
+        record(&path.join(format!("leaf-{index}")));
+        linger();
+        unsafe {
+            fixture_exit(0);
+        }
+    }
 }
 
 #[expect(
