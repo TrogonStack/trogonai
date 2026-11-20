@@ -1,4 +1,4 @@
-use agent_client_protocol::v1::schema::{PromptRequest, PromptResponse, StopReason};
+use agent_client_protocol::v1::schema::{PromptRequest, PromptResponse};
 use agent_client_protocol::{Error, ErrorCode};
 use async_nats::jetstream::AckKind;
 use futures::StreamExt;
@@ -15,7 +15,7 @@ use crate::agent::Bridge;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
 use crate::nats::parsing::SessionAgentMethod;
-use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
+use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 use crate::wire::{decode_response, encode_request, req_id_from_request_headers};
@@ -30,7 +30,7 @@ pub async fn handle<N, C, J>(
     args: PromptRequest,
 ) -> agent_client_protocol::Result<PromptResponse>
 where
-    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    N: RequestClient + PublishClient + FlushClient,
     C: trogon_std::time::GetElapsed,
     J: JetStreamPublisher + JetStreamGetStream,
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
@@ -63,7 +63,6 @@ async fn handle_js<N, C, J>(
     req_id: &ReqId,
 ) -> agent_client_protocol::Result<PromptResponse>
 where
-    N: SubscribeClient,
     C: trogon_std::time::GetElapsed,
     J: JetStreamPublisher + JetStreamGetStream,
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
@@ -90,13 +89,6 @@ where
         .await
         .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("response messages: {e}")))?;
 
-    // Cancel still uses core NATS — it's a fire-and-forget signal, not persisted.
-    let mut cancel_sub = bridge
-        .nats
-        .subscribe(responses::CancelledSubject::new(prefix, session_id))
-        .await
-        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("subscribe cancelled: {e}")))?;
-
     // Now publish — consumers are ready, no race condition.
     let encoded = encode_request(
         SessionAgentMethod::Prompt.protocol_method(),
@@ -118,64 +110,51 @@ where
     let op_timeout = bridge.config.prompt_timeout();
 
     loop {
-        tokio::select! {
-            resp = timeout(op_timeout, resp_messages.next()) => {
-                match resp {
-                    Ok(Some(Ok(js_msg))) => {
-                        let message = js_msg.message();
-                        let response_headers = message.headers.clone().unwrap_or_default();
+        match timeout(op_timeout, resp_messages.next()).await {
+            Ok(Some(Ok(js_msg))) => {
+                let message = js_msg.message();
+                let response_headers = message.headers.clone().unwrap_or_default();
 
-                        // The consumer is session-scoped, so it also sees the replies of
-                        // other requests in flight on this session.
-                        if req_id_from_request_headers(&response_headers).as_ref() != Some(req_id) {
-                            let _ = js_msg.ack().await;
-                            continue;
-                        }
+                // The consumer is session-scoped, so it also sees the replies of
+                // other requests in flight on this session.
+                if req_id_from_request_headers(&response_headers).as_ref() != Some(req_id) {
+                    let _ = js_msg.ack().await;
+                    continue;
+                }
 
-                        match decode_response::<PromptResponse>(&response_headers, message.payload.as_ref()) {
-                            Ok(Ok(response)) => {
-                                let _ = js_msg.ack().await;
-                                break Ok(response);
-                            }
-                            Ok(Err(agent_err)) => {
-                                let _ = js_msg.ack().await;
-                                break Err(agent_err);
-                            }
-                            Err(_) => {
-                                let _ = js_msg.ack_with(AckKind::Term).await;
-                                bridge.metrics.record_error("prompt", "bad_response_payload");
-                                break Err(Error::new(
-                                    ErrorCode::INTERNAL_ERROR,
-                                    "bad response payload",
-                                ));
-                            }
-                        }
+                match decode_response::<PromptResponse>(&response_headers, message.payload.as_ref()) {
+                    Ok(Ok(response)) => {
+                        let _ = js_msg.ack().await;
+                        break Ok(response);
                     }
-                    Ok(Some(Err(e))) => {
-                        bridge.metrics.record_error("prompt", "response_consumer_error");
-                        break Err(Error::new(
-                            ErrorCode::INTERNAL_ERROR,
-                            format!("response consumer: {e}"),
-                        ));
+                    Ok(Err(agent_err)) => {
+                        let _ = js_msg.ack().await;
+                        break Err(agent_err);
                     }
-                    Ok(None) => {
-                        bridge.metrics.record_error("prompt", "response_stream_closed");
-                        break Err(Error::new(
-                            ErrorCode::INTERNAL_ERROR,
-                            "response stream closed unexpectedly",
-                        ));
-                    }
-                    Err(_elapsed) => {
-                        bridge.metrics.record_error("prompt", "prompt_timeout");
-                        break Err(Error::new(
-                            ErrorCode::INTERNAL_ERROR,
-                            "prompt timed out waiting for runner",
-                        ));
+                    Err(_) => {
+                        let _ = js_msg.ack_with(AckKind::Term).await;
+                        bridge.metrics.record_error("prompt", "bad_response_payload");
+                        break Err(Error::new(ErrorCode::INTERNAL_ERROR, "bad response payload"));
                     }
                 }
             }
-            _ = cancel_sub.next() => {
-                break Ok(PromptResponse::new(StopReason::Cancelled));
+            Ok(Some(Err(e))) => {
+                bridge.metrics.record_error("prompt", "response_consumer_error");
+                break Err(Error::new(ErrorCode::INTERNAL_ERROR, format!("response consumer: {e}")));
+            }
+            Ok(None) => {
+                bridge.metrics.record_error("prompt", "response_stream_closed");
+                break Err(Error::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    "response stream closed unexpectedly",
+                ));
+            }
+            Err(_elapsed) => {
+                bridge.metrics.record_error("prompt", "prompt_timeout");
+                break Err(Error::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    "prompt timed out waiting for runner",
+                ));
             }
         }
     }
