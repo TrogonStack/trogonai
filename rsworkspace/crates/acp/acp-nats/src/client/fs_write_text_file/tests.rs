@@ -208,7 +208,7 @@ async fn handle_invalid_payload_publishes_error_reply() {
 fn error_code_and_message_invalid_request_returns_invalid_params() {
     let err = serde_json::from_slice::<WriteTextFileRequest>(b"not json").unwrap_err();
     let fs_err = FsWriteTextFileError::InvalidRequest(err);
-    let (code, message) = error_code_and_message(&fs_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&fs_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert!(message.contains("Invalid write_text_file request"));
 }
@@ -217,7 +217,7 @@ fn error_code_and_message_invalid_request_returns_invalid_params() {
 fn error_code_and_message_client_error_preserves_client_code() {
     let client_err = agent_client_protocol::Error::new(ErrorCode::INVALID_PARAMS, "permission denied");
     let fs_err = FsWriteTextFileError::ClientError(client_err);
-    let (code, message) = error_code_and_message(&fs_err);
+    let agent_client_protocol::Error { code, message, .. } = agent_client_protocol::Error::from(&fs_err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(message, "permission denied");
 }
