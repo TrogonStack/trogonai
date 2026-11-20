@@ -95,5 +95,5 @@ impl Writer {
     }
 }
 
-#[cfg(test)]
-mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub(super) mod tests;

@@ -104,32 +104,83 @@ fn clone_without_notification(path: &Path) -> i32 {
 }
 
 fn churn(path: &Path) -> i32 {
+    let attempted = std::sync::Arc::new(AtomicBool::new(false));
+    let mut gate = [-1; 2];
+    assert_eq!(unsafe { libc::pipe2(gate.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
     let threads: Vec<_> = (0..4)
         .map(|_| {
-            std::thread::spawn(|| {
+            let attempted = std::sync::Arc::clone(&attempted);
+            std::thread::spawn(move || {
                 let until = Instant::now() + Duration::from_secs(10);
                 while Instant::now() < until {
                     let child = unsafe { libc::fork() };
-                    churn_after_fork(child);
+                    churn_after_fork(child, &attempted);
                 }
             })
         })
         .collect();
+    let until = Instant::now() + Duration::from_secs(5);
+    while !attempted.load(Ordering::Acquire) {
+        assert!(Instant::now() < until, "churn worker must attempt its first fork");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let keeper = unsafe { libc::fork() };
+    assert!(keeper >= 0);
+    churn_with_keeper(path, threads, gate, keeper)
+}
+
+fn churn_with_keeper(path: &Path, threads: Vec<std::thread::JoinHandle<()>>, gate: [i32; 2], keeper: i32) -> i32 {
+    if keeper == 0 {
+        unsafe {
+            libc::close(gate[1]);
+            let mut release = [0_u8];
+            let received = libc::read(gate[0], release.as_mut_ptr().cast(), 1);
+            libc::_exit(if received == 1 && release[0] == b'R' { 0 } else { 96 });
+        }
+    }
+    unsafe {
+        libc::close(gate[0]);
+    }
+    let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, keeper, 0) };
+    assert!(raw >= 0);
+    let identity = unsafe { <std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(raw as i32) };
+    let mut poll = libc::pollfd {
+        fd: std::os::fd::AsRawFd::as_raw_fd(&identity),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    assert_eq!(
+        unsafe { libc::poll(&mut poll, 1, 0) },
+        0,
+        "keeper must be alive before churn readiness"
+    );
     record(path);
     for thread in threads {
         let _ = thread.join();
     }
+    assert_eq!(unsafe { libc::write(gate[1], b"R".as_ptr().cast(), 1) }, 1);
+    unsafe {
+        libc::close(gate[1]);
+    }
+    let mut status = 0;
+    assert_eq!(unsafe { libc::waitpid(keeper, &mut status, 0) }, keeper);
+    assert_eq!(status, 0);
     0
 }
 
-fn churn_after_fork(child: i32) {
+fn churn_after_fork(child: i32, attempted: &AtomicBool) {
     if child == 0 {
         unsafe {
             libc::setsid();
-            libc::usleep(30_000);
-            fixture_exit(0);
+            let delay = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 30_000_000,
+            };
+            libc::nanosleep(&delay, std::ptr::null_mut());
+            libc::_exit(0);
         }
     }
+    attempted.store(true, Ordering::Release);
     if child > 0 {
         let mut status = 0;
         unsafe {

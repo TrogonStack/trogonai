@@ -135,7 +135,12 @@ pub fn decode_event(bytes: &[u8]) -> Result<Event, ProtocolError> {
         return Err(ProtocolError::OversizedFrame);
     }
     let event: Event = serde_json::from_slice(bytes).map_err(ProtocolError::InvalidJson)?;
-    match &event {
+    validate_event(&event)?;
+    Ok(event)
+}
+
+fn validate_event(event: &Event) -> Result<(), ProtocolError> {
+    match event {
         Event::Hello { environment, .. } => {
             Environment::new(environment.clone())?;
         }
@@ -144,11 +149,11 @@ pub fn decode_event(bytes: &[u8]) -> Result<Event, ProtocolError> {
         }
         _ => {}
     }
-    Ok(event)
+    Ok(())
 }
 
-pub fn encode_event(event: &Event) -> Result<Vec<u8>, ProtocolError> {
-    let mut bytes = serde_json::to_vec(event).map_err(ProtocolError::InvalidJson)?;
+fn encode_frame(value: &impl Serialize) -> Result<Vec<u8>, ProtocolError> {
+    let mut bytes = serde_json::to_vec(value).map_err(ProtocolError::InvalidJson)?;
     if bytes.len() >= MAX_FRAME_BYTES {
         return Err(ProtocolError::OversizedFrame);
     }
@@ -156,14 +161,14 @@ pub fn encode_event(event: &Event) -> Result<Vec<u8>, ProtocolError> {
     Ok(bytes)
 }
 
+pub fn encode_event(event: &Event) -> Result<Vec<u8>, ProtocolError> {
+    validate_event(event)?;
+    encode_frame(event)
+}
+
 pub fn write_command(writer: &mut impl Write, command: &CommandWire) -> Result<(), ProtocolError> {
     Command::try_from(command.clone())?;
-    let mut bytes = serde_json::to_vec(command).map_err(ProtocolError::InvalidJson)?;
-    if bytes.len() >= MAX_FRAME_BYTES {
-        return Err(ProtocolError::OversizedFrame);
-    }
-    bytes.push(b'\n');
-    writer.write_all(&bytes).map_err(ProtocolError::Io)?;
+    writer.write_all(&encode_frame(command)?).map_err(ProtocolError::Io)?;
     writer.flush().map_err(ProtocolError::Io)
 }
 

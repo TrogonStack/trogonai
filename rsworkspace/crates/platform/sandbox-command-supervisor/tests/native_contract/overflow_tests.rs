@@ -1,21 +1,32 @@
 use super::*;
 use sandbox_command_supervisor::protocol::MAX_CHILDREN;
 
-struct Subreaper(i32);
+static SUBREAPER_CUSTODY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct Subreaper {
+    previous: i32,
+    _custody: std::sync::MutexGuard<'static, ()>,
+}
 
 impl Subreaper {
     fn enter() -> Self {
+        let custody = SUBREAPER_CUSTODY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut previous = 0_i32;
         assert_eq!(unsafe { libc::prctl(libc::PR_GET_CHILD_SUBREAPER, &mut previous) }, 0);
         assert_eq!(unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) }, 0);
-        Self(previous)
+        Self {
+            previous,
+            _custody: custody,
+        }
     }
 }
 
 impl Drop for Subreaper {
     fn drop(&mut self) {
         unsafe {
-            libc::prctl(libc::PR_SET_CHILD_SUBREAPER, self.0, 0, 0, 0);
+            libc::prctl(libc::PR_SET_CHILD_SUBREAPER, self.previous, 0, 0, 0);
         }
     }
 }
@@ -240,4 +251,25 @@ fn overflow_finite_command_deadline_drains_pinned_family() {
 #[test]
 fn overflow_explicit_hard_cancel_drains_pinned_family() {
     run(Control::HardCancel);
+}
+
+#[test]
+fn subreaper_custody_excludes_a_second_owner_until_restoration() -> Result<(), Box<dyn std::error::Error>> {
+    let first = Subreaper::enter();
+    let (send, receive) = std::sync::mpsc::channel();
+    let second = std::thread::spawn(move || {
+        let guard = Subreaper::enter();
+        let _ = send.send(());
+        drop(guard);
+    });
+    let overlapped = receive.recv_timeout(Duration::from_millis(100)).is_ok();
+    drop(first);
+    second
+        .join()
+        .map_err(|_| std::io::Error::other("subreaper owner panicked"))?;
+    assert!(
+        !overlapped,
+        "a second owner must wait until cleanup and flag restoration"
+    );
+    Ok(())
 }

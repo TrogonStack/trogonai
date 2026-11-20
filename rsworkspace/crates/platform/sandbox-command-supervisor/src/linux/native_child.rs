@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 pub(super) struct Prepared {
     pub(super) argv: Vec<CString>,
     pub(super) environment: Vec<CString>,
-    pub(super) executable: CString,
+    pub(super) executable: Option<CString>,
     pub(super) cwd: Option<CString>,
     pub(super) timeout: Option<Duration>,
     pub(super) release_timeout: Duration,
@@ -41,7 +41,7 @@ impl Prepared {
             })
             .unwrap_or(current);
         let command = if argv[0].contains('/') {
-            argv[0].clone()
+            Some(argv[0].clone())
         } else {
             let path = env
                 .get("PATH")
@@ -63,7 +63,6 @@ impl Prepared {
                         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
                 })
                 .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_else(|| argv[0].clone())
         };
         Ok(Self {
             argv: argv
@@ -76,7 +75,10 @@ impl Prepared {
                 .map(|(key, value)| CString::new(format!("{key}={value}")))
                 .collect::<Result<_, _>>()
                 .map_err(|_| ErrorCode::InvalidCommand)?,
-            executable: CString::new(command).map_err(|_| ErrorCode::InvalidCommand)?,
+            executable: command
+                .map(CString::new)
+                .transpose()
+                .map_err(|_| ErrorCode::InvalidCommand)?,
             cwd: cwd
                 .map(CString::new)
                 .transpose()
@@ -123,14 +125,31 @@ struct Launch {
     environment: Vec<*const libc::c_char>,
 }
 
-pub(super) fn spawn(prepared: &Prepared) -> Result<Root, ErrorCode> {
+#[derive(Debug, thiserror::Error)]
+pub(super) enum SpawnError {
+    #[error(transparent)]
+    Code(#[from] ErrorCode),
+    #[error("native child setup failed")]
+    Setup(#[source] io::Error),
+}
+
+impl SpawnError {
+    pub(super) fn code(&self) -> ErrorCode {
+        match self {
+            Self::Code(code) => *code,
+            Self::Setup(_) => ErrorCode::SetupFailed,
+        }
+    }
+}
+
+pub(super) fn spawn(prepared: &Prepared) -> Result<Root, SpawnError> {
     let (gate_read, gate_write) = pipe()?;
     let (out_read, out_write) = pipe()?;
     let (err_read, err_write) = pipe()?;
     let (setup_read, setup_write) = pipe()?;
     let null = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
     if null < 0 {
-        return Err(ErrorCode::SetupFailed);
+        return Err(ErrorCode::SetupFailed.into());
     }
     let null = unsafe { OwnedFd::from_raw_fd(null) };
     let argv: Vec<_> = prepared
@@ -147,7 +166,7 @@ pub(super) fn spawn(prepared: &Prepared) -> Result<Root, ErrorCode> {
         .collect();
     let pid = unsafe { libc::fork() };
     if pid < 0 {
-        return Err(ErrorCode::SetupFailed);
+        return Err(ErrorCode::SetupFailed.into());
     }
     after_fork(
         pid,
@@ -168,7 +187,7 @@ pub(super) fn spawn(prepared: &Prepared) -> Result<Root, ErrorCode> {
     )
 }
 
-fn after_fork(pid: i32, prepared: &Prepared, launch: Launch) -> Result<Root, ErrorCode> {
+fn after_fork(pid: i32, prepared: &Prepared, launch: Launch) -> Result<Root, SpawnError> {
     let Launch {
         gate_read,
         gate_write,
@@ -198,8 +217,11 @@ fn after_fork(pid: i32, prepared: &Prepared, launch: Launch) -> Result<Root, Err
             {
                 child_error(setup, errno());
             }
-            libc::fcntl(3, libc::F_SETFD, libc::FD_CLOEXEC);
-            libc::fcntl(4, libc::F_SETFD, libc::FD_CLOEXEC);
+            if libc::fcntl(3, libc::F_SETFD, libc::FD_CLOEXEC) < 0
+                || libc::fcntl(4, libc::F_SETFD, libc::FD_CLOEXEC) < 0
+            {
+                child_error(4, errno());
+            }
             if libc::syscall(libc::SYS_close_range, 5_u32, u32::MAX, 0) < 0 {
                 child_error(4, errno());
             }
@@ -239,8 +261,11 @@ fn after_fork(pid: i32, prepared: &Prepared, launch: Launch) -> Result<Root, Err
                 break;
             }
             libc::close(3);
-            libc::execve(prepared.executable.as_ptr(), argv.as_ptr(), environment.as_ptr());
-            child_error(4, errno());
+            if let Some(executable) = &prepared.executable {
+                libc::execve(executable.as_ptr(), argv.as_ptr(), environment.as_ptr());
+                child_error(4, errno());
+            }
+            child_error(4, libc::ENOENT);
         }
     }
     drop(gate_read);
@@ -252,34 +277,16 @@ fn after_fork(pid: i32, prepared: &Prepared, launch: Launch) -> Result<Root, Err
         Ok(descriptor) => descriptor,
         Err(error) => {
             drop(gate_write);
-            return Err(error);
+            return Err(error.into());
         }
     };
-    let until = Instant::now() + Duration::from_secs(5);
-    let mut ready = [0_u8];
-    loop {
-        let mut poll = libc::pollfd {
-            fd: setup_read.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let result = unsafe { libc::poll(&mut poll, 1, 10) };
-        if result > 0 {
-            let result = unsafe { libc::read(setup_read.as_raw_fd(), ready.as_mut_ptr().cast(), 1) };
-            if result == 1 && ready[0] == 0 {
-                break;
-            }
-            let _ = signal_pidfd(&descriptor, libc::SIGKILL);
-            return Err(ErrorCode::SetupFailed);
-        }
-        if Instant::now() >= until || readable(&descriptor)? {
-            let _ = signal_pidfd(&descriptor, libc::SIGKILL);
-            return Err(ErrorCode::SetupFailed);
-        }
+    if let Err(error) = await_readiness(&setup_read, &descriptor) {
+        let _ = signal_pidfd(&descriptor, libc::SIGKILL);
+        return Err(error);
     }
     let (identity, group, session) = identity(pid)?;
     if group != pid || session != pid {
-        return Err(ErrorCode::IdentityUnknown);
+        return Err(ErrorCode::IdentityUnknown.into());
     }
     for fd in [&out_read, &err_read, &setup_read] {
         nonblocking(fd.as_raw_fd())?;
@@ -297,5 +304,51 @@ fn after_fork(pid: i32, prepared: &Prepared, launch: Launch) -> Result<Root, Err
     })
 }
 
-#[cfg(test)]
-mod tests;
+fn await_readiness(setup: &OwnedFd, child: &OwnedFd) -> Result<(), SpawnError> {
+    let until = Instant::now() + Duration::from_secs(5);
+    let mut message = [0_u8; 5];
+    let mut received = 0;
+    loop {
+        if Instant::now() >= until {
+            return Err(ErrorCode::SetupFailed.into());
+        }
+        let mut poll = libc::pollfd {
+            fd: setup.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        if unsafe { libc::poll(&mut poll, 1, 10) } > 0 {
+            let remaining = if received == 0 { 1 } else { message.len() - received };
+            let result = unsafe { libc::read(setup.as_raw_fd(), message[received..].as_mut_ptr().cast(), remaining) };
+            if result < 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                return Err(SpawnError::Setup(error));
+            }
+            if result == 0 {
+                return Err(ErrorCode::SetupFailed.into());
+            }
+            received += result as usize;
+            if message[0] == 0 {
+                return Ok(());
+            }
+            if message[0] != 1 {
+                return Err(ErrorCode::SetupFailed.into());
+            }
+            if received == message.len() {
+                return Err(SpawnError::Setup(io::Error::from_raw_os_error(i32::from_le_bytes([
+                    message[1], message[2], message[3], message[4],
+                ]))));
+            }
+            continue;
+        }
+        if readable(child)? {
+            return Err(ErrorCode::SetupFailed.into());
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub(super) mod tests;

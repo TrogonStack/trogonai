@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::Cursor;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
 
 use sandbox_command_supervisor::protocol::{
     CommandWire as Command, Event, ExecutionId, MAX_DATA_BYTES, MAX_FRAME_BYTES, ProtocolError, Stream, VERSION,
@@ -74,7 +76,9 @@ fn validated_identity_and_command_bounds_reject_malformed_inputs() -> Result<(),
 #[test]
 fn json_commands_reject_unknown_fields_and_oversized_input() -> Result<(), Box<dyn std::error::Error>> {
     assert!(decode_command(br#"{"kind":"release","execution_id":"contract","unexpected":true}"#).is_err());
-    assert!(decode_command(&vec![b' '; MAX_FRAME_BYTES + 1]).is_err());
+    let mut oversized = serde_json::to_vec(&init()?)?;
+    oversized.resize(MAX_FRAME_BYTES + 1, b' ');
+    assert!(matches!(decode_command(&oversized), Err(ProtocolError::OversizedFrame)));
     let mut encoded = Vec::new();
     write_command(&mut encoded, &init()?)?;
     assert!(matches!(
@@ -109,11 +113,12 @@ fn event_reader_bounds_frames_data_and_requires_complete_lines() -> Result<(), B
         read_event(&mut Cursor::new(b"{}")),
         Err(ProtocolError::UnterminatedFrame)
     ));
-    let encoded = encode_event(&Event::Output {
+    let mut encoded = serde_json::to_vec(&Event::Output {
         execution_id: ExecutionId::new("contract")?,
         stream: Stream::Stderr,
         data: vec![0; MAX_DATA_BYTES + 1],
     })?;
+    encoded.push(b'\n');
     assert!(matches!(
         read_event(&mut Cursor::new(encoded)),
         Err(ProtocolError::OversizedFrame)
@@ -124,4 +129,47 @@ fn event_reader_bounds_frames_data_and_requires_complete_lines() -> Result<(), B
 #[test]
 fn production_family_capacity_is_preserved_with_all_features() {
     assert_eq!(sandbox_command_supervisor::protocol::MAX_CHILDREN, 4096);
+}
+
+#[test]
+fn event_encoder_rejects_payloads_the_event_reader_cannot_accept() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Event::Output {
+        execution_id: ExecutionId::new("contract")?,
+        stream: Stream::Stdout,
+        data: vec![0; MAX_DATA_BYTES + 1],
+    };
+    assert!(matches!(encode_event(&output), Err(ProtocolError::OversizedFrame)));
+    let hello = Event::Hello {
+        version: VERSION,
+        execution_id: ExecutionId::new("contract")?,
+        environment: BTreeMap::from([("BAD=KEY".into(), "value".into())]),
+    };
+    assert!(matches!(encode_event(&hello), Err(ProtocolError::InvalidEnvironment)));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_cli_identity_is_a_usage_error_without_a_panic() -> Result<(), Box<dyn std::error::Error>> {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_sandbox-command-supervisor"))
+        .arg("--execution-id")
+        .arg(std::ffi::OsString::from_vec(vec![0xff]))
+        .output()?;
+    assert_eq!(output.status.code(), Some(64));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_probe_channel_cannot_report_successful_delivery() -> Result<(), Box<dyn std::error::Error>> {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_sandbox-command-supervisor"))
+        .arg("--probe")
+        .stdout(std::fs::File::open("/dev/null")?)
+        .output()?;
+    assert_eq!(output.status.code(), Some(74));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    Ok(())
 }

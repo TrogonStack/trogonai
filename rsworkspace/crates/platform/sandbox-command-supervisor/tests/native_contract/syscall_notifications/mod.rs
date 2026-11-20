@@ -11,6 +11,7 @@ use std::thread::JoinHandle;
 pub(super) enum Syscall {
     Session,
     Fork,
+    SignalSend,
 }
 
 pub(super) enum Action {
@@ -18,12 +19,14 @@ pub(super) enum Action {
     Refuse(i32),
 }
 
+#[derive(Clone, Copy)]
 enum Refusals {
     Repeated,
     Once,
     Finished,
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct Policy {
     allowed: usize,
     refusals: Refusals,
@@ -31,6 +34,14 @@ pub(super) struct Policy {
 }
 
 impl Policy {
+    pub(super) fn observe() -> Self {
+        Self {
+            allowed: 0,
+            refusals: Refusals::Finished,
+            errno: 0,
+        }
+    }
+
     pub(super) fn reject_after(allowed: usize, errno: i32) -> Self {
         Self {
             allowed,
@@ -69,7 +80,14 @@ pub(super) struct Observation {
     pub(super) process: Option<OwnedFd>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct ObservedSignal {
+    pub(super) target: i32,
+    pub(super) signal: i32,
+}
+
 pub(super) struct Report {
+    pub(super) signal_sends: std::collections::BTreeMap<ObservedSignal, usize>,
     pub(super) first: Vec<Observation>,
     pub(super) continued: usize,
     pub(super) refused: usize,
@@ -87,11 +105,25 @@ impl PendingListener {
         let number = match syscall {
             Syscall::Session => libc::SYS_setsid,
             Syscall::Fork => libc::SYS_clone,
+            Syscall::SignalSend => libc::SYS_kill,
         };
         let filter = match syscall {
             Syscall::Session => vec![
                 instruction(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS, 0, 0, 0),
                 instruction(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K, 0, 1, number as u32),
+                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_USER_NOTIF),
+                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
+            ],
+            Syscall::SignalSend => vec![
+                instruction(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS, 0, 0, 0),
+                instruction(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K, 0, 3, number as u32),
+                instruction(
+                    libc::BPF_LD | libc::BPF_W | libc::BPF_ABS,
+                    0,
+                    0,
+                    std::mem::offset_of!(libc::seccomp_data, args) as u32,
+                ),
+                instruction(libc::BPF_JMP | libc::BPF_JSET | libc::BPF_K, 0, 1, 1 << 31),
                 instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_USER_NOTIF),
                 instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
             ],
@@ -258,6 +290,7 @@ fn receive_listener(socket: &UnixDatagram) -> io::Result<OwnedFd> {
 
 fn observe(descriptor: OwnedFd, mut policy: Policy, stop: &AtomicBool) -> io::Result<Report> {
     let mut report = Report {
+        signal_sends: std::collections::BTreeMap::new(),
         first: Vec::new(),
         continued: 0,
         refused: 0,
@@ -294,7 +327,8 @@ fn observe(descriptor: OwnedFd, mut policy: Policy, stop: &AtomicBool) -> io::Re
                 _ => return Err(io::Error::last_os_error()),
             }
         }
-        let action = policy.next();
+        let mut next_policy = policy;
+        let action = next_policy.next();
         let process = match (&action, &policy.refusals) {
             (Action::Refuse(_), Refusals::Repeated) => {
                 let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, request.pid as i32, 0) };
@@ -305,28 +339,21 @@ fn observe(descriptor: OwnedFd, mut policy: Policy, stop: &AtomicBool) -> io::Re
             }
             _ => None,
         };
-        let mut response = libc::seccomp_notif_resp {
-            id: request.id,
-            val: 0,
-            error: 0,
-            flags: 0,
-        };
-        match action {
-            Action::Continue => response.flags = libc::SECCOMP_USER_NOTIF_FLAG_CONTINUE as u32,
-            Action::Refuse(errno) => response.error = -errno,
-        }
-        if unsafe {
-            libc::ioctl(
-                descriptor.as_raw_fd(),
-                libc::_IOWR::<libc::seccomp_notif_resp>(u32::from(b'!'), 1),
-                &mut response,
-            )
-        } < 0
-        {
-            if io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT) {
+        if let Err(error) = send_response(&descriptor, &request, &mut policy, next_policy, &action) {
+            if error.raw_os_error() == Some(libc::ENOENT) {
                 continue;
             }
-            return Err(io::Error::last_os_error());
+            return Err(error);
+        }
+        if request.data.nr == libc::SYS_kill as i32 {
+            let signal = ObservedSignal {
+                target: request.data.args[0] as u32 as i32,
+                signal: request.data.args[1] as u32 as i32,
+            };
+            if !report.signal_sends.contains_key(&signal) && report.signal_sends.len() >= 128 {
+                return Err(io::Error::other("too many distinct observed signal sends"));
+            }
+            *report.signal_sends.entry(signal).or_default() += 1;
         }
         match action {
             Action::Continue => report.continued += 1,
@@ -342,3 +369,37 @@ fn observe(descriptor: OwnedFd, mut policy: Policy, stop: &AtomicBool) -> io::Re
     }
     Ok(report)
 }
+
+fn send_response(
+    descriptor: &OwnedFd,
+    request: &libc::seccomp_notif,
+    policy: &mut Policy,
+    next_policy: Policy,
+    action: &Action,
+) -> io::Result<()> {
+    let mut response = libc::seccomp_notif_resp {
+        id: request.id,
+        val: 0,
+        error: 0,
+        flags: 0,
+    };
+    match action {
+        Action::Continue => response.flags = libc::SECCOMP_USER_NOTIF_FLAG_CONTINUE as u32,
+        Action::Refuse(errno) => response.error = -*errno,
+    }
+    if unsafe {
+        libc::ioctl(
+            descriptor.as_raw_fd(),
+            libc::_IOWR::<libc::seccomp_notif_resp>(u32::from(b'!'), 1),
+            &mut response,
+        )
+    } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    *policy = next_policy;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

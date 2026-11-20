@@ -21,6 +21,8 @@ prerequisites are available. Unsupported platforms or prerequisites produce code
 `78`. Linux requires procfs, pidfds, `close_range`, and subreaper support. The
 supervisor cannot run as PID 1.
 
+Failure to deliver the probe frame exits with code `74`.
+
 ## Control a command
 
 Start the executable with `--execution-id <id>`, then exchange newline-delimited
@@ -58,6 +60,14 @@ platforms run the protocol contracts. The additive `test-support` feature builds
 the workload fixture and a separate supervisor fixture with a capacity of 8 for
 overflow controls. The production supervisor always retains a capacity of 4096,
 including builds with all features enabled.
+
+Kernel tests run in a fresh executable worker so each case owns its process
+family. Full `cargo test` builds that worker automatically. Before a focused
+`cargo test --lib` run, build it explicitly:
+
+```sh
+mise exec -- cargo build -p sandbox-command-supervisor --features test-support --bin supervisor-kernel-test-worker
+```
 
 See the repository's [sandbox foundation architecture](../../../../docs/architecture/sandbox-foundation.md)
 for how this package fits with the client SDK and future worker integrations.

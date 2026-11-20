@@ -5576,6 +5576,7 @@ name = "sandbox-command-supervisor"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "sandbox-command-supervisor",
  "serde",
  "serde_json",
  "tempfile",

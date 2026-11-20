@@ -5,7 +5,10 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use trogon_std::env::ReadEnv;
 
-pub(super) type TestResult = Result<(), Box<dyn std::error::Error>>;
+pub(super) type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+mod containment_tests;
+mod worker;
 
 #[cfg(any(
     target_arch = "aarch64",
@@ -37,53 +40,52 @@ pub(super) fn continuous_profile() -> Option<(&'static str, std::ffi::OsString)>
 }
 
 pub(super) fn isolated(name: &str, body: impl FnOnce() -> TestResult) -> TestResult {
+    isolated_with_timeout(name, Duration::from_secs(5), body)
+}
+
+pub(super) fn isolated_with_timeout(name: &str, timeout: Duration, body: impl FnOnce() -> TestResult) -> TestResult {
     if super::SystemEnv.var_os("SUPERVISOR_KERNEL_TEST").as_deref() == Some(std::ffi::OsStr::new(name)) {
+        assert_eq!(unsafe { libc::syscall(libc::SYS_gettid) }, unsafe { libc::getpid() }
+            as libc::c_long);
         return body();
     }
-    let mut child = Command::new(std::env::current_exe()?)
-        .args(["--exact", name, "--nocapture"])
-        .env("SUPERVISOR_KERNEL_TEST", name)
-        .envs(continuous_profile())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if child.try_wait()?.is_some() {
-            let output = child.wait_with_output()?;
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            child.kill()?;
-            child.wait()?;
-            return Err(std::io::Error::other("kernel boundary test exceeded its deadline").into());
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    worker::run(name, timeout)
 }
 
 pub(super) fn isolated_process(name: &str, body: impl FnOnce() -> TestResult) -> TestResult {
-    isolated(name, || {
-        let child = unsafe { libc::fork() };
-        if child < 0 {
-            return Err(std::io::Error::last_os_error().into());
+    isolated(name, body)
+}
+
+pub(crate) fn worker_main() -> i32 {
+    if unsafe { libc::syscall(libc::SYS_gettid) } != unsafe { libc::getpid() } as libc::c_long {
+        return 70;
+    }
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    let [name] = arguments.as_slice() else {
+        return 64;
+    };
+    let Some(name) = name.to_str() else {
+        return 64;
+    };
+    if super::SystemEnv.var_os("SUPERVISOR_KERNEL_TEST").as_deref() != Some(std::ffi::OsStr::new(name)) {
+        return 64;
+    }
+    let result = std::panic::catch_unwind(|| {
+        dispatch_worker(name)
+            .or_else(|| super::state_tests::dispatch_worker(name))
+            .or_else(|| super::native_child::tests::dispatch_worker(name))
+            .or_else(|| super::writer::tests::dispatch_worker(name))
+            .or_else(|| containment_tests::dispatch_worker(name))
+    });
+    match result {
+        Ok(Some(Ok(()))) => 0,
+        Ok(Some(Err(error))) => {
+            eprintln!("{error}");
+            1
         }
-        if child == 0 {
-            match body() {
-                Ok(()) => std::process::exit(0),
-                Err(error) => {
-                    eprintln!("{error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        let mut status = 0;
-        assert_eq!(unsafe { libc::waitpid(child, &mut status, 0) }, child);
-        assert!(libc::WIFEXITED(status));
-        assert_eq!(libc::WEXITSTATUS(status), 0);
-        Ok(())
-    })
+        Ok(None) => 64,
+        Err(_) => 1,
+    }
 }
 
 pub(super) fn refuse_syscall(syscall: libc::c_long, error: i32) -> TestResult {
@@ -192,12 +194,11 @@ fn identifiers(count: usize) -> Vec<u8> {
         .into_bytes()
 }
 
-#[test]
 #[expect(
     clippy::panic,
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
-fn child_parser_preserves_below_and_exact_production_limit() {
+pub(in crate::linux) fn worker_child_parser_preserves_below_and_exact_production_limit() {
     for count in [PRODUCTION_LIMIT - 1, PRODUCTION_LIMIT] {
         let snapshot = parse_children(&identifiers(count), false, PRODUCTION_LIMIT)
             .unwrap_or_else(|_| panic!("complete positive kernel IDs"));
@@ -209,11 +210,15 @@ fn child_parser_preserves_below_and_exact_production_limit() {
 }
 
 #[test]
+fn child_parser_preserves_below_and_exact_production_limit() {
+    worker_child_parser_preserves_below_and_exact_production_limit()
+}
+
 #[expect(
     clippy::panic,
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
-fn child_parser_retains_bounded_prefix_above_production_limit() {
+pub(in crate::linux) fn worker_child_parser_retains_bounded_prefix_above_production_limit() {
     let snapshot = parse_children(&identifiers(PRODUCTION_LIMIT + 1), false, PRODUCTION_LIMIT)
         .unwrap_or_else(|_| panic!("complete bounded prefix"));
     assert_eq!(snapshot.children.len(), PRODUCTION_LIMIT);
@@ -222,11 +227,15 @@ fn child_parser_retains_bounded_prefix_above_production_limit() {
 }
 
 #[test]
+fn child_parser_retains_bounded_prefix_above_production_limit() {
+    worker_child_parser_retains_bounded_prefix_above_production_limit()
+}
+
 #[expect(
     clippy::panic,
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
-fn child_parser_never_authorizes_a_truncated_pid_token() {
+pub(in crate::linux) fn worker_child_parser_never_authorizes_a_truncated_pid_token() {
     let mut bytes = identifiers(PRODUCTION_LIMIT - 1);
     bytes.extend_from_slice(b"12345");
     for truncated in [false, true] {
@@ -244,11 +253,15 @@ fn child_parser_never_authorizes_a_truncated_pid_token() {
 }
 
 #[test]
+fn child_parser_never_authorizes_a_truncated_pid_token() {
+    worker_child_parser_never_authorizes_a_truncated_pid_token()
+}
+
 #[expect(
     clippy::panic,
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
-fn child_parser_keeps_exhausted_whitespace_boundary_uncertain() {
+pub(in crate::linux) fn worker_child_parser_keeps_exhausted_whitespace_boundary_uncertain() {
     let snapshot =
         parse_children(b"71 72 ", true, PRODUCTION_LIMIT).unwrap_or_else(|_| panic!("complete tokens at byte bound"));
     assert_eq!(snapshot.children, [71, 72]);
@@ -260,7 +273,11 @@ fn child_parser_keeps_exhausted_whitespace_boundary_uncertain() {
 }
 
 #[test]
-fn child_parser_refuses_malformed_and_nonpositive_complete_ids() {
+fn child_parser_keeps_exhausted_whitespace_boundary_uncertain() {
+    worker_child_parser_keeps_exhausted_whitespace_boundary_uncertain()
+}
+
+pub(in crate::linux) fn worker_child_parser_refuses_malformed_and_nonpositive_complete_ids() {
     for bytes in [
         b"0 ".as_slice(),
         b"-1 ",
@@ -276,7 +293,11 @@ fn child_parser_refuses_malformed_and_nonpositive_complete_ids() {
 }
 
 #[test]
-fn invalid_descriptors_and_process_handles_preserve_kernel_errors() -> TestResult {
+fn child_parser_refuses_malformed_and_nonpositive_complete_ids() {
+    worker_child_parser_refuses_malformed_and_nonpositive_complete_ids()
+}
+
+pub(in crate::linux) fn worker_invalid_descriptors_and_process_handles_preserve_kernel_errors() -> TestResult {
     assert_eq!(super::nonblocking(-1), Err(super::ErrorCode::IoFailure));
     assert!(matches!(super::pidfd(-1), Err(super::ErrorCode::IdentityUnknown)));
     let (read, _) = super::pipe()?;
@@ -285,7 +306,12 @@ fn invalid_descriptors_and_process_handles_preserve_kernel_errors() -> TestResul
 }
 
 #[test]
-fn syscall_refusal_does_not_turn_failed_pipe_creation_into_owned_descriptors() -> TestResult {
+fn invalid_descriptors_and_process_handles_preserve_kernel_errors() -> TestResult {
+    worker_invalid_descriptors_and_process_handles_preserve_kernel_errors()
+}
+
+pub(in crate::linux) fn worker_syscall_refusal_does_not_turn_failed_pipe_creation_into_owned_descriptors() -> TestResult
+{
     isolated(
         "linux::tests::syscall_refusal_does_not_turn_failed_pipe_creation_into_owned_descriptors",
         || {
@@ -297,7 +323,11 @@ fn syscall_refusal_does_not_turn_failed_pipe_creation_into_owned_descriptors() -
 }
 
 #[test]
-fn interrupted_readiness_is_unknown_without_becoming_a_terminal_error() -> TestResult {
+fn syscall_refusal_does_not_turn_failed_pipe_creation_into_owned_descriptors() -> TestResult {
+    worker_syscall_refusal_does_not_turn_failed_pipe_creation_into_owned_descriptors()
+}
+
+pub(in crate::linux) fn worker_interrupted_readiness_is_unknown_without_becoming_a_terminal_error() -> TestResult {
     isolated(
         "linux::tests::interrupted_readiness_is_unknown_without_becoming_a_terminal_error",
         || {
@@ -310,7 +340,11 @@ fn interrupted_readiness_is_unknown_without_becoming_a_terminal_error() -> TestR
 }
 
 #[test]
-fn failed_readiness_preserves_the_io_failure() -> TestResult {
+fn interrupted_readiness_is_unknown_without_becoming_a_terminal_error() -> TestResult {
+    worker_interrupted_readiness_is_unknown_without_becoming_a_terminal_error()
+}
+
+pub(in crate::linux) fn worker_failed_readiness_preserves_the_io_failure() -> TestResult {
     isolated("linux::tests::failed_readiness_preserves_the_io_failure", || {
         let (read, _) = super::pipe()?;
         refuse_syscall(POLL_SYSCALL, libc::EIO)?;
@@ -320,7 +354,11 @@ fn failed_readiness_preserves_the_io_failure() -> TestResult {
 }
 
 #[test]
-fn signal_callback_retains_the_kernel_signal() -> TestResult {
+fn failed_readiness_preserves_the_io_failure() -> TestResult {
+    worker_failed_readiness_preserves_the_io_failure()
+}
+
+pub(in crate::linux) fn worker_signal_callback_retains_the_kernel_signal() -> TestResult {
     isolated("linux::tests::signal_callback_retains_the_kernel_signal", || {
         unsafe { super::disposition(libc::SIGUSR1, super::remember_signal as *const () as libc::sighandler_t)? };
         assert_eq!(unsafe { libc::raise(libc::SIGUSR1) }, 0);
@@ -330,7 +368,11 @@ fn signal_callback_retains_the_kernel_signal() -> TestResult {
 }
 
 #[test]
-fn wait_status_distinguishes_signaled_roots_from_stopped_children() -> TestResult {
+fn signal_callback_retains_the_kernel_signal() -> TestResult {
+    worker_signal_callback_retains_the_kernel_signal()
+}
+
+pub(in crate::linux) fn worker_wait_status_distinguishes_signaled_roots_from_stopped_children() -> TestResult {
     isolated(
         "linux::tests::wait_status_distinguishes_signaled_roots_from_stopped_children",
         || {
@@ -352,7 +394,11 @@ fn wait_status_distinguishes_signaled_roots_from_stopped_children() -> TestResul
 }
 
 #[test]
-fn a_reaped_child_keeps_its_pidfd_without_authorizing_a_replacement() -> TestResult {
+fn wait_status_distinguishes_signaled_roots_from_stopped_children() -> TestResult {
+    worker_wait_status_distinguishes_signaled_roots_from_stopped_children()
+}
+
+pub(in crate::linux) fn worker_a_reaped_child_keeps_its_pidfd_without_authorizing_a_replacement() -> TestResult {
     isolated(
         "linux::tests::a_reaped_child_keeps_its_pidfd_without_authorizing_a_replacement",
         || {
@@ -371,6 +417,11 @@ fn a_reaped_child_keeps_its_pidfd_without_authorizing_a_replacement() -> TestRes
     )
 }
 
+#[test]
+fn a_reaped_child_keeps_its_pidfd_without_authorizing_a_replacement() -> TestResult {
+    worker_a_reaped_child_keeps_its_pidfd_without_authorizing_a_replacement()
+}
+
 fn loop_supervisor() -> Result<super::Supervisor, crate::ExecutionIdError> {
     Ok(super::Supervisor::new(
         crate::ExecutionId::new("loop-contract")?,
@@ -378,8 +429,7 @@ fn loop_supervisor() -> Result<super::Supervisor, crate::ExecutionIdError> {
     ))
 }
 
-#[test]
-fn closed_control_output_ends_an_absent_loop_without_reopening_cleanup() -> TestResult {
+pub(in crate::linux) fn worker_closed_control_output_ends_an_absent_loop_without_reopening_cleanup() -> TestResult {
     isolated(
         "linux::tests::closed_control_output_ends_an_absent_loop_without_reopening_cleanup",
         || {
@@ -396,7 +446,12 @@ fn closed_control_output_ends_an_absent_loop_without_reopening_cleanup() -> Test
 }
 
 #[test]
-fn idle_initialization_deadline_preserves_open_input_and_returns_usage_status() -> TestResult {
+fn closed_control_output_ends_an_absent_loop_without_reopening_cleanup() -> TestResult {
+    worker_closed_control_output_ends_an_absent_loop_without_reopening_cleanup()
+}
+
+pub(in crate::linux) fn worker_idle_initialization_deadline_preserves_open_input_and_returns_usage_status() -> TestResult
+{
     isolated(
         "linux::tests::idle_initialization_deadline_preserves_open_input_and_returns_usage_status",
         || {
@@ -416,7 +471,12 @@ fn idle_initialization_deadline_preserves_open_input_and_returns_usage_status() 
 }
 
 #[test]
-fn terminal_receipt_backpressure_expires_without_dropping_the_pending_frame() -> TestResult {
+fn idle_initialization_deadline_preserves_open_input_and_returns_usage_status() -> TestResult {
+    worker_idle_initialization_deadline_preserves_open_input_and_returns_usage_status()
+}
+
+pub(in crate::linux) fn worker_terminal_receipt_backpressure_expires_without_dropping_the_pending_frame() -> TestResult
+{
     isolated(
         "linux::tests::terminal_receipt_backpressure_expires_without_dropping_the_pending_frame",
         || {
@@ -442,7 +502,11 @@ fn terminal_receipt_backpressure_expires_without_dropping_the_pending_frame() ->
 }
 
 #[test]
-fn refused_external_group_signal_does_not_prevent_held_timeout_cleanup() -> TestResult {
+fn terminal_receipt_backpressure_expires_without_dropping_the_pending_frame() -> TestResult {
+    worker_terminal_receipt_backpressure_expires_without_dropping_the_pending_frame()
+}
+
+pub(in crate::linux) fn worker_refused_external_group_signal_does_not_prevent_held_timeout_cleanup() -> TestResult {
     isolated_process(
         "linux::tests::refused_external_group_signal_does_not_prevent_held_timeout_cleanup",
         || {
@@ -492,6 +556,11 @@ fn refused_external_group_signal_does_not_prevent_held_timeout_cleanup() -> Test
     )
 }
 
+#[test]
+fn refused_external_group_signal_does_not_prevent_held_timeout_cleanup() -> TestResult {
+    worker_refused_external_group_signal_does_not_prevent_held_timeout_cleanup()
+}
+
 fn refused_probe(name: &str, syscall: libc::c_long) -> TestResult {
     isolated(name, || {
         refuse_syscall(syscall, libc::EPERM)?;
@@ -500,8 +569,7 @@ fn refused_probe(name: &str, syscall: libc::c_long) -> TestResult {
     })
 }
 
-#[test]
-fn unavailable_signal_dispositions_refuse_the_native_probe() -> TestResult {
+pub(in crate::linux) fn worker_unavailable_signal_dispositions_refuse_the_native_probe() -> TestResult {
     refused_probe(
         "linux::tests::unavailable_signal_dispositions_refuse_the_native_probe",
         libc::SYS_rt_sigaction,
@@ -509,7 +577,11 @@ fn unavailable_signal_dispositions_refuse_the_native_probe() -> TestResult {
 }
 
 #[test]
-fn unavailable_signal_masks_refuse_the_native_probe() -> TestResult {
+fn unavailable_signal_dispositions_refuse_the_native_probe() -> TestResult {
+    worker_unavailable_signal_dispositions_refuse_the_native_probe()
+}
+
+pub(in crate::linux) fn worker_unavailable_signal_masks_refuse_the_native_probe() -> TestResult {
     refused_probe(
         "linux::tests::unavailable_signal_masks_refuse_the_native_probe",
         libc::SYS_rt_sigprocmask,
@@ -517,7 +589,11 @@ fn unavailable_signal_masks_refuse_the_native_probe() -> TestResult {
 }
 
 #[test]
-fn unavailable_proc_filesystem_metadata_refuses_the_native_probe() -> TestResult {
+fn unavailable_signal_masks_refuse_the_native_probe() -> TestResult {
+    worker_unavailable_signal_masks_refuse_the_native_probe()
+}
+
+pub(in crate::linux) fn worker_unavailable_proc_filesystem_metadata_refuses_the_native_probe() -> TestResult {
     refused_probe(
         "linux::tests::unavailable_proc_filesystem_metadata_refuses_the_native_probe",
         libc::SYS_statfs,
@@ -525,7 +601,11 @@ fn unavailable_proc_filesystem_metadata_refuses_the_native_probe() -> TestResult
 }
 
 #[test]
-fn unavailable_descriptor_isolation_refuses_the_native_probe() -> TestResult {
+fn unavailable_proc_filesystem_metadata_refuses_the_native_probe() -> TestResult {
+    worker_unavailable_proc_filesystem_metadata_refuses_the_native_probe()
+}
+
+pub(in crate::linux) fn worker_unavailable_descriptor_isolation_refuses_the_native_probe() -> TestResult {
     refused_probe(
         "linux::tests::unavailable_descriptor_isolation_refuses_the_native_probe",
         libc::SYS_close_range,
@@ -533,7 +613,11 @@ fn unavailable_descriptor_isolation_refuses_the_native_probe() -> TestResult {
 }
 
 #[test]
-fn an_existing_owned_child_prevents_supervisor_activation() -> TestResult {
+fn unavailable_descriptor_isolation_refuses_the_native_probe() -> TestResult {
+    worker_unavailable_descriptor_isolation_refuses_the_native_probe()
+}
+
+pub(in crate::linux) fn worker_an_existing_owned_child_prevents_supervisor_activation() -> TestResult {
     isolated_process(
         "linux::tests::an_existing_owned_child_prevents_supervisor_activation",
         || {
@@ -551,7 +635,11 @@ fn an_existing_owned_child_prevents_supervisor_activation() -> TestResult {
 }
 
 #[test]
-fn a_nonterminal_kernel_notification_cannot_become_a_root_exit() -> TestResult {
+fn an_existing_owned_child_prevents_supervisor_activation() -> TestResult {
+    worker_an_existing_owned_child_prevents_supervisor_activation()
+}
+
+pub(in crate::linux) fn worker_a_nonterminal_kernel_notification_cannot_become_a_root_exit() -> TestResult {
     isolated_process(
         "linux::tests::a_nonterminal_kernel_notification_cannot_become_a_root_exit",
         || {
@@ -573,7 +661,12 @@ fn a_nonterminal_kernel_notification_cannot_become_a_root_exit() -> TestResult {
 }
 
 #[test]
-fn initial_control_queue_exhaustion_refuses_start_without_changing_execution_state() -> TestResult {
+fn a_nonterminal_kernel_notification_cannot_become_a_root_exit() -> TestResult {
+    worker_a_nonterminal_kernel_notification_cannot_become_a_root_exit()
+}
+
+pub(in crate::linux) fn worker_initial_control_queue_exhaustion_refuses_start_without_changing_execution_state()
+-> TestResult {
     let mut supervisor = loop_supervisor()?;
     let event = super::Event::Status {
         execution_id: supervisor.execution.clone(),
@@ -591,7 +684,11 @@ fn initial_control_queue_exhaustion_refuses_start_without_changing_execution_sta
 }
 
 #[test]
-fn delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence() -> TestResult {
+fn initial_control_queue_exhaustion_refuses_start_without_changing_execution_state() -> TestResult {
+    worker_initial_control_queue_exhaustion_refuses_start_without_changing_execution_state()
+}
+
+pub(in crate::linux) fn worker_delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence() -> TestResult {
     isolated_process(
         "linux::tests::delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence",
         || {
@@ -603,10 +700,10 @@ fn delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence() -> Tes
             let descriptor = super::pidfd(child.id() as i32)?;
             let (read, write) = super::pipe()?;
             assert_eq!(unsafe { libc::dup2(super::AsRawFd::as_raw_fd(&write), 1) }, 1);
-            let observer = std::thread::spawn(move || -> Result<(), String> {
+            let observer = std::thread::spawn(move || -> Result<(), crate::ProtocolError> {
                 let mut frames = std::io::BufReader::new(std::fs::File::from(read));
                 assert!(matches!(
-                    crate::protocol::read_event(&mut frames).map_err(|error| error.to_string())?,
+                    crate::protocol::read_event(&mut frames)?,
                     Some(super::Event::Error {
                         code: super::ErrorCode::CleanupPending,
                         uncertain: crate::Certainty::Uncertain,
@@ -615,7 +712,7 @@ fn delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence() -> Tes
                 ));
                 assert_eq!(super::signal_pidfd(&descriptor, libc::SIGKILL), Ok(true));
                 assert!(matches!(
-                    crate::protocol::read_event(&mut frames).map_err(|error| error.to_string())?,
+                    crate::protocol::read_event(&mut frames)?,
                     Some(super::Event::FamilyAbsent { reaped_count: 1, .. })
                 ));
                 Ok(())
@@ -629,8 +726,7 @@ fn delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence() -> Tes
             assert_eq!(supervisor.run_loop(), 0);
             observer
                 .join()
-                .map_err(|_| std::io::Error::other("cleanup observer panicked"))?
-                .map_err(std::io::Error::other)?;
+                .map_err(|_| std::io::Error::other("cleanup observer panicked"))??;
             assert!(supervisor.cleanup_notice);
             assert!(matches!(supervisor.phase, super::Phase::Absent));
             assert_eq!(supervisor.reaped, 1);
@@ -645,7 +741,12 @@ fn delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence() -> Tes
 }
 
 #[test]
-fn repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence() -> TestResult {
+fn delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence() -> TestResult {
+    worker_delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence()
+}
+
+pub(in crate::linux) fn worker_repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence() -> TestResult
+{
     isolated_process(
         "linux::tests::repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence",
         || {
@@ -671,6 +772,36 @@ fn repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence() -
                             })
                         ));
                     }
+                    let until = Instant::now() + Duration::from_millis(100);
+                    while Instant::now() < until {
+                        let remaining = until.saturating_duration_since(Instant::now());
+                        let mut poll = libc::pollfd {
+                            fd: frames.get_ref().as_raw_fd(),
+                            events: libc::POLLIN,
+                            revents: 0,
+                        };
+                        if frames.buffer().is_empty() {
+                            let result =
+                                unsafe { libc::poll(&mut poll, 1, remaining.as_millis().min(i32::MAX as u128) as i32) };
+                            if result < 0 {
+                                return Err(std::io::Error::last_os_error().into());
+                            }
+                            if result == 0 {
+                                break;
+                            }
+                        }
+                        assert!(
+                            matches!(
+                                crate::protocol::read_event(&mut frames)?,
+                                Some(super::Event::Error {
+                                    code: super::ErrorCode::IdentityUnknown,
+                                    uncertain: crate::Certainty::Uncertain,
+                                    ..
+                                })
+                            ),
+                            "active wait refusal cannot produce a terminal receipt"
+                        );
+                    }
                     let _ = super::signal_pidfd(&descriptor, libc::SIGKILL)?;
                     let mut status = 0;
                     assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
@@ -694,4 +825,95 @@ fn repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence() -
             Err(std::io::Error::other(format!("uncertain ownership loop returned {result}")).into())
         },
     )
+}
+
+#[test]
+fn repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence() -> TestResult {
+    worker_repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence()
+}
+
+pub(in crate::linux) fn dispatch_worker(name: &str) -> Option<crate::linux::tests::TestResult> {
+    match name {
+        "linux::tests::child_parser_preserves_below_and_exact_production_limit" => Some({
+            worker_child_parser_preserves_below_and_exact_production_limit();
+            Ok(())
+        }),
+        "linux::tests::child_parser_retains_bounded_prefix_above_production_limit" => Some({
+            worker_child_parser_retains_bounded_prefix_above_production_limit();
+            Ok(())
+        }),
+        "linux::tests::child_parser_never_authorizes_a_truncated_pid_token" => Some({
+            worker_child_parser_never_authorizes_a_truncated_pid_token();
+            Ok(())
+        }),
+        "linux::tests::child_parser_keeps_exhausted_whitespace_boundary_uncertain" => Some({
+            worker_child_parser_keeps_exhausted_whitespace_boundary_uncertain();
+            Ok(())
+        }),
+        "linux::tests::child_parser_refuses_malformed_and_nonpositive_complete_ids" => Some({
+            worker_child_parser_refuses_malformed_and_nonpositive_complete_ids();
+            Ok(())
+        }),
+        "linux::tests::invalid_descriptors_and_process_handles_preserve_kernel_errors" => {
+            Some(worker_invalid_descriptors_and_process_handles_preserve_kernel_errors())
+        }
+        "linux::tests::syscall_refusal_does_not_turn_failed_pipe_creation_into_owned_descriptors" => {
+            Some(worker_syscall_refusal_does_not_turn_failed_pipe_creation_into_owned_descriptors())
+        }
+        "linux::tests::interrupted_readiness_is_unknown_without_becoming_a_terminal_error" => {
+            Some(worker_interrupted_readiness_is_unknown_without_becoming_a_terminal_error())
+        }
+        "linux::tests::failed_readiness_preserves_the_io_failure" => {
+            Some(worker_failed_readiness_preserves_the_io_failure())
+        }
+        "linux::tests::signal_callback_retains_the_kernel_signal" => {
+            Some(worker_signal_callback_retains_the_kernel_signal())
+        }
+        "linux::tests::wait_status_distinguishes_signaled_roots_from_stopped_children" => {
+            Some(worker_wait_status_distinguishes_signaled_roots_from_stopped_children())
+        }
+        "linux::tests::a_reaped_child_keeps_its_pidfd_without_authorizing_a_replacement" => {
+            Some(worker_a_reaped_child_keeps_its_pidfd_without_authorizing_a_replacement())
+        }
+        "linux::tests::closed_control_output_ends_an_absent_loop_without_reopening_cleanup" => {
+            Some(worker_closed_control_output_ends_an_absent_loop_without_reopening_cleanup())
+        }
+        "linux::tests::idle_initialization_deadline_preserves_open_input_and_returns_usage_status" => {
+            Some(worker_idle_initialization_deadline_preserves_open_input_and_returns_usage_status())
+        }
+        "linux::tests::terminal_receipt_backpressure_expires_without_dropping_the_pending_frame" => {
+            Some(worker_terminal_receipt_backpressure_expires_without_dropping_the_pending_frame())
+        }
+        "linux::tests::refused_external_group_signal_does_not_prevent_held_timeout_cleanup" => {
+            Some(worker_refused_external_group_signal_does_not_prevent_held_timeout_cleanup())
+        }
+        "linux::tests::unavailable_signal_dispositions_refuse_the_native_probe" => {
+            Some(worker_unavailable_signal_dispositions_refuse_the_native_probe())
+        }
+        "linux::tests::unavailable_signal_masks_refuse_the_native_probe" => {
+            Some(worker_unavailable_signal_masks_refuse_the_native_probe())
+        }
+        "linux::tests::unavailable_proc_filesystem_metadata_refuses_the_native_probe" => {
+            Some(worker_unavailable_proc_filesystem_metadata_refuses_the_native_probe())
+        }
+        "linux::tests::unavailable_descriptor_isolation_refuses_the_native_probe" => {
+            Some(worker_unavailable_descriptor_isolation_refuses_the_native_probe())
+        }
+        "linux::tests::an_existing_owned_child_prevents_supervisor_activation" => {
+            Some(worker_an_existing_owned_child_prevents_supervisor_activation())
+        }
+        "linux::tests::a_nonterminal_kernel_notification_cannot_become_a_root_exit" => {
+            Some(worker_a_nonterminal_kernel_notification_cannot_become_a_root_exit())
+        }
+        "linux::tests::initial_control_queue_exhaustion_refuses_start_without_changing_execution_state" => {
+            Some(worker_initial_control_queue_exhaustion_refuses_start_without_changing_execution_state())
+        }
+        "linux::tests::delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence" => {
+            Some(worker_delayed_retirement_emits_one_cleanup_notice_before_confirmed_absence())
+        }
+        "linux::tests::repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence" => {
+            Some(worker_repeated_wait_refusal_reports_uncertainty_without_claiming_family_absence())
+        }
+        _ => None,
+    }
 }

@@ -3,8 +3,7 @@ use crate::CommandWire;
 use crate::linux::tests::{TestResult, isolated, refuse_syscall};
 use std::cell::RefCell;
 use std::io::{Seek, SeekFrom};
-use std::process::{Command as Process, Stdio};
-use trogon_std::env::ReadEnv;
+use std::process::Command as Process;
 
 #[cfg(any(
     target_arch = "aarch64",
@@ -179,17 +178,22 @@ fn refuse_argument(syscall: libc::c_long, argument: u32, value: u32, error: i32)
 fn setup_refusal(name: &str, fault: impl FnOnce() -> TestResult) -> TestResult {
     isolated(name, || {
         let custody = ChildCustody::new()?;
-        let workload = prepared(None)?;
+        let directory = tempfile::tempdir()?;
+        let marker = directory.path().join("executed");
+        let workload = prepared(Some(&marker))?;
         fault()?;
-        let result = spawn(&workload);
+        let mut result = spawn(&workload);
+        if let Ok(root) = &mut result {
+            root.gate.take();
+        }
         custody.settle()?;
-        assert!(matches!(result, Err(ErrorCode::SetupFailed)));
+        assert!(matches!(result, Err(error) if error.code() == ErrorCode::SetupFailed));
+        assert!(!marker.exists());
         Ok(())
     })
 }
 
-#[test]
-fn refused_null_input_open_cannot_create_a_held_root() -> TestResult {
+pub(in crate::linux) fn worker_refused_null_input_open_cannot_create_a_held_root() -> TestResult {
     setup_refusal(
         "linux::native_child::tests::refused_null_input_open_cannot_create_a_held_root",
         || {
@@ -204,7 +208,11 @@ fn refused_null_input_open_cannot_create_a_held_root() -> TestResult {
 }
 
 #[test]
-fn refused_child_descriptor_duplication_reports_setup_failure() -> TestResult {
+fn refused_null_input_open_cannot_create_a_held_root() -> TestResult {
+    worker_refused_null_input_open_cannot_create_a_held_root()
+}
+
+pub(in crate::linux) fn worker_refused_child_descriptor_duplication_reports_setup_failure() -> TestResult {
     setup_refusal(
         "linux::native_child::tests::refused_child_descriptor_duplication_reports_setup_failure",
         || refuse_argument(libc::SYS_fcntl, 1, libc::F_DUPFD_CLOEXEC as u32, libc::EMFILE),
@@ -212,7 +220,11 @@ fn refused_child_descriptor_duplication_reports_setup_failure() -> TestResult {
 }
 
 #[test]
-fn refused_child_standard_descriptor_setup_reports_failure() -> TestResult {
+fn refused_child_descriptor_duplication_reports_setup_failure() -> TestResult {
+    worker_refused_child_descriptor_duplication_reports_setup_failure()
+}
+
+pub(in crate::linux) fn worker_refused_child_standard_descriptor_setup_reports_failure() -> TestResult {
     setup_refusal(
         "linux::native_child::tests::refused_child_standard_descriptor_setup_reports_failure",
         || refuse_syscall(DUPLICATE_SYSCALL, libc::EPERM),
@@ -220,7 +232,11 @@ fn refused_child_standard_descriptor_setup_reports_failure() -> TestResult {
 }
 
 #[test]
-fn refused_child_descriptor_closure_reports_setup_failure() -> TestResult {
+fn refused_child_standard_descriptor_setup_reports_failure() -> TestResult {
+    worker_refused_child_standard_descriptor_setup_reports_failure()
+}
+
+pub(in crate::linux) fn worker_refused_child_descriptor_closure_reports_setup_failure() -> TestResult {
     setup_refusal(
         "linux::native_child::tests::refused_child_descriptor_closure_reports_setup_failure",
         || refuse_syscall(libc::SYS_close_range, libc::EPERM),
@@ -228,7 +244,11 @@ fn refused_child_descriptor_closure_reports_setup_failure() -> TestResult {
 }
 
 #[test]
-fn refused_child_signal_disposition_reports_setup_failure() -> TestResult {
+fn refused_child_descriptor_closure_reports_setup_failure() -> TestResult {
+    worker_refused_child_descriptor_closure_reports_setup_failure()
+}
+
+pub(in crate::linux) fn worker_refused_child_signal_disposition_reports_setup_failure() -> TestResult {
     setup_refusal(
         "linux::native_child::tests::refused_child_signal_disposition_reports_setup_failure",
         || refuse_syscall(libc::SYS_rt_sigaction, libc::EPERM),
@@ -236,7 +256,11 @@ fn refused_child_signal_disposition_reports_setup_failure() -> TestResult {
 }
 
 #[test]
-fn failed_ready_notification_cannot_release_a_workload() -> TestResult {
+fn refused_child_signal_disposition_reports_setup_failure() -> TestResult {
+    worker_refused_child_signal_disposition_reports_setup_failure()
+}
+
+pub(in crate::linux) fn worker_failed_ready_notification_cannot_release_a_workload() -> TestResult {
     setup_refusal(
         "linux::native_child::tests::failed_ready_notification_cannot_release_a_workload",
         || refuse_argument(libc::SYS_write, 0, 4, libc::EPIPE),
@@ -244,14 +268,37 @@ fn failed_ready_notification_cannot_release_a_workload() -> TestResult {
 }
 
 #[test]
-fn failed_pidfd_acquisition_closes_the_held_launch_gate() -> TestResult {
+fn failed_ready_notification_cannot_release_a_workload() -> TestResult {
+    worker_failed_ready_notification_cannot_release_a_workload()
+}
+
+pub(in crate::linux) fn worker_failed_pidfd_acquisition_closes_the_held_launch_gate() -> TestResult {
     isolated(
         "linux::native_child::tests::failed_pidfd_acquisition_closes_the_held_launch_gate",
         || {
             let custody = ChildCustody::new()?;
             let workload = prepared(None)?;
             refuse_syscall(libc::SYS_pidfd_open, libc::EPERM)?;
-            assert!(matches!(spawn(&workload), Err(ErrorCode::IdentityUnknown)));
+            assert!(matches!(spawn(&workload), Err(error) if error.code() == ErrorCode::IdentityUnknown));
+            custody.settle()?;
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn failed_pidfd_acquisition_closes_the_held_launch_gate() -> TestResult {
+    worker_failed_pidfd_acquisition_closes_the_held_launch_gate()
+}
+
+pub(in crate::linux) fn worker_successful_syscall_without_session_change_is_not_identity_evidence() -> TestResult {
+    isolated(
+        "linux::native_child::tests::successful_syscall_without_session_change_is_not_identity_evidence",
+        || {
+            let custody = ChildCustody::new()?;
+            let workload = prepared(None)?;
+            refuse_syscall(libc::SYS_setsid, 0)?;
+            assert!(matches!(spawn(&workload), Err(error) if error.code() == ErrorCode::IdentityUnknown));
             custody.settle()?;
             Ok(())
         },
@@ -260,17 +307,7 @@ fn failed_pidfd_acquisition_closes_the_held_launch_gate() -> TestResult {
 
 #[test]
 fn successful_syscall_without_session_change_is_not_identity_evidence() -> TestResult {
-    isolated(
-        "linux::native_child::tests::successful_syscall_without_session_change_is_not_identity_evidence",
-        || {
-            let custody = ChildCustody::new()?;
-            let workload = prepared(None)?;
-            refuse_syscall(libc::SYS_setsid, 0)?;
-            assert!(matches!(spawn(&workload), Err(ErrorCode::IdentityUnknown)));
-            custody.settle()?;
-            Ok(())
-        },
-    )
+    worker_successful_syscall_without_session_change_is_not_identity_evidence()
 }
 
 fn wait_root(root: &Root) -> Result<RootStatus, Box<dyn std::error::Error>> {
@@ -291,8 +328,7 @@ fn wait_root(root: &Root) -> Result<RootStatus, Box<dyn std::error::Error>> {
     }
 }
 
-#[test]
-fn invalid_launch_gate_byte_never_executes_the_workload() -> TestResult {
+pub(in crate::linux) fn worker_invalid_launch_gate_byte_never_executes_the_workload() -> TestResult {
     isolated(
         "linux::native_child::tests::invalid_launch_gate_byte_never_executes_the_workload",
         || {
@@ -310,6 +346,11 @@ fn invalid_launch_gate_byte_never_executes_the_workload() -> TestResult {
             Ok(())
         },
     )
+}
+
+#[test]
+fn invalid_launch_gate_byte_never_executes_the_workload() -> TestResult {
+    worker_invalid_launch_gate_byte_never_executes_the_workload()
 }
 
 extern "C" fn interrupt_gate(_: i32) {
@@ -332,8 +373,7 @@ fn wait_for_gate_read(root: &Root) -> TestResult {
     }
 }
 
-#[test]
-fn an_interrupted_gate_read_retries_before_an_explicit_release() -> TestResult {
+pub(in crate::linux) fn worker_an_interrupted_gate_read_retries_before_an_explicit_release() -> TestResult {
     isolated(
         "linux::native_child::tests::an_interrupted_gate_read_retries_before_an_explicit_release",
         || {
@@ -375,38 +415,296 @@ fn an_interrupted_gate_read_retries_before_an_explicit_release() -> TestResult {
 }
 
 #[test]
-fn absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root() -> TestResult {
-    const NAME: &str =
-        "linux::native_child::tests::absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root";
-    if SystemEnv.var_os("SUPERVISOR_NATIVE_DEADLINE").as_deref() == Some(std::ffi::OsStr::new(NAME)) {
+fn an_interrupted_gate_read_retries_before_an_explicit_release() -> TestResult {
+    worker_an_interrupted_gate_read_retries_before_an_explicit_release()
+}
+
+fn deadline_refusal(name: &str, fault: impl FnOnce() -> TestResult) -> TestResult {
+    crate::linux::tests::isolated_with_timeout(name, Duration::from_secs(10), || {
         let custody = ChildCustody::new()?;
-        let workload = prepared(None)?;
-        refuse_syscall(POLL_SYSCALL, 0)?;
+        let directory = tempfile::tempdir()?;
+        let marker = directory.path().join("executed");
+        let workload = prepared(Some(&marker))?;
+        fault()?;
         let start = Instant::now();
-        assert!(matches!(spawn(&workload), Err(ErrorCode::SetupFailed)));
+        assert!(matches!(spawn(&workload), Err(error) if error.code() == ErrorCode::SetupFailed));
         assert!(start.elapsed() >= Duration::from_secs(5));
         custody.settle()?;
-        return Ok(());
+        assert!(!marker.exists());
+        Ok(())
+    })
+}
+
+pub(in crate::linux) fn worker_absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root() -> TestResult
+{
+    deadline_refusal(
+        "linux::native_child::tests::absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root",
+        || refuse_syscall(POLL_SYSCALL, 0),
+    )
+}
+
+#[test]
+fn absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root() -> TestResult {
+    worker_absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root()
+}
+
+pub(in crate::linux) fn worker_interrupted_readiness_retries_within_the_original_deadline() -> TestResult {
+    deadline_refusal(
+        "linux::native_child::tests::interrupted_readiness_retries_within_the_original_deadline",
+        || refuse_argument(libc::SYS_read, 2, 1, libc::EINTR),
+    )
+}
+
+#[test]
+fn interrupted_readiness_retries_within_the_original_deadline() -> TestResult {
+    worker_interrupted_readiness_retries_within_the_original_deadline()
+}
+
+fn refuse_close_on_exec(descriptor: RawFd) -> TestResult {
+    let mut filter = [
+        libc::sock_filter {
+            code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+            jt: 0,
+            jf: 5,
+            k: libc::SYS_fcntl as u32,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+            jt: 0,
+            jf: 0,
+            k: 16,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+            jt: 0,
+            jf: 3,
+            k: descriptor as u32,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+            jt: 0,
+            jf: 0,
+            k: 24,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
+            jt: 0,
+            jf: 1,
+            k: libc::F_SETFD as u32,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_RET | libc::BPF_K) as u16,
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
+        },
+        libc::sock_filter {
+            code: (libc::BPF_RET | libc::BPF_K) as u16,
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ALLOW,
+        },
+    ];
+    install_filter(&mut filter)
+}
+
+pub(in crate::linux) fn worker_refused_gate_close_on_exec_cannot_report_ready() -> TestResult {
+    setup_refusal(
+        "linux::native_child::tests::refused_gate_close_on_exec_cannot_report_ready",
+        || refuse_close_on_exec(3),
+    )
+}
+
+#[test]
+fn refused_gate_close_on_exec_cannot_report_ready() -> TestResult {
+    worker_refused_gate_close_on_exec_cannot_report_ready()
+}
+
+pub(in crate::linux) fn worker_refused_setup_close_on_exec_cannot_report_ready() -> TestResult {
+    setup_refusal(
+        "linux::native_child::tests::refused_setup_close_on_exec_cannot_report_ready",
+        || refuse_close_on_exec(4),
+    )
+}
+
+#[test]
+fn refused_setup_close_on_exec_cannot_report_ready() -> TestResult {
+    worker_refused_setup_close_on_exec_cannot_report_ready()
+}
+
+fn setup_error_source(name: &str, expected_errno: i32, fault: impl FnOnce() -> TestResult) -> TestResult {
+    isolated(name, || {
+        let custody = ChildCustody::new()?;
+        let directory = tempfile::tempdir()?;
+        let marker = directory.path().join("executed");
+        let mut workload = prepared(Some(&marker))?;
+        workload.cwd = Some(CString::new(
+            directory.path().join("absent").to_string_lossy().as_bytes(),
+        )?);
+        fault()?;
+        let error = match spawn(&workload) {
+            Err(error) => error,
+            Ok(mut root) => {
+                root.gate.take();
+                return Err(io::Error::other("invalid setup reported readiness").into());
+            }
+        };
+        custody.settle()?;
+        let source = std::error::Error::source(&error).and_then(|source| source.downcast_ref::<io::Error>());
+        assert_eq!(source.and_then(io::Error::raw_os_error), Some(expected_errno));
+        assert!(!marker.exists());
+        Ok(())
+    })
+}
+
+pub(in crate::linux) fn worker_missing_working_directory_preserves_native_setup_errno() -> TestResult {
+    setup_error_source(
+        "linux::native_child::tests::missing_working_directory_preserves_native_setup_errno",
+        libc::ENOENT,
+        || Ok(()),
+    )
+}
+
+#[test]
+fn missing_working_directory_preserves_native_setup_errno() -> TestResult {
+    worker_missing_working_directory_preserves_native_setup_errno()
+}
+
+pub(in crate::linux) fn worker_refused_working_directory_preserves_native_setup_errno() -> TestResult {
+    setup_error_source(
+        "linux::native_child::tests::refused_working_directory_preserves_native_setup_errno",
+        libc::EPERM,
+        || refuse_syscall(libc::SYS_chdir, libc::EPERM),
+    )
+}
+
+#[test]
+fn refused_working_directory_preserves_native_setup_errno() -> TestResult {
+    worker_refused_working_directory_preserves_native_setup_errno()
+}
+
+pub(in crate::linux) fn worker_malformed_or_incomplete_setup_records_never_report_readiness() -> TestResult {
+    let current = pidfd(unsafe { libc::getpid() })?;
+    for packet in [&[][..], &[1][..], &[2][..], &[1, 7, 0][..]] {
+        let (read, write) = pipe()?;
+        if !packet.is_empty() {
+            assert_eq!(
+                unsafe { libc::write(write.as_raw_fd(), packet.as_ptr().cast(), packet.len()) },
+                packet.len() as isize
+            );
+        }
+        drop(write);
+        assert!(matches!(await_readiness(&read, &current), Err(error) if error.code() == ErrorCode::SetupFailed));
     }
-    let mut child = Process::new(std::env::current_exe()?)
-        .args(["--exact", NAME, "--nocapture"])
-        .env("SUPERVISOR_NATIVE_DEADLINE", NAME)
-        .envs(crate::linux::tests::continuous_profile())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if child.try_wait()?.is_some() {
-            let output = child.wait_with_output()?;
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-            return Ok(());
+    Ok(())
+}
+
+#[test]
+fn malformed_or_incomplete_setup_records_never_report_readiness() -> TestResult {
+    worker_malformed_or_incomplete_setup_records_never_report_readiness()
+}
+
+pub(in crate::linux) fn worker_failed_readiness_read_preserves_the_native_io_error() -> TestResult {
+    setup_error_source(
+        "linux::native_child::tests::failed_readiness_read_preserves_the_native_io_error",
+        libc::EIO,
+        || refuse_argument(libc::SYS_read, 2, 1, libc::EIO),
+    )
+}
+
+#[test]
+fn failed_readiness_read_preserves_the_native_io_error() -> TestResult {
+    worker_failed_readiness_read_preserves_the_native_io_error()
+}
+
+pub(in crate::linux) fn worker_a_retired_child_without_setup_readiness_is_not_a_ready_root() -> TestResult {
+    isolated(
+        "linux::native_child::tests::a_retired_child_without_setup_readiness_is_not_a_ready_root",
+        || {
+            let custody = ChildCustody::new()?;
+            let mut child = Process::new("/bin/true").spawn()?;
+            let descriptor = pidfd(child.id() as i32)?;
+            assert!(child.wait()?.success());
+            let (setup, _writer) = pipe()?;
+            assert!(
+                matches!(await_readiness(&setup, &descriptor), Err(error) if error.code() == ErrorCode::SetupFailed)
+            );
+            custody.settle()?;
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn a_retired_child_without_setup_readiness_is_not_a_ready_root() -> TestResult {
+    worker_a_retired_child_without_setup_readiness_is_not_a_ready_root()
+}
+
+pub(in crate::linux) fn dispatch_worker(name: &str) -> Option<crate::linux::tests::TestResult> {
+    match name {
+        "linux::native_child::tests::refused_null_input_open_cannot_create_a_held_root" => {
+            Some(worker_refused_null_input_open_cannot_create_a_held_root())
         }
-        if Instant::now() >= deadline {
-            child.kill()?;
-            child.wait()?;
-            return Err(io::Error::other("setup deadline test exceeded its parent bound").into());
+        "linux::native_child::tests::refused_child_descriptor_duplication_reports_setup_failure" => {
+            Some(worker_refused_child_descriptor_duplication_reports_setup_failure())
         }
-        std::thread::sleep(Duration::from_millis(5));
+        "linux::native_child::tests::refused_child_standard_descriptor_setup_reports_failure" => {
+            Some(worker_refused_child_standard_descriptor_setup_reports_failure())
+        }
+        "linux::native_child::tests::refused_child_descriptor_closure_reports_setup_failure" => {
+            Some(worker_refused_child_descriptor_closure_reports_setup_failure())
+        }
+        "linux::native_child::tests::refused_child_signal_disposition_reports_setup_failure" => {
+            Some(worker_refused_child_signal_disposition_reports_setup_failure())
+        }
+        "linux::native_child::tests::failed_ready_notification_cannot_release_a_workload" => {
+            Some(worker_failed_ready_notification_cannot_release_a_workload())
+        }
+        "linux::native_child::tests::failed_pidfd_acquisition_closes_the_held_launch_gate" => {
+            Some(worker_failed_pidfd_acquisition_closes_the_held_launch_gate())
+        }
+        "linux::native_child::tests::successful_syscall_without_session_change_is_not_identity_evidence" => {
+            Some(worker_successful_syscall_without_session_change_is_not_identity_evidence())
+        }
+        "linux::native_child::tests::invalid_launch_gate_byte_never_executes_the_workload" => {
+            Some(worker_invalid_launch_gate_byte_never_executes_the_workload())
+        }
+        "linux::native_child::tests::an_interrupted_gate_read_retries_before_an_explicit_release" => {
+            Some(worker_an_interrupted_gate_read_retries_before_an_explicit_release())
+        }
+        "linux::native_child::tests::absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root" => {
+            Some(worker_absent_setup_readiness_reaches_the_original_deadline_and_retires_the_root())
+        }
+        "linux::native_child::tests::interrupted_readiness_retries_within_the_original_deadline" => {
+            Some(worker_interrupted_readiness_retries_within_the_original_deadline())
+        }
+        "linux::native_child::tests::refused_gate_close_on_exec_cannot_report_ready" => {
+            Some(worker_refused_gate_close_on_exec_cannot_report_ready())
+        }
+        "linux::native_child::tests::refused_setup_close_on_exec_cannot_report_ready" => {
+            Some(worker_refused_setup_close_on_exec_cannot_report_ready())
+        }
+        "linux::native_child::tests::missing_working_directory_preserves_native_setup_errno" => {
+            Some(worker_missing_working_directory_preserves_native_setup_errno())
+        }
+        "linux::native_child::tests::refused_working_directory_preserves_native_setup_errno" => {
+            Some(worker_refused_working_directory_preserves_native_setup_errno())
+        }
+        "linux::native_child::tests::malformed_or_incomplete_setup_records_never_report_readiness" => {
+            Some(worker_malformed_or_incomplete_setup_records_never_report_readiness())
+        }
+        "linux::native_child::tests::failed_readiness_read_preserves_the_native_io_error" => {
+            Some(worker_failed_readiness_read_preserves_the_native_io_error())
+        }
+        "linux::native_child::tests::a_retired_child_without_setup_readiness_is_not_a_ready_root" => {
+            Some(worker_a_retired_child_without_setup_readiness_is_not_a_ready_root())
+        }
+        _ => None,
     }
 }

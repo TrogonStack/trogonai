@@ -25,8 +25,7 @@ impl Drop for StdoutGuard {
     }
 }
 
-#[test]
-fn control_queue_refuses_overflow_without_dropping_retained_frames() -> TestResult {
+pub(in crate::linux) fn worker_control_queue_refuses_overflow_without_dropping_retained_frames() -> TestResult {
     let mut writer = Writer::new();
     let execution = ExecutionId::new("control-bound")?;
     let event = Event::Status {
@@ -48,7 +47,12 @@ fn control_queue_refuses_overflow_without_dropping_retained_frames() -> TestResu
 }
 
 #[test]
-fn permanent_output_failure_closes_the_writer_and_releases_queue_accounting() -> TestResult {
+fn control_queue_refuses_overflow_without_dropping_retained_frames() -> TestResult {
+    worker_control_queue_refuses_overflow_without_dropping_retained_frames()
+}
+
+pub(in crate::linux) fn worker_permanent_output_failure_closes_the_writer_and_releases_queue_accounting() -> TestResult
+{
     isolated(
         "linux::writer::tests::permanent_output_failure_closes_the_writer_and_releases_queue_accounting",
         || {
@@ -86,7 +90,11 @@ fn permanent_output_failure_closes_the_writer_and_releases_queue_accounting() ->
 }
 
 #[test]
-fn a_full_nonblocking_pipe_retains_unsent_frames_and_queue_accounting() -> TestResult {
+fn permanent_output_failure_closes_the_writer_and_releases_queue_accounting() -> TestResult {
+    worker_permanent_output_failure_closes_the_writer_and_releases_queue_accounting()
+}
+
+pub(in crate::linux) fn worker_a_full_nonblocking_pipe_retains_unsent_frames_and_queue_accounting() -> TestResult {
     isolated(
         "linux::writer::tests::a_full_nonblocking_pipe_retains_unsent_frames_and_queue_accounting",
         || {
@@ -118,7 +126,11 @@ fn a_full_nonblocking_pipe_retains_unsent_frames_and_queue_accounting() -> TestR
 }
 
 #[test]
-fn kernel_zero_write_retains_the_nonempty_frame_without_progress() -> TestResult {
+fn a_full_nonblocking_pipe_retains_unsent_frames_and_queue_accounting() -> TestResult {
+    worker_a_full_nonblocking_pipe_retains_unsent_frames_and_queue_accounting()
+}
+
+pub(in crate::linux) fn worker_kernel_zero_write_retains_the_nonempty_frame_without_progress() -> TestResult {
     isolated(
         "linux::writer::tests::kernel_zero_write_retains_the_nonempty_frame_without_progress",
         || {
@@ -139,4 +151,27 @@ fn kernel_zero_write_retains_the_nonempty_frame_without_progress() -> TestResult
             Ok(())
         },
     )
+}
+
+#[test]
+fn kernel_zero_write_retains_the_nonempty_frame_without_progress() -> TestResult {
+    worker_kernel_zero_write_retains_the_nonempty_frame_without_progress()
+}
+
+pub(in crate::linux) fn dispatch_worker(name: &str) -> Option<crate::linux::tests::TestResult> {
+    match name {
+        "linux::writer::tests::control_queue_refuses_overflow_without_dropping_retained_frames" => {
+            Some(worker_control_queue_refuses_overflow_without_dropping_retained_frames())
+        }
+        "linux::writer::tests::permanent_output_failure_closes_the_writer_and_releases_queue_accounting" => {
+            Some(worker_permanent_output_failure_closes_the_writer_and_releases_queue_accounting())
+        }
+        "linux::writer::tests::a_full_nonblocking_pipe_retains_unsent_frames_and_queue_accounting" => {
+            Some(worker_a_full_nonblocking_pipe_retains_unsent_frames_and_queue_accounting())
+        }
+        "linux::writer::tests::kernel_zero_write_retains_the_nonempty_frame_without_progress" => {
+            Some(worker_kernel_zero_write_retains_the_nonempty_frame_without_progress())
+        }
+        _ => None,
+    }
 }

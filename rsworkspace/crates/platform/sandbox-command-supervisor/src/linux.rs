@@ -253,6 +253,12 @@ pub fn probe() -> Result<(), ErrorCode> {
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExecObservation {
+    Pending,
+    Complete,
+}
+
 #[derive(Clone, Copy)]
 struct SignalRequest {
     request_id: u64,
@@ -283,6 +289,8 @@ struct Supervisor {
     terminal_at: Option<Instant>,
     acknowledged: bool,
     signal_request: Option<SignalRequest>,
+    exec_observation: ExecObservation,
+    pending_terminal: Option<Event>,
 }
 
 impl Supervisor {
@@ -310,6 +318,8 @@ impl Supervisor {
             terminal_at: None,
             acknowledged: false,
             signal_request: None,
+            exec_observation: ExecObservation::Pending,
+            pending_terminal: None,
         }
     }
 
@@ -329,7 +339,7 @@ impl Supervisor {
     }
 
     fn begin_drain(&mut self) {
-        if matches!(self.phase, Phase::Absent) {
+        if matches!(self.phase, Phase::Absent) || self.pending_terminal.is_some() {
             return;
         }
         self.canceled = true;
@@ -389,13 +399,18 @@ impl Supervisor {
                             self.begin_drain();
                         }
                     }
-                    Err(code) => {
-                        self.error(code, true);
+                    Err(error) => {
+                        self.error(error.code(), true);
                         self.begin_drain();
                     }
                 }
             }
             Command::Release { .. } if self.phase == Phase::Held => {
+                if self.release_deadline.is_some_and(|time| Instant::now() >= time) {
+                    self.timed_out = true;
+                    self.begin_drain();
+                    return;
+                }
                 let result = self
                     .root
                     .as_mut()
@@ -519,11 +534,17 @@ impl Supervisor {
 
     fn hard_signal(&mut self) -> Result<bool, ErrorCode> {
         let mut delivered = false;
+        let mut failure = None;
         let root_pid = self.root.as_ref().map(|root| root.pid);
         if let Some(root) = &self.root
             && !root.reaped
         {
-            delivered |= signal_pidfd(&root.pidfd, libc::SIGKILL)?;
+            match signal_pidfd(&root.pidfd, libc::SIGKILL) {
+                Ok(sent) => delivered |= sent,
+                Err(code) => {
+                    failure.get_or_insert(code);
+                }
+            }
         }
         let children = direct_children(self.family_limit)?;
         if children.has_more {
@@ -531,11 +552,15 @@ impl Supervisor {
         }
         for child in children.children {
             if Some(child) != root_pid {
-                let descriptor = pidfd(child)?;
-                delivered |= signal_pidfd(&descriptor, libc::SIGKILL)?;
+                match pidfd(child).and_then(|descriptor| signal_pidfd(&descriptor, libc::SIGKILL)) {
+                    Ok(sent) => delivered |= sent,
+                    Err(code) => {
+                        failure.get_or_insert(code);
+                    }
+                }
             }
         }
-        Ok(delivered)
+        failure.map_or(Ok(delivered), Err)
     }
 
     fn read_input(&mut self) {
@@ -624,68 +649,106 @@ impl Supervisor {
     }
 
     fn observe_exec(&mut self) {
-        if self.phase == Phase::Absent {
+        if self.phase == Phase::Absent || self.exec_observation == ExecObservation::Complete {
             return;
         }
         let Some(root) = &self.root else {
             return;
         };
+        let descriptor = root.setup.as_raw_fd();
         let mut data = [0_u8; 5];
-        let count = unsafe { libc::read(root.setup.as_raw_fd(), data.as_mut_ptr().cast(), data.len()) };
-        if count > 0 {
-            self.error(ErrorCode::ExecFailed, false);
+        for _ in 0..8 {
+            let count = unsafe { libc::read(descriptor, data.as_mut_ptr().cast(), data.len()) };
+            if count < 0 {
+                match errno() {
+                    libc::EINTR => continue,
+                    libc::EAGAIN => return,
+                    _ => {
+                        self.exec_observation = ExecObservation::Complete;
+                        self.error(ErrorCode::IoFailure, true);
+                        return;
+                    }
+                }
+            }
+            self.exec_observation = ExecObservation::Complete;
+            if count > 0 {
+                self.error(ErrorCode::ExecFailed, false);
+            }
+            return;
+        }
+    }
+
+    fn admit_terminal(&mut self) {
+        if let Some(event) = &self.pending_terminal
+            && self.writer.queue(event.clone()).is_ok()
+        {
+            self.pending_terminal = None;
+            self.phase = Phase::Absent;
         }
     }
 
     fn tick_family(&mut self) -> Result<(), ErrorCode> {
+        if self.pending_terminal.is_some() {
+            self.admit_terminal();
+            return Ok(());
+        }
+        let mut failure = None;
         if self.phase == Phase::Draining {
-            self.hard_signal()?;
+            failure = self.hard_signal().err();
         }
         let children = direct_children(self.family_limit)?;
         if children.has_more {
             self.process_limit();
-            self.hard_signal()?;
+            if let Err(code) = self.hard_signal() {
+                failure.get_or_insert(code);
+            }
         }
         for child in &children.children {
-            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-            let result = unsafe {
-                libc::waitid(
-                    libc::P_PID,
-                    *child as libc::id_t,
-                    &mut info,
-                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT | libc::__WALL,
-                )
-            };
-            if result < 0 {
-                return Err(ErrorCode::IdentityUnknown);
-            }
-            if unsafe { info.si_pid() } == 0 {
-                continue;
-            }
-            if let Some(root) = self.root.as_mut().filter(|root| root.pid == *child) {
-                if root.status.is_none() && readable(&root.pidfd)? {
-                    let status = RootStatus::from_siginfo(&info)?;
-                    root.status = Some(status);
-                    if self.released {
-                        let _ = self.writer.queue(Event::RootExited {
-                            execution_id: self.execution.clone(),
-                            exit_code: status.code,
-                            signal: status.signal,
-                        });
-                    }
-                }
-            } else {
-                let descriptor = pidfd(*child)?;
-                if !readable(&descriptor)? {
-                    continue;
-                }
-                let mut status = 0;
-                let result = unsafe { libc::waitpid(*child, &mut status, libc::__WALL | libc::WNOHANG) };
-                if result == *child {
-                    self.reaped = self.reaped.saturating_add(1);
-                } else if result < 0 {
+            let observed = (|| {
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                let result = unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        *child as libc::id_t,
+                        &mut info,
+                        libc::WEXITED | libc::WNOHANG | libc::WNOWAIT | libc::__WALL,
+                    )
+                };
+                if result < 0 {
                     return Err(ErrorCode::IdentityUnknown);
                 }
+                if unsafe { info.si_pid() } == 0 {
+                    return Ok(());
+                }
+                if let Some(root) = self.root.as_mut().filter(|root| root.pid == *child) {
+                    if root.status.is_none() && readable(&root.pidfd)? {
+                        let status = RootStatus::from_siginfo(&info)?;
+                        root.status = Some(status);
+                        if self.released {
+                            let _ = self.writer.queue(Event::RootExited {
+                                execution_id: self.execution.clone(),
+                                exit_code: status.code,
+                                signal: status.signal,
+                            });
+                        }
+                    }
+                } else {
+                    let descriptor = pidfd(*child)?;
+                    if !readable(&descriptor)? {
+                        return Ok(());
+                    }
+                    let mut status = 0;
+                    let result = unsafe { libc::waitpid(*child, &mut status, libc::__WALL | libc::WNOHANG) };
+                    if result == *child {
+                        self.reaped = self.reaped.saturating_add(1);
+                    } else if result < 0 {
+                        return Err(ErrorCode::IdentityUnknown);
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(code) = observed {
+                failure.get_or_insert(code);
             }
         }
         let children = direct_children(self.family_limit)?;
@@ -698,10 +761,11 @@ impl Supervisor {
             let mut status = 0;
             let result = unsafe { libc::waitpid(root.pid, &mut status, libc::__WALL | libc::WNOHANG) };
             if result != root.pid || RootStatus::from_raw(status).is_none() {
-                return Err(ErrorCode::IdentityUnknown);
+                failure.get_or_insert(ErrorCode::IdentityUnknown);
+            } else {
+                root.reaped = true;
+                self.reaped = self.reaped.saturating_add(1);
             }
-            root.reaped = true;
-            self.reaped = self.reaped.saturating_add(1);
         }
         // Never reap an identity appearing after the snapshot without first pinning it.
         let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
@@ -713,6 +777,9 @@ impl Supervisor {
                 libc::WEXITED | libc::WNOHANG | libc::WNOWAIT | libc::__WALL,
             )
         };
+        if let Some(code) = failure {
+            return Err(code);
+        }
         if result == 0 {
             return Ok(());
         }
@@ -728,6 +795,10 @@ impl Supervisor {
             return Ok(());
         }
         self.observe_exec();
+        if self.root.is_some() && self.exec_observation == ExecObservation::Pending {
+            self.exec_observation = ExecObservation::Complete;
+            self.error(ErrorCode::IoFailure, true);
+        }
         self.read_output(Stream::Stdout);
         self.read_output(Stream::Stderr);
         if let Some(root) = &mut self.root {
@@ -739,9 +810,8 @@ impl Supervisor {
             }
         }
         let status = self.root.as_ref().and_then(|root| root.status);
-        self.phase = Phase::Absent;
         self.terminal_at = Some(Instant::now());
-        self.writer.queue(Event::FamilyAbsent {
+        self.pending_terminal = Some(Event::FamilyAbsent {
             execution_id: self.execution.clone(),
             released: self.released.into(),
             root_exit_code: self.released.then_some(status).flatten().and_then(|status| status.code),
@@ -755,7 +825,8 @@ impl Supervisor {
             reaped_count: self.reaped,
             stdout_truncated: self.writer.stdout_truncated.into(),
             stderr_truncated: self.writer.stderr_truncated.into(),
-        })?;
+        });
+        self.admit_terminal();
         Ok(())
     }
 
@@ -781,11 +852,12 @@ impl Supervisor {
                 self.input_closed = true;
                 self.begin_drain();
             }
-            if !self.input_closed {
+            if !self.input_closed && self.pending_terminal.is_none() {
                 self.read_input();
             }
             let signal = EXTERNAL_SIGNAL.swap(0, Ordering::Relaxed);
             if signal != 0
+                && self.pending_terminal.is_none()
                 && let Err(code) = self.soft_signal(signal)
             {
                 self.error(code, true);
@@ -794,11 +866,17 @@ impl Supervisor {
                 self.writer.flush();
                 return if self.input_closed { 0 } else { 64 };
             }
-            if self.phase == Phase::Held && self.release_deadline.is_some_and(|time| Instant::now() >= time) {
+            if self.pending_terminal.is_none()
+                && self.phase == Phase::Held
+                && self.release_deadline.is_some_and(|time| Instant::now() >= time)
+            {
                 self.timed_out = true;
                 self.begin_drain();
             }
-            if self.phase == Phase::Running && self.command_deadline.is_some_and(|time| Instant::now() >= time) {
+            if self.pending_terminal.is_none()
+                && self.phase == Phase::Running
+                && self.command_deadline.is_some_and(|time| Instant::now() >= time)
+            {
                 self.timed_out = true;
                 self.begin_drain();
             }
@@ -811,7 +889,8 @@ impl Supervisor {
                 self.error(code, true);
                 self.begin_drain();
             }
-            if self.phase == Phase::Draining
+            if self.pending_terminal.is_none()
+                && self.phase == Phase::Draining
                 && !self.cleanup_notice
                 && self
                     .cleanup_started
@@ -821,6 +900,9 @@ impl Supervisor {
                 self.error(ErrorCode::CleanupPending, true);
             }
             self.writer.flush();
+            if self.pending_terminal.is_some() && self.terminal_at.is_some_and(|time| time.elapsed() >= ACK_TIMEOUT) {
+                return 74;
+            }
             if self.phase == Phase::Absent
                 && (self.acknowledged
                     || self.input_closed
@@ -835,7 +917,11 @@ impl Supervisor {
             }
             let mut polls = [
                 libc::pollfd {
-                    fd: if self.input_closed { -1 } else { 0 },
+                    fd: if self.input_closed || self.pending_terminal.is_some() {
+                        -1
+                    } else {
+                        0
+                    },
                     events: libc::POLLIN,
                     revents: 0,
                 },
@@ -902,8 +988,13 @@ pub fn run(execution: ExecutionId, family_limit: usize) -> i32 {
     supervisor.start(environment)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 mod tests;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 mod state_tests;
+
+#[cfg(feature = "test-support")]
+pub(crate) fn run_kernel_worker() -> i32 {
+    tests::worker_main()
+}

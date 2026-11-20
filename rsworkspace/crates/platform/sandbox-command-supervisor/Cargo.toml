@@ -14,15 +14,17 @@ trogon-std = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tempfile = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
 
 [dev-dependencies]
+sandbox-command-supervisor = { path = ".", features = ["test-support"] }
 tempfile = { workspace = true }
 
 [features]
-test-support = []
+test-support = ["dep:tempfile"]
 
 [[bin]]
 name = "sandbox-command-supervisor"
@@ -42,3 +44,9 @@ required-features = ["test-support"]
 name = "supervisor-overflow-fixture"
 path = "src/bin/overflow_fixture.rs"
 required-features = ["test-support"]
+
+[[bin]]
+name = "supervisor-kernel-test-worker"
+path = "src/bin/kernel_test_worker.rs"
+required-features = ["test-support"]
+test = false

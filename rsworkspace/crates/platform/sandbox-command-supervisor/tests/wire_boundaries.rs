@@ -3,9 +3,9 @@ use std::error::Error;
 use std::io::{self, BufReader, Cursor, Read, Write};
 
 use sandbox_command_supervisor::protocol::{
-    Command, CommandWire, Event, ExecutionId, MAX_ARGUMENT_BYTES, MAX_COMMAND_TIMEOUT_MS, MAX_ENV_BYTES,
-    MAX_RELEASE_TIMEOUT_MS, ProtocolError, VERSION, decode_command, decode_event, encode_event, read_event,
-    write_command,
+    Cancellation, Certainty, Command, CommandWire, Delivery, Event, ExecutionId, MAX_ARGUMENT_BYTES,
+    MAX_COMMAND_TIMEOUT_MS, MAX_ENV_BYTES, MAX_RELEASE_TIMEOUT_MS, PlatformSupport, ProtocolError, ReleaseState,
+    TimeoutState, Truncation, VERSION, decode_command, decode_event, encode_event, read_event, write_command,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -146,9 +146,10 @@ fn signal_bounds_and_all_command_identities_survive_conversion() -> TestResult {
     let encoded = serde_json::to_vec(&init()?)?;
     let command = decode_command(&encoded)?;
     assert_eq!(command.execution_id().as_str(), "boundary");
-    if let Command::Init { version, .. } = command {
-        assert_eq!(version.get(), VERSION);
-    }
+    let Command::Init { version, .. } = command else {
+        return Err(io::Error::other("Init must decode to the typed initialization command").into());
+    };
+    assert_eq!(version.get(), VERSION);
     assert!(decode_command(br#"{"kind":"release","execution_id":""}"#).is_err());
     assert!(decode_command(br#"{"kind":"unknown","execution_id":"boundary"}"#).is_err());
     Ok(())
@@ -156,15 +157,41 @@ fn signal_bounds_and_all_command_identities_survive_conversion() -> TestResult {
 
 #[test]
 fn event_flags_retain_boolean_json_and_hello_environment_is_bounded() -> TestResult {
-    for bytes in [
+    for (index, bytes) in [
         br#"{"kind":"probe","version":1,"supported":true}"#.as_slice(),
         br#"{"kind":"probe","version":1,"supported":false}"#,
         br#"{"kind":"signal_result","execution_id":"boundary","request_id":1,"signal":15,"delivered":true}"#,
         br#"{"kind":"error","execution_id":"boundary","code":"invalid_command","uncertain":false}"#,
         br#"{"kind":"family_absent","execution_id":"boundary","released":true,"root_exit_code":0,"root_signal":null,"timed_out":false,"canceled":false,"reaped_count":1,"stdout_truncated":false,"stderr_truncated":true}"#,
         br#"{"kind":"family_absent","execution_id":"boundary","released":false,"root_exit_code":null,"root_signal":9,"timed_out":true,"canceled":true,"reaped_count":1,"stdout_truncated":true,"stderr_truncated":false}"#,
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let event = decode_event(bytes)?;
+        assert!(matches!(
+            (&event, index),
+            (Event::Probe { supported: PlatformSupport::Supported, .. }, 0)
+                | (Event::Probe { supported: PlatformSupport::Unsupported, .. }, 1)
+                | (Event::SignalResult { delivered: Delivery::Delivered, .. }, 2)
+                | (Event::Error { uncertain: Certainty::Certain, .. }, 3)
+                | (Event::FamilyAbsent {
+                    released: ReleaseState::Released,
+                    timed_out: TimeoutState::WithinDeadline,
+                    canceled: Cancellation::Active,
+                    stdout_truncated: Truncation::Complete,
+                    stderr_truncated: Truncation::Truncated,
+                    ..
+                }, 4)
+                | (Event::FamilyAbsent {
+                    released: ReleaseState::Held,
+                    timed_out: TimeoutState::TimedOut,
+                    canceled: Cancellation::Canceled,
+                    stdout_truncated: Truncation::Truncated,
+                    stderr_truncated: Truncation::Complete,
+                    ..
+                }, 5)
+        ));
         let encoded = encode_event(&event)?;
         assert_eq!(serde_json::from_slice::<serde_json::Value>(bytes)?, serde_json::from_slice::<serde_json::Value>(&encoded)?);
     }

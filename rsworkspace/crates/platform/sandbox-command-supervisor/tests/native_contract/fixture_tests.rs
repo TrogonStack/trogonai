@@ -10,34 +10,89 @@ struct CapturedChild(Option<Child>);
 impl Drop for CapturedChild {
     fn drop(&mut self) {
         if let Some(child) = &mut self.0 {
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
             let _ = child.kill();
             let _ = child.wait();
         }
     }
 }
 
+fn drain_capture(pipe: &mut impl std::io::Read, bytes: &mut Vec<u8>) -> io::Result<bool> {
+    let mut chunk = [0_u8; 8192];
+    for _ in 0..16 {
+        match pipe.read(&mut chunk) {
+            Ok(0) => return Ok(true),
+            Ok(size) => {
+                if bytes.len().saturating_add(size) > 1024 * 1024 {
+                    return Err(io::Error::other("captured output exceeds its bound"));
+                }
+                bytes.extend_from_slice(&chunk[..size]);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
+}
+
 fn capture(command: &mut Process) -> io::Result<Output> {
-    let child = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let child = command
+        .process_group(0)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
     let mut guard = CapturedChild(Some(child));
+    let child = guard
+        .0
+        .as_mut()
+        .ok_or_else(|| io::Error::other("missing captured child"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("missing captured stdout"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::other("missing captured stderr"))?;
+    for descriptor in [stdout.as_raw_fd(), stderr.as_raw_fd()] {
+        let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };
+        if flags < 0 || unsafe { libc::fcntl(descriptor, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
     let until = Instant::now() + WAIT;
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let mut status = None;
     loop {
-        let child = guard
-            .0
-            .as_mut()
-            .ok_or_else(|| io::Error::other("missing captured child"))?;
-        if child.try_wait()?.is_some() {
-            break;
+        let stdout_eof = drain_capture(&mut stdout, &mut output)?;
+        let stderr_eof = drain_capture(&mut stderr, &mut errors)?;
+        if stdout_eof && stderr_eof && status.is_none() {
+            status = guard
+                .0
+                .as_mut()
+                .ok_or_else(|| io::Error::other("missing captured child"))?
+                .try_wait()?;
+        }
+        if stdout_eof
+            && stderr_eof
+            && let Some(status) = status
+        {
+            guard.0.take();
+            return Ok(Output {
+                status,
+                stdout: output,
+                stderr: errors,
+            });
         }
         if Instant::now() >= until {
             return Err(io::Error::from(io::ErrorKind::TimedOut));
         }
         std::thread::sleep(Duration::from_millis(5));
     }
-    guard
-        .0
-        .take()
-        .ok_or_else(|| io::Error::other("missing captured child"))?
-        .wait_with_output()
 }
 
 #[test]
@@ -232,5 +287,17 @@ fn fork_refusal_during_full_natural_churn_does_not_lose_family_cleanup() -> Resu
     assert!(matches!(report.first[1].action, Action::Refuse(libc::EAGAIN)));
     assert!(matches!(report.first[2].action, Action::Continue));
     sentinel.assert_alive();
+    Ok(())
+}
+
+#[test]
+fn capture_deadline_includes_descendants_holding_output_pipes() -> Result<(), Box<dyn std::error::Error>> {
+    let mut command = Process::new("/bin/sh");
+    command.args(["-c", &format!("sleep {} & exit 0", WAIT.as_secs() + 1)]);
+    let result = capture(&mut command);
+    assert!(
+        result.is_err_and(|error| error.kind() == io::ErrorKind::TimedOut),
+        "exited direct child must not remove the output EOF deadline"
+    );
     Ok(())
 }
