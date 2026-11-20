@@ -1,3 +1,7 @@
+mod acp_subject_namespace;
+
+pub(crate) use acp_subject_namespace::AcpSubjectNamespace;
+
 pub mod client_ops;
 pub mod commands;
 pub mod global;
