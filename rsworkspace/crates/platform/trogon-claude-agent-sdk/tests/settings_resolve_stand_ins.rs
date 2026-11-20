@@ -2,14 +2,16 @@
 //! taken, so each stands as a code point of plane 15 or 16, against what the pinned TypeScript `resolveSettings` and
 //! the pinned Python `claude_agent_sdk` give: each counts as the one UTF-16 unit of its surrogate in every length the
 //! schema checks and every depth. A zod length check counts a character past the Basic Multilingual Plane as one code
-//! point and a plain `e.length` check as two units. The goldens come from `settings_stand_in_goldens.py`.
+//! point and a plain `e.length` check as two units. The goldens come from `settings_stand_in_goldens.py`. A document
+//! nested `SETTINGS_DEPTH_BOUND` levels or deeper fails the TypeScript resolve with `MaximumCallStack` whatever Node
+//! answered, so the goldens that deep carry Node's answer for information only.
 
 use std::thread;
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use trogon_claude_agent_sdk::{
-    DeepJsonValue, NodeStack, PythonCStack, ResolveSettingsError, ResolveSettingsOptions, ResolverState,
+    DeepJsonValue, PythonCStack, ResolveSettingsError, ResolveSettingsOptions, ResolverState, SETTINGS_DEPTH_BOUND,
     SettingsDialect, js_stringify, python_json_dumps, resolve_python_settings_with_state,
     resolve_settings_in_dialect_with_state, resolve_settings_json_with_state,
 };
@@ -30,6 +32,10 @@ const DEEP_STACK_BYTES: usize = 256 * 1024 * 1024;
 const CASES: usize = 13;
 
 const DEPTH_CASES: usize = 6;
+
+/// The depth cases of the goldens that are as deep as the bound, and the ones below it.
+const DEPTH_ABOVE: usize = 6;
+const DEPTH_BELOW: usize = 0;
 
 /// The text in a settings file of the goldens that stands for every private-use code point of the Basic
 /// Multilingual Plane.
@@ -158,13 +164,54 @@ fn approximated(text: &str) -> String {
 
 /// The whole result of the TypeScript dialect as `JSON.stringify` prints it, or the error `resolveSettings` rejects
 /// with.
-fn json_outcome(files: &[(String, String)], stack: NodeStack) -> Result<(Option<String>, Value), Failure> {
-    let options: ResolveSettingsOptions = serde_json::from_value(json!({}))?;
-    let state = ResolverState::new().with_node_stack(stack);
-    match resolve_settings_json_with_state(&host(files)?, &options, &state) {
+fn json_outcome(files: &[(String, String)]) -> Result<(Option<String>, Value), Failure> {
+    match resolve_json(files)? {
         Ok(text) => Ok((Some(text), Value::Null)),
         Err(error) => Ok((None, rejection(error)?)),
     }
+}
+
+/// The whole result of the TypeScript dialect as `JSON.stringify` prints it, or the error of the engine.
+fn resolve_json(files: &[(String, String)]) -> Result<Result<String, ResolveSettingsError>, Failure> {
+    let options: ResolveSettingsOptions = serde_json::from_value(json!({}))?;
+    Ok(resolve_settings_json_with_state(
+        &host(files)?,
+        &options,
+        &ResolverState::new(),
+    ))
+}
+
+/// The depth of the deepest file of a case, which is below the bound where `serde_json` can read every file.
+/// The deepest nesting of arrays and objects in any of `files`, read from the text so an escaped lone surrogate,
+/// which `serde_json` rejects, is counted as `JSON.parse` reads it.
+fn case_depth(files: &[(String, String)]) -> usize {
+    files.iter().map(|(_, text)| text_depth(text)).max().unwrap_or(0)
+}
+
+fn text_depth(text: &str) -> usize {
+    let (mut open, mut deepest) = (0usize, 0usize);
+    let (mut in_string, mut escaped) = (false, false);
+    for byte in text.bytes() {
+        if in_string {
+            match (escaped, byte) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                open += 1;
+                deepest = deepest.max(open);
+            }
+            b'}' | b']' => open = open.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest
 }
 
 /// The `effective` member of the typed result in `dialect`, printed by `JSON.stringify`, or the error.
@@ -200,10 +247,12 @@ fn a_stand_in_past_the_basic_multilingual_plane_resolves_as_resolve_settings_doe
             name.to_owned(),
             (entry["result"].as_str().map(str::to_owned), entry["error"].clone()),
         ));
-        actual.push((
-            name.to_owned(),
-            json_outcome(&case_files(entry)?, NodeStack::NODE_24_DARWIN_ARM64)?,
-        ));
+        let files = case_files(entry)?;
+        assert!(
+            case_depth(&files) < SETTINGS_DEPTH_BOUND,
+            "case {name} is as deep as the bound"
+        );
+        actual.push((name.to_owned(), json_outcome(&files)?));
     }
     assert_eq!((entries.len(), actual), (CASES, expected));
     Ok(())
@@ -248,46 +297,52 @@ fn the_typed_result_counts_a_stand_in_as_one_unit_in_both_dialects() -> TestResu
     Ok(())
 }
 
-/// A file nested one level under the depth Node reads or merges with lone surrogates in its leaf reads, merges or
-/// rejects as one holding `null` does: a stand-in moves no depth boundary.
+/// A file whose depth is as deep as the bound fails the resolve with `MaximumCallStack` and one a level shallower
+/// resolves, as one holding `null` does: a stand-in moves no depth boundary. The goldens that are as deep as the bound
+/// carry Node's answer, shown only in the failure message.
 #[test]
 fn a_stand_in_past_the_basic_multilingual_plane_moves_no_typescript_depth_boundary() -> TestResult {
     let worker = thread::Builder::new()
         .stack_size(DEEP_STACK_BYTES)
         .spawn(|| -> TestResult {
             let goldens = goldens()?;
-            let startup = goldens["startup_bytes"]
-                .as_u64()
-                .and_then(|bytes| usize::try_from(bytes).ok())
-                .ok_or("the goldens name no startup")?;
-            assert_eq!(
-                (
-                    goldens["node"].as_str(),
-                    NodeStack::NODE_24_DARWIN_ARM64.with_startup_bytes(startup)
-                ),
-                (Some("v24.13.1 darwin arm64"), NodeStack::NODE_24_DARWIN_ARM64)
-            );
             let entries = goldens["depth"].as_array().ok_or("the goldens have no depth cases")?;
-            let mut expected = Vec::new();
-            let mut actual = Vec::new();
+            let (mut below, mut above) = (0, 0);
             for entry in entries {
                 let name = entry["name"].as_str().ok_or("a depth case has no name")?;
-                expected.push((
-                    name.to_owned(),
-                    entry["effective"].as_str().map(str::to_owned),
-                    entry["error"].clone(),
-                ));
-                let (result, error) = json_outcome(&depth_files(entry)?, NodeStack::NODE_24_DARWIN_ARM64)?;
-                let effective = result
-                    .map(|result| {
-                        effective_of(&result)
-                            .map(str::to_owned)
-                            .ok_or("a result has no effective member")
-                    })
-                    .transpose()?;
-                actual.push((name.to_owned(), effective, error));
+                let shape = &entry["files"][0];
+                let depth = count(shape, 1)?
+                    .saturating_add(count(shape, 2)?)
+                    .saturating_add(count(shape, 3)?);
+                let files = depth_files(entry)?;
+                if depth < SETTINGS_DEPTH_BOUND {
+                    below = usize::saturating_add(below, 1);
+                    let (result, error) = json_outcome(&files)?;
+                    let effective = result.and_then(|result| effective_of(&result).map(str::to_owned));
+                    assert_eq!(
+                        (effective, error),
+                        (entry["effective"].as_str().map(str::to_owned), entry["error"].clone()),
+                        "depth case {name}"
+                    );
+                } else {
+                    above = usize::saturating_add(above, 1);
+                    assert!(
+                        matches!(resolve_json(&files)?, Err(ResolveSettingsError::MaximumCallStack)),
+                        "depth case {name} at depth {depth} did not fail with MaximumCallStack (node answered {}, {})",
+                        entry["effective"],
+                        entry["error"]
+                    );
+                }
             }
-            assert_eq!((entries.len(), actual), (DEPTH_CASES, expected));
+            assert_eq!((entries.len(), below, above), (DEPTH_CASES, DEPTH_BELOW, DEPTH_ABOVE));
+            let within = nested(SETTINGS_DEPTH_BOUND.saturating_sub(1), 0, 0, LEAF);
+            let at_bound = nested(SETTINGS_DEPTH_BOUND, 0, 0, LEAF);
+            let user = |text: String| vec![("userSettings".to_owned(), text)];
+            assert!(resolve_json(&user(within))?.is_ok());
+            assert!(matches!(
+                resolve_json(&user(at_bound))?,
+                Err(ResolveSettingsError::MaximumCallStack)
+            ));
             Ok(())
         })?;
     worker.join().map_err(|_| "the deep settings worker panicked")?

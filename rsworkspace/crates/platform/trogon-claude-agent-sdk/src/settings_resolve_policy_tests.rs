@@ -1,7 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::{
-    cell::Cell,
     io,
     path::{Path, PathBuf},
 };
@@ -9,19 +8,21 @@ use std::{
 use serde_json::{Value, json};
 
 use super::{
-    Held, held_by_other_tier, pin_machine_login, read_policy_file, restrictive_union_env, same_value, select_admin,
+    Held, held_by_other_tier, pin_machine_login, read_managed_file, read_policy_file, restrictive_union_env,
+    same_value, select_admin,
 };
 use crate::{
-    adapters::ReadFile,
+    adapters::{NativeHost, ReadFile},
     constants::{
         MCP_SERVER_ALLOW_LIST_KEY, PARENT_MANAGED_FILE, REGISTRY_USER_FILE, REMOTE_MANAGED_FILE,
         SETTINGS_FILE_MAX_BYTES,
     },
-    node_merge_warmth::MergeWarmth,
-    node_stack::NodeStack,
     settings_dialect::SettingsDialect,
     settings_managed_reader::{ManagedReader, ParsedFiles},
+    settings_resolve_error::ResolveSettingsError,
+    settings_resolve_platform::MdmEvaluation,
     settings_resolve_platform_kind::PlatformKind,
+    settings_resolve_state::ResolverState,
     settings_resolve_tier::{LoadState, TierRead},
     settings_resolve_values::SettingsMap,
 };
@@ -58,14 +59,54 @@ impl ReadFile for OneFile {
     }
 }
 
-fn read(answer: Answer) -> (TierRead, bool) {
+fn read_in(dialect: SettingsDialect, answer: Answer) -> Result<(TierRead, bool), ResolveSettingsError> {
     let parsed = ParsedFiles::default();
-    let warmth = Cell::new(MergeWarmth::default());
     read_policy_file(
         &OneFile(answer),
         &PathBuf::from("/etc/claude-code/managed-settings.json"),
-        ManagedReader::new(SettingsDialect::Python, NodeStack::default(), &parsed, &warmth),
+        ManagedReader::new(dialect, &parsed),
     )
+}
+
+fn read(answer: Answer) -> (TierRead, bool) {
+    read_in(SettingsDialect::Python, answer).expect("reads")
+}
+
+#[test]
+fn a_typescript_managed_document_nested_at_the_bound_fails_the_read() {
+    let depth = crate::SETTINGS_DEPTH_BOUND;
+    let text = format!("{}null{}", "{\"x\":".repeat(depth), "}".repeat(depth));
+    let error = read_in(SettingsDialect::TypeScript, Answer::Bytes(text.into_bytes())).err();
+    assert!(matches!(error, Some(ResolveSettingsError::MaximumCallStack)));
+}
+
+/// Registry documents a session holds may only restrict, so the first pass merges none of them and the restricted
+/// pass merges them all: a merge only that pass makes throws there. A WSL machine policy that did not load keeps the
+/// managed folder unread, so the host is never asked for a file.
+#[test]
+fn a_held_document_whose_restricted_merge_throws_rejects_the_managed_file_tier() {
+    let mdm = MdmEvaluation {
+        mdm: TierRead::did_not_load(false),
+        hkcu: SettingsMap::new(),
+        wsl_inherits: false,
+        plist: None,
+        unread_without_errno: false,
+        blocking_error: false,
+        where_asked: None,
+        held_documents: vec![
+            loaded(Some(json!({"permissions": {"deny": ["Read(./secrets/**)"]}})), true),
+            loaded(Some(json!({"permissions": {"deny": {"length": -1}}})), true),
+        ],
+    };
+    let parsed = ParsedFiles::default();
+    let read = read_managed_file(
+        &NativeHost,
+        &ResolverState::new(),
+        PlatformKind::Wsl,
+        &mdm,
+        ManagedReader::new(SettingsDialect::TypeScript, &parsed),
+    );
+    assert!(matches!(read.err(), Some(ResolveSettingsError::InvalidArrayLength)));
 }
 
 #[test]

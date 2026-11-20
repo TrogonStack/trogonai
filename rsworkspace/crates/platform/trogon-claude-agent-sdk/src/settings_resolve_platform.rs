@@ -19,6 +19,7 @@ use crate::{
         PROC_VERSION_PATH, REGISTRY_MACHINE_FILE, REGISTRY_MACHINE_KEY, REGISTRY_NOT_FOUND_TEXT, REGISTRY_USER_FILE,
         REGISTRY_USER_KEY, REGISTRY_VALUE_NAME, WINDOWS_MANAGED_DIRECTORY, WSL_MANAGED_DIRECTORY, WSL_REGISTRY_TOOL,
     },
+    settings_depth::check_text,
     settings_resolve_platform_kind::PlatformKind,
     settings_resolve_tier::{LoadState, TierRead, parse_policy_answer},
     settings_resolve_values::SettingsMap,
@@ -158,6 +159,24 @@ pub(crate) struct MdmRead {
     /// Milliseconds the programs kept the read waiting: the slowest of the reads that ran at once, each one the
     /// sum of the programs it ran one after the other.
     pub(crate) elapsed_ms: u128,
+}
+
+impl MdmRead {
+    /// Whether any policy text the readers produced (a property list, or the `Settings` value of a registry key) is an
+    /// object nested [`SETTINGS_DEPTH_BOUND`](crate::SETTINGS_DEPTH_BOUND) levels or deeper, which the TypeScript
+    /// dialect fails the resolve on whichever document an evaluation would have read first.
+    pub(crate) fn too_deep(&self) -> bool {
+        let plists = self
+            .plists
+            .iter()
+            .flatten()
+            .filter_map(|document| document.stdout.clone());
+        let registry = [&self.hklm_stdout, &self.hkcu_stdout]
+            .into_iter()
+            .flatten()
+            .filter_map(|stdout| registry_value(stdout));
+        plists.chain(registry).any(|text| check_text(&text).is_err())
+    }
 }
 
 /// Runs one read per input at once, as `Promise.all` upstream does, so the slowest read sets how long they take.
