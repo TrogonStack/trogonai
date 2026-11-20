@@ -2639,3 +2639,17 @@ pub(crate) const UTF16LE_BOM: &[u8] = b"\xff\xfe";
 
 /// The UTF-8 byte order mark the `utf-8-sig` codec drops from the start of a Python settings file.
 pub(crate) const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
+
+/// The nesting depth at which a settings document of the TypeScript dialect fails the resolve with
+/// [`MaximumCallStack`](crate::ResolveSettingsError::MaximumCallStack): a document nested this deep or deeper fails, and one nested less
+/// resolves as Node resolves it.
+///
+/// The depth of a document counts the arrays and objects around its deepest value: a scalar is 0, `{}` and `[]` are
+/// 1, and `{"a": {}}` is 2.
+///
+/// The bound is the largest multiple of 100 that is at most half the smallest margin any recorded Node run leaves.
+/// That run is Windows x64 on Node v24.13.1 (CI run 44055880748, job 50), the `adv:admin:arrays` unit with a plain
+/// and a `__proto__` key: Node's reference answer holds up to level 1185, a document of depth 1190, and the first
+/// answer that differs is at level 1186. Half of 1190 is 595, so the bound is 500. Every other recorded run keeps its
+/// reference answer to a greater depth.
+pub const SETTINGS_DEPTH_BOUND: usize = 500;
