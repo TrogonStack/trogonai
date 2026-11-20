@@ -65,6 +65,34 @@ impl JetStreamContext for NatsJetStreamClient {
         self.context.update_stream(&reconciled).await?;
         Ok(())
     }
+
+    async fn create_or_reconcile_stream_if_owned<S: Into<stream::Config> + Send>(
+        &self,
+        desired: S,
+        owned: &[ProvisionedStreamField],
+        subject_namespace: &str,
+    ) -> Result<bool, async_nats::jetstream::context::CreateStreamError> {
+        let desired = desired.into();
+        let Ok(stream) = self.context.get_stream(&desired.name).await else {
+            self.context.create_stream(desired).await?;
+            return Ok(true);
+        };
+        let live = &stream.cached_info().config;
+        if live.subjects.is_empty()
+            || !live
+                .subjects
+                .iter()
+                .all(|subject| subject.starts_with(subject_namespace))
+        {
+            return Ok(false);
+        }
+        let reconciled = reconciled_stream_config(live, &desired, owned);
+        if reconciled == *live {
+            return Ok(true);
+        }
+        self.context.update_stream(&reconciled).await?;
+        Ok(true)
+    }
 }
 
 pub type PublishError = async_nats::jetstream::context::PublishError;
