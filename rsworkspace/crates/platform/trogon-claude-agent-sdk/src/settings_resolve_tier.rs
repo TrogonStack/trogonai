@@ -169,3 +169,7 @@ fn strip_enabling_plugins(document: &mut SettingsMap) {
         document.insert("enabledPlugins".to_owned(), Value::Object(kept));
     }
 }
+
+#[cfg(test)]
+#[path = "settings_resolve_tier_tests.rs"]
+mod tests;
