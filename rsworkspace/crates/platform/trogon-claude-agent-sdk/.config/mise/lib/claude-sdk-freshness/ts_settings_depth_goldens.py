@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """Records how the pinned TypeScript `resolveSettings` reads and merges deeply nested settings files on Node, so
-the stack profile the TypeScript dialect of the settings engine follows is checked against Node and the pinned
+the depth bound of the TypeScript dialect of the settings engine is checked against Node and the pinned
 package instead of against a reading of the bundle.
 
 usage: python3 -I ts_settings_depth_goldens.py NODE PACKAGE_DIR OUT_FILE [--check | --observe RUNS HOST]
 
 NODE runs `resolve_settings_oracle.mjs` against PACKAGE_DIR, the unpacked pinned `@anthropic-ai/claude-agent-sdk`.
 The stack V8 has, and so every boundary here, depends on the Node release and the platform: `PROFILES` holds the
-boundaries of each platform a `NodeStack` profile names, and the recorder records the cases of the platform it runs
+boundaries Node showed on each platform, and the recorder records the cases of the platform it runs
 on, so record each golden file with Node 24.13.1 on its own platform (the linux ones in the `node:24.13.1-bookworm`
 image). On macOS the stack also depends on how much of it the command line and environment fill when Node starts:
 each argument and each `NAME=value` entry takes its UTF-8 length plus 9 bytes, and the path of the executable once
-more. Node runs here with only a `PAD` variable, sized so they fill `STARTUP_BYTES`, the startup `NodeStack` assumes
-by default. On Linux V8 sets its limit below them, so they move no boundary.
+more. Node runs here with only a `PAD` variable, sized so they fill `STARTUP_BYTES`, the startup the macOS goldens were
+recorded with. On Linux V8 sets its limit below them, so they move no boundary.
 
-A profile names a boundary by the last level on its near side, and the cases record that level and the next. V8
+A `PROFILES` entry names a boundary by the last level on its near side, and the cases record that level and the next. V8
 compiles functions on background threads and installs the code at times that vary from run to run, which moves where
-a deep merge runs out. `NodeStack` assumes no background compile lands while a merge runs, so each case records what
+a deep merge runs out. the goldens assume no background compile lands while a merge runs, so each case records what
 Node answers with `REFERENCE_FLAGS`, which keep every function in the interpreter, and the recorder stops on any case
 where Node with `CROSS_CHECK_FLAGS`, which compile on the main thread only, answers otherwise. `flags` and
 `cross_check_flags` hold them, and `node` the Node release, platform and machine, so each golden can be recorded
@@ -70,7 +70,7 @@ HELD_TWICE, ARRAY_LIKE = '"a":[1],"b":[1],', '"a":{"length":1},"b":{"length":1},
 
 
 def levels(level):
-    """A profile names a boundary by the last level on its near side: the cases record it and the next."""
+    """A `PROFILES` entry names a boundary by the last level on its near side: the cases record it and the next."""
     return [level, level + 1]
 
 
