@@ -81,6 +81,15 @@ class BehaviorTests(unittest.TestCase):
                          row(row_id, gate_z.RUST_ADAPTATION, gate_z.DEFECT_REASON + " More text."))
         self.assertEqual(gate_z.behavior_gaps(rows), [f"{row_id}.decision"] * 3)
 
+    def test_the_depth_row_passes_with_the_owner_reason_and_only_with_it(self):
+        row_id = "r33-typescript-settings-file-depth"
+        passing = behaviors(row(row_id, gate_z.RUST_ADAPTATION, "Rust fails at 500. " + gate_z.DEPTH_REASON))
+        self.assertEqual(gate_z.behavior_gaps(passing), [])
+        failing = behaviors(row(row_id, gate_z.RUST_ADAPTATION, "Rust fails at 500."),
+                            row(row_id, gate_z.RUST_ADAPTATION, gate_z.DEPTH_REASON + " More text."),
+                            row("r34-other", gate_z.RUST_ADAPTATION, gate_z.DEPTH_REASON))
+        self.assertEqual(gate_z.behavior_gaps(failing), [f"{row_id}.decision", f"{row_id}.decision", "r34-other.decision"])
+
     def test_the_defect_reason_does_not_admit_any_other_row(self):
         ids = ("m18-python-system-proxy", "m17-python-system-proxy-undefined-reads", "m19-python-tls-hello-retry-groups")
         rows = behaviors(*(row(row_id, gate_z.RUST_ADAPTATION, gate_z.DEFECT_REASON) for row_id in ids))

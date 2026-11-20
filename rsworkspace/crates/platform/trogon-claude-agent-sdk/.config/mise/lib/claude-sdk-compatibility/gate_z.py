@@ -18,6 +18,11 @@ DEFECT_REASON = (
     "Upstream here is a defect, not a contract: CPython _scproxy aborts the interpreter with an NSException on macOS and "
     "winreg Reg2Py reads uninitialized memory on Windows, so Rust reads the values safely instead."
 )
+DEPTH_ROWS = frozenset(("r33-typescript-settings-file-depth",))
+DEPTH_REASON = (
+    "The owner chose one fixed depth bound over the depth V8 happens to reach, which varies with the compile state, so "
+    "the difference is accepted."
+)
 OPENSSL_CRATES = frozenset(("openssl", "openssl-sys", "openssl-src", "native-tls"))
 SDK_PACKAGE = "trogon-claude-agent-sdk"
 
@@ -30,11 +35,14 @@ def unsupported_features(mapping):
 
 def _accepted_adaptation(row_id, reason):
     # Only the TLS rows the owner accepted under ADR 0015 may differ, plus the rows whose upstream behavior is a crash or
-    # an undefined read, which Rust does not copy. Each must give the owner's reason for it.
+    # an undefined read, which Rust does not copy, plus the settings depth row, whose bound the owner fixed. Each must give
+    # the owner's reason for it.
     if TLS_ROWS.fullmatch(row_id) is not None:
         return reason.endswith(TLS_REASON)
     if row_id in DEFECT_ROWS:
         return reason.endswith(DEFECT_REASON)
+    if row_id in DEPTH_ROWS:
+        return reason.endswith(DEPTH_REASON)
     return False
 
 
