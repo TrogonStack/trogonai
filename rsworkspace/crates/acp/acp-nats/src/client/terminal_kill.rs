@@ -23,10 +23,11 @@ fn invalid_params_error(message: impl Into<String>) -> TerminalKillError {
     ))
 }
 
-pub fn error_code_and_message(e: &TerminalKillError) -> (ErrorCode, String) {
-    match e {
-        TerminalKillError::InvalidParams(inner) => (inner.code, inner.message.clone()),
-        TerminalKillError::ClientError(inner) => (inner.code, inner.message.clone()),
+impl From<&TerminalKillError> for agent_client_protocol::Error {
+    fn from(error: &TerminalKillError) -> Self {
+        match error {
+            TerminalKillError::InvalidParams(inner) | TerminalKillError::ClientError(inner) => inner.clone(),
+        }
     }
 }
 
@@ -56,13 +57,13 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
             rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "terminal_kill reply").await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let error = agent_client_protocol::Error::from(&e);
             warn!(
                 error = %e,
                 session_id = %expected_session_id,
                 "Failed to handle terminal/kill"
             );
-            rpc_reply::publish_error_reply(nats, reply_to, response_id, code, &message, "terminal_kill error reply")
+            rpc_reply::publish_agent_error_reply(nats, reply_to, response_id, &error, "terminal_kill error reply")
                 .await;
         }
     }
