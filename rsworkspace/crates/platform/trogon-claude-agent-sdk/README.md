@@ -972,35 +972,20 @@ Each hole or `undefined` element prints as `null`; a `length` that is no valid a
 rejects with `RangeError` (`ResolveSettingsError::InvalidArrayLength`), and more holes than a V8
 string can print reject with `ResolveSettingsError::InvalidStringLength`
 (`.config/mise/lib/claude-sdk-freshness/ts_settings_merge_goldens.py` records the cases).
-A settings file in the TypeScript dialect nests as deeply as the pinned resolver lets it on Node:
-`resolveSettings` skips a file its read walks run out of stack on, and rejects with `RangeError`
-(`ResolveSettingsError::MaximumCallStack`) when copying the file into its cache or merging it does,
-or with `SyntaxError` (`ResolveSettingsError::InvalidRegularExpression`) when V8 runs out of stack
-compiling the regular expression lodash `isIndex` tests array indexes with, which it does on the
-first two tests of the process.
-`NodeStack::NODE_24_DARWIN_ARM64` holds the stack each pass takes per object and per array on Node
-24.13.1 darwin arm64, started with 4384 bytes of command line and environment, where a file reads up
-to 2223 nested objects and merges up to 1244. `NodeStack::NODE_24_LINUX_ARM64` (1957 and 1252) and
-`NodeStack::NODE_24_LINUX_X64` (1649 and 1307) hold the same for Node 24.13.1 on Linux, where the
-command line and environment take nothing from the stack. Each profile assumes no background
-compile lands while a merge runs, as on Node with every function kept in the interpreter, which the
-goldens record each case with; they also record the cases Node answers more than one way with its
-default flags on each host, and the engine answers each of those as one of them. The default, `NodeStack::for_build_target`, is the profile of the platform the
-crate is built for, and darwin arm64 elsewhere. Each pass also spends a fixed amount at
-the array or object that ends a path, by whether it is empty, and the merge spends more the first
-time V8 runs part of lodash in the process, so the merges of one resolve share that history. A merge
-that assigns a scalar at most levels of a path gets optimized while it runs and reaches deeper than
-the profile by an amount that varies from run to run; the profile follows the unoptimized merge. An array the merge joins onto another
-array is not walked, so a result can nest deeper than any merge: the goldens hold one 2224 levels
-deep. The stack Node has depends on its
-release, its platform and, on macOS, those startup bytes: `NodeStack::with_startup_bytes` sets them
-and `ResolverState::with_node_stack` picks the profile
-(`.config/mise/lib/claude-sdk-freshness/ts_settings_depth_goldens.py` records each boundary).
-Managed settings documents take the passes of the pinned reader: a document too deep to read is
-skipped as unreadable, the managed file rejects when its merge runs out, and a drop-in that runs out
-keeps what it merged, leaves the file tier unloaded and ends the folder. The origin and the machine
-policy come from evaluations with stacks of their own, as upstream
-(`.config/mise/lib/claude-sdk-freshness/ts_managed_settings_goldens.py` records the cases):
+A settings document in the TypeScript dialect nests at most `SETTINGS_DEPTH_BOUND` (500) levels, counting a
+scalar as 0 and `{}` or `[]` as 1. The pinned `resolveSettings` copies and merges a document recursively until V8
+runs out of stack, and where that happens depends on the tier V8 compiled each function to, which functions are
+compiled, the caller and the history of the process, so the SDK picks one bound that is the same everywhere. A
+resolve that reads or receives a document nested that deep, whichever one (a user, project or local settings file,
+`managed-settings.json` or a drop-in, a policy from the registry or a property list, or the `managedSettings` and
+`serverManagedSettings` options), fails with `RangeError` (`ResolveSettingsError::MaximumCallStack`) and drops
+nothing, whatever the host, the `ResolverState` or what resolved before. Below the bound the answer is exactly the
+one of Node, merge rules included. The bound is the largest multiple of 100 at most half the smallest margin any
+recorded Node reaches: Node 24.13.1 on Windows x64 answers as the reference to a document 1190 levels deep and
+differently from 1191 (CI run 44055880748, job 50), half of which is 595, so the bound is 500. A document nested
+past the 128 levels `serde_json` reads is still read below the bound
+(`.config/mise/lib/claude-sdk-freshness/ts_settings_depth_goldens.py` and
+`.config/mise/lib/claude-sdk-freshness/ts_managed_settings_goldens.py` record what Node answers).
 
 ```rust,no_run
 use trogon_claude_agent_sdk::{ResolveSettingsOptions, python_json_dumps, resolve_python_settings};
