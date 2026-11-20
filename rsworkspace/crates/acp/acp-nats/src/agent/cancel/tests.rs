@@ -39,17 +39,13 @@ async fn cancel_publishes_to_correct_subject() {
 }
 
 #[tokio::test]
-async fn cancel_also_publishes_session_cancelled_broadcast() {
+async fn cancel_publishes_only_the_backend_cancellation_intent() {
     let (mock, _js, bridge) = mock_bridge();
 
     let _ = bridge.cancel(CancelNotification::new("s1")).await;
 
     let published = mock.published_messages();
-    assert!(
-        published.contains(&"acp.v1.session.s1.agent.cancelled".to_string()),
-        "expected publish to acp.v1.session.s1.agent.cancelled (prompt broadcast), got: {:?}",
-        published
-    );
+    assert_eq!(published, ["acp.v1.session.s1.agent.cancel"]);
 }
 
 #[tokio::test]
