@@ -30,11 +30,5 @@ impl RestartPolicy {
     }
 }
 
-impl Default for RestartPolicy {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 #[cfg(test)]
 mod tests;

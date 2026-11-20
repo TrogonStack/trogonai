@@ -160,7 +160,7 @@ where
         > + Unpin,
     S: std::future::Future<Output = ()>,
 {
-    let meter = trogon_telemetry::meter("channel-bridge-discord");
+    let meter = trogon_telemetry::meter(ServiceName::ChannelBridgeDiscord.as_str());
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
     let bridge: Arc<AcpBridge> = Arc::new(acp_nats::Bridge::new(
         nats_client.clone(),

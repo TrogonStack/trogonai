@@ -97,7 +97,6 @@ where
     S: Fn(InitializedAgent<ConnectionAgent>) -> F,
     F: Future<Output = Result<(), E>>,
     E: Display,
-    InitializedAgent<ConnectionAgent>: AgentHandler,
 {
     let mut delay = None;
     loop {

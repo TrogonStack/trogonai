@@ -21,7 +21,7 @@ pub trait SendText {
     type Error: std::error::Error + 'static;
     type Message;
 
-    async fn send_text(&self, channel: Id<ChannelMarker>, text: String) -> Result<Self::Message, Self::Error>;
+    async fn send_text(&self, channel: Id<ChannelMarker>, text: &str) -> Result<Self::Message, Self::Error>;
 }
 
 pub struct DiscordOutbound {
@@ -47,7 +47,7 @@ impl SendText for DiscordOutbound {
     type Error = twilight_http::Error;
     type Message = Response<Message>;
 
-    async fn send_text(&self, channel: Id<ChannelMarker>, text: String) -> Result<Self::Message, Self::Error> {
-        self.http.create_message(channel).content(&text).await
+    async fn send_text(&self, channel: Id<ChannelMarker>, text: &str) -> Result<Self::Message, Self::Error> {
+        self.http.create_message(channel).content(text).await
     }
 }

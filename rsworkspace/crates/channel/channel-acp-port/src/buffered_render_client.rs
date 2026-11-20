@@ -64,20 +64,20 @@ impl ClientHandler for BufferedRenderClient {
     }
 
     async fn session_notification(&self, args: SessionNotification) -> agent_client_protocol::Result<()> {
-        let session_id = args.session_id.to_string();
         match args.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let ContentBlock::Text(text) = chunk.content {
-                    self.buffers
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .entry(session_id)
-                        .or_default()
-                        .push_str(&text.text);
+                    let mut buffers = self.buffers.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    match buffers.get_mut(&*args.session_id.0) {
+                        Some(buffer) => buffer.push_str(&text.text),
+                        None => {
+                            buffers.insert(args.session_id.to_string(), text.text);
+                        }
+                    }
                 }
             }
             other => {
-                debug!(session_id = %session_id, update = ?std::mem::discriminant(&other), "Ignoring non-message session update");
+                debug!(session_id = %args.session_id, update = ?std::mem::discriminant(&other), "Ignoring non-message session update");
             }
         }
         Ok(())

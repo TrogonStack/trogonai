@@ -183,7 +183,7 @@ where
                 self.release_current_session(&conversation_id, &mut record).await?;
                 if event.text.is_none() {
                     self.outbound
-                        .send_text(reply_to, NEW_SESSION_ACKNOWLEDGEMENT.to_string())
+                        .send_text(reply_to, NEW_SESSION_ACKNOWLEDGEMENT)
                         .await
                         .map_err(PipelineError::SendText)?;
                     return ack(msg).await;

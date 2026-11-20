@@ -14,8 +14,7 @@ use std::time::Duration;
 /// per session (`{prefix}.session.{id}.client.*`). Every callback an agent
 /// makes names its session, so this routes each one to a
 /// [`NatsClientProxy`] for that session: `session/update` lands on the
-/// session's `client.session.update` subject (captured by the `CLIENT_OPS`
-/// stream), and requests such as `session/request_permission` reach whichever
+/// session's `client.session.update` subject, and requests such as `session/request_permission` reach whichever
 /// client opened the session.
 ///
 /// Elicitation and extension callbacks carry no session, so they keep the

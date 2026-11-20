@@ -1,6 +1,6 @@
 use acp_nats::AcpPrefix;
+use acp_nats::jetstream::provision::{ProvisionError, provision_selected_streams};
 use acp_nats::nats::AcpStream;
-use tracing::info;
 use trogon_nats::jetstream::JetStreamContext;
 
 /// The ACP streams the host creates: the ones the JetStream prompt path cannot
@@ -17,25 +17,8 @@ use trogon_nats::jetstream::JetStreamContext;
 /// break every one of those calls, so they stay for whoever owns that design.
 pub const HOST_STREAMS: [AcpStream; 2] = [AcpStream::Commands, AcpStream::Responses];
 
-#[derive(Debug, thiserror::Error)]
-#[error("could not provision the {stream} stream")]
-pub struct ProvisionError<Source> {
-    stream: String,
-    #[source]
-    source: Source,
-}
-
 pub async fn provision<J: JetStreamContext>(js: &J, prefix: &AcpPrefix) -> Result<(), ProvisionError<J::Error>> {
-    for stream in HOST_STREAMS {
-        let config = stream.config(prefix);
-        let name = config.name.clone();
-        js.get_or_create_stream(config).await.map_err(|source| ProvisionError {
-            stream: name.clone(),
-            source,
-        })?;
-        info!(stream = %name, "provisioned JetStream stream");
-    }
-    Ok(())
+    provision_selected_streams(js, prefix, HOST_STREAMS).await
 }
 
 #[cfg(test)]
