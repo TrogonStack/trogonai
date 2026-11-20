@@ -1,5 +1,5 @@
 use super::domain::{MessageId, PeerId, TenantId, TrustedContent};
-use super::state::PeerState;
+use super::peer_state::PeerState;
 use super::{evolve_error::EvolveError, message_error::MessageError, message_values, state_values};
 use trogonai_proto::peers::v1alpha1 as proto;
 #[derive(Debug, Clone)]
