@@ -1,4 +1,4 @@
-use super::state::PeerState;
+use super::peer_state::PeerState;
 use super::{
     AcceptedMessage, IntakenMessage, accepted_outbox::AcceptedOutbox, domain::*, evolve_error::EvolveError,
     inbox_replacement::InboxReplacement, state_values,
