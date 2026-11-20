@@ -11,6 +11,12 @@ use crate::{constants::SERDE_JSON_NESTING, settings_parse::parse_json};
 
 /// Whether `text` opens more arrays and objects at once, outside strings, than `serde_json` reads.
 pub(crate) fn nests_past_serde_json(text: &str) -> bool {
+    nests_past(text, SERDE_JSON_NESTING)
+}
+
+/// Whether `text` opens more than `limit` arrays and objects at once, outside strings. It stops counting at the
+/// first level past `limit`, and says nothing about whether `text` is JSON.
+pub(crate) fn nests_past(text: &str, limit: usize) -> bool {
     let bytes = text.as_bytes();
     let mut depth = 0_usize;
     let mut index = 0;
@@ -22,7 +28,7 @@ pub(crate) fn nests_past_serde_json(text: &str) -> bool {
             }
             b'[' | b'{' => {
                 depth = depth.saturating_add(1);
-                if depth > SERDE_JSON_NESTING {
+                if depth > limit {
                     return true;
                 }
             }
