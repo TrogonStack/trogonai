@@ -12,6 +12,7 @@ pub use parsing::{
     ClientMethod, GlobalAgentMethod, ParsedAgentSubject, ParsedClientSubject, SessionAgentMethod, parse_agent_subject,
     parse_client_subject,
 };
+pub(crate) use subjects::AcpSubjectNamespace;
 pub use subjects::{
     AcpStream, StreamAssignment, client_ops, commands, global, markers, responses, retired_stream_names, subscriptions,
 };
