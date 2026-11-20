@@ -1,12 +1,10 @@
-use std::cell::Cell;
-
 use serde_json::{Map, Value};
 
 use crate::settings_schema::{SettingsSchema, schema};
 
 use crate::{
-    node_merge::NodeMerge, node_merge_call::NodeMergeCall, node_merge_warmth::MergeWarmth, node_stack::NodeStack,
-    settings_merge_spec::MergeSpec, settings_numbers::same_value_zero,
+    settings_merge::merge_settings, settings_merge_spec::MergeSpec, settings_numbers::same_value_zero,
+    settings_resolve_error::ResolveSettingsError,
 };
 
 pub(crate) type SettingsMap = Map<String, Value>;
@@ -43,34 +41,18 @@ pub(crate) fn union_arrays(left: &[Value], right: &[Value]) -> Vec<Value> {
     merged
 }
 
-/// Lodash `mergeWith` of `source` into `destination` with the upstream customizer, on a stack no merge runs out of:
+/// Lodash `mergeWith` of `source` into `destination` with the upstream customizer, as [`merge_settings`] runs it:
 /// arrays union, objects recurse, scalars replace, an existing key keeps its position while a new key appends, and an
 /// object merged into an array sets its members, `length` among them. The keys the customizer treats specially come
-/// from the extracted schema description.
-pub(crate) fn merge_unbounded(destination: &mut SettingsMap, source: &SettingsMap) -> NodeMerge {
-    let node = NodeStack::for_build_target();
-    with_merge_spec(|spec| node.merge_unbounded(spec, destination, source))
-}
-
-/// [`merge_unbounded`] of `source` into `destination` as lodash `mergeWith` runs it on the `node` stack in the
-/// merge `call`, after merges that left V8 as warm as `warmth` says, keeping what it wrote before it runs out.
-pub(crate) fn merge_within(
-    node: NodeStack,
-    call: NodeMergeCall,
-    warmth: &Cell<MergeWarmth>,
-    destination: &mut SettingsMap,
-    source: &SettingsMap,
-) -> NodeMerge {
-    with_merge_spec(|spec| node.merge_within(call, spec, destination, source, warmth))
-}
-
-/// Runs `merge` with the keys the customizer treats specially, from the extracted schema description, or with none
-/// when the description failed to load.
-fn with_merge_spec(merge: impl FnOnce(&MergeSpec) -> NodeMerge) -> NodeMerge {
-    merge(
+/// from the extracted schema description, or are none when the description failed to load. A merge that fails keeps
+/// what it wrote before.
+pub(crate) fn merge(destination: &mut SettingsMap, source: &SettingsMap) -> Result<(), ResolveSettingsError> {
+    merge_settings(
         schema()
             .map(SettingsSchema::merge_spec)
             .unwrap_or(&MergeSpec::default()),
+        destination,
+        source,
     )
 }
 
