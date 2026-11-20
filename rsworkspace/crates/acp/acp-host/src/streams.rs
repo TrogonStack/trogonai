@@ -1,7 +1,8 @@
 use acp_nats::AcpPrefix;
 use acp_nats::jetstream::provision::{ProvisionError, provision_selected_streams};
 use acp_nats::nats::AcpStream;
-use trogon_nats::jetstream::JetStreamContext;
+use async_nats::jetstream::context::GetStreamError;
+use trogon_nats::jetstream::{JetStreamContext, JetStreamGetStream, JetStreamGetStreamInfo};
 
 /// The ACP streams the host creates: the ones the JetStream prompt path cannot
 /// run without. `Bridge::prompt` publishes each prompt into `COMMANDS` and
@@ -17,7 +18,11 @@ use trogon_nats::jetstream::JetStreamContext;
 /// break every one of those calls, so they stay for whoever owns that design.
 pub const HOST_STREAMS: [AcpStream; 2] = [AcpStream::Commands, AcpStream::Responses];
 
-pub async fn provision<J: JetStreamContext>(js: &J, prefix: &AcpPrefix) -> Result<(), ProvisionError<J::Error>> {
+pub async fn provision<J>(js: &J, prefix: &AcpPrefix) -> Result<(), ProvisionError<<J as JetStreamContext>::Error>>
+where
+    J: JetStreamContext + JetStreamGetStream<Error = GetStreamError>,
+    <J as JetStreamGetStream>::Stream: JetStreamGetStreamInfo,
+{
     provision_selected_streams(js, prefix, HOST_STREAMS).await
 }
 
