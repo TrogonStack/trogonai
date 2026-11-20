@@ -94,3 +94,6 @@ impl Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

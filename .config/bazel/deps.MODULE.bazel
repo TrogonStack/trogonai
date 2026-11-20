@@ -6,10 +6,14 @@ bazel_dep(name = "rules_rust", version = "0.75.0")
 # their C code with coverage, which embeds timestamps and changes every
 # downstream Rust cache key. Not reported upstream yet; drop the patch once
 # rules_rust skips coverage for uninstrumented build scripts.
+# Child process coverage also needs the declared executable objects during export.
 single_version_override(
     module_name = "rules_rust",
     patch_strip = 1,
-    patches = ["//.config/bazel:patches/rules_rust-native-coverage-filter.patch"],
+    patches = [
+        "//.config/bazel:patches/rules_rust-native-coverage-filter.patch",
+        "//.config/bazel:patches/rules_rust-child-binary-coverage.patch",
+    ],
 )
 
 bazel_dep(name = "rules_go", version = "0.65.0")

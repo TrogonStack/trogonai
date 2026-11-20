@@ -1037,7 +1037,18 @@ fn coverage_environment() -> BTreeMap<std::ffi::OsString, std::ffi::OsString> {
     {
         trogon_std::env::SystemEnv
             .var_os("LLVM_PROFILE_FILE")
-            .map(|path| BTreeMap::from([("LLVM_PROFILE_FILE".into(), path)]))
+            .map(|path| {
+                let path = if trogon_std::env::SystemEnv.var_os("RUST_COVERAGE_CONTINUOUS").as_deref()
+                    == Some(std::ffi::OsStr::new("1"))
+                {
+                    std::path::PathBuf::from(path)
+                        .with_file_name(format!("supervisor-{}-%p%c.profraw", std::process::id()))
+                        .into_os_string()
+                } else {
+                    path
+                };
+                BTreeMap::from([("LLVM_PROFILE_FILE".into(), path)])
+            })
             .unwrap_or_default()
     }
     #[cfg(not(coverage))]
@@ -1051,6 +1062,31 @@ fn workload_environment(mut environment: BTreeMap<String, String>) -> BTreeMap<S
         }
     }
     environment
+}
+
+#[test]
+fn legacy_fixture_profiling_preserves_exact_application_output() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let marker = directory.path().join("effect");
+    let mut command = Process::new(env!("CARGO_BIN_EXE_supervisor-test-fixture"));
+    command.arg("effect").arg(&marker).env_clear();
+    #[cfg(coverage)]
+    if let Some(profile) = trogon_std::env::SystemEnv.var_os("LLVM_PROFILE_FILE") {
+        command.env(
+            "LLVM_PROFILE_FILE",
+            std::path::PathBuf::from(profile)
+                .with_file_name(format!("legacy-fixture-{}-%p-%m.profraw", std::process::id())),
+        );
+    }
+    let output = command.output()?;
+    assert_eq!(output.status.code(), Some(7));
+    assert!(marker.exists());
+    assert_eq!(
+        output.stdout,
+        b"ordinary stdout\n{\"kind\":\"family_absent\",\"execution_id\":\"contract\"}\n"
+    );
+    assert_eq!(output.stderr, b"ordinary stderr\n");
+    Ok(())
 }
 
 #[test]

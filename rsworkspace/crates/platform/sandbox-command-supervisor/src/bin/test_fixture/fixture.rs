@@ -238,13 +238,16 @@ pub fn run() -> i32 {
 
 #[cfg(coverage)]
 unsafe extern "C" {
+    fn __llvm_profile_is_continuous_mode_enabled() -> libc::c_int;
     fn __llvm_profile_write_file() -> libc::c_int;
 }
 
 fn flush_fixture_profile() {
     #[cfg(coverage)]
     unsafe {
-        __llvm_profile_write_file();
+        if __llvm_profile_is_continuous_mode_enabled() == 0 {
+            __llvm_profile_write_file();
+        }
     }
 }
 

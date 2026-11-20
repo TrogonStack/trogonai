@@ -1,0 +1,132 @@
+diff --git a/rust/coverage/collect_rust_coverage.rs b/rust/coverage/collect_rust_coverage.rs
+--- a/rust/coverage/collect_rust_coverage.rs
++++ b/rust/coverage/collect_rust_coverage.rs
+@@ -15,14 +15,19 @@
+ //! - `RUNFILES_DIR` (optional): Location of the test's runfiles. Not set in split
+ //!   coverage postprocessing mode (`--experimental_split_coverage_postprocessing`).
+ //! - `TEST_BINARY`: Runfiles-relative path to the test binary (used when `RUNFILES_DIR` is absent).
++//! - `RUST_COVERAGE_OBJECTS` (optional): Newline-separated runfiles-relative paths to
++//!   declared instrumented child executables.
+ //! - `VERBOSE_COVERAGE`: Print debug info from the coverage scripts
+ //!
+ //! The script looks in $COVERAGE_DIR for the Rust metadata coverage files
+ //! (profraw) and uses lcov to get the coverage data. The coverage data
+ //! is placed in $COVERAGE_DIR as a `coverage.dat` file.
+-
++
++use std::collections::BTreeSet;
+ use std::env;
+ use std::fs;
++use std::io;
++use std::path::Component;
+ use std::path::Path;
+ use std::path::PathBuf;
+ use std::process;
+@@ -106,6 +111,61 @@
+         .join("bin")
+ }
+-
++
++fn find_coverage_objects(
++    execroot: &Path,
++    runfiles_dir: Option<&Path>,
++    coverage_dir: &Path,
++) -> io::Result<Vec<PathBuf>> {
++    let declared = match env::var("RUST_COVERAGE_OBJECTS") {
++        Ok(value) => value,
++        Err(env::VarError::NotPresent) => return Ok(Vec::new()),
++        Err(error) => return Err(io::Error::new(io::ErrorKind::InvalidInput, error)),
++    };
++    let paths: Vec<_> = declared.lines().filter(|line| !line.is_empty()).collect();
++    if paths.len() > 1024 {
++        return Err(io::Error::new(
++            io::ErrorKind::InvalidInput,
++            "too many coverage objects",
++        ));
++    }
++    let mut objects = BTreeSet::new();
++    for value in paths {
++        let relative = Path::new(value);
++        if !relative
++            .components()
++            .all(|part| matches!(part, Component::Normal(_)))
++        {
++            return Err(io::Error::new(
++                io::ErrorKind::InvalidInput,
++                "coverage objects must be runfiles-relative paths",
++            ));
++        }
++        let runfile = match runfiles_dir {
++            Some(directory) => {
++                let workspace = env::var("TEST_WORKSPACE")
++                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
++                Some(directory.join(workspace).join(relative))
++            }
++            None => None,
++        };
++        let fallback = execroot
++            .join(config_bin_dir(execroot, coverage_dir))
++            .join(relative);
++        let object = runfile
++            .into_iter()
++            .chain(std::iter::once(fallback))
++            .find(|path| path.is_file())
++            .ok_or_else(|| {
++                io::Error::new(
++                    io::ErrorKind::NotFound,
++                    "declared coverage object is unavailable",
++                )
++            })?;
++        objects.insert(object);
++    }
++    Ok(objects.into_iter().collect())
++}
++
+ fn main() {
+     let coverage_dir = PathBuf::from(env::var("COVERAGE_DIR").unwrap());
+     let execroot = PathBuf::from(env::var("ROOT").unwrap());
+@@ -152,6 +212,8 @@
+             test_binary
+         }
+     };
++    let coverage_objects = find_coverage_objects(&execroot, runfiles_dir.as_deref(), &coverage_dir)
++        .expect("Invalid declared coverage objects");
+     let profraw_files: Vec<PathBuf> = fs::read_dir(coverage_dir)
+         .unwrap()
+         .flatten()
+@@ -206,6 +268,10 @@
+         .stdout(process::Stdio::piped())
+         .stderr(process::Stdio::piped());
+-
++
++    for object in coverage_objects {
++        llvm_cov_cmd.arg("-object").arg(object);
++    }
++
+     debug_log!("Spawning {:#?}", llvm_cov_cmd);
+     let child = llvm_cov_cmd
+         .spawn()
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -2254,7 +2254,7 @@
+     executable = crate_info.output if crate_info.type == "bin" or crate_info.is_test else None
+-
++
+     instrumented_files_kwargs = {
+-        "dependency_attributes": ["deps", "crate"],
++        "dependency_attributes": ["deps", "crate", "data"],
+         "extensions": ["rs"],
+         "source_attributes": ["srcs"],
+     }
+@@ -2263,6 +2263,9 @@
+         instrumented_files_kwargs.update({
+             "metadata_files": coverage_runfiles + [executable] if executable else [],
+         })
++
++    if not experimental_use_coverage_metadata_files and executable and ctx.coverage_instrumented():
++        instrumented_files_kwargs["metadata_files"] = [executable]
+-
++
+     providers = [
+         DefaultInfo(
