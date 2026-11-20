@@ -1,5 +1,5 @@
 use super::{domain::*, evolve_error::EvolveError, state_values};
-use crate::commands::state::PeerState;
+use crate::commands::peer_state::PeerState;
 use sha2::{Digest, Sha256};
 use trogonai_proto::peers::v1alpha1 as proto;
 
