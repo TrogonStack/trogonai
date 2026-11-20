@@ -1,6 +1,6 @@
 use super::domain::{MessageId, PeerId, TenantId};
 use super::{evolve_error::EvolveError, message_error::MessageError, message_rules, state_values};
-use crate::commands::state::PeerState;
+use crate::commands::peer_state::PeerState;
 use trogonai_proto::peers::v1alpha1 as proto;
 #[derive(Debug, Clone)]
 pub struct AcceptedMessage {
