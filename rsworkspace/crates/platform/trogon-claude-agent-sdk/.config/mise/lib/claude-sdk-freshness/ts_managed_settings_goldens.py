@@ -7,9 +7,8 @@ usage: python3 -I ts_managed_settings_goldens.py NODE PACKAGE_DIR OUT_FILE [--ch
 
 NODE runs `resolve_settings_oracle.mjs` against PACKAGE_DIR, the unpacked pinned `@anthropic-ai/claude-agent-sdk`,
 on linux, with the command line and environment filling `STARTUP_BYTES` as `ts_settings_depth_goldens.py` explains.
-Every boundary depends on the Node release and the platform: `PROFILES` holds the boundaries of each platform a
-`NodeStack` profile names, the recorder records the cases of the platform it runs on, and each golden file comes
-from Node 24.13.1 on its own platform, as `ts_settings_depth_goldens.py` explains. A profile names a boundary by the
+Every boundary depends on the Node release and the platform: `PROFILES` holds the boundaries Node showed on each platform, the recorder records the cases of the platform it runs on, and each golden file comes
+from Node 24.13.1 on its own platform, as `ts_settings_depth_goldens.py` explains. A `PROFILES` entry names a boundary by the
 last level on its near side, and `partial_drop` by how deep `z` nests. Each case records what Node answers with
 `REFERENCE_FLAGS` once Node with `CROSS_CHECK_FLAGS` answered the same, and `--observe RUNS HOST` records under
 `observed` the cases that answer otherwise with the default flags, as `ts_settings_depth_goldens.py` explains.
@@ -71,7 +70,7 @@ SERVERS = ["managed", '{"managedMcpServers":{}}']
 
 
 def levels(level):
-    """A profile names a boundary by the last level on its near side: the cases record it and the next."""
+    """A `PROFILES` entry names a boundary by the last level on its near side: the cases record it and the next."""
     return [level, level + 1]
 
 
