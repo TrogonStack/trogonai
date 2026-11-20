@@ -221,7 +221,7 @@ async fn notification_client_error_does_not_panic() {
 #[test]
 fn error_code_and_message_malformed_json() {
     let err = ExtError::MalformedJson("bad json".to_string());
-    let (code, msg) = error_code_and_message(&err);
+    let agent_client_protocol::Error { code, message: msg, .. } = agent_client_protocol::Error::from(&err);
     assert_eq!(code, ErrorCode::PARSE_ERROR);
     assert!(msg.contains("Malformed ext request JSON"));
 }
@@ -232,7 +232,7 @@ fn error_code_and_message_client_error() {
         ErrorCode::INVALID_PARAMS,
         "bad request",
     ));
-    let (code, msg) = error_code_and_message(&err);
+    let agent_client_protocol::Error { code, message: msg, .. } = agent_client_protocol::Error::from(&err);
     assert_eq!(code, ErrorCode::INVALID_PARAMS);
     assert_eq!(msg, "bad request");
 }
