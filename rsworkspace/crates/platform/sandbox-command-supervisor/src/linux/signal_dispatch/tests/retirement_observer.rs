@@ -20,7 +20,7 @@ pub(super) fn install(pid: i32, identity: OwnedFd) -> io::Result<Receiver<io::Re
     let (send_listener, listener) = channel();
     let (send_receipt, receipt) = channel();
     let tid = unsafe { libc::syscall(libc::SYS_gettid) } as u32;
-    // The worker exits immediately after this case. Keep coverage-runtime closes serviced until then.
+    // Service runtime closes, then retire outside Rust control flow before exit_group can stop this thread.
     std::thread::Builder::new().spawn(move || {
         let result = listener
             .recv()
@@ -34,9 +34,15 @@ pub(super) fn install(pid: i32, identity: OwnedFd) -> io::Result<Receiver<io::Re
         instruction(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS, 0, 0, 0),
         instruction(
             libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K,
+            1,
+            0,
+            libc::SYS_close as u32,
+        ),
+        instruction(
+            libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K,
             0,
             1,
-            libc::SYS_close as u32,
+            libc::SYS_exit_group as u32,
         ),
         instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_USER_NOTIF),
         instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
@@ -106,7 +112,16 @@ fn observe(
             }
             return Err(error);
         }
-        if request.pid != tid || request.data.nr != libc::SYS_close as i32 {
+        if request.pid != tid {
+            return Err(io::Error::other("unexpected task-walk notification thread"));
+        }
+        if request.data.nr == libc::SYS_exit_group as i32 {
+            if !retired {
+                return Err(io::Error::other("worker exited before the task retirement oracle"));
+            }
+            release_exit_and_retire(&listener, request.id);
+        }
+        if request.data.nr != libc::SYS_close as i32 {
             return Err(io::Error::other("unexpected task-walk notification"));
         }
         let path = std::fs::read_link(format!("/proc/self/fd/{}", request.data.args[0]))?;
@@ -164,4 +179,23 @@ fn observe(
         io::ErrorKind::TimedOut,
         "task-walk observer outlived its isolated worker",
     ))
+}
+
+fn release_exit_and_retire(listener: &OwnedFd, id: u64) -> ! {
+    let response = libc::seccomp_notif_resp {
+        id,
+        val: 0,
+        error: 0,
+        flags: libc::SECCOMP_USER_NOTIF_FLAG_CONTINUE as u32,
+    };
+    // A failed response leaves the main thread blocked and the worker deadline rejects the test.
+    unsafe {
+        libc::ioctl(
+            listener.as_raw_fd(),
+            libc::_IOWR::<libc::seccomp_notif_resp>(u32::from(b'!'), 1),
+            &response,
+        );
+        libc::syscall(libc::SYS_exit, 0);
+        libc::abort();
+    }
 }
