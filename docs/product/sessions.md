@@ -6,7 +6,7 @@ product:
   name: Sessions
   tagline: Durable, replayable history of everything an agent did.
   order: 4
-  status: planned
+  status: in_progress
   icon: history
   color: "#F59E0B"
 guarantees:
@@ -36,10 +36,10 @@ progress:
     status: built
     note: Deciders, snapshots, projections and their telemetry, shared across the platform. Sessions will run on it.
   - name: Session event, command and state contracts
-    status: partial
+    status: in_progress
     note: Protobuf schemas define every event, command and state a session can have.
   - name: Query, artifact, doctor and maintenance contracts
-    status: partial
+    status: in_progress
     note: The wire contracts for reading and operating sessions are defined in protobuf.
   - name: Session log and decider on NATS JetStream
     status: designed
@@ -65,9 +65,10 @@ change and artifact, in the order it happened. The record is the source of
 truth, so a session can survive a crash, be resumed or forked, and be replayed
 exactly as it happened.
 
-::: info Designed, not built yet
-The session contracts are defined. The service that records and serves sessions
-is not built yet. [Where it stands](#where-it-stands) has the detail.
+::: info In progress, not ready for use
+The session contracts and platform foundations are in place. The service that
+records and serves sessions is still being built. [Where it stands](#where-it-stands)
+has the detail.
 :::
 
 ## Everything the agent did, in order
