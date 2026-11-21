@@ -7,13 +7,13 @@ fn envelope_without_event() -> EvaluationBindingEvent {
 }
 
 fn fold(events: &[EvaluationBindingEvent]) -> Result<EvaluationBindingState, EvaluationBindingEvolveError> {
-    events.iter().try_fold(initial_state(), evolve)
+    events.iter().try_fold(EvaluationBindingState::default(), |state, event| state.evolve(event))
 }
 
 #[test]
 fn starts_missing_with_no_results() {
-    assert_eq!(initial_state().status, BindingStatus::Missing);
-    assert!(initial_state().recorded_results.is_empty());
+    assert_eq!(EvaluationBindingState::default().status, BindingStatus::Missing);
+    assert!(EvaluationBindingState::default().recorded_results.is_empty());
 }
 
 #[test]
