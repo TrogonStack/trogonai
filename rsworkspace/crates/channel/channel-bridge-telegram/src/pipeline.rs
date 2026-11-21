@@ -4,7 +4,8 @@ mod tests;
 use crate::constants::{NEW_SESSION_ACKNOWLEDGEMENT, TEXT_CHUNK_LIMIT};
 use crate::outbound::{SendText, SendTyping};
 use crate::parse;
-use crate::render::{TelegramRenderClient, chunk_text};
+use crate::render::chunk_text;
+use channel_acp_port::BufferedRenderClient;
 use tracing::{info, warn};
 use trogon_channel::{
     AgentId, AgentPort, AgentPortError as _, AgentSessionId, ChannelAccount, ChannelStore, ChannelStoreError, Command,
@@ -16,7 +17,7 @@ use trogon_std::NowV7;
 pub struct Pipeline<'a, P, O, G, S> {
     pub store: &'a ChannelStore,
     pub port: &'a P,
-    pub renderer: &'a TelegramRenderClient,
+    pub renderer: &'a BufferedRenderClient,
     pub outbound: &'a O,
     pub claims: &'a ClaimResolver<S>,
     pub account: &'a ChannelAccount,

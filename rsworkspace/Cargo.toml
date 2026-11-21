@@ -34,6 +34,7 @@ ard-nats = { path = "crates/ard/ard-nats" }
 ard-registry = { path = "crates/ard/ard-registry" }
 a2a-redaction = { path = "crates/a2a/a2a-redaction" }
 acp-nats = { path = "crates/acp/acp-nats" }
+acp-nats-agent = { path = "crates/acp/acp-nats-agent" }
 grpc-nats-micro = { path = "crates/platform/grpc-nats-micro" }
 trogon-telemetry = { path = "crates/platform/trogon-telemetry" }
 mcp-nats = { path = "crates/mcp/mcp-nats" }
@@ -68,6 +69,7 @@ trogon-webhooks = { path = "crates/platform/trogon-webhooks" }
 trogon-policy-eval = { path = "crates/policy/trogon-policy-eval" }
 trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
+channel-acp-port = { path = "crates/channel/channel-acp-port" }
 channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
 trogon-credential-aggregate = { path = "crates/credential/trogon-credential-aggregate" }
 trogon-credential-domain = { path = "crates/credential/trogon-credential-domain" }
@@ -160,6 +162,7 @@ google-cloud-pubsub = "=1.7.0"
 
 # Discord
 twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }
+twilight-http = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }
 twilight-model = "=0.17.1"
 
 # Error handling

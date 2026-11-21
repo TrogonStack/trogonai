@@ -6,6 +6,7 @@ pub enum ServiceName {
     A2aGateway,
     AcpNatsStdio,
     AcpNatsServer,
+    AcpHost,
     McpNatsStdio,
     McpNatsServer,
     TrogonGateway,
@@ -17,6 +18,7 @@ pub enum ServiceName {
     TrogonSourceSlack,
     TrogonSourceTelegram,
     ChannelBridgeTelegram,
+    ChannelBridgeDiscord,
     TrogonDeciderNatsServer,
 }
 
@@ -26,6 +28,7 @@ impl ServiceName {
             Self::A2aGateway => "a2a-gateway",
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsServer => "acp-nats-server",
+            Self::AcpHost => "acp-host",
             Self::McpNatsStdio => "mcp-nats-stdio",
             Self::McpNatsServer => "mcp-nats-server",
             Self::TrogonGateway => "trogon-gateway",
@@ -37,6 +40,7 @@ impl ServiceName {
             Self::TrogonSourceSlack => "trogon-source-slack",
             Self::TrogonSourceTelegram => "trogon-source-telegram",
             Self::ChannelBridgeTelegram => "channel-bridge-telegram",
+            Self::ChannelBridgeDiscord => "channel-bridge-discord",
             Self::TrogonDeciderNatsServer => "trogon-decider-nats-server",
         }
     }
