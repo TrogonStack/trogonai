@@ -60,6 +60,7 @@ trogon-identity-types = { path = "crates/platform/trogon-identity-types" }
 trogon-jwks-publisher = { path = "crates/platform/trogon-jwks-publisher" }
 trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
+trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
 trogon-egress-proxy = { path = "crates/platform/trogon-egress-proxy" }
