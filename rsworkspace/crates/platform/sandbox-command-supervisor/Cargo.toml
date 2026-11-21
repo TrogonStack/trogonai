@@ -1,0 +1,53 @@
+[package]
+name = "sandbox-command-supervisor"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Kernel-owned command family supervisor for container workers"
+
+[lints]
+workspace = true
+
+[dependencies]
+trogon-std = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tempfile = { workspace = true, optional = true }
+include_dir = { version = "0.7.4", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+sandbox-command-supervisor = { path = ".", features = ["test-support"] }
+tempfile = { workspace = true }
+
+[features]
+test-support = ["dep:tempfile", "dep:include_dir"]
+
+[[bin]]
+name = "sandbox-command-supervisor"
+path = "src/main.rs"
+
+[[bin]]
+name = "supervisor-test-fixture"
+path = "src/bin/test_fixture.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "native_contract"
+path = "tests/native_contract.rs"
+required-features = ["test-support"]
+
+[[bin]]
+name = "supervisor-overflow-fixture"
+path = "src/bin/overflow_fixture.rs"
+required-features = ["test-support"]
+
+[[bin]]
+name = "supervisor-kernel-test-worker"
+path = "src/bin/kernel_test_worker.rs"
+required-features = ["test-support"]
+test = false
