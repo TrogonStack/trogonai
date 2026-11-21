@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const LABELS = { built: "Built", partial: "In progress", designed: "Designed" } as const;
+const LABELS = { built: "Built", in_progress: "In progress", designed: "Designed" } as const;
 
 defineProps<{ items: Array<{ name: string; status: keyof typeof LABELS; note: string }> }>();
 </script>
@@ -52,7 +52,7 @@ defineProps<{ items: Array<{ name: string; status: keyof typeof LABELS; note: st
   background: #14b8a6;
 }
 
-.build-progress__dot.is-partial {
+.build-progress__dot.is-in_progress {
   border-color: #f59e0b;
   background: linear-gradient(90deg, #f59e0b 50%, transparent 50%);
 }
@@ -90,7 +90,7 @@ defineProps<{ items: Array<{ name: string; status: keyof typeof LABELS; note: st
   color: color-mix(in srgb, #14b8a6 75%, var(--vp-c-text-1));
 }
 
-.build-progress__pill.is-partial {
+.build-progress__pill.is-in_progress {
   background: color-mix(in srgb, #f59e0b 16%, transparent);
   color: color-mix(in srgb, #f59e0b 70%, var(--vp-c-text-1));
 }

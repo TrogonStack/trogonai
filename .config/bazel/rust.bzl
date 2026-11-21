@@ -160,6 +160,7 @@ def workspace_crate(
         rustc_env = {},
         library_tags = [],
         unit_test_args = [],
+        unit_test_data = [],
         unit_test_tags = [],
         binaries = {},
         integration_tests = {},
@@ -178,6 +179,7 @@ def workspace_crate(
         rustc_env: Environment for compiling every target.
         library_tags: Tags for the library target.
         unit_test_args: Arguments for the library's unit test binary.
+        unit_test_data: Additional runfiles required by unit tests.
         unit_test_tags: Tags for every unit test target, library and binaries.
         binaries: Maps a binary name to `compile_data`, `rustc_env`, `tags`, and
             `test_args` for its unit test.
@@ -201,6 +203,7 @@ def workspace_crate(
     name = crate["name"]
     compile_data = _files(compile_data)
     data = _files(data)
+    unit_test_data = _files(unit_test_data)
     test_env = _env(env)
     rustc_env = _env(rustc_env)
 
@@ -238,6 +241,7 @@ def workspace_crate(
             test_proc_macro_deps = test_proc_macro_deps,
             library_tags = library_tags,
             unit_test_args = unit_test_args,
+            unit_test_data = unit_test_data,
             unit_test_tags = unit_test_tags,
             binaries = binaries,
             integration_tests = integration_tests,
@@ -259,6 +263,7 @@ def _crate_targets(
         test_proc_macro_deps,
         library_tags,
         unit_test_args,
+        unit_test_data,
         unit_test_tags,
         binaries,
         integration_tests,
@@ -311,7 +316,7 @@ def _crate_targets(
             crate = ":" + target,
             compile_data = compile_data + _files(settings["compile_data"]),
             crate_features = crate_features,
-            data = data,
+            data = data + unit_test_data,
             env = test_env,
             proc_macro_deps = test_proc_macro_deps,
             lint_config = lint_config,
@@ -436,7 +441,7 @@ def _crate_targets(
             compile_data = compile_data,
             # A test compiles the crate again and takes features from its own attributes.
             crate_features = crate_features,
-            data = data,
+            data = data + unit_test_data,
             env = test_env,
             proc_macro_deps = test_proc_macro_deps,
             lint_config = lint_config,
