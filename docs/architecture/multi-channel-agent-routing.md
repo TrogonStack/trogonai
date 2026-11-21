@@ -325,9 +325,13 @@ AgentPort:
 - There is exactly one implementation, `AcpPort`, over the existing `acp-nats`
   client machinery, and it adopts only the session methods the agent advertises at
   initialize. A2A and HTTP are shapes the trait allows, not code that exists.
-- The agent registry is config: `agent_id -> { protocol, address }` (for ACP: the
-  acp prefix; the agent's workspace/cwd is agent configuration, never a channel
-  concern).
+- The target design is an agent registry in config: `agent_id -> { protocol,
+  address }` (for ACP: the acp prefix; the agent's workspace/cwd is agent
+  configuration, never a channel concern). That registry is not implemented. The
+  Telegram bridge today binds every new conversation to the single agent named by
+  `CHANNEL_AGENT_ID` (default `default`), reaches it through the one ACP prefix
+  from `ACP_PREFIX`, and takes the workspace from `CHANNEL_AGENT_CWD`
+  (`channel-bridge-telegram/src/config.rs`).
 
 ## Carrying platform structure over ACP: the `_meta` convention
 

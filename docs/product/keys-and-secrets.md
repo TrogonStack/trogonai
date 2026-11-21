@@ -6,7 +6,7 @@ product:
   name: Keys & Secrets
   tagline: Keep provider credentials in platform custody, with your own keys if you choose.
   order: 5
-  status: planned
+  status: in_progress
   icon: key-round
   color: "#E11D48"
 guarantees:
@@ -36,10 +36,10 @@ progress:
     status: built
     note: Callers get NATS credentials bound to their tenant and to the subjects they may use.
   - name: Gateway credential storage and rotation
-    status: partial
+    status: in_progress
     note: Webhook secrets and bot tokens are stored in OpenBao, as a prototype inside the gateway.
   - name: Key custody console
-    status: partial
+    status: in_progress
     note: Screens to register, bind, pause and migrate keys exist, running against a stand-in backend.
   - name: Secrets service and connection proxy
     status: designed
@@ -59,9 +59,10 @@ credential. The platform keeps it in custody, adds it to the request on the way
 out and encrypts it at rest under a key you choose, all the way up to a key
 in your own cloud account that you can switch off at any time.
 
-::: info Designed, mostly not built yet
-This page shows the designed product. A few foundations are running today;
-[Where it stands](#where-it-stands) lists what is built and what is not.
+::: info In progress, not ready for use
+This page shows the product taking shape. Platform identity and gateway
+foundations are running today, while custody and provider connections remain in
+progress. [Where it stands](#where-it-stands) lists what is built and what is not.
 :::
 
 ## Agents never see the secret
