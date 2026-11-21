@@ -1,0 +1,10 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load(":coverage_test.bzl", "rust_child_coverage_test")
+
+py_binary(
+    name = "collector_test_runner",
+    srcs = ["collector_test.py"],
+    main = "collector_test.py",
+)
+
+rust_child_coverage_test(name = "collector_test")
