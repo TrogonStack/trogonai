@@ -95,6 +95,35 @@ version = "1.250.0"
 backend = "cargo:wasm-tools"
 specifiers = ["1.250.0"]
 
+[[tools."github:open-telemetry/weaver"]]
+version = "0.24.2"
+backend = "github:open-telemetry/weaver"
+specifiers = ["0.24.2"]
+
+[tools."github:open-telemetry/weaver"."platforms.linux-arm64"]
+checksum = "sha256:0c7f762246211e5bb636baddb288c7171fef5a7c4c4cf5b8998f47a4b2959c5e"
+url = "https://github.com/open-telemetry/weaver/releases/download/v0.24.2/weaver-aarch64-unknown-linux-gnu.tar.xz"
+url_api = "https://api.github.com/repos/open-telemetry/weaver/releases/assets/455827160"
+provenance = "github-attestations"
+
+[tools."github:open-telemetry/weaver"."platforms.linux-x64"]
+checksum = "sha256:e5508316149b01cac325bd3b2c72c83ffea4cfcb554cac2906ff80df6edafc0e"
+url = "https://github.com/open-telemetry/weaver/releases/download/v0.24.2/weaver-x86_64-unknown-linux-gnu.tar.xz"
+url_api = "https://api.github.com/repos/open-telemetry/weaver/releases/assets/455827179"
+provenance = "github-attestations"
+
+[tools."github:open-telemetry/weaver"."platforms.macos-arm64"]
+checksum = "sha256:4268071b0662c1235bac32944c2355d78b3ebe6e5c720e3c2fd6e6378581076f"
+url = "https://github.com/open-telemetry/weaver/releases/download/v0.24.2/weaver-aarch64-apple-darwin.tar.xz"
+url_api = "https://api.github.com/repos/open-telemetry/weaver/releases/assets/455827141"
+provenance = "github-attestations"
+
+[tools."github:open-telemetry/weaver"."platforms.macos-x64"]
+checksum = "sha256:14d1658a1e59ee2874bef30f3bc4cf963306e4d23f639c2287a9bec1a2562453"
+url = "https://github.com/open-telemetry/weaver/releases/download/v0.24.2/weaver-x86_64-apple-darwin.tar.xz"
+url_api = "https://api.github.com/repos/open-telemetry/weaver/releases/assets/455827170"
+provenance = "github-attestations"
+
 [[tools."github:rhysd/actionlint"]]
 version = "1.7.12"
 backend = "github:rhysd/actionlint"
@@ -273,14 +302,6 @@ specifiers = ["1.96.0"]
 components = "clippy,llvm-tools-preview,rustfmt"
 profile = "minimal"
 targets = "wasm32-unknown-unknown"
-
-[[tools."ubi:open-telemetry/weaver"]]
-version = "0.24.2"
-backend = "ubi:open-telemetry/weaver"
-specifiers = ["0.24.2"]
-
-[tools."ubi:open-telemetry/weaver".options]
-exe = "weaver"
 
 [[tools.uv]]
 version = "0.11.18"
