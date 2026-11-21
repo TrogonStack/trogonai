@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/outbox_entry.proto";
+
+// One guarded append reserves pending capacity and records deduplication.
+message PeerMessageAccepted {
+  OutboxEntry entry = 1;
+}

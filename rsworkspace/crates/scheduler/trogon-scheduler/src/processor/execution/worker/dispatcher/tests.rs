@@ -1006,6 +1006,121 @@ async fn same_lane_resumes_after_the_first_record_finishes() {
     );
 }
 
+enum AckGate {
+    Held {
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    },
+    Open,
+}
+
+struct GatedMessage {
+    gate: AckGate,
+    position: StreamPosition,
+    acknowledged: Arc<Mutex<Vec<StreamPosition>>>,
+}
+
+impl DeliveredMessage for GatedMessage {
+    async fn ack(&self) -> Result<(), String> {
+        if let AckGate::Held { entered, release } = &self.gate {
+            entered.notify_one();
+            release.notified().await;
+        }
+        self.acknowledged.lock().unwrap().push(self.position);
+        Ok(())
+    }
+
+    async fn term(&self) -> Result<(), String> {
+        panic!("valid queued records must not be terminated")
+    }
+
+    async fn retry(&self) -> Result<(), String> {
+        panic!("valid queued records must not be retried")
+    }
+}
+
+#[tokio::test]
+async fn queued_same_lane_records_resume_after_a_blocked_acknowledgment() {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let (processor, _kv, _execution) = build();
+        let (handle, join, reports) = spawn_dispatcher::<_, _, _, _, GatedMessage>(
+            processor,
+            clock(),
+            DispatcherConfig {
+                max_active_lanes: 2,
+                channel_capacity: 1,
+            },
+        );
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let acknowledged = Arc::new(Mutex::new(Vec::new()));
+        let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
+        let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
+        let first = stream_event(&event, id, 1);
+        let first_position = first.stream_position;
+        handle
+            .submit(
+                first,
+                GatedMessage {
+                    gate: AckGate::Held {
+                        entered: entered.clone(),
+                        release: release.clone(),
+                    },
+                    position: first_position,
+                    acknowledged: acknowledged.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        entered.notified().await;
+
+        for position in 2..=3 {
+            let event = stream_event(&paused(id), id, position);
+            let position = event.stream_position;
+            handle
+                .submit(
+                    event,
+                    GatedMessage {
+                        gate: AckGate::Open,
+                        position,
+                        acknowledged: acknowledged.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        // With one channel slot, the third submission proves the second is
+        // queued inside the dispatcher while the first ACK is still held.
+        assert_eq!(handle.active_lanes(), 1);
+        assert!(acknowledged.lock().unwrap().is_empty());
+        release.notify_one();
+
+        let reports = drain(reports, 3).await;
+        assert_eq!(
+            reports
+                .iter()
+                .map(|report| report.stream_position.as_u64())
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert!(reports.iter().all(|report| report.result.is_ok()));
+        assert_eq!(
+            acknowledged
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|position| position.as_u64())
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(handle.active_lanes(), 0);
+        drop(handle);
+        join.await.unwrap();
+    })
+    .await
+    .expect("queued same-lane records must complete after the first ACK is released");
+}
+
 #[tokio::test(start_paused = true)]
 async fn record_queued_behind_a_busy_lane_runs_once_the_lane_finishes() {
     let (processor, _kv, _execution) = build();

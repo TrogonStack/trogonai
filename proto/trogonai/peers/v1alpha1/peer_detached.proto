@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/peers/v1alpha1/attachment_ref.proto";
+
+message PeerDetached {
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
+  google.protobuf.Timestamp detached_at = 2;
+}

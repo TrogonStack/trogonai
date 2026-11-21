@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+enum ContentAvailability {
+  CONTENT_AVAILABILITY_UNSPECIFIED = 0;
+  CONTENT_AVAILABILITY_AVAILABLE = 1;
+  CONTENT_AVAILABILITY_RETRY_UNAVAILABLE = 2;
+}

@@ -30,11 +30,15 @@ pub(crate) async fn serve(
     health: trogon_provider_gateway::Health,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServerError> {
+    let mut shutdown = Box::pin(shutdown);
+    let first_poll = std::future::poll_fn(|cx| std::task::Poll::Ready(shutdown.as_mut().poll(cx))).await;
     let address = listener.local_addr().map_err(ServerError::LocalAddress)?;
     tracing::info!(%address, "provider gateway listening");
 
     let shutdown = async move {
-        shutdown.await;
+        if first_poll.is_pending() {
+            shutdown.await;
+        }
         health.begin_shutdown();
     };
     let telemetry = crate::telemetry::HttpTelemetry::new(trogon_telemetry::meter("trogon-provider-gateway"));

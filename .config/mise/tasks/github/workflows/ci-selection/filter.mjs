@@ -14,14 +14,22 @@ const workspace = env.GITHUB_WORKSPACE || root;
 const NULL_COMMIT = '0'.repeat(40);
 const isInitialPush = (before) => before == null || before === '' || before === NULL_COMMIT;
 const sha = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value) && value !== NULL_COMMIT;
-const run = (command, args) => execFileSync(command, args, {
-  cwd: workspace, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-  timeout: 60000, maxBuffer: 32 * 1024 * 1024,
-});
+class SelectionFailure extends Error {}
+const run = (command, args) => {
+  try {
+    return execFileSync(command, args, {
+      cwd: workspace, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 60000, maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch (cause) {
+    throw new SelectionFailure(command === 'gh' ? 'github-api-command-failed' : 'git-command-failed', { cause });
+  }
+};
 const api = (endpoint, options = []) => JSON.parse(run('gh', ['api', ...options, endpoint]));
-const requireValue = (condition) => { if (!condition) throw new Error('Invalid selection input'); };
+const requireValue = (condition, code = 'invalid-input') => { if (!condition) throw new SelectionFailure(code); };
 const filePath = (value) => typeof value === 'string' && value.length > 0 && !value.includes('\0')
   && !value.split('/').some((part) => ['', '.', '..'].includes(part));
+let stage = 'event-context';
 
 try {
   const event = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
@@ -34,6 +42,7 @@ try {
 
   const groups = env.CI_FILTERS === '.github/filters/codeql.yml' ? ['go', 'javascript-typescript', 'rust'] : null;
   requireValue(groups);
+  stage = 'filters';
   const filters = yaml.load(fs.readFileSync(path.join(workspace, env.CI_FILTERS), 'utf8'));
   requireValue(filters && !Array.isArray(filters) && typeof filters === 'object');
   requireValue(Object.keys(filters).sort().join(',') === [...groups].sort().join(','));
@@ -46,6 +55,7 @@ try {
   let files = [];
   let selectAll = false;
   if (env.GITHUB_EVENT_NAME === 'push') {
+    stage = 'push-history';
     requireValue(event.after === env.GITHUB_SHA);
     selectAll = isInitialPush(event.before);
     if (!selectAll) {
@@ -63,16 +73,21 @@ try {
     requireValue(expectedBase === undefined || sha(expectedBase));
     const endpoint = `repos/${repo}/pulls/${number}`;
     const check = (metadata) => {
-      requireValue(metadata?.head?.sha === expectedHead && sha(metadata?.base?.sha));
-      requireValue(expectedBase === undefined || metadata.base.sha === expectedBase);
+      requireValue(metadata?.head?.sha === expectedHead, 'pull-request-head-changed');
+      requireValue(sha(metadata?.base?.sha), 'invalid-pull-request-base');
+      requireValue(expectedBase === undefined || metadata.base.sha === expectedBase, 'pull-request-base-changed');
       requireValue(Number.isSafeInteger(metadata.changed_files) && metadata.changed_files >= 0);
       return metadata;
     };
+    stage = 'pull-request-before';
     const before = check(api(endpoint));
+    stage = 'pull-request-files';
     const pages = api(`${endpoint}/files?per_page=100`, ['--paginate', '--slurp']);
     requireValue(Array.isArray(pages) && pages.every(Array.isArray));
     const rows = pages.flat();
+    stage = 'pull-request-after';
     const after = check(api(endpoint));
+    stage = 'pull-request-file-validation';
     requireValue(before.base.sha === after.base.sha && rows.length === before.changed_files && rows.length === after.changed_files);
     requireValue(new Set(rows.map((row) => row?.filename)).size === rows.length);
     files = rows.flatMap((row) => {
@@ -92,8 +107,10 @@ try {
     .map(([name]) => name);
   const output = matchers.map(([name]) => `${name}=${selected.includes(name)}\n`).join('')
     + `changes=${JSON.stringify(selected)}\n`;
+  stage = 'publish-selection';
   fs.appendFileSync(env.GITHUB_OUTPUT, output);
-} catch {
-  console.error('CI selection failed; retaining full-check defaults');
+} catch (error) {
+  const code = error instanceof SelectionFailure ? error.message : 'unexpected-error';
+  console.error(`CI selection failed (${stage}: ${code}); retaining full-check defaults`);
   process.exitCode = 1;
 }

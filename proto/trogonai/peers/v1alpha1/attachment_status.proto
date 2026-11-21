@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+enum AttachmentStatus {
+  ATTACHMENT_STATUS_UNSPECIFIED = 0;
+  ATTACHMENT_STATUS_ATTACHED = 1;
+  ATTACHMENT_STATUS_DETACHED = 2;
+}

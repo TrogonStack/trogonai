@@ -145,7 +145,8 @@ def _target_srcs(root):
     """A target's root file plus the module directory beside it."""
     if root.endswith("/main.rs"):
         return native.glob([root.rpartition("/")[0] + "/**/*.rs"])
-    return [root] + native.glob([root.removesuffix(".rs") + "/**/*.rs"], allow_empty = True)
+    support = native.glob(["tests/support/**/*.rs"], allow_empty = True) if root.startswith("tests/") else []
+    return _dedupe([root] + native.glob([root.removesuffix(".rs") + "/**/*.rs"], allow_empty = True) + support)
 
 def _dedupe(items):
     return {item: True for item in items}.keys()
@@ -269,7 +270,8 @@ def _crate_targets(
     library = crate["library"]
     lint_config = ":" + name + "_lints"
     lib_target = name + suffix
-    lib_deps = [":" + lib_target] if library else []
+    lib_deps = [":" + lib_target] if library and not library["proc_macro"] else []
+    lib_proc_macro_deps = [":" + lib_target] if library and library["proc_macro"] else []
 
     # A binary named after its package would clash with the library target.
     binary_targets = {
@@ -291,7 +293,7 @@ def _crate_targets(
             crate_name = binary["name"].replace("-", "_"),
             crate_root = root,
             edition = edition,
-            proc_macro_deps = normal_proc_macro_deps,
+            proc_macro_deps = lib_proc_macro_deps + normal_proc_macro_deps,
             rustc_env = rustc_env | _env(settings["rustc_env"]),
             lint_config = lint_config,
             rustc_flags = _RUSTC_FLAGS,
@@ -337,10 +339,10 @@ def _crate_targets(
             compile_data = compile_data + _files(settings["compile_data"]),
             crate_features = crate_features,
             crate_root = test["root"],
-            data = data + binary_data + _files(settings["data"]),
+            data = _dedupe(data + binary_data + _files(settings["data"])),
             edition = edition,
             env = test_env | binary_coverage_env,
-            proc_macro_deps = normal_proc_macro_deps + test_proc_macro_deps,
+            proc_macro_deps = lib_proc_macro_deps + normal_proc_macro_deps + test_proc_macro_deps,
             rustc_env = rustc_env | binary_env | _env(settings["rustc_env"]),
             lint_config = lint_config,
             rustc_flags = _RUSTC_FLAGS,
@@ -360,7 +362,7 @@ def _crate_targets(
             crate_features = crate_features,
             crate_root = example["root"],
             edition = edition,
-            proc_macro_deps = normal_proc_macro_deps + test_proc_macro_deps,
+            proc_macro_deps = lib_proc_macro_deps + normal_proc_macro_deps + test_proc_macro_deps,
             rustc_env = rustc_env | _env(settings["rustc_env"]),
             lint_config = lint_config,
             rustc_flags = _RUSTC_FLAGS,
