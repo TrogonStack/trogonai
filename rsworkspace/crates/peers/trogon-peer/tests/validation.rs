@@ -173,6 +173,7 @@ fn enrollment_rejects_unrepresentable_lease_deadlines_without_panicking() {
     for now in [
         DateTime::<Utc>::MAX_UTC,
         Utc.with_ymd_and_hms(9999, 12, 31, 23, 59, 55).unwrap(),
+        DateTime::<Utc>::from_timestamp(-62_135_596_805, 0).unwrap(),
     ] {
         let command = Enroll::new(
             identity("tenant", "caller", "installation", "session"),
@@ -185,6 +186,106 @@ fn enrollment_rejects_unrepresentable_lease_deadlines_without_panicking() {
             .given_no_history()
             .when(command)
             .then_error(EnrollError::LeaseDeadlineOverflow);
+    }
+}
+
+#[test]
+fn replay_reports_the_invalid_enrollment_field_before_accepting_its_identity() {
+    for (field, invalid) in [
+        ("enrollment.caller_id", "caller.*"),
+        ("enrollment.installation_id", "install.*"),
+        ("enrollment.native_session_id", "native\nvalue"),
+        ("enrollment.collaboration_ref", "scope\nvalue"),
+        ("enrollment.display_name", "display\nvalue"),
+    ] {
+        let mut value = enrollment();
+        match field {
+            "enrollment.caller_id" => value.caller_id = Some(invalid.to_owned()),
+            "enrollment.installation_id" => value.installation_id = Some(invalid.to_owned()),
+            "enrollment.native_session_id" => value.native_session_id = Some(invalid.to_owned()),
+            "enrollment.collaboration_ref" => value.collaboration_ref = Some(invalid.to_owned()),
+            _ => value.display_name = Some(invalid.to_owned()),
+        }
+        assert!(
+            matches!(evolve(initial_state(), &enrolled(value)), Err(EvolveError::InvalidValue {field: actual, ..}) if actual == field)
+        );
+    }
+}
+
+#[test]
+fn replay_enforces_protobuf_timestamp_bounds_including_nanoseconds() {
+    for (seconds, nanos) in [(-62_135_596_801, 0), (253_402_300_800, 0), (0, -1), (0, 1_000_000_000)] {
+        let mut value = enrollment();
+        let mut timestamp = value.enrolled_at.as_option().unwrap().clone();
+        timestamp.seconds = seconds;
+        timestamp.nanos = nanos;
+        value.enrolled_at = MessageField::some(timestamp);
+        assert_eq!(
+            evolve(initial_state(), &enrolled(value)),
+            Err(EvolveError::TimestampRange {
+                field: "enrollment.enrolled_at"
+            })
+        );
+    }
+}
+
+#[test]
+fn attachment_facts_cannot_import_another_identity_or_a_detached_lease() {
+    let value = enrollment();
+    let start = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+    let state = evolve(initial_state(), &enrolled(value.clone())).unwrap();
+    let valid = proto::PeerAttachment {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
+            peer_id: value.peer_id,
+            connector_id: Some("connector".to_owned()),
+            generation: Some(1),
+        }),
+        status: Some(proto::AttachmentStatus::ATTACHMENT_STATUS_ATTACHED.into()),
+        observed_at: MessageField::some(timestamp_from_datetime(&start)),
+        expires_at: MessageField::some(timestamp_from_datetime(&(start + chrono::Duration::seconds(10)))),
+    };
+    for mutation in 0..5 {
+        let mut changed = valid.clone();
+        let mut reference = changed.attachment_ref.as_option().unwrap().clone();
+        let expected = match mutation {
+            0 => {
+                reference.peer_id = Some("a".repeat(64));
+                EvolveError::IdentityMismatch
+            }
+            1 => {
+                reference.connector_id = Some("invalid.*".to_owned());
+                EvolveError::InvalidValue {
+                    field: "attachment.connector_id",
+                    source: PeerValueError::InvalidCharacter,
+                }
+            }
+            2 => {
+                changed.observed_at =
+                    MessageField::some(timestamp_from_datetime(&(start - chrono::Duration::seconds(1))));
+                changed.expires_at =
+                    MessageField::some(timestamp_from_datetime(&(start + chrono::Duration::seconds(9))));
+                EvolveError::InvalidAttachment
+            }
+            3 => {
+                changed.status = Some(proto::AttachmentStatus::ATTACHMENT_STATUS_DETACHED.into());
+                changed.expires_at = changed.observed_at.clone();
+                EvolveError::InvalidAttachment
+            }
+            _ => {
+                reference.generation = Some(2);
+                EvolveError::InvalidAttachment
+            }
+        };
+        changed.attachment_ref = MessageField::some(reference);
+        let event = proto::PeerEvent {
+            event: Some(
+                proto::PeerAttached {
+                    attachment: MessageField::some(changed),
+                }
+                .into(),
+            ),
+        };
+        assert_eq!(evolve(state.clone(), &event), Err(expected));
     }
 }
 
