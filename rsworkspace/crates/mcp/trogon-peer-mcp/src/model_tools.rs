@@ -111,7 +111,7 @@ pub(crate) async fn acknowledge<B: AcknowledgePeerBatch>(
     metadata_result(acknowledgment_metadata(&response, &batch_id)?)
 }
 
-fn wire_attachment(attachment: &AttachmentRef) -> v1::AttachmentRef {
+pub(crate) fn wire_attachment(attachment: &AttachmentRef) -> v1::AttachmentRef {
     v1::AttachmentRef {
         peer_id: Some(attachment.peer_id().as_str().to_owned()),
         connector_id: Some(attachment.connector_id().as_str().to_owned()),
