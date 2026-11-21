@@ -46,6 +46,8 @@ build:coverage --instrumentation_filter=^//rsworkspace[/:]
 # instruments every test binary.
 build:coverage --instrument_test_targets
 build:coverage --combined_report=lcov
+# Opted-in native contract tests retain counters across fork, exec and _exit.
+build:coverage --@rules_rust//rust/settings:extra_rustc_flag=-Cllvm-args=-runtime-counter-relocation
 # cargo llvm-cov compiles with these cfgs, and on the nightly toolchain the
 # coverage job uses, `coverage_nightly` turns `#[coverage(off)]` on. Bazel builds
 # with the stable toolchain, which accepts that attribute only in bootstrap mode.
