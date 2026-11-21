@@ -10,5 +10,6 @@ workspace_crate(
         "message_frontier_clock": {},
         "message_history_admission": {},
         "message_history_fence": {},
+        "public_content_binding_contract": {},
     },
 )
