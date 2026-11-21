@@ -84,11 +84,26 @@ cases! {
         let target = child.target()?;
         assert!(alive(&target.descriptor)?);
         child.0.kill()?;
-        child.0.wait()?;
+        assert_eq!(child.0.wait()?.signal(), Some(libc::SIGKILL));
         assert!(!alive(&target.descriptor)?);
         let mut poll = libc::pollfd { fd: target.descriptor.as_raw_fd(), events: libc::POLLIN, revents: 0 };
         assert_eq!(unsafe { libc::poll(&mut poll, 1, 0) }, 1);
+        assert_ne!(poll.revents & libc::POLLIN, 0);
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { libc::waitid(libc::P_PIDFD,
+            target.descriptor.as_raw_fd() as libc::id_t, &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) }, -1);
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
+        Ok(())
+    },
+    a_hangup_without_readable_data_cannot_grant_liveness => {
+        let (read, write) = crate::linux::pipe()?;
+        drop(write);
+        let mut poll = libc::pollfd { fd: read.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+        assert_eq!(unsafe { libc::poll(&mut poll, 1, 0) }, 1);
+        assert_eq!(poll.revents & libc::POLLIN, 0);
         assert_ne!(poll.revents & libc::POLLHUP, 0);
+        assert_eq!(alive(&read), Ok(false));
         Ok(())
     },
     an_interrupted_liveness_check_cannot_grant_authority => {
