@@ -134,7 +134,7 @@ fn attachment_replay_rejects_invalid_generation_status_or_lease() {
     let now = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
     let state = evolve(initial_state(), &enrolled(value.clone())).unwrap();
     let valid = proto::PeerAttachment {
-        attachment: MessageField::some(proto::AttachmentRef {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
             peer_id: value.peer_id,
             connector_id: Some("connector".to_owned()),
             generation: Some(1),
@@ -146,11 +146,11 @@ fn attachment_replay_rejects_invalid_generation_status_or_lease() {
     for mutation in 0..5 {
         let mut changed = valid.clone();
         match mutation {
-            0 => changed.attachment = MessageField::default(),
+            0 => changed.attachment_ref = MessageField::default(),
             1 => {
-                let mut reference = changed.attachment.as_option().unwrap().clone();
+                let mut reference = changed.attachment_ref.as_option().unwrap().clone();
                 reference.generation = Some(0);
-                changed.attachment = MessageField::some(reference);
+                changed.attachment_ref = MessageField::some(reference);
             }
             2 => changed.status = Some(buffa::EnumValue::from(77)),
             3 => changed.expires_at = MessageField::some(timestamp_from_datetime(&now)),
@@ -216,7 +216,7 @@ fn command(now: DateTime<Utc>) -> Enroll {
 fn attachment() -> proto::PeerAttachment {
     let now = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
     proto::PeerAttachment {
-        attachment: MessageField::some(proto::AttachmentRef {
+        attachment_ref: MessageField::some(proto::AttachmentRef {
             peer_id: enrollment().peer_id,
             connector_id: Some("connector".to_owned()),
             generation: Some(1),
@@ -398,7 +398,7 @@ fn attachment_replay_requires_payload_reference_identity_and_connector() {
         Err(EvolveError::MissingField { field: "attachment" })
     );
     let mut value = attachment();
-    value.attachment = MessageField::default();
+    value.attachment_ref = MessageField::default();
     assert_eq!(
         evolve(state.clone(), &attached(value)),
         Err(EvolveError::MissingField {
@@ -409,7 +409,7 @@ fn attachment_replay_requires_payload_reference_identity_and_connector() {
         (
             proto::AttachmentRef {
                 peer_id: None,
-                ..attachment().attachment.into_option().unwrap()
+                ..attachment().attachment_ref.into_option().unwrap()
             },
             EvolveError::MissingField {
                 field: "attachment.peer_id",
@@ -418,14 +418,14 @@ fn attachment_replay_requires_payload_reference_identity_and_connector() {
         (
             proto::AttachmentRef {
                 peer_id: Some("other_peer".to_owned()),
-                ..attachment().attachment.into_option().unwrap()
+                ..attachment().attachment_ref.into_option().unwrap()
             },
             EvolveError::IdentityMismatch,
         ),
         (
             proto::AttachmentRef {
                 connector_id: None,
-                ..attachment().attachment.into_option().unwrap()
+                ..attachment().attachment_ref.into_option().unwrap()
             },
             EvolveError::MissingField {
                 field: "attachment.connector_id",
@@ -434,7 +434,7 @@ fn attachment_replay_requires_payload_reference_identity_and_connector() {
         (
             proto::AttachmentRef {
                 connector_id: Some("invalid.*".to_owned()),
-                ..attachment().attachment.into_option().unwrap()
+                ..attachment().attachment_ref.into_option().unwrap()
             },
             EvolveError::InvalidValue {
                 field: "attachment.connector_id",
@@ -443,7 +443,7 @@ fn attachment_replay_requires_payload_reference_identity_and_connector() {
         ),
     ] {
         let mut value = attachment();
-        value.attachment = MessageField::some(reference);
+        value.attachment_ref = MessageField::some(reference);
         assert_eq!(evolve(state.clone(), &attached(value)), Err(error));
     }
 }
