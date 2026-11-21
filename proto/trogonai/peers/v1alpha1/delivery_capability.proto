@@ -1,0 +1,8 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+enum DeliveryCapability {
+  DELIVERY_CAPABILITY_UNSPECIFIED = 0;
+  DELIVERY_CAPABILITY_ON_USER_PROMPT = 1;
+}

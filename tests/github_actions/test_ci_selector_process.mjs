@@ -142,6 +142,22 @@ test('PR head and base changes before or during pagination cannot exclude checks
   }
 });
 
+test('selector failures identify the guarded boundary without exposing subprocess stderr', (t) => {
+  const f = fixture(t);
+  const apiFailure = f.run('pull_request', event(), [{ fail: true }]);
+  failed(apiFailure);
+  assert.match(apiFailure.stderr, /pull-request-before: github-api-command-failed/);
+  assert.doesNotMatch(apiFailure.stderr, /not authorized/);
+
+  const baseChanged = f.run('pull_request', event(), [metadata(1, { base: { sha: 'c'.repeat(40) } })]);
+  failed(baseChanged);
+  assert.match(baseChanged.stderr, /pull-request-before: pull-request-base-changed/);
+
+  const afterChanged = f.run('pull_request', event(), [metadata(1), [[row('notes/readme.md')]], metadata(1, { head: { sha: 'c'.repeat(40) } })]);
+  failed(afterChanged);
+  assert.match(afterChanged.stderr, /pull-request-after: pull-request-head-changed/);
+});
+
 test('API failure, truncation, duplicate pages and malformed file data fail closed', (t) => {
   const f = fixture(t);
   for (const responses of [
