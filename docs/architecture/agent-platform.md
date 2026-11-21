@@ -37,8 +37,10 @@ nonbehavioral record metadata outside the configuration digest. Archive is
 permanent; reviving the behavior requires provisioning another Agent.
 
 These contracts do not establish a complete Agent Registry or onboarding
-service. Agent code generation is excluded in `buf.gen.yaml` while the design
-is active. The configuration draft follows the runtime-owned settings boundary
+service. The `proto/trogonai/agents` package is excluded from codegen in
+`buf.gen.yaml` while the design is active, but the generator runs with
+`include_imports: true`, so any promoted package that imports it pulls the
+generated `trogonai.agents.*` types in. The configuration draft follows the runtime-owned settings boundary
 in draft
 [ADR#0062](../adr/0062-runtime-owned-settings-and-platform-declarations.md).
 
@@ -70,14 +72,41 @@ blocks.
 Several edge and bridge implementations also exist, but they do not yet
 form one Session-integrated gateway layer:
 
-- `a2a-gateway` contains a feature-gated live dispatch path that authenticates,
-  policy-screens, audits, and forwards A2A gateway ingress to mapped agent RPC
-  subjects;
+- `a2a-gateway` serves live A2A ingress in the default build. It authenticates
+  callers, applies the policy layers enabled in the deployment, and forwards
+  allowed requests to mapped agent RPC subjects. Platform audit publishing
+  requires explicit configuration. The SpiceDB relational tier requires the
+  `spicedb` Cargo feature;
 - `mcp-nats-server` and `mcp-nats-stdio` bridge remote HTTP or local stdio MCP
   traffic onto the NATS MCP binding; and
 - `trogon-gateway` verifies external source traffic and publishes raw source
   events to JetStream. Its current sources include Telegram, Slack, Discord,
   GitHub, GitLab, and other webhook or event producers.
+
+Several platform security building blocks also exist as crates:
+
+- `rsworkspace/crates/platform/trogon-egress-proxy` is an mTLS HTTP CONNECT
+  forward proxy that admits agent tunnels only to destinations a policy
+  snapshot permits and records each decision through the platform audit writer;
+- `rsworkspace/crates/aauth/` holds the AAuth verifier, agent-side signer,
+  Person Server and Access Server. Per accepted
+  [ADR#0017](../adr/0017-aauth-agent-authentication.md), as superseded in part
+  by [ADR#0082](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
+  AAuth runs at the external HTTP edge rather than on the bus;
+- `trogon-workload-identity` and `trogon-workload-registration` cover
+  supervisor-owned attested workload credential activation and governed
+  registration. The model is proposed under draft
+  [ADR#0098](../adr/0098-attested-workload-identity.md); see
+  [workload identity and portable trust](./workload-identity.md) and the
+  [runtime reference](../reference/workload-identity.md);
+- `rsworkspace/crates/platform/trogon-audit` provides platform audit records and
+  a writer that refuses actions when it cannot store their required audit
+  records; and
+- `rsworkspace/crates/policy/trogon-policy-eval` evaluates policy bindings
+  (permits, ceilings, holds, and request-rule narrowing) as pure functions,
+  with `trogon-policy-cel` adding request rules that can only narrow. The
+  binding model is proposed under draft
+  [ADR#0071](../adr/0071-policy-bindings-on-a-subject-entitlements-ceilings-and-holds.md).
 
 These are not the same thing as the target control plane. MCP transport is not
 a Tool Registry. ARD is a discovery surface and, by accepted
@@ -381,7 +410,8 @@ The following possibilities should not be read as promised architecture:
   implementation catalogs are useful target capabilities. Their service
   boundaries, storage topology, and ownership contracts require separate
   decisions.
-- **Draft ADR details.** ADRs 0025, 0031, 0032, 0035, 0043, 0061, and 0062 are proposals.
+- **Draft ADR details.** ADRs 0025, 0031, 0032, 0035, 0043, 0061, 0062, 0063,
+  0070, 0071, 0072, 0087, 0092, 0093, 0094, 0095, 0096, and 0098 are proposals.
   Their concepts help describe the target, but acceptance and implementation
   are still required.
 

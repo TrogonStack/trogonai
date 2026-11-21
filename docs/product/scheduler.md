@@ -6,7 +6,7 @@ product:
   name: Scheduler
   tagline: Send a message at a set time or on a repeating rule, without running a timer yourself.
   order: 7
-  status: planned
+  status: in_progress
   icon: calendar-clock
   color: "#65A30D"
 guarantees:
@@ -45,16 +45,16 @@ progress:
     status: built
     note: The processor counts the changes it handled, the timers it set and cleared and its redeliveries, and traces each change.
   - name: Firing through NATS scheduled messages
-    status: partial
+    status: in_progress
     note: The processor that sets and clears NATS timers is written and tested against stand-ins. Its tests against a live NATS server run outside CI.
   - name: Recurrence rules
-    status: partial
+    status: in_progress
     note: The scheduler works out each next occurrence and records it when it fires. Written and tested, with nothing running it yet.
   - name: Postgres read model
-    status: partial
+    status: in_progress
     note: An optional view stored in Postgres exists behind a build flag. Nothing selects it yet.
   - name: Console screens
-    status: partial
+    status: in_progress
     note: Screens to list, create, pause, resume and remove schedules exist, running against a stand-in backend.
   - name: Commands over the network
     status: designed
@@ -70,7 +70,7 @@ A schedule says when to send, where to send and what to send. When its time
 comes, the message is published on the NATS subject you named, and anything
 subscribed to that subject receives it.
 
-::: info Built as a library, not running yet
+::: info In progress, not running yet
 The scheduling logic is written and tested, but no service runs it yet, so
 there is nothing to call today. [Where it stands](#where-it-stands) has the
 detail.
