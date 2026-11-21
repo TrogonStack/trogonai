@@ -7640,6 +7640,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-peer-nats"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "trogon-nats",
+]
+
+[[package]]
 name = "trogon-policy-cel"
 version = "0.1.0"
 dependencies = [
