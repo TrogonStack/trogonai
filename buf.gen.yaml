@@ -14,7 +14,9 @@ inputs:
       - proto/trogonai/agents
       - proto/trogonai/catalog
       - proto/trogonai/connections
-      - proto/trogonai/evaluation
+      - proto/trogonai/evaluation/comparisons
+      - proto/trogonai/evaluation/queries
+      - proto/trogonai/evaluation/rubrics
       - proto/trogonai/gateway/credentials/commands
       - proto/trogonai/library
       - proto/trogonai/platform/api_keys
