@@ -122,8 +122,8 @@ sandbox deployment:
   The contract describes which transitions are allowed; it does not persist
   operations, perform provider effects or prove their completion.
 
-See the [command supervisor](../../rsworkspace/crates/platform/sandbox-command-supervisor/README.md)
-and [operation contract](../../rsworkspace/crates/sandbox/trogon-sandbox-contract/README.md)
+See the [command supervisor](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/platform/sandbox-command-supervisor/README.md)
+and [operation contract](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/sandbox/trogon-sandbox-contract/README.md)
 package documentation for their public interfaces.
 
 A server-side import must integrate with the repository's existing NATS,
