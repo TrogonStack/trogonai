@@ -102,18 +102,30 @@ impl Authenticator {
             .iter()
             .any(|key| key.common.key_id.as_deref() == Some(kid));
         if expired || missing {
-            if cache.attempted.is_some_and(|attempted| {
+            let throttled = cache.attempted.is_some_and(|attempted| {
                 attempted.elapsed() < Duration::from_secs(crate::constants::JWKS_REFRESH_SECONDS)
-            }) {
-                return Err(if expired {
-                    AuthError::Unavailable
-                } else {
-                    AuthError::Unauthenticated
-                });
+            });
+            let stale_usable =
+                !missing && cache.fetched.elapsed() < Duration::from_secs(crate::constants::JWKS_MAX_STALE_SECONDS);
+            if throttled {
+                if !stale_usable {
+                    return Err(if missing {
+                        AuthError::Unauthenticated
+                    } else {
+                        AuthError::Unavailable
+                    });
+                }
+            } else {
+                cache.attempted = Some(Instant::now());
+                match fetch_keys(&self.client, &state.config).await {
+                    Ok(keys) => {
+                        cache.keys = keys;
+                        cache.fetched = Instant::now();
+                    }
+                    Err(_) if stale_usable => {}
+                    Err(error) => return Err(error),
+                }
             }
-            cache.attempted = Some(Instant::now());
-            cache.keys = fetch_keys(&self.client, &state.config).await?;
-            cache.fetched = Instant::now();
         }
         let mut matches = cache
             .keys

@@ -6,4 +6,5 @@ pub(crate) const MAX_JWKS_BYTES: usize = 262_144;
 pub(crate) const MAX_DELEGATION_DEPTH: usize = 8;
 pub(crate) const JWKS_CACHE_SECONDS: u64 = 300;
 pub(crate) const JWKS_REFRESH_SECONDS: u64 = 30;
+pub(crate) const JWKS_MAX_STALE_SECONDS: u64 = 3_600;
 pub(crate) const MCP_MAX_REQUEST_BODY_BYTES: usize = 131_072;
