@@ -2,7 +2,7 @@ use trogon_decider::{Decider, Decision, WritePrecondition};
 use trogonai_proto::evaluation::bindings::v1alpha1 as v1;
 
 use crate::constants::MAX_FINDINGS;
-use crate::error::{CommandInvalidError, EvaluationBindingDecideError, EvaluationBindingEvolveError};
+use crate::error::{CommandInvalidError, EvaluationBindingDecideError};
 use crate::facts::{FindingEvidence, WithheldVocabularyScreen};
 use crate::state::{BindingStatus, EvaluationBindingState};
 use crate::surface::finding_inside_surface;
@@ -78,20 +78,11 @@ impl Decider for RecordEvaluationResult {
     type State = EvaluationBindingState;
     type Event = v1::EvaluationBindingEvent;
     type DecideError = EvaluationBindingDecideError;
-    type EvolveError = EvaluationBindingEvolveError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
         &self.binding_id
-    }
-
-    fn initial_state() -> Self::State {
-        crate::state::initial_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        crate::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {

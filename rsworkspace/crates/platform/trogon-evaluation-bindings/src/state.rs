@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use trogon_decider::Evolve;
 use trogonai_proto::evaluation::bindings::v1alpha1::EvaluationBindingEvent;
 use trogonai_proto::evaluation::bindings::{EvaluationBindingEventCase, v1alpha1::EvaluationBinding};
 
@@ -22,11 +23,15 @@ pub struct EvaluationBindingState {
     pub recorded_results: BTreeSet<String>,
 }
 
-pub fn initial_state() -> EvaluationBindingState {
-    EvaluationBindingState::default()
+impl Evolve<EvaluationBindingEvent> for EvaluationBindingState {
+    type Error = EvaluationBindingEvolveError;
+
+    fn evolve(self, event: &EvaluationBindingEvent) -> Result<Self, Self::Error> {
+        apply(self, event)
+    }
 }
 
-pub fn evolve(
+fn apply(
     mut state: EvaluationBindingState,
     event: &EvaluationBindingEvent,
 ) -> Result<EvaluationBindingState, EvaluationBindingEvolveError> {

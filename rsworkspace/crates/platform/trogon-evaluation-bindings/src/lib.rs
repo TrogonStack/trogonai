@@ -25,5 +25,5 @@ pub use bind_rubric::BindRubric;
 pub use error::{CommandInvalidError, EvaluationBindingDecideError, EvaluationBindingEvolveError};
 pub use facts::{FindingEvidence, JudgeScope, RubricVersionStanding, WithheldVocabularyScreen};
 pub use record_evaluation_result::RecordEvaluationResult;
-pub use state::{BindingStatus, EvaluationBindingState, evolve, initial_state};
+pub use state::{BindingStatus, EvaluationBindingState};
 pub use unbind_rubric::UnbindRubric;
