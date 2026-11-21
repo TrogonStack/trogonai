@@ -1,34 +1,12 @@
 use super::constants::ATTACHMENT_LEASE;
 use super::domain::{AttachmentRef, PeerId, PeerObservation, TrustedPeerOwner};
-use super::state::{self, EvolveError};
-use crate::commands::state::PeerState;
+pub use super::heartbeat_error::HeartbeatError;
+use super::state::{self, EvolveError, PeerState};
 use buffa::MessageField;
 use chrono::{DateTime, Utc};
 use trogon_decider::{Decider, Decision, WritePrecondition};
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::v1alpha1::{self as proto, PeerEvent};
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum HeartbeatError {
-    #[error("peer identity is not enrolled")]
-    MissingEnrollment,
-    #[error("authenticated owner does not own this peer")]
-    OwnerMismatch,
-    #[error("connector attachment has been fenced")]
-    Fenced,
-    #[error("connector attachment is inactive")]
-    Inactive,
-    #[error("connector attachment lease expired")]
-    Expired,
-    #[error("service time moved backwards")]
-    ClockRegression,
-    #[error("reported activity moved backwards or is in the future")]
-    InvalidActivity,
-    #[error("attachment deadline is outside the supported range")]
-    LeaseDeadlineOverflow,
-    #[error("invalid peer state: {0}")]
-    InvalidState(#[from] EvolveError),
-}
 
 #[derive(Debug, Clone)]
 pub struct Heartbeat {
