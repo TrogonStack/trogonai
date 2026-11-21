@@ -33,6 +33,11 @@ pub struct TelemetryShutdownError {
 }
 
 impl TelemetryShutdownError {
+    /// The providers that failed to shut down, in shutdown order (tracer, meter, logger).
+    pub fn errors(&self) -> &[TelemetryProviderShutdownError] {
+        &self.errors
+    }
+
     fn fmt_errors(&self) -> String {
         let mut out = String::from("failed to shutdown OpenTelemetry providers:\n");
         for error in &self.errors {
