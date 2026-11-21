@@ -36,7 +36,7 @@ progress:
     status: built
     note: Your own systems send authenticated HTTP events. The gateway keeps the original body in a durable delivery for your consumers.
   - name: Generic webhook management in the console
-    status: partial
+    status: in_progress
     note: Endpoint setup and delivery inspection have a local preview. Live project-scoped management is still pending.
   - name: Webhook gateway with checks for each provider
     status: built
@@ -54,7 +54,7 @@ progress:
     status: built
     note: Agents hold conversations with people in Telegram.
   - name: Credential store for provider secrets
-    status: partial
+    status: in_progress
     note: Writing, rotating, revoking and destroying secrets are recorded as events, and the running gateway refreshes from them.
   - name: Actions through project connections
     status: designed
