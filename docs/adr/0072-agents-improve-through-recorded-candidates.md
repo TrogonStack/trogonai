@@ -273,6 +273,9 @@ charter.
   `settings_path` falls inside the `EditableSurface` of the evaluated
   revision, and must screen each finding against the comparison's withheld
   vocabulary before it can be cited anywhere an improver can read.
+  The refusals are `EvaluationFindingOutsideEditableSurfaceError` and
+  `EvaluationFindingMatchesWithheldVocabularyError`; neither names the term or
+  rubric that matched.
 - Dispatch of `BindRubric` verifies the rubric version exists on a rubric that
   is not retired and that the judge differs from the subject.
 - Rendering a run history must resolve the comparison's screening rubric
