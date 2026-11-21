@@ -82,5 +82,3 @@ mise exec -- cargo build -p sandbox-command-supervisor --features test-support -
 
 See the repository's [sandbox foundation architecture](../../../../docs/architecture/sandbox-foundation.md)
 for how this package fits with the client SDK and future worker integrations.
-
-Licensed under Apache-2.0, as declared in `Cargo.toml` and the repository license.
