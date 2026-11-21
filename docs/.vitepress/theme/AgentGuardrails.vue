@@ -2,7 +2,7 @@
 import { withBase } from "vitepress";
 import Icon from "./Icon.vue";
 
-type Status = "built" | "partial" | "designed";
+type Status = "built" | "in_progress" | "designed";
 
 type Rail = { icon: string; name: string; text: string; status: Status; side: "left" | "right"; link?: boolean };
 
@@ -32,7 +32,7 @@ const rails: Rail[] = [
     icon: "shield-check",
     name: "Policy",
     text: "Permits, ceilings and holds on what an agent may do. Policies can only narrow, never widen.",
-    status: "partial",
+    status: "in_progress",
     side: "right",
   },
   {
@@ -52,7 +52,7 @@ const rails: Rail[] = [
   },
 ];
 
-const statusLabel: Record<Status, string> = { built: "Built", partial: "Partial", designed: "Designed" };
+const statusLabel: Record<Status, string> = { built: "Built", in_progress: "In progress", designed: "Designed" };
 </script>
 
 <template>
@@ -128,7 +128,7 @@ const statusLabel: Record<Status, string> = { built: "Built", partial: "Partial"
   grid-column: 3;
 }
 
-.agent-guardrails__rails li.is-partial {
+.agent-guardrails__rails li.is-in_progress {
   --tone: #2563eb;
 }
 
