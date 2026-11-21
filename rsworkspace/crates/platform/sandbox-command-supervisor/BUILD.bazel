@@ -1,6 +1,8 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
+    compile_data = ["src/**/*.rs", "Cargo.toml"],
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
     env = {
         "RUST_COVERAGE_OBJECTS": "$(rootpath :supervisor-kernel-test-worker)",
         "RUST_COVERAGE_CONTINUOUS": "1",

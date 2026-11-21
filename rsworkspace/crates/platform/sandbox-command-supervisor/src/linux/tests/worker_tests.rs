@@ -1,6 +1,7 @@
 use super::TestResult;
 use std::collections::BTreeMap;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
@@ -12,6 +13,27 @@ use trogon_std::env::ReadEnv;
 
 static CUSTODY: Mutex<()> = Mutex::new(());
 const LOG_LIMIT: u64 = 8 * 1024 * 1024;
+
+pub(super) fn source_fingerprint() -> String {
+    static SOURCES: include_dir::Dir<'_> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src");
+    fn files<'a>(directory: &'a include_dir::Dir<'a>, output: &mut Vec<&'a include_dir::File<'a>>) {
+        output.extend(directory.files());
+        for child in directory.dirs() {
+            files(child, output);
+        }
+    }
+    let mut sources = Vec::new();
+    files(&SOURCES, &mut sources);
+    sources.sort_unstable_by_key(|file| file.path());
+    let mut fingerprint = std::collections::hash_map::DefaultHasher::new();
+    for file in sources {
+        file.path().hash(&mut fingerprint);
+        file.contents().hash(&mut fingerprint);
+    }
+    include_bytes!("../../../Cargo.toml").hash(&mut fingerprint);
+    (cfg!(debug_assertions), std::env::consts::ARCH).hash(&mut fingerprint);
+    format!("{:016x}", fingerprint.finish())
+}
 
 fn children() -> io::Result<Vec<i32>> {
     let mut children = Vec::new();
@@ -196,11 +218,39 @@ pub(super) fn run_observed(
     timeout: Duration,
     mut observe: impl FnMut(&OwnedFd) -> TestResult,
 ) -> TestResult {
+    run_bound(name, timeout, None, &source_fingerprint(), |descriptor| {
+        observe(descriptor)?;
+        Ok(Readiness::Ready)
+    })
+}
+
+pub(super) enum Readiness {
+    Pending,
+    Ready,
+}
+
+pub(super) fn run_after_ready(
+    name: &str,
+    startup_timeout: Duration,
+    timeout: Duration,
+    observe: impl FnMut(&OwnedFd) -> TestResult<Readiness>,
+) -> TestResult {
+    run_bound(name, timeout, Some(startup_timeout), &source_fingerprint(), observe)
+}
+
+fn run_bound(
+    name: &str,
+    timeout: Duration,
+    startup_timeout: Option<Duration>,
+    fingerprint: &str,
+    mut observe: impl FnMut(&OwnedFd) -> TestResult<Readiness>,
+) -> TestResult {
     let mut custody = Custody::enter()?;
     let mut errors = tempfile::tempfile()?;
     let mut command = Command::new(executable()?);
     command
         .arg(name)
+        .arg(fingerprint)
         .env("SUPERVISOR_KERNEL_TEST", name)
         .envs(super::continuous_profile())
         .stdin(Stdio::null())
@@ -227,9 +277,22 @@ pub(super) fn run_observed(
         .descriptor
         .as_ref()
         .ok_or_else(|| io::Error::other("missing exact worker identity"))?;
-    let until = Instant::now() + timeout;
+    let mut until = Instant::now() + startup_timeout.unwrap_or(timeout);
+    let mut armed = startup_timeout.is_none();
+    let timeout_error = || io::Error::new(io::ErrorKind::TimedOut, "kernel worker exceeded its deadline");
     let outcome = loop {
-        observe(descriptor)?;
+        if Instant::now() >= until {
+            break Err(timeout_error());
+        }
+        let ready = observe(descriptor)?;
+        let now = Instant::now();
+        if now >= until {
+            break Err(timeout_error());
+        }
+        if !armed && matches!(ready, Readiness::Ready) {
+            until = now + timeout;
+            armed = true;
+        }
         if let Some(status) = worker.process.try_wait()? {
             break Ok(status);
         }
@@ -245,11 +308,30 @@ pub(super) fn run_observed(
     drop(worker);
     let retired = custody.settle()?;
     let status = outcome?;
+    if matches!(status.code(), Some(64 | 65)) {
+        return Err(io::Error::other("stale kernel worker; rebuild with: cargo build -p sandbox-command-supervisor --features test-support --bin supervisor-kernel-test-worker").into());
+    }
     if !status.success() {
         return Err(io::Error::other(format!("kernel worker failed: {}", log(&mut errors)?)).into());
     }
     if retired != 0 {
         return Err(io::Error::other("successful worker left descendants requiring forced cleanup").into());
     }
+    Ok(())
+}
+
+#[test]
+fn stale_worker_is_rejected_before_the_case_runs() -> TestResult {
+    let result = run_bound(
+        "linux::native_child::tests::a_retired_child_without_setup_readiness_is_not_a_ready_root",
+        Duration::from_secs(5),
+        None,
+        "stale-source",
+        |_| Ok(Readiness::Ready),
+    );
+    let error = result
+        .err()
+        .ok_or_else(|| io::Error::other("stale worker executed the case"))?;
+    assert!(error.to_string().contains("stale kernel worker"), "{error}");
     Ok(())
 }

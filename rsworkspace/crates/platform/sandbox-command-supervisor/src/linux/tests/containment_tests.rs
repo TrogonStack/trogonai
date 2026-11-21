@@ -1,7 +1,7 @@
 use super::{TestResult, worker};
 use crate::linux::{pidfd, readable};
 use std::io;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -32,6 +32,9 @@ fn start_time(pid: u32) -> io::Result<u64> {
     reason = "An intentional assertion panic must propagate as a failed worker exit"
 )]
 fn failing_worker(mode: &str, marker: &Path) -> TestResult {
+    if mode == "timeout" {
+        std::thread::sleep(Duration::from_millis(350));
+    }
     let mut command = Command::new("/bin/sleep");
     command
         .arg("30")
@@ -94,7 +97,7 @@ fn containment(mode: &str) -> TestResult {
     let mut worker_fd: Option<OwnedFd> = None;
     let mut escaped_fd: Option<OwnedFd> = None;
     let name = format!("custody-case:{mode}:{}", marker.display());
-    let result = worker::run_observed(&name, Duration::from_millis(200), |descriptor| {
+    let mut observe = |descriptor: &OwnedFd| {
         if worker_fd.is_none() {
             worker_fd = Some(descriptor.try_clone()?);
         }
@@ -114,7 +117,24 @@ fn containment(mode: &str) -> TestResult {
             escaped_fd = Some(retained);
         }
         Ok(())
-    });
+    };
+    let result = if mode == "timeout" {
+        worker::run_after_ready(
+            &name,
+            Duration::from_secs(5),
+            Duration::from_millis(200),
+            |descriptor| {
+                observe(descriptor)?;
+                Ok(if marker.is_file() {
+                    worker::Readiness::Ready
+                } else {
+                    worker::Readiness::Pending
+                })
+            },
+        )
+    } else {
+        worker::run_observed(&name, Duration::from_secs(5), &mut observe)
+    };
     let error = result
         .err()
         .ok_or_else(|| io::Error::other("failing worker was accepted"))?;
@@ -129,12 +149,25 @@ fn containment(mode: &str) -> TestResult {
             io::ErrorKind::Other
         }
     );
-    assert!(readable(
-        &worker_fd.ok_or_else(|| io::Error::other("worker was not pinned"))?
-    )?);
-    assert!(readable(
-        &escaped_fd.ok_or_else(|| io::Error::other("escaped child was not pinned"))?
-    )?);
+    for descriptor in [
+        worker_fd.ok_or_else(|| io::Error::other("worker was not pinned"))?,
+        escaped_fd.ok_or_else(|| io::Error::other("escaped child was not pinned"))?,
+    ] {
+        assert!(readable(&descriptor)?);
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            unsafe {
+                libc::waitid(
+                    libc::P_PIDFD,
+                    descriptor.as_raw_fd() as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            },
+            -1
+        );
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
+    }
     assert!(!readable(&sentinel_fd)?);
     assert!(
         sentinel

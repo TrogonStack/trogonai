@@ -12,6 +12,7 @@ pub(super) enum Syscall {
     Session,
     Fork,
     SignalSend,
+    ControlWrite,
 }
 
 pub(super) enum Action {
@@ -88,6 +89,7 @@ pub(super) struct ObservedSignal {
 
 pub(super) struct Report {
     pub(super) signal_sends: std::collections::BTreeMap<ObservedSignal, usize>,
+    pub(super) pidfd_sends: std::collections::BTreeMap<i32, usize>,
     pub(super) first: Vec<Observation>,
     pub(super) continued: usize,
     pub(super) refused: usize,
@@ -106,15 +108,10 @@ impl PendingListener {
             Syscall::Session => libc::SYS_setsid,
             Syscall::Fork => libc::SYS_clone,
             Syscall::SignalSend => libc::SYS_kill,
+            Syscall::ControlWrite => libc::SYS_write,
         };
         let filter = match syscall {
-            Syscall::Session => vec![
-                instruction(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS, 0, 0, 0),
-                instruction(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K, 0, 1, number as u32),
-                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_USER_NOTIF),
-                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
-            ],
-            Syscall::SignalSend => vec![
+            Syscall::ControlWrite => vec![
                 instruction(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS, 0, 0, 0),
                 instruction(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K, 0, 3, number as u32),
                 instruction(
@@ -123,7 +120,45 @@ impl PendingListener {
                     0,
                     std::mem::offset_of!(libc::seccomp_data, args) as u32,
                 ),
-                instruction(libc::BPF_JMP | libc::BPF_JSET | libc::BPF_K, 0, 1, 1 << 31),
+                instruction(
+                    libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K,
+                    0,
+                    1,
+                    libc::STDOUT_FILENO as u32,
+                ),
+                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_USER_NOTIF),
+                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
+            ],
+            Syscall::Session => vec![
+                instruction(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS, 0, 0, 0),
+                instruction(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K, 0, 1, number as u32),
+                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_USER_NOTIF),
+                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
+            ],
+            Syscall::SignalSend => vec![
+                instruction(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS, 0, 0, 0),
+                instruction(
+                    libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K,
+                    4,
+                    0,
+                    libc::SYS_pidfd_send_signal as u32,
+                ),
+                instruction(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K, 0, 6, number as u32),
+                instruction(
+                    libc::BPF_LD | libc::BPF_W | libc::BPF_ABS,
+                    0,
+                    0,
+                    std::mem::offset_of!(libc::seccomp_data, args) as u32,
+                ),
+                instruction(libc::BPF_JMP | libc::BPF_JSET | libc::BPF_K, 3, 4, 1 << 31),
+                instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
+                instruction(
+                    libc::BPF_LD | libc::BPF_W | libc::BPF_ABS,
+                    0,
+                    0,
+                    (std::mem::offset_of!(libc::seccomp_data, args) + size_of::<u64>()) as u32,
+                ),
+                instruction(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K, 1, 0, 0),
                 instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_USER_NOTIF),
                 instruction(libc::BPF_RET | libc::BPF_K, 0, 0, libc::SECCOMP_RET_ALLOW),
             ],
@@ -291,6 +326,7 @@ fn receive_listener(socket: &UnixDatagram) -> io::Result<OwnedFd> {
 fn observe(descriptor: OwnedFd, mut policy: Policy, stop: &AtomicBool) -> io::Result<Report> {
     let mut report = Report {
         signal_sends: std::collections::BTreeMap::new(),
+        pidfd_sends: std::collections::BTreeMap::new(),
         first: Vec::new(),
         continued: 0,
         refused: 0,
@@ -330,13 +366,10 @@ fn observe(descriptor: OwnedFd, mut policy: Policy, stop: &AtomicBool) -> io::Re
         let mut next_policy = policy;
         let action = next_policy.next();
         let process = match (&action, &policy.refusals) {
-            (Action::Refuse(_), Refusals::Repeated) => {
-                let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, request.pid as i32, 0) };
-                if raw < 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                Some(unsafe { OwnedFd::from_raw_fd(raw as RawFd) })
-            }
+            (Action::Refuse(_), Refusals::Repeated) => match pin_notification_target(&descriptor, &request)? {
+                Some(process) => Some(process),
+                None => continue,
+            },
             _ => None,
         };
         if let Err(error) = send_response(&descriptor, &request, &mut policy, next_policy, &action) {
@@ -354,6 +387,12 @@ fn observe(descriptor: OwnedFd, mut policy: Policy, stop: &AtomicBool) -> io::Re
                 return Err(io::Error::other("too many distinct observed signal sends"));
             }
             *report.signal_sends.entry(signal).or_default() += 1;
+        }
+        if request.data.nr == libc::SYS_pidfd_send_signal as i32 {
+            *report
+                .pidfd_sends
+                .entry(request.data.args[1] as u32 as i32)
+                .or_default() += 1;
         }
         match action {
             Action::Continue => report.continued += 1,
@@ -400,6 +439,23 @@ fn send_response(
     *policy = next_policy;
     Ok(())
 }
+
+fn pin_notification_target(descriptor: &OwnedFd, request: &libc::seccomp_notif) -> io::Result<Option<OwnedFd>> {
+    let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, request.pid as i32, 0) };
+    if raw < 0 {
+        let original = io::Error::last_os_error();
+        let mut id = request.id;
+        if unsafe { libc::ioctl(descriptor.as_raw_fd(), libc::_IOW::<u64>(u32::from(b'!'), 2), &mut id) } < 0
+            && io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT)
+        {
+            return Ok(None);
+        }
+        return Err(original);
+    }
+    Ok(Some(unsafe { OwnedFd::from_raw_fd(raw as RawFd) }))
+}
+
+mod control_stall;
 
 #[cfg(test)]
 mod tests;

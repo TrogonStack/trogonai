@@ -37,9 +37,9 @@ fn a_control_command_cannot_be_prepared_as_a_workload() {
 fn fill_control_queue(supervisor: &mut Supervisor) -> Result<(), ProtocolError> {
     let event = Event::Status {
         execution_id: supervisor.execution.clone(),
-        phase: supervisor.phase,
+        phase: Phase::Running,
     };
-    let frames = QUEUED_CONTROL_LIMIT / encode_event(&event)?.len();
+    let frames = (QUEUED_CONTROL_LIMIT - supervisor.writer.control_bytes) / encode_event(&event)?.len();
     for _ in 0..frames {
         assert!(supervisor.writer.queue(event.clone()).is_ok());
     }
@@ -55,26 +55,60 @@ fn signal(supervisor: &Supervisor, request_id: u64, signal: i32) -> Result<Comma
     })
 }
 
-pub(in crate::linux) fn worker_failed_error_delivery_closes_control_and_retains_drain() -> Result<(), ProtocolError> {
-    let mut supervisor = supervisor();
-    supervisor.phase = Phase::Running;
-    fill_control_queue(&mut supervisor)?;
-    let queued = supervisor.writer.pending.len();
-
-    supervisor.error(ErrorCode::CleanupPending, true);
-
-    assert!(supervisor.writer.closed);
-    assert!(matches!(supervisor.phase, Phase::Draining));
-    assert!(supervisor.canceled);
-    assert!(supervisor.cleanup_started.is_some());
-    assert_eq!(supervisor.writer.pending.len(), queued);
-    assert!(!supervisor.acknowledged);
-    Ok(())
+pub(in crate::linux) fn worker_errors_retry_before_terminal_when_control_pressure_clears() -> TestResult {
+    isolated(
+        "linux::state_tests::errors_retry_before_terminal_when_control_pressure_clears",
+        || {
+            let mut supervisor = supervisor();
+            supervisor.phase = Phase::Running;
+            fill_control_queue(&mut supervisor)?;
+            let queued = supervisor.writer.pending.len();
+            for _ in 0..100 {
+                supervisor.error(ErrorCode::CleanupPending, true);
+            }
+            supervisor.error(ErrorCode::ExecFailed, false);
+            assert_eq!(supervisor.pending_errors.len(), 2);
+            assert!(supervisor.writer.control_bytes <= QUEUED_CONTROL_LIMIT);
+            require(
+                !supervisor.writer.closed,
+                "temporary control pressure closed the writer",
+            )?;
+            assert!(matches!(supervisor.phase, Phase::Draining));
+            assert!(supervisor.canceled);
+            assert!(supervisor.cleanup_started.is_some());
+            assert_eq!(supervisor.writer.pending.len(), queued);
+            assert!(!supervisor.acknowledged);
+            let retained = queued_events(&mut supervisor.writer)?;
+            assert_eq!(retained.len(), queued);
+            supervisor.tick_family()?;
+            let events = queued_events(&mut supervisor.writer)?;
+            assert_eq!(events.len(), 3);
+            assert!(matches!(
+                events[0],
+                Event::Error {
+                    code: ErrorCode::CleanupPending,
+                    uncertain: crate::Certainty::Uncertain,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                events[1],
+                Event::Error {
+                    code: ErrorCode::ExecFailed,
+                    uncertain: crate::Certainty::Certain,
+                    ..
+                }
+            ));
+            assert!(matches!(events[2], Event::FamilyAbsent { .. }));
+            assert!(matches!(supervisor.phase, Phase::Absent));
+            Ok(())
+        },
+    )
 }
 
 #[test]
-fn failed_error_delivery_closes_control_and_retains_drain() -> Result<(), ProtocolError> {
-    worker_failed_error_delivery_closes_control_and_retains_drain()
+fn errors_retry_before_terminal_when_control_pressure_clears() -> TestResult {
+    worker_errors_retry_before_terminal_when_control_pressure_clears()
 }
 
 pub(in crate::linux) fn worker_failed_signal_receipt_still_initiates_cleanup() -> Result<(), ProtocolError> {
@@ -474,14 +508,14 @@ fn an_undeliverable_ready_receipt_keeps_the_root_held_and_drains() -> TestResult
     worker_an_undeliverable_ready_receipt_keeps_the_root_held_and_drains()
 }
 
-pub(in crate::linux) fn worker_process_group_signal_refusal_does_not_claim_delivery() -> TestResult {
+pub(in crate::linux) fn worker_pidfd_signal_refusal_does_not_claim_delivery() -> TestResult {
     isolated(
-        "linux::state_tests::process_group_signal_refusal_does_not_claim_delivery",
+        "linux::state_tests::pidfd_signal_refusal_does_not_claim_delivery",
         || {
             probe()?;
             let mut guard = StateGuard::new();
             guard.initialize()?;
-            refuse_syscall(libc::SYS_kill, libc::EPERM)?;
+            refuse_signal(libc::SIGCONT, libc::EPERM)?;
 
             assert_eq!(guard.state.soft_signal(libc::SIGCONT), Err(ErrorCode::IdentityUnknown));
             assert!(!guard.state.released);
@@ -492,8 +526,8 @@ pub(in crate::linux) fn worker_process_group_signal_refusal_does_not_claim_deliv
 }
 
 #[test]
-fn process_group_signal_refusal_does_not_claim_delivery() -> TestResult {
-    worker_process_group_signal_refusal_does_not_claim_delivery()
+fn pidfd_signal_refusal_does_not_claim_delivery() -> TestResult {
+    worker_pidfd_signal_refusal_does_not_claim_delivery()
 }
 
 pub(in crate::linux) fn worker_incomplete_family_signal_scan_is_not_reported_as_complete() -> TestResult {
@@ -1033,6 +1067,14 @@ fn terminal_settlement_marks_unfinished_pipe_reads_as_truncated() -> TestResult 
 }
 
 fn refuse_argument(syscall: libc::c_long, argument: i32, error: i32) -> TestResult {
+    refuse_argument_at(syscall, 0, argument, error)
+}
+
+pub(super) fn refuse_signal(signal: i32, error: i32) -> TestResult {
+    refuse_argument_at(libc::SYS_pidfd_send_signal, 1, signal, error)
+}
+
+fn refuse_argument_at(syscall: libc::c_long, index: u32, argument: i32, error: i32) -> TestResult {
     let mut filter = [
         libc::sock_filter {
             code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
@@ -1050,7 +1092,7 @@ fn refuse_argument(syscall: libc::c_long, argument: i32, error: i32) -> TestResu
             code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
             jt: 0,
             jf: 0,
-            k: 16,
+            k: 16 + index * 8,
         },
         libc::sock_filter {
             code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
@@ -1108,7 +1150,11 @@ fn queued_events(writer: &mut Writer) -> Result<Vec<Event>, Box<dyn std::error::
     bytes
         .split(|byte| *byte == b'\n')
         .filter(|line| !line.is_empty())
-        .map(|line| crate::protocol::decode_event(line).map_err(Into::into))
+        .map(|line| {
+            crate::protocol::decode_event(line)
+                .map(crate::Event::into_wire)
+                .map_err(Into::into)
+        })
         .collect()
 }
 
@@ -1119,11 +1165,25 @@ pub(in crate::linux) fn worker_release_after_the_hold_deadline_never_opens_the_g
             probe()?;
             let mut guard = StateGuard::new();
             guard.initialize()?;
+            let (gate_read, gate_write) = pipe()?;
+            nonblocking(gate_read.as_raw_fd())?;
+            guard
+                .state
+                .root
+                .as_mut()
+                .ok_or_else(|| io::Error::other("missing held root"))?
+                .gate = Some(gate_write);
             guard.state.release_deadline = Some(Instant::now() - Duration::from_millis(1));
             guard.state.command(Command::Release {
                 execution_id: guard.state.execution.clone(),
             });
             require(!guard.state.released, "expired release opened the launch gate")?;
+            let mut byte = [0_u8; 1];
+            require(
+                unsafe { libc::read(gate_read.as_raw_fd(), byte.as_mut_ptr().cast(), 1) } == 0,
+                "expired release did not close the actual gate without a release byte",
+            )?;
+            assert_ne!(byte, *b"R");
             assert!(guard.state.timed_out);
             assert!(matches!(guard.state.phase, Phase::Draining));
             assert!(guard.state.command_deadline.is_none());
@@ -1644,14 +1704,486 @@ fn final_interrupted_setup_read_reports_unknown_exec_with_exact_absence() -> Tes
     worker_final_interrupted_setup_read_reports_unknown_exec_with_exact_absence()
 }
 
+pub(in crate::linux) fn worker_a_full_control_queue_keeps_release_behind_the_gate() -> TestResult {
+    isolated(
+        "linux::state_tests::a_full_control_queue_keeps_release_behind_the_gate",
+        || {
+            probe()?;
+            let mut guard = StateGuard::new();
+            guard.initialize()?;
+            let (gate_read, gate_write) = pipe()?;
+            nonblocking(gate_read.as_raw_fd())?;
+            let root = guard
+                .state
+                .root
+                .as_mut()
+                .ok_or_else(|| io::Error::other("missing root"))?;
+            root.gate = Some(gate_write);
+            queued_events(&mut guard.state.writer)?;
+            fill_control_queue(&mut guard.state)?;
+            let deadline = guard.state.release_deadline;
+            guard.state.command(Command::Release {
+                execution_id: guard.state.execution.clone(),
+            });
+            require(
+                !guard.state.released,
+                "release crossed the gate without room for its receipt",
+            )?;
+            assert!(matches!(guard.state.phase, Phase::Held));
+            assert_eq!(guard.state.release_deadline, deadline);
+            assert!(guard.state.command_deadline.is_none());
+            let mut byte = [0_u8; 1];
+            assert_eq!(
+                unsafe { libc::read(gate_read.as_raw_fd(), byte.as_mut_ptr().cast(), 1) },
+                -1
+            );
+            assert_eq!(errno(), libc::EAGAIN);
+            let events = queued_events(&mut guard.state.writer)?;
+            assert!(!events.iter().any(|event| matches!(event, Event::Released { .. })));
+            guard.state.try_release();
+            assert!(guard.state.released);
+            assert_eq!(
+                unsafe { libc::read(gate_read.as_raw_fd(), byte.as_mut_ptr().cast(), 1) },
+                1
+            );
+            assert_eq!(byte, *b"R");
+            let events = queued_events(&mut guard.state.writer)?;
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, Event::Released { .. }))
+                    .count(),
+                1
+            );
+            guard.confirm_cleanup()
+        },
+    )
+}
+
+#[test]
+fn a_full_control_queue_keeps_release_behind_the_gate() -> TestResult {
+    worker_a_full_control_queue_keeps_release_behind_the_gate()
+}
+
+pub(in crate::linux) fn worker_root_exit_retries_while_an_owned_child_remains_live() -> TestResult {
+    isolated(
+        "linux::state_tests::root_exit_retries_while_an_owned_child_remains_live",
+        || {
+            probe()?;
+            let mut guard = StateGuard::new();
+            guard.initialize()?;
+            guard.state.command(Command::Release {
+                execution_id: guard.state.execution.clone(),
+            });
+            let root_pid = guard
+                .state
+                .root
+                .as_ref()
+                .ok_or_else(|| io::Error::other("missing root"))?
+                .pid;
+            observe_exit(root_pid)?;
+            let _companion = guard.companion(false)?;
+            queued_events(&mut guard.state.writer)?;
+            fill_control_queue(&mut guard.state)?;
+            guard.state.tick_family()?;
+            assert!(
+                guard
+                    .state
+                    .root
+                    .as_ref()
+                    .is_some_and(|root| root.status.is_some() && !root.reaped)
+            );
+            assert!(!matches!(guard.state.phase, Phase::Absent));
+            let initial = queued_events(&mut guard.state.writer)?;
+            assert!(!initial.iter().any(|event| matches!(event, Event::RootExited { .. })));
+            guard.state.tick_family()?;
+            let retried = queued_events(&mut guard.state.writer)?;
+            require(
+                retried
+                    .iter()
+                    .filter(|event| {
+                        matches!(
+                            event,
+                            Event::RootExited {
+                                exit_code: Some(0),
+                                signal: None,
+                                ..
+                            }
+                        )
+                    })
+                    .count()
+                    == 1,
+                "root exit receipt was lost while its owned companion was still live",
+            )?;
+            assert!(!retried.iter().any(|event| matches!(event, Event::FamilyAbsent { .. })));
+            guard.state.tick_family()?;
+            assert!(queued_events(&mut guard.state.writer)?.is_empty());
+            guard.confirm_cleanup()
+        },
+    )
+}
+
+#[test]
+fn root_exit_retries_while_an_owned_child_remains_live() -> TestResult {
+    worker_root_exit_retries_while_an_owned_child_remains_live()
+}
+
+pub(in crate::linux) fn worker_a_closed_writer_cannot_admit_or_retire_terminal_success() -> TestResult {
+    isolated(
+        "linux::state_tests::a_closed_writer_cannot_admit_or_retire_terminal_success",
+        || {
+            let mut supervisor = supervisor();
+            supervisor.phase = Phase::Draining;
+            supervisor.writer.closed = true;
+            supervisor.input_closed = true;
+            supervisor.tick_family()?;
+            require(
+                !matches!(supervisor.phase, Phase::Absent),
+                "closed writer admitted terminal success",
+            )?;
+            assert!(supervisor.pending_terminal.is_some());
+            supervisor.terminal_at = Some(Instant::now() - ACK_TIMEOUT);
+            assert_eq!(supervisor.run_loop(), 74);
+            assert!(supervisor.pending_terminal.is_some());
+            assert!(!supervisor.acknowledged);
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn a_closed_writer_cannot_admit_or_retire_terminal_success() -> TestResult {
+    worker_a_closed_writer_cannot_admit_or_retire_terminal_success()
+}
+
+pub(in crate::linux) fn worker_a_closed_transport_after_terminal_admission_cannot_retire_successfully() -> TestResult {
+    isolated(
+        "linux::state_tests::a_closed_transport_after_terminal_admission_cannot_retire_successfully",
+        || {
+            let mut supervisor = supervisor();
+            supervisor.phase = Phase::Draining;
+            supervisor.tick_family()?;
+            assert!(matches!(supervisor.phase, Phase::Absent));
+            assert_eq!(supervisor.writer.pending.len(), 1);
+            let (read, _write) = pipe()?;
+            let saved = unsafe { libc::fcntl(libc::STDOUT_FILENO, libc::F_DUPFD_CLOEXEC, 10) };
+            require(saved >= 0, "could not save stdout")?;
+            let saved = unsafe { OwnedFd::from_raw_fd(saved) };
+            require(
+                unsafe { libc::dup2(read.as_raw_fd(), libc::STDOUT_FILENO) } == libc::STDOUT_FILENO,
+                "could not replace stdout",
+            )?;
+            supervisor.input_closed = true;
+            let status = supervisor.run_loop();
+            let restored = unsafe { libc::dup2(saved.as_raw_fd(), libc::STDOUT_FILENO) };
+            assert_eq!(restored, libc::STDOUT_FILENO);
+            require(
+                status == 74,
+                "permanent failure after terminal admission retired successfully",
+            )?;
+            assert!(supervisor.writer.closed);
+            assert!(!supervisor.acknowledged);
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn a_closed_transport_after_terminal_admission_cannot_retire_successfully() -> TestResult {
+    worker_a_closed_transport_after_terminal_admission_cannot_retire_successfully()
+}
+
+pub(in crate::linux) fn worker_a_backpressured_release_keeps_its_original_deadline() -> TestResult {
+    isolated(
+        "linux::state_tests::a_backpressured_release_keeps_its_original_deadline",
+        || {
+            probe()?;
+            let mut guard = StateGuard::new();
+            guard.initialize()?;
+            let (gate_read, gate_write) = pipe()?;
+            nonblocking(gate_read.as_raw_fd())?;
+            guard
+                .state
+                .root
+                .as_mut()
+                .ok_or_else(|| io::Error::other("missing root"))?
+                .gate = Some(gate_write);
+            queued_events(&mut guard.state.writer)?;
+            fill_control_queue(&mut guard.state)?;
+            let deadline = guard.state.release_deadline;
+            guard.state.command(Command::Release {
+                execution_id: guard.state.execution.clone(),
+            });
+            assert!(guard.state.release_requested);
+            assert_eq!(guard.state.release_deadline, deadline);
+            guard.state.release_deadline = Some(Instant::now() - Duration::from_millis(1));
+            guard.state.try_release();
+            assert!(guard.state.timed_out && !guard.state.released);
+            assert!(!guard.state.release_requested);
+            assert!(matches!(guard.state.phase, Phase::Draining));
+            let mut byte = [0_u8; 1];
+            assert_eq!(
+                unsafe { libc::read(gate_read.as_raw_fd(), byte.as_mut_ptr().cast(), 1) },
+                0
+            );
+            assert_ne!(byte, *b"R");
+            assert!(guard.state.command_deadline.is_none());
+            let events = queued_events(&mut guard.state.writer)?;
+            assert!(!events.iter().any(|event| matches!(event, Event::Released { .. })));
+            guard.confirm_cleanup()
+        },
+    )
+}
+
+#[test]
+fn a_backpressured_release_keeps_its_original_deadline() -> TestResult {
+    worker_a_backpressured_release_keeps_its_original_deadline()
+}
+
+pub(in crate::linux) fn worker_backpressured_errors_and_root_exit_precede_terminal_absence() -> TestResult {
+    isolated(
+        "linux::state_tests::backpressured_errors_and_root_exit_precede_terminal_absence",
+        || {
+            probe()?;
+            let mut guard = StateGuard::new();
+            guard.initialize()?;
+            guard.state.command(Command::Release {
+                execution_id: guard.state.execution.clone(),
+            });
+            let root_pid = guard
+                .state
+                .root
+                .as_ref()
+                .ok_or_else(|| io::Error::other("missing root"))?
+                .pid;
+            observe_exit(root_pid)?;
+            queued_events(&mut guard.state.writer)?;
+            fill_control_queue(&mut guard.state)?;
+            guard.state.error(ErrorCode::CleanupPending, true);
+            guard.state.tick_family()?;
+            assert!(guard.state.pending_terminal.is_some());
+            assert!(guard.state.pending_root_exit.is_some());
+            let deadline = guard.state.terminal_at;
+            assert!(deadline.is_some());
+            assert!(!matches!(guard.state.phase, Phase::Absent));
+            queued_events(&mut guard.state.writer)?;
+            guard.state.tick_family()?;
+            let events = queued_events(&mut guard.state.writer)?;
+            assert!(matches!(
+                events.as_slice(),
+                [
+                    Event::Error {
+                        code: ErrorCode::CleanupPending,
+                        ..
+                    },
+                    Event::RootExited {
+                        exit_code: Some(0),
+                        signal: None,
+                        ..
+                    },
+                    Event::FamilyAbsent {
+                        root_exit_code: Some(0),
+                        ..
+                    }
+                ]
+            ));
+            assert_eq!(guard.state.terminal_at, deadline);
+            assert!(matches!(guard.state.phase, Phase::Absent));
+            assert!(guard.state.root.as_ref().is_some_and(|root| root.reaped));
+            guard.state.root.take();
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn backpressured_errors_and_root_exit_precede_terminal_absence() -> TestResult {
+    worker_backpressured_errors_and_root_exit_precede_terminal_absence()
+}
+
+pub(in crate::linux) fn worker_a_closed_writer_release_closes_the_gate_without_a_release_byte() -> TestResult {
+    isolated(
+        "linux::state_tests::a_closed_writer_release_closes_the_gate_without_a_release_byte",
+        || {
+            probe()?;
+            let mut guard = StateGuard::new();
+            guard.initialize()?;
+            let (gate_read, gate_write) = pipe()?;
+            nonblocking(gate_read.as_raw_fd())?;
+            guard
+                .state
+                .root
+                .as_mut()
+                .ok_or_else(|| io::Error::other("missing held root"))?
+                .gate = Some(gate_write);
+            let saved = unsafe { libc::fcntl(libc::STDOUT_FILENO, libc::F_DUPFD_CLOEXEC, 10) };
+            require(saved >= 0, "could not save output descriptor")?;
+            let saved = unsafe { OwnedFd::from_raw_fd(saved) };
+            let (read_only, _write) = pipe()?;
+            require(
+                unsafe { libc::dup2(read_only.as_raw_fd(), libc::STDOUT_FILENO) } == libc::STDOUT_FILENO,
+                "could not arrange permanent output failure",
+            )?;
+            guard.state.writer.flush();
+            assert_eq!(
+                unsafe { libc::dup2(saved.as_raw_fd(), libc::STDOUT_FILENO) },
+                libc::STDOUT_FILENO
+            );
+            require(
+                guard.state.writer.closed,
+                "actual failed output did not close the writer",
+            )?;
+            assert!(guard.state.writer.pending.is_empty());
+            guard.state.command(Command::Release {
+                execution_id: guard.state.execution.clone(),
+            });
+            require(
+                matches!(guard.state.phase, Phase::Draining),
+                "closed release channel did not initiate cleanup",
+            )?;
+            assert!(!guard.state.released);
+            assert!(!guard.state.release_requested);
+            assert!(guard.state.canceled);
+            assert!(guard.state.command_deadline.is_none());
+            assert_eq!(guard.state.pending_errors.front(), Some(&(ErrorCode::IoFailure, true)));
+            let mut byte = [0_u8; 1];
+            require(
+                unsafe { libc::read(gate_read.as_raw_fd(), byte.as_mut_ptr().cast(), 1) } == 0,
+                "closed writer release did not close the gate without a release byte",
+            )?;
+            assert_ne!(byte, *b"R");
+            guard.confirm_cleanup()
+        },
+    )
+}
+
+#[test]
+fn a_closed_writer_release_closes_the_gate_without_a_release_byte() -> TestResult {
+    worker_a_closed_writer_release_closes_the_gate_without_a_release_byte()
+}
+
+pub(in crate::linux) fn worker_batched_release_and_status_preserve_the_deferred_input_tail() -> TestResult {
+    isolated(
+        "linux::state_tests::batched_release_and_status_preserve_the_deferred_input_tail",
+        || {
+            probe()?;
+            let mut guard = StateGuard::new();
+            guard.initialize()?;
+            queued_events(&mut guard.state.writer)?;
+            fill_control_queue(&mut guard.state)?;
+            let queued = guard.state.writer.pending.len();
+            let deadline = guard.state.release_deadline;
+            let mut release = Vec::new();
+            crate::protocol::write_command(
+                &mut release,
+                &crate::CommandWire::Release {
+                    execution_id: guard.state.execution.clone(),
+                },
+            )?;
+            let mut status = Vec::new();
+            crate::protocol::write_command(
+                &mut status,
+                &crate::CommandWire::Status {
+                    execution_id: guard.state.execution.clone(),
+                },
+            )?;
+            let mut batch = release;
+            batch.extend_from_slice(&status);
+            let (input_read, input_write) = pipe()?;
+            nonblocking(input_read.as_raw_fd())?;
+            assert_eq!(
+                unsafe { libc::write(input_write.as_raw_fd(), batch.as_ptr().cast(), batch.len()) },
+                batch.len() as isize
+            );
+            let saved = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_DUPFD_CLOEXEC, 10) };
+            require(saved >= 0, "could not save input descriptor")?;
+            let saved = unsafe { OwnedFd::from_raw_fd(saved) };
+            require(
+                unsafe { libc::dup2(input_read.as_raw_fd(), libc::STDIN_FILENO) } == libc::STDIN_FILENO,
+                "could not provide batched native input",
+            )?;
+            guard.state.read_input();
+            require(
+                guard.state.deferred_input == status,
+                "backpressure discarded or consumed the batched status tail",
+            )?;
+            assert!(guard.state.input.is_empty());
+            assert!(guard.state.release_requested && !guard.state.released);
+            assert!(matches!(guard.state.phase, Phase::Held));
+            assert_eq!(guard.state.release_deadline, deadline);
+            assert_eq!(guard.state.writer.pending.len(), queued);
+            assert!(!guard.state.input_closed);
+            let initial = queued_events(&mut guard.state.writer)?;
+            assert_eq!(initial.len(), queued);
+            guard.state.try_release();
+            assert!(guard.state.released);
+            guard.state.read_input();
+            assert_eq!(
+                unsafe { libc::dup2(saved.as_raw_fd(), libc::STDIN_FILENO) },
+                libc::STDIN_FILENO
+            );
+            require(
+                guard.state.deferred_input.is_empty(),
+                "deferred input was not consumed after admission resumed",
+            )?;
+            assert!(!guard.state.input_closed);
+            assert!(guard.state.input.is_empty());
+            let resumed = queued_events(&mut guard.state.writer)?;
+            require(
+                matches!(
+                    resumed.as_slice(),
+                    [
+                        Event::Released { .. },
+                        Event::Status {
+                            phase: Phase::Running,
+                            ..
+                        }
+                    ]
+                ),
+                "batched commands did not resume in Released then Running status order",
+            )?;
+            guard.confirm_cleanup()
+        },
+    )
+}
+
+#[test]
+fn batched_release_and_status_preserve_the_deferred_input_tail() -> TestResult {
+    worker_batched_release_and_status_preserve_the_deferred_input_tail()
+}
+
 pub(in crate::linux) fn dispatch_worker(name: &str) -> Option<crate::linux::tests::TestResult> {
     match name {
+        "linux::state_tests::a_closed_writer_release_closes_the_gate_without_a_release_byte" => {
+            Some(worker_a_closed_writer_release_closes_the_gate_without_a_release_byte())
+        }
+        "linux::state_tests::batched_release_and_status_preserve_the_deferred_input_tail" => {
+            Some(worker_batched_release_and_status_preserve_the_deferred_input_tail())
+        }
+        "linux::state_tests::a_backpressured_release_keeps_its_original_deadline" => {
+            Some(worker_a_backpressured_release_keeps_its_original_deadline())
+        }
+        "linux::state_tests::backpressured_errors_and_root_exit_precede_terminal_absence" => {
+            Some(worker_backpressured_errors_and_root_exit_precede_terminal_absence())
+        }
+        "linux::state_tests::a_closed_transport_after_terminal_admission_cannot_retire_successfully" => {
+            Some(worker_a_closed_transport_after_terminal_admission_cannot_retire_successfully())
+        }
+        "linux::state_tests::a_closed_writer_cannot_admit_or_retire_terminal_success" => {
+            Some(worker_a_closed_writer_cannot_admit_or_retire_terminal_success())
+        }
+        "linux::state_tests::root_exit_retries_while_an_owned_child_remains_live" => {
+            Some(worker_root_exit_retries_while_an_owned_child_remains_live())
+        }
+        "linux::state_tests::a_full_control_queue_keeps_release_behind_the_gate" => {
+            Some(worker_a_full_control_queue_keeps_release_behind_the_gate())
+        }
         "linux::state_tests::a_control_command_cannot_be_prepared_as_a_workload" => Some({
             worker_a_control_command_cannot_be_prepared_as_a_workload();
             Ok(())
         }),
-        "linux::state_tests::failed_error_delivery_closes_control_and_retains_drain" => {
-            Some(worker_failed_error_delivery_closes_control_and_retains_drain().map_err(Into::into))
+        "linux::state_tests::errors_retry_before_terminal_when_control_pressure_clears" => {
+            Some(worker_errors_retry_before_terminal_when_control_pressure_clears())
         }
         "linux::state_tests::failed_signal_receipt_still_initiates_cleanup" => {
             Some(worker_failed_signal_receipt_still_initiates_cleanup().map_err(Into::into))
@@ -1690,8 +2222,8 @@ pub(in crate::linux) fn dispatch_worker(name: &str) -> Option<crate::linux::test
         "linux::state_tests::an_undeliverable_ready_receipt_keeps_the_root_held_and_drains" => {
             Some(worker_an_undeliverable_ready_receipt_keeps_the_root_held_and_drains())
         }
-        "linux::state_tests::process_group_signal_refusal_does_not_claim_delivery" => {
-            Some(worker_process_group_signal_refusal_does_not_claim_delivery())
+        "linux::state_tests::pidfd_signal_refusal_does_not_claim_delivery" => {
+            Some(worker_pidfd_signal_refusal_does_not_claim_delivery())
         }
         "linux::state_tests::incomplete_family_signal_scan_is_not_reported_as_complete" => {
             Some(worker_incomplete_family_signal_scan_is_not_reported_as_complete())

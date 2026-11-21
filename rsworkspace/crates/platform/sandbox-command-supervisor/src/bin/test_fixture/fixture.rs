@@ -1,3 +1,5 @@
+#[path = "signal_threads.rs"]
+mod signal_threads;
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -289,6 +291,7 @@ pub fn run() -> i32 {
         "term-tree" => escaped(path, false, true),
         "clone" => clone_without_notification(path),
         "churn" => churn(path),
+        "signal-threads" => signal_threads::run(path),
         "overflow" => overflow(path),
         "flood" => {
             record(path);

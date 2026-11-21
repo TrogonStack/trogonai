@@ -6,6 +6,10 @@ pub(super) struct Pending {
     stream: Option<Stream>,
 }
 
+pub(super) struct ControlReservation {
+    bytes: Vec<u8>,
+}
+
 pub(super) struct Writer {
     pub(super) pending: VecDeque<Pending>,
     pub(super) data_bytes: usize,
@@ -34,30 +38,43 @@ impl Writer {
         }
     }
 
-    pub(super) fn queue(&mut self, event: Event) -> Result<(), ErrorCode> {
-        let stream = match &event {
-            Event::Output { stream, .. } => Some(*stream),
-            _ => None,
-        };
-        let bytes = encode_event(&event).map_err(|_| ErrorCode::InvalidFrame)?;
-        if self.closed || stream.is_some_and(|_| self.data_bytes + bytes.len() > QUEUED_DATA_LIMIT) {
-            if let Some(stream) = stream {
-                self.truncate(stream);
-            }
-            return Ok(());
-        }
-        if stream.is_none() && self.control_bytes + bytes.len() > QUEUED_CONTROL_LIMIT {
+    pub(super) fn reserve_control(&self, event: &Event) -> Result<ControlReservation, ErrorCode> {
+        if self.closed || matches!(event, Event::Output { .. }) {
             return Err(ErrorCode::IoFailure);
         }
-        if stream.is_some() {
-            self.data_bytes += bytes.len();
-        } else {
-            self.control_bytes += bytes.len();
+        let bytes = encode_event(event).map_err(|_| ErrorCode::InvalidFrame)?;
+        if self.control_bytes + bytes.len() > QUEUED_CONTROL_LIMIT {
+            return Err(ErrorCode::IoFailure);
         }
+        Ok(ControlReservation { bytes })
+    }
+
+    pub(super) fn commit_control(&mut self, reservation: ControlReservation) {
+        self.control_bytes += reservation.bytes.len();
+        self.pending.push_back(Pending {
+            bytes: reservation.bytes,
+            offset: 0,
+            stream: None,
+        });
+    }
+
+    pub(super) fn queue(&mut self, event: Event) -> Result<(), ErrorCode> {
+        let Event::Output { stream, .. } = &event else {
+            let reservation = self.reserve_control(&event)?;
+            self.commit_control(reservation);
+            return Ok(());
+        };
+        let stream = *stream;
+        let bytes = encode_event(&event).map_err(|_| ErrorCode::InvalidFrame)?;
+        if self.closed || self.data_bytes + bytes.len() > QUEUED_DATA_LIMIT {
+            self.truncate(stream);
+            return Ok(());
+        }
+        self.data_bytes += bytes.len();
         self.pending.push_back(Pending {
             bytes,
             offset: 0,
-            stream,
+            stream: Some(stream),
         });
         Ok(())
     }

@@ -5575,6 +5575,7 @@ dependencies = [
 name = "sandbox-command-supervisor"
 version = "0.1.0"
 dependencies = [
+ "include_dir",
  "libc",
  "sandbox-command-supervisor",
  "serde",

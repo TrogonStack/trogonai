@@ -3,9 +3,10 @@ use std::error::Error;
 use std::io::{self, BufReader, Cursor, Read, Write};
 
 use sandbox_command_supervisor::protocol::{
-    Cancellation, Certainty, Command, CommandWire, Delivery, Event, ExecutionId, MAX_ARGUMENT_BYTES,
-    MAX_COMMAND_TIMEOUT_MS, MAX_ENV_BYTES, MAX_RELEASE_TIMEOUT_MS, PlatformSupport, ProtocolError, ReleaseState,
-    TimeoutState, Truncation, VERSION, decode_command, decode_event, encode_event, read_event, write_command,
+    Cancellation, Certainty, Command, CommandWire, Delivery, Event as ValidatedEvent, EventWire, EventWire as Event,
+    ExecutionId, Identity, MAX_ARGUMENT_BYTES, MAX_COMMAND_TIMEOUT_MS, MAX_DATA_BYTES, MAX_ENV_BYTES,
+    MAX_RELEASE_TIMEOUT_MS, PlatformSupport, ProtocolError, ReleaseState, TimeoutState, Truncation, VERSION,
+    decode_command, decode_event, encode_event, read_event, write_command,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -168,7 +169,7 @@ fn event_flags_retain_boolean_json_and_hello_environment_is_bounded() -> TestRes
     .into_iter()
     .enumerate()
     {
-        let event = decode_event(bytes)?;
+        let event = decode_event(bytes)?.into_wire();
         assert!(matches!(
             (&event, index),
             (Event::Probe { supported: PlatformSupport::Supported, .. }, 0)
@@ -202,7 +203,8 @@ fn event_flags_retain_boolean_json_and_hello_environment_is_bounded() -> TestRes
     assert!(decode_event(br#"{"kind":"probe","version":1,"supported":"true"}"#).is_err());
     assert!(decode_event(br#"{"kind":"probe","version":1,"supported":true,"unexpected":0}"#).is_err());
     assert!(matches!(
-        decode_event(br#"{"kind":"hello","version":1,"execution_id":"boundary","environment":{}}"#),
+        decode_event(br#"{"kind":"hello","version":1,"execution_id":"boundary","environment":{}}"#)
+            .map(sandbox_command_supervisor::Event::into_wire),
         Ok(Event::Hello { .. })
     ));
     Ok(())
@@ -288,5 +290,120 @@ fn a_successful_write_still_requires_a_successful_flush() -> TestResult {
         Ok(()) => return Err(io::Error::other("expected flush failure").into()),
     };
     assert!(error.source().is_some_and(|source| source.is::<io::Error>()));
+    Ok(())
+}
+
+fn invalid_event_fields() -> Result<Vec<sandbox_command_supervisor::protocol::EventWire>, Box<dyn Error>> {
+    let execution = ExecutionId::new("boundary")?;
+    Ok(vec![
+        EventWire::Probe {
+            version: VERSION + 1,
+            supported: true.into(),
+        },
+        EventWire::Hello {
+            version: VERSION + 1,
+            execution_id: execution.clone(),
+            environment: BTreeMap::new(),
+        },
+        EventWire::Ready {
+            version: VERSION + 1,
+            execution_id: execution.clone(),
+            helper: Identity { pid: 1, start_time: 1 },
+            root: Identity { pid: 2, start_time: 2 },
+            process_group: 2,
+            session: 2,
+        },
+        EventWire::SignalResult {
+            execution_id: execution.clone(),
+            request_id: 0,
+            signal: 15,
+            delivered: true.into(),
+        },
+        EventWire::SignalResult {
+            execution_id: execution.clone(),
+            request_id: 1,
+            signal: 0,
+            delivered: false.into(),
+        },
+        EventWire::SignalResult {
+            execution_id: execution.clone(),
+            request_id: 1,
+            signal: 65,
+            delivered: false.into(),
+        },
+        EventWire::Output {
+            execution_id: execution.clone(),
+            stream: sandbox_command_supervisor::protocol::Stream::Stdout,
+            data: vec![0; MAX_DATA_BYTES + 1],
+        },
+        EventWire::Hello {
+            version: VERSION,
+            execution_id: execution,
+            environment: BTreeMap::from([("BAD=KEY".into(), "value".into())]),
+        },
+    ])
+}
+
+#[test]
+fn raw_event_conversion_rejects_fields_accepted_by_the_wire_enum() -> TestResult {
+    for (index, event) in invalid_event_fields()?.into_iter().enumerate() {
+        assert!(
+            sandbox_command_supervisor::protocol::Event::try_from(event).is_err(),
+            "raw event conversion accepted invalid case {index}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn event_transport_rejects_invalid_versions_and_signal_receipts() -> TestResult {
+    for (index, event) in invalid_event_fields()?.into_iter().enumerate() {
+        assert!(encode_event(&event).is_err(), "encoder accepted invalid case {index}");
+        let bytes = serde_json::to_vec(&event)?;
+        assert!(decode_event(&bytes).is_err(), "decoder accepted invalid case {index}");
+    }
+    Ok(())
+}
+
+#[test]
+fn validated_event_owns_an_immutable_checked_snapshot() -> TestResult {
+    let mut wire = Event::SignalResult {
+        execution_id: ExecutionId::new("boundary")?,
+        request_id: u64::MAX,
+        signal: 64,
+        delivered: true.into(),
+    };
+    let checked = ValidatedEvent::try_from(wire.clone())?;
+    let expected = encode_event(&wire)?;
+    if let Event::SignalResult { request_id, signal, .. } = &mut wire {
+        *request_id = 0;
+        *signal = 0;
+    }
+    assert!(ValidatedEvent::try_from(wire).is_err());
+    assert!(matches!(
+        checked.as_wire(),
+        Event::SignalResult {
+            request_id: u64::MAX,
+            signal: 64,
+            delivered: Delivery::Delivered,
+            ..
+        }
+    ));
+    assert_eq!(encode_event(&checked)?, expected);
+    assert_eq!(encode_event(&checked.clone().into_wire())?, expected);
+    let decoded = decode_event(&expected)?;
+    assert_eq!(encode_event(&decoded)?, expected);
+    let Event::SignalResult {
+        request_id,
+        signal,
+        delivered,
+        ..
+    } = decoded.into_wire()
+    else {
+        return Err(io::Error::other("validated receipt changed event kind").into());
+    };
+    assert_eq!(request_id, u64::MAX);
+    assert_eq!(signal, 64);
+    assert_eq!(delivered, Delivery::Delivered);
     Ok(())
 }

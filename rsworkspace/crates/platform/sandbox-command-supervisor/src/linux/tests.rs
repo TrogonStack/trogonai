@@ -8,7 +8,8 @@ use trogon_std::env::ReadEnv;
 pub(super) type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 mod containment_tests;
-mod worker;
+mod worker_tests;
+use worker_tests as worker;
 
 #[cfg(any(
     target_arch = "aarch64",
@@ -61,7 +62,7 @@ pub(crate) fn worker_main() -> i32 {
         return 70;
     }
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
-    let [name] = arguments.as_slice() else {
+    let [name, source] = arguments.as_slice() else {
         return 64;
     };
     let Some(name) = name.to_str() else {
@@ -70,11 +71,18 @@ pub(crate) fn worker_main() -> i32 {
     if super::SystemEnv.var_os("SUPERVISOR_KERNEL_TEST").as_deref() != Some(std::ffi::OsStr::new(name)) {
         return 64;
     }
+    if source != std::ffi::OsStr::new(&worker::source_fingerprint()) {
+        eprintln!(
+            "stale kernel worker; rebuild with: cargo build -p sandbox-command-supervisor --features test-support --bin supervisor-kernel-test-worker"
+        );
+        return 65;
+    }
     let result = std::panic::catch_unwind(|| {
         dispatch_worker(name)
             .or_else(|| super::state_tests::dispatch_worker(name))
             .or_else(|| super::native_child::tests::dispatch_worker(name))
             .or_else(|| super::writer::tests::dispatch_worker(name))
+            .or_else(|| super::signal_dispatch::tests::dispatch_worker(name))
             .or_else(|| containment_tests::dispatch_worker(name))
     });
     match result {
@@ -436,7 +444,7 @@ pub(in crate::linux) fn worker_closed_control_output_ends_an_absent_loop_without
             let mut supervisor = loop_supervisor()?;
             supervisor.phase = super::Phase::Absent;
             supervisor.writer.closed = true;
-            assert_eq!(supervisor.run_loop(), 0);
+            assert_eq!(supervisor.run_loop(), 74);
             assert!(supervisor.input_closed);
             assert!(!supervisor.canceled);
             assert!(supervisor.cleanup_started.is_none());
@@ -484,9 +492,16 @@ pub(in crate::linux) fn worker_terminal_receipt_backpressure_expires_without_dro
             supervisor.phase = super::Phase::Absent;
             supervisor.input_closed = true;
             supervisor.terminal_at = Some(Instant::now() - super::ACK_TIMEOUT);
-            let event = super::Event::Status {
+            let event = super::Event::FamilyAbsent {
                 execution_id: supervisor.execution.clone(),
-                phase: super::Phase::Absent,
+                released: false.into(),
+                root_exit_code: None,
+                root_signal: None,
+                timed_out: false.into(),
+                canceled: true.into(),
+                reaped_count: 0,
+                stdout_truncated: false.into(),
+                stderr_truncated: false.into(),
             };
             let bytes = super::encode_event(&event)?.len();
             supervisor.writer.queue(event)?;
@@ -505,10 +520,49 @@ pub(in crate::linux) fn worker_terminal_receipt_backpressure_expires_without_dro
 fn terminal_receipt_backpressure_expires_without_dropping_the_pending_frame() -> TestResult {
     worker_terminal_receipt_backpressure_expires_without_dropping_the_pending_frame()
 }
+pub(in crate::linux) fn worker_terminal_receipt_backpressure_waits_for_the_original_ack_deadline() -> TestResult {
+    isolated_with_timeout(
+        "linux::tests::terminal_receipt_backpressure_waits_for_the_original_ack_deadline",
+        super::ACK_TIMEOUT + Duration::from_secs(3),
+        || {
+            let mut supervisor = loop_supervisor()?;
+            supervisor.phase = super::Phase::Absent;
+            supervisor.input_closed = true;
+            let event = super::Event::FamilyAbsent {
+                execution_id: supervisor.execution.clone(),
+                released: false.into(),
+                root_exit_code: None,
+                root_signal: None,
+                timed_out: false.into(),
+                canceled: true.into(),
+                reaped_count: 0,
+                stdout_truncated: false.into(),
+                stderr_truncated: false.into(),
+            };
+            let bytes = super::encode_event(&event)?.len();
+            supervisor.writer.queue(event)?;
+            refuse_stdout_frame_write(bytes)?;
+            let terminal_at = Instant::now();
+            supervisor.terminal_at = Some(terminal_at);
+            assert_eq!(supervisor.run_loop(), 74);
+            assert!(terminal_at.elapsed() >= super::ACK_TIMEOUT);
+            assert_eq!(supervisor.writer.pending.len(), 1);
+            assert_eq!(supervisor.writer.control_bytes, bytes);
+            assert!(!supervisor.writer.closed);
+            assert!(!supervisor.acknowledged);
+            Ok(())
+        },
+    )
+}
 
-pub(in crate::linux) fn worker_refused_external_group_signal_does_not_prevent_held_timeout_cleanup() -> TestResult {
+#[test]
+fn terminal_receipt_backpressure_waits_for_the_original_ack_deadline() -> TestResult {
+    worker_terminal_receipt_backpressure_waits_for_the_original_ack_deadline()
+}
+
+pub(in crate::linux) fn worker_refused_external_pidfd_signal_does_not_prevent_held_timeout_cleanup() -> TestResult {
     isolated_process(
-        "linux::tests::refused_external_group_signal_does_not_prevent_held_timeout_cleanup",
+        "linux::tests::refused_external_pidfd_signal_does_not_prevent_held_timeout_cleanup",
         || {
             super::probe()?;
             let mut supervisor = loop_supervisor()?;
@@ -522,7 +576,7 @@ pub(in crate::linux) fn worker_refused_external_group_signal_does_not_prevent_he
             supervisor.phase = super::Phase::Held;
             supervisor.input_closed = true;
             supervisor.release_deadline = Some(Instant::now());
-            refuse_syscall(libc::SYS_kill, libc::EPERM)?;
+            super::state_tests::refuse_signal(libc::SIGTERM, libc::EPERM)?;
             super::EXTERNAL_SIGNAL.store(libc::SIGTERM, super::Ordering::Relaxed);
             assert_eq!(supervisor.run_loop(), 0);
             assert!(matches!(supervisor.phase, super::Phase::Absent));
@@ -534,7 +588,7 @@ pub(in crate::linux) fn worker_refused_external_group_signal_does_not_prevent_he
             assert!(supervisor.cleanup_started.is_some());
             let mut frames = std::io::BufReader::new(std::fs::File::from(control_read));
             assert!(matches!(
-                crate::protocol::read_event(&mut frames)?,
+                crate::protocol::read_event(&mut frames)?.map(crate::Event::into_wire),
                 Some(super::Event::Error {
                     code: super::ErrorCode::IdentityUnknown,
                     uncertain: crate::Certainty::Uncertain,
@@ -542,7 +596,7 @@ pub(in crate::linux) fn worker_refused_external_group_signal_does_not_prevent_he
                 })
             ));
             assert!(matches!(
-                crate::protocol::read_event(&mut frames)?,
+                crate::protocol::read_event(&mut frames)?.map(crate::Event::into_wire),
                 Some(super::Event::FamilyAbsent {
                     released: crate::ReleaseState::Held,
                     timed_out: crate::TimeoutState::TimedOut,
@@ -557,8 +611,8 @@ pub(in crate::linux) fn worker_refused_external_group_signal_does_not_prevent_he
 }
 
 #[test]
-fn refused_external_group_signal_does_not_prevent_held_timeout_cleanup() -> TestResult {
-    worker_refused_external_group_signal_does_not_prevent_held_timeout_cleanup()
+fn refused_external_pidfd_signal_does_not_prevent_held_timeout_cleanup() -> TestResult {
+    worker_refused_external_pidfd_signal_does_not_prevent_held_timeout_cleanup()
 }
 
 fn refused_probe(name: &str, syscall: libc::c_long) -> TestResult {
@@ -703,7 +757,7 @@ pub(in crate::linux) fn worker_delayed_retirement_emits_one_cleanup_notice_befor
             let observer = std::thread::spawn(move || -> Result<(), crate::ProtocolError> {
                 let mut frames = std::io::BufReader::new(std::fs::File::from(read));
                 assert!(matches!(
-                    crate::protocol::read_event(&mut frames)?,
+                    crate::protocol::read_event(&mut frames)?.map(crate::Event::into_wire),
                     Some(super::Event::Error {
                         code: super::ErrorCode::CleanupPending,
                         uncertain: crate::Certainty::Uncertain,
@@ -712,7 +766,7 @@ pub(in crate::linux) fn worker_delayed_retirement_emits_one_cleanup_notice_befor
                 ));
                 assert_eq!(super::signal_pidfd(&descriptor, libc::SIGKILL), Ok(true));
                 assert!(matches!(
-                    crate::protocol::read_event(&mut frames)?,
+                    crate::protocol::read_event(&mut frames)?.map(crate::Event::into_wire),
                     Some(super::Event::FamilyAbsent { reaped_count: 1, .. })
                 ));
                 Ok(())
@@ -764,7 +818,7 @@ pub(in crate::linux) fn worker_repeated_wait_refusal_reports_uncertainty_without
                     let mut frames = std::io::BufReader::new(std::fs::File::from(read));
                     for _ in 0..2 {
                         assert!(matches!(
-                            crate::protocol::read_event(&mut frames)?,
+                            crate::protocol::read_event(&mut frames)?.map(crate::Event::into_wire),
                             Some(super::Event::Error {
                                 code: super::ErrorCode::IdentityUnknown,
                                 uncertain: crate::Certainty::Uncertain,
@@ -792,7 +846,7 @@ pub(in crate::linux) fn worker_repeated_wait_refusal_reports_uncertainty_without
                         }
                         assert!(
                             matches!(
-                                crate::protocol::read_event(&mut frames)?,
+                                crate::protocol::read_event(&mut frames)?.map(crate::Event::into_wire),
                                 Some(super::Event::Error {
                                     code: super::ErrorCode::IdentityUnknown,
                                     uncertain: crate::Certainty::Uncertain,
@@ -881,11 +935,14 @@ pub(in crate::linux) fn dispatch_worker(name: &str) -> Option<crate::linux::test
         "linux::tests::idle_initialization_deadline_preserves_open_input_and_returns_usage_status" => {
             Some(worker_idle_initialization_deadline_preserves_open_input_and_returns_usage_status())
         }
+        "linux::tests::terminal_receipt_backpressure_waits_for_the_original_ack_deadline" => {
+            Some(worker_terminal_receipt_backpressure_waits_for_the_original_ack_deadline())
+        }
         "linux::tests::terminal_receipt_backpressure_expires_without_dropping_the_pending_frame" => {
             Some(worker_terminal_receipt_backpressure_expires_without_dropping_the_pending_frame())
         }
-        "linux::tests::refused_external_group_signal_does_not_prevent_held_timeout_cleanup" => {
-            Some(worker_refused_external_group_signal_does_not_prevent_held_timeout_cleanup())
+        "linux::tests::refused_external_pidfd_signal_does_not_prevent_held_timeout_cleanup" => {
+            Some(worker_refused_external_pidfd_signal_does_not_prevent_held_timeout_cleanup())
         }
         "linux::tests::unavailable_signal_dispositions_refuse_the_native_probe" => {
             Some(worker_unavailable_signal_dispositions_refuse_the_native_probe())

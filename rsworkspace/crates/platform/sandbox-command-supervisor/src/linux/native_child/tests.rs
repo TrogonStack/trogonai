@@ -277,10 +277,13 @@ pub(in crate::linux) fn worker_failed_pidfd_acquisition_closes_the_held_launch_g
         "linux::native_child::tests::failed_pidfd_acquisition_closes_the_held_launch_gate",
         || {
             let custody = ChildCustody::new()?;
-            let workload = prepared(None)?;
+            let directory = tempfile::tempdir()?;
+            let marker = directory.path().join("executed");
+            let workload = prepared(Some(&marker))?;
             refuse_syscall(libc::SYS_pidfd_open, libc::EPERM)?;
             assert!(matches!(spawn(&workload), Err(error) if error.code() == ErrorCode::IdentityUnknown));
             custody.settle()?;
+            assert!(!marker.exists());
             Ok(())
         },
     )
@@ -296,10 +299,13 @@ pub(in crate::linux) fn worker_successful_syscall_without_session_change_is_not_
         "linux::native_child::tests::successful_syscall_without_session_change_is_not_identity_evidence",
         || {
             let custody = ChildCustody::new()?;
-            let workload = prepared(None)?;
+            let directory = tempfile::tempdir()?;
+            let marker = directory.path().join("executed");
+            let workload = prepared(Some(&marker))?;
             refuse_syscall(libc::SYS_setsid, 0)?;
             assert!(matches!(spawn(&workload), Err(error) if error.code() == ErrorCode::IdentityUnknown));
             custody.settle()?;
+            assert!(!marker.exists());
             Ok(())
         },
     )

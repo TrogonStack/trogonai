@@ -4,8 +4,8 @@ use std::io::Cursor;
 use std::os::unix::ffi::OsStringExt;
 
 use sandbox_command_supervisor::protocol::{
-    CommandWire as Command, Event, ExecutionId, MAX_DATA_BYTES, MAX_FRAME_BYTES, ProtocolError, Stream, VERSION,
-    decode_command, encode_event, read_event, write_command,
+    CommandWire as Command, EventWire as Event, ExecutionId, MAX_DATA_BYTES, MAX_FRAME_BYTES, ProtocolError, Stream,
+    VERSION, decode_command, encode_event, read_event, write_command,
 };
 
 fn init() -> Result<Command, Box<dyn std::error::Error>> {
@@ -98,7 +98,7 @@ fn binary_output_remains_data_and_cannot_become_a_control_event() -> Result<(), 
     })?;
     assert_eq!(encoded.iter().filter(|byte| **byte == b'\n').count(), 1);
     assert!(
-        matches!(read_event(&mut Cursor::new(encoded))?, Some(Event::Output { data: actual, .. }) if actual == data)
+        matches!(read_event(&mut Cursor::new(encoded))?.map(sandbox_command_supervisor::Event::into_wire), Some(Event::Output { data: actual, .. }) if actual == data)
     );
     Ok(())
 }

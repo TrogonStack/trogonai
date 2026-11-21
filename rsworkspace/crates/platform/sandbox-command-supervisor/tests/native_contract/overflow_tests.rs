@@ -1,35 +1,7 @@
 use super::*;
 use sandbox_command_supervisor::protocol::MAX_CHILDREN;
 
-static SUBREAPER_CUSTODY: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-struct Subreaper {
-    previous: i32,
-    _custody: std::sync::MutexGuard<'static, ()>,
-}
-
-impl Subreaper {
-    fn enter() -> Self {
-        let custody = SUBREAPER_CUSTODY
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut previous = 0_i32;
-        assert_eq!(unsafe { libc::prctl(libc::PR_GET_CHILD_SUBREAPER, &mut previous) }, 0);
-        assert_eq!(unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) }, 0);
-        Self {
-            previous,
-            _custody: custody,
-        }
-    }
-}
-
-impl Drop for Subreaper {
-    fn drop(&mut self) {
-        unsafe {
-            libc::prctl(libc::PR_SET_CHILD_SUBREAPER, self.previous, 0, 0, 0);
-        }
-    }
-}
+type Subreaper = TestCustody;
 
 struct Family {
     helper: Harness,
@@ -65,12 +37,10 @@ impl Family {
             }
         }
         self.helper.input.take();
-        if self.helper.process.try_wait().ok().flatten().is_none() {
-            let _ = self.helper.process.kill();
-        }
-        let helper_absent = self.helper.process.wait().is_ok();
+        let helper_absent = stop_helper(&mut self.helper.process, Duration::ZERO);
         let until = Instant::now() + Duration::from_secs(3);
-        let mut complete = helper_absent;
+        let settled = self.helper.custody.settle();
+        let mut complete = helper_absent && settled;
         for identity in &self.identities {
             let mut reaped = false;
             while Instant::now() < until {
@@ -240,16 +210,19 @@ fn run(control: Control) {
 
 #[test]
 fn overflow_control_eof_drains_pinned_family() {
+    let _custody = TestCustody::enter();
     run(Control::Eof);
 }
 
 #[test]
 fn overflow_finite_command_deadline_drains_pinned_family() {
+    let _custody = TestCustody::enter();
     run(Control::Deadline);
 }
 
 #[test]
 fn overflow_explicit_hard_cancel_drains_pinned_family() {
+    let _custody = TestCustody::enter();
     run(Control::HardCancel);
 }
 
@@ -258,18 +231,59 @@ fn subreaper_custody_excludes_a_second_owner_until_restoration() -> Result<(), B
     let first = Subreaper::enter();
     let (send, receive) = std::sync::mpsc::channel();
     let second = std::thread::spawn(move || {
+        let _ = send.send(TestCustody::unavailable_to_another_thread());
         let guard = Subreaper::enter();
-        let _ = send.send(());
+        let _ = send.send(false);
         drop(guard);
     });
-    let overlapped = receive.recv_timeout(Duration::from_millis(100)).is_ok();
+    let blocked = receive.recv_timeout(WAIT)?;
     drop(first);
+    assert!(!receive.recv_timeout(WAIT)?);
     second
         .join()
         .map_err(|_| std::io::Error::other("subreaper owner panicked"))?;
+    assert!(blocked, "a second owner must observe the held custody lock");
+    Ok(())
+}
+
+#[test]
+fn failed_overflow_setup_reaps_leaves_not_yet_registered_with_the_family() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
+    let directory = tempfile::tempdir()?;
+    let mut sentinel = Sentinel::start();
+    let mut family = Family::start();
+    let root = family.helper.initialize("overflow", directory.path(), None, None);
+    family.identities.push(pin(root));
+    family.helper.release();
+    let mut unregistered = Vec::new();
+    for index in 0..10 {
+        unregistered.push(pin(recorded(&directory.path().join(format!("leaf-{index}")))));
+    }
+    assert!(unregistered.iter().all(|identity| !dead(identity, Instant::now())));
+    assert!(family.cleanup());
+    let cleaned = unregistered.iter().all(|identity| {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PIDFD,
+                identity.as_raw_fd() as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT | libc::__WALL,
+            )
+        };
+        dead(identity, Instant::now())
+            && result < 0
+            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)
+    });
+    let independent_cleanup = family.helper.custody.settle();
+    sentinel.assert_alive();
     assert!(
-        !overlapped,
-        "a second owner must wait until cleanup and flag restoration"
+        independent_cleanup,
+        "failed setup fixture guard must retain all child custody"
+    );
+    assert!(
+        cleaned,
+        "overflow cleanup missed leaves started before identity registration"
     );
     Ok(())
 }

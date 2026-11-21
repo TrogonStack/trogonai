@@ -41,10 +41,19 @@ JSON on stdin and stdout. Version 1 control flow is:
 The `release` command opens the launch gate. It does not request cleanup.
 Control EOF, deadlines, and hard cancellation drain the owned family. Signal
 request IDs must increase for new requests; an identical retry replays the
-previous result without delivering the signal again.
+previous result without delivering the signal again. Soft signals use a bounded
+snapshot of pinned workload descendants and send once per retained process. The
+snapshot visits every owned process task and its children, with at most 65536
+traversal entries for the production capacity. A capacity or ownership uncertainty
+starts cleanup instead of sending from a partial snapshot. Forks after a snapshot
+remain best effort until cleanup. The worker descriptor limit must accommodate a
+snapshot pidfds alongside retained cleanup handles and control and stream
+descriptors; descriptor exhaustion also starts cleanup.
 
-The Rust API separates untrusted `CommandWire` records from validated `Command`
-values. `decode_command` validates once at the input boundary. Event flag enums
+The Rust API separates untrusted `CommandWire` and `EventWire` records from
+validated `Command` and `Event` values. The decoders validate at the input
+boundary. A validated event exposes an immutable wire view through `as_wire()`
+or transfers its wire record through `into_wire()`. Event flag enums
 retain their version 1 JSON boolean encoding. Stdout and stderr bytes are carried
 inside output frames, never interpreted as control messages.
 
@@ -63,7 +72,9 @@ including builds with all features enabled.
 
 Kernel tests run in a fresh executable worker so each case owns its process
 family. Full `cargo test` builds that worker automatically. Before a focused
-`cargo test --lib` run, build it explicitly:
+`cargo test --lib` run, build it explicitly. The harness rejects a worker whose
+embedded source fingerprint differs from the test binary and prints the rebuild
+command. The fingerprint checks source freshness rather than authenticity:
 
 ```sh
 mise exec -- cargo build -p sandbox-command-supervisor --features test-support --bin supervisor-kernel-test-worker

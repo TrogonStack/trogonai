@@ -1,4 +1,5 @@
 mod native_child;
+mod signal_dispatch;
 mod writer;
 use native_child::{Prepared, Root, spawn};
 use writer::Writer;
@@ -14,8 +15,8 @@ use std::time::{Duration, Instant};
 use trogon_std::env::{EnumerateEnv, SystemEnv};
 
 use crate::protocol::{
-    Command, DEFAULT_RELEASE_TIMEOUT_MS, ErrorCode, Event, ExecutionId, Identity, MAX_CHILDREN, MAX_DATA_BYTES,
-    MAX_FRAME_BYTES, Phase, Stream, VERSION, decode_command, encode_event,
+    Command, DEFAULT_RELEASE_TIMEOUT_MS, ErrorCode, EventWire as Event, ExecutionId, Identity, MAX_CHILDREN,
+    MAX_DATA_BYTES, MAX_FRAME_BYTES, Phase, Stream, VERSION, decode_command, encode_event,
 };
 
 mod constants;
@@ -274,6 +275,7 @@ struct Supervisor {
     writer: Writer,
     input: Vec<u8>,
     discard_input: bool,
+    deferred_input: Vec<u8>,
     input_closed: bool,
     released: bool,
     canceled: bool,
@@ -291,6 +293,9 @@ struct Supervisor {
     signal_request: Option<SignalRequest>,
     exec_observation: ExecObservation,
     pending_terminal: Option<Event>,
+    pending_errors: VecDeque<(ErrorCode, bool)>,
+    pending_root_exit: Option<RootStatus>,
+    release_requested: bool,
 }
 
 impl Supervisor {
@@ -303,6 +308,7 @@ impl Supervisor {
             writer: Writer::new(),
             input: Vec::new(),
             discard_input: false,
+            deferred_input: Vec::new(),
             input_closed: false,
             released: false,
             canceled: false,
@@ -320,22 +326,98 @@ impl Supervisor {
             signal_request: None,
             exec_observation: ExecObservation::Pending,
             pending_terminal: None,
+            pending_errors: VecDeque::new(),
+            pending_root_exit: None,
+            release_requested: false,
+        }
+    }
+
+    fn control_pending(&self) -> bool {
+        !self.pending_errors.is_empty()
+            || self.pending_root_exit.is_some()
+            || self.release_requested
+            || self.pending_terminal.is_some()
+    }
+
+    fn admit_control(&mut self) {
+        while let Some(&(code, uncertain)) = self.pending_errors.front() {
+            if self
+                .writer
+                .queue(Event::Error {
+                    execution_id: self.execution.clone(),
+                    code,
+                    uncertain: uncertain.into(),
+                })
+                .is_err()
+            {
+                return;
+            }
+            self.pending_errors.pop_front();
+        }
+        if let Some(status) = self.pending_root_exit {
+            if self
+                .writer
+                .queue(Event::RootExited {
+                    execution_id: self.execution.clone(),
+                    exit_code: status.code,
+                    signal: status.signal,
+                })
+                .is_err()
+            {
+                return;
+            }
+            self.pending_root_exit = None;
         }
     }
 
     fn error(&mut self, code: ErrorCode, uncertain: bool) {
-        if self
-            .writer
-            .queue(Event::Error {
-                execution_id: self.execution.clone(),
-                code,
-                uncertain: uncertain.into(),
-            })
-            .is_err()
-        {
-            self.writer.closed = true;
+        // Repeated observations share a receipt while the finite error domain is backpressured.
+        if !self.pending_errors.contains(&(code, uncertain)) {
+            self.pending_errors.push_back((code, uncertain));
+        }
+        self.admit_control();
+        if !self.pending_errors.is_empty() {
             self.begin_drain();
         }
+    }
+
+    fn try_release(&mut self) {
+        if !self.release_requested || self.phase != Phase::Held {
+            return;
+        }
+        let reservation = self.writer.reserve_control(&Event::Released {
+            execution_id: self.execution.clone(),
+        });
+        if self.release_deadline.is_some_and(|time| Instant::now() >= time) {
+            self.timed_out = true;
+            self.begin_drain();
+            return;
+        }
+        let reservation = match reservation {
+            Ok(reservation) => reservation,
+            Err(_) if !self.writer.closed => return,
+            Err(code) => {
+                self.error(code, true);
+                self.begin_drain();
+                return;
+            }
+        };
+        let result = self
+            .root
+            .as_mut()
+            .and_then(|root| root.gate.take())
+            .map(|gate| unsafe { libc::write(gate.as_raw_fd(), b"R".as_ptr().cast(), 1) == 1 })
+            .unwrap_or(false);
+        if !result {
+            self.error(ErrorCode::IoFailure, true);
+            self.begin_drain();
+            return;
+        }
+        self.writer.commit_control(reservation);
+        self.release_requested = false;
+        self.released = true;
+        self.phase = Phase::Running;
+        self.command_deadline = self.command_timeout.map(|timeout| Instant::now() + timeout);
     }
 
     fn begin_drain(&mut self) {
@@ -343,6 +425,7 @@ impl Supervisor {
             return;
         }
         self.canceled = true;
+        self.release_requested = false;
         self.phase = Phase::Draining;
         self.cleanup_started.get_or_insert_with(Instant::now);
         if let Some(root) = &mut self.root {
@@ -406,28 +489,8 @@ impl Supervisor {
                 }
             }
             Command::Release { .. } if self.phase == Phase::Held => {
-                if self.release_deadline.is_some_and(|time| Instant::now() >= time) {
-                    self.timed_out = true;
-                    self.begin_drain();
-                    return;
-                }
-                let result = self
-                    .root
-                    .as_mut()
-                    .and_then(|root| root.gate.take())
-                    .map(|gate| unsafe { libc::write(gate.as_raw_fd(), b"R".as_ptr().cast(), 1) == 1 })
-                    .unwrap_or(false);
-                if !result {
-                    self.error(ErrorCode::IoFailure, true);
-                    self.begin_drain();
-                    return;
-                }
-                self.released = true;
-                self.phase = Phase::Running;
-                self.command_deadline = self.command_timeout.map(|timeout| Instant::now() + timeout);
-                let _ = self.writer.queue(Event::Released {
-                    execution_id: self.execution.clone(),
-                });
+                self.release_requested = true;
+                self.try_release();
             }
             Command::Signal { request_id, signal, .. } if self.phase != Phase::AwaitingInit => {
                 let request_id = request_id.get();
@@ -508,28 +571,10 @@ impl Supervisor {
     }
 
     fn soft_signal(&mut self, signal: i32) -> Result<bool, ErrorCode> {
-        let mut delivered = false;
-        if let Some(root) = &self.root {
-            if !root.reaped {
-                // The sole reaper keeps this direct child waitable, reserving its private session.
-                let result = unsafe { libc::kill(-root.pid, signal) };
-                if result < 0 && errno() != libc::ESRCH {
-                    return Err(ErrorCode::IdentityUnknown);
-                }
-                delivered |= result == 0;
-            }
-            let children = direct_children(self.family_limit)?;
-            for child in children.children {
-                if child != root.pid {
-                    let descriptor = pidfd(child)?;
-                    delivered |= signal_pidfd(&descriptor, signal)?;
-                }
-            }
-            if children.has_more {
-                return Err(ErrorCode::ProcessLimit);
-            }
+        if self.root.is_none() {
+            return Ok(false);
         }
-        Ok(delivered)
+        signal_dispatch::send(self.family_limit, signal)
     }
 
     fn hard_signal(&mut self) -> Result<bool, ErrorCode> {
@@ -566,7 +611,14 @@ impl Supervisor {
     fn read_input(&mut self) {
         let mut bytes = [0_u8; 8192];
         for _ in 0..8 {
-            let count = unsafe { libc::read(0, bytes.as_mut_ptr().cast(), bytes.len()) };
+            let count = if self.deferred_input.is_empty() {
+                unsafe { libc::read(0, bytes.as_mut_ptr().cast(), bytes.len()) }
+            } else {
+                let count = self.deferred_input.len();
+                bytes[..count].copy_from_slice(&self.deferred_input);
+                self.deferred_input.clear();
+                count as isize
+            };
             if count == 0 {
                 self.input_closed = true;
                 self.begin_drain();
@@ -582,7 +634,7 @@ impl Supervisor {
                     }
                 }
             }
-            for byte in &bytes[..count as usize] {
+            for (index, byte) in bytes[..count as usize].iter().enumerate() {
                 if self.discard_input {
                     if *byte == b'\n' {
                         self.discard_input = false;
@@ -601,6 +653,10 @@ impl Supervisor {
                     self.input.clear();
                     self.discard_input = true;
                     self.error(ErrorCode::InvalidFrame, false);
+                }
+                if self.control_pending() {
+                    self.deferred_input.extend_from_slice(&bytes[index + 1..count as usize]);
+                    return;
                 }
             }
         }
@@ -679,6 +735,10 @@ impl Supervisor {
     }
 
     fn admit_terminal(&mut self) {
+        self.admit_control();
+        if !self.pending_errors.is_empty() || self.pending_root_exit.is_some() {
+            return;
+        }
         if let Some(event) = &self.pending_terminal
             && self.writer.queue(event.clone()).is_ok()
         {
@@ -688,6 +748,7 @@ impl Supervisor {
     }
 
     fn tick_family(&mut self) -> Result<(), ErrorCode> {
+        self.admit_control();
         if self.pending_terminal.is_some() {
             self.admit_terminal();
             return Ok(());
@@ -725,11 +786,7 @@ impl Supervisor {
                         let status = RootStatus::from_siginfo(&info)?;
                         root.status = Some(status);
                         if self.released {
-                            let _ = self.writer.queue(Event::RootExited {
-                                execution_id: self.execution.clone(),
-                                exit_code: status.code,
-                                signal: status.signal,
-                            });
+                            self.pending_root_exit = Some(status);
                         }
                     }
                 } else {
@@ -751,6 +808,7 @@ impl Supervisor {
                 failure.get_or_insert(code);
             }
         }
+        self.admit_control();
         let children = direct_children(self.family_limit)?;
         if let Some(root) = &mut self.root
             && !root.reaped
@@ -852,7 +910,9 @@ impl Supervisor {
                 self.input_closed = true;
                 self.begin_drain();
             }
-            if !self.input_closed && self.pending_terminal.is_none() {
+            self.admit_control();
+            self.try_release();
+            if !self.input_closed && !self.control_pending() {
                 self.read_input();
             }
             let signal = EXTERNAL_SIGNAL.swap(0, Ordering::Relaxed);
@@ -900,7 +960,9 @@ impl Supervisor {
                 self.error(ErrorCode::CleanupPending, true);
             }
             self.writer.flush();
-            if self.pending_terminal.is_some() && self.terminal_at.is_some_and(|time| time.elapsed() >= ACK_TIMEOUT) {
+            if self.pending_terminal.is_some()
+                && (self.writer.closed || self.terminal_at.is_some_and(|time| time.elapsed() >= ACK_TIMEOUT))
+            {
                 return 74;
             }
             if self.phase == Phase::Absent
@@ -908,7 +970,10 @@ impl Supervisor {
                     || self.input_closed
                     || self.terminal_at.is_some_and(|time| time.elapsed() >= ACK_TIMEOUT))
             {
-                if self.writer.pending.is_empty() || self.writer.closed {
+                if self.writer.closed {
+                    return 74;
+                }
+                if self.writer.pending.is_empty() && !self.control_pending() {
                     return 0;
                 }
                 if self.terminal_at.is_some_and(|time| time.elapsed() >= ACK_TIMEOUT) {
@@ -917,7 +982,7 @@ impl Supervisor {
             }
             let mut polls = [
                 libc::pollfd {
-                    fd: if self.input_closed || self.pending_terminal.is_some() {
+                    fd: if self.input_closed || self.control_pending() {
                         -1
                     } else {
                         0

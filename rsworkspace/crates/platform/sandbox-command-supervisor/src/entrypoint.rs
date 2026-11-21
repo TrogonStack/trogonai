@@ -1,4 +1,4 @@
-use crate::protocol::{Event, ExecutionId, VERSION, encode_event};
+use crate::protocol::{EventWire as Event, ExecutionId, VERSION, encode_event};
 use std::io::Write;
 
 pub(crate) fn run(family_limit: usize) -> i32 {

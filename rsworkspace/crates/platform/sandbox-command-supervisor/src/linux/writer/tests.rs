@@ -75,6 +75,13 @@ pub(in crate::linux) fn worker_permanent_output_failure_closes_the_writer_and_re
             assert!(writer.pending.is_empty());
             assert_eq!(writer.control_bytes, 0);
             assert_eq!(writer.data_bytes, 0);
+            assert_eq!(
+                writer.queue(Event::Status {
+                    execution_id: execution.clone(),
+                    phase: Phase::Absent,
+                }),
+                Err(ErrorCode::IoFailure)
+            );
             for stream in [Stream::Stdout, Stream::Stderr] {
                 writer.queue(Event::Output {
                     execution_id: execution.clone(),

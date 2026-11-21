@@ -5,17 +5,22 @@ use std::io;
 use std::os::unix::ffi::OsStringExt;
 use std::process::Output;
 
-struct CapturedChild(Option<Child>);
+struct CapturedChild {
+    child: Option<Child>,
+    custody: FamilyCustody,
+}
 
 impl Drop for CapturedChild {
     fn drop(&mut self) {
-        if let Some(child) = &mut self.0 {
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        let stopped = self
+            .child
+            .as_mut()
+            .is_none_or(|child| stop_helper(child, Duration::ZERO));
+        let settled = self.custody.settle();
+        assert!(
+            stopped && settled || std::thread::panicking(),
+            "captured child custody must settle"
+        );
     }
 }
 
@@ -38,15 +43,23 @@ fn drain_capture(pipe: &mut impl std::io::Read, bytes: &mut Vec<u8>) -> io::Resu
     Ok(false)
 }
 
-fn capture(command: &mut Process) -> io::Result<Output> {
+pub(super) fn capture(command: &mut Process) -> io::Result<Output> {
+    let custody = FamilyCustody::enter();
     let child = command
         .process_group(0)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
-    let mut guard = CapturedChild(Some(child));
+    capture_child(child, Instant::now() + WAIT, custody)
+}
+
+fn capture_child(child: Child, until: Instant, custody: FamilyCustody) -> io::Result<Output> {
+    let mut guard = CapturedChild {
+        child: Some(child),
+        custody,
+    };
     let child = guard
-        .0
+        .child
         .as_mut()
         .ok_or_else(|| io::Error::other("missing captured child"))?;
     let mut stdout = child
@@ -63,16 +76,18 @@ fn capture(command: &mut Process) -> io::Result<Output> {
             return Err(io::Error::last_os_error());
         }
     }
-    let until = Instant::now() + WAIT;
     let mut output = Vec::new();
     let mut errors = Vec::new();
     let mut status = None;
     loop {
+        if Instant::now() >= until {
+            return Err(io::Error::from(io::ErrorKind::TimedOut));
+        }
         let stdout_eof = drain_capture(&mut stdout, &mut output)?;
         let stderr_eof = drain_capture(&mut stderr, &mut errors)?;
         if stdout_eof && stderr_eof && status.is_none() {
             status = guard
-                .0
+                .child
                 .as_mut()
                 .ok_or_else(|| io::Error::other("missing captured child"))?
                 .try_wait()?;
@@ -81,7 +96,10 @@ fn capture(command: &mut Process) -> io::Result<Output> {
             && stderr_eof
             && let Some(status) = status
         {
-            guard.0.take();
+            if Instant::now() >= until {
+                return Err(io::Error::from(io::ErrorKind::TimedOut));
+            }
+            guard.child.take();
             return Ok(Output {
                 status,
                 stdout: output,
@@ -97,6 +115,7 @@ fn capture(command: &mut Process) -> io::Result<Output> {
 
 #[test]
 fn malformed_fixture_invocations_refuse_without_user_effects() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir()?;
     let marker = directory.path().join("effect");
     for arguments in [
@@ -117,6 +136,7 @@ fn malformed_fixture_invocations_refuse_without_user_effects() -> Result<(), Box
 
 #[test]
 fn malformed_and_oversized_inherited_environments_refuse_before_hello() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     for (key, value) in [
         (OsString::from_vec(vec![0xff]), "value".into()),
         ("INVALID_VALUE".into(), OsString::from_vec(vec![0xff])),
@@ -150,6 +170,7 @@ fn malformed_and_oversized_inherited_environments_refuse_before_hello() -> Resul
 
 #[test]
 fn missing_startup_kernel_prerequisite_refuses_before_hello() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     let mut command = Process::new(env!("CARGO_BIN_EXE_sandbox-command-supervisor"));
     command
         .args(["--execution-id", "contract"])
@@ -174,11 +195,13 @@ fn missing_startup_kernel_prerequisite_refuses_before_hello() -> Result<(), Box<
 
 #[test]
 fn escaped_middle_session_refusal_preserves_root_status_and_owned_absence() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     refused_middle(Syscall::Session, Policy::reject_after(1, libc::EPERM), 1, libc::EPERM)
 }
 
 #[test]
 fn escaped_leaf_fork_refusal_preserves_root_status_and_owned_absence() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     refused_middle(Syscall::Fork, Policy::reject_after(2, libc::EAGAIN), 2, libc::EAGAIN)
 }
 
@@ -205,7 +228,7 @@ fn refused_middle(
         stdout_truncated: Truncation::Complete, stderr_truncated: Truncation::Complete,
         reaped_count, ..
     } if reaped_count >= 1));
-    assert_dead(&root);
+    assert_exited(&root);
     assert!(!marker.exists());
     sentinel.assert_alive();
     helper.acknowledge();
@@ -227,13 +250,14 @@ fn refused_middle(
         .process
         .as_ref()
         .ok_or_else(|| io::Error::other("missing denied middle identity"))?;
-    assert_dead(middle);
+    assert_exited(middle);
     sentinel.assert_alive();
     Ok(())
 }
 
 #[test]
 fn fork_refusal_during_full_natural_churn_does_not_lose_family_cleanup() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir()?;
     let marker = directory.path().join("churn");
     let mut sentinel = Sentinel::start();
@@ -275,7 +299,7 @@ fn fork_refusal_during_full_natural_churn_does_not_lose_family_cleanup() -> Resu
         }
     }
     assert!(released_at.elapsed() >= Duration::from_secs(10));
-    assert_dead(&root);
+    assert_exited(&root);
     sentinel.assert_alive();
     helper.acknowledge();
     let report = listener.finish()?;
@@ -292,12 +316,30 @@ fn fork_refusal_during_full_natural_churn_does_not_lose_family_cleanup() -> Resu
 
 #[test]
 fn capture_deadline_includes_descendants_holding_output_pipes() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     let mut command = Process::new("/bin/sh");
     command.args(["-c", &format!("sleep {} & exit 0", WAIT.as_secs() + 1)]);
     let result = capture(&mut command);
     assert!(
         result.is_err_and(|error| error.kind() == io::ErrorKind::TimedOut),
         "exited direct child must not remove the output EOF deadline"
+    );
+    Ok(())
+}
+
+#[test]
+fn capture_refuses_completion_after_original_deadline() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
+    let custody = FamilyCustody::enter();
+    let mut child = Process::new("/bin/true")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child.wait()?;
+    let result = capture_child(child, Instant::now() - Duration::from_millis(1), custody);
+    assert!(
+        result.is_err_and(|error| error.kind() == io::ErrorKind::TimedOut),
+        "completed pipes and status cannot erase an expired capture deadline"
     );
     Ok(())
 }

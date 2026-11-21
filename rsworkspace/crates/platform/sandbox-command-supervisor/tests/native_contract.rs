@@ -18,8 +18,13 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use sandbox_command_supervisor::protocol::{
-    CommandWire as Command, ErrorCode, Event, ExecutionId, Identity, Phase, Stream, VERSION, read_event, write_command,
+    CommandWire as Command, ErrorCode, EventWire as Event, ExecutionId, Identity, Phase, Stream, VERSION, write_command,
 };
+
+fn read_event(reader: &mut impl std::io::BufRead) -> Result<Option<Event>, sandbox_command_supervisor::ProtocolError> {
+    sandbox_command_supervisor::protocol::read_event(reader)
+        .map(|event| event.map(sandbox_command_supervisor::Event::into_wire))
+}
 
 const WAIT: Duration = Duration::from_secs(8);
 const MAX_CAPTURE_BYTES: usize = 2 * sandbox_command_supervisor::protocol::MAX_FRAME_BYTES;
@@ -32,6 +37,7 @@ struct Harness {
     output: Vec<u8>,
     errors: Vec<u8>,
     next_signal: u64,
+    custody: FamilyCustody,
 }
 
 impl Harness {
@@ -49,6 +55,7 @@ impl Harness {
         reason = "A failed native fixture or contract assertion must terminate the test immediately"
     )]
     fn start_command(mut command: Process) -> Self {
+        let custody = FamilyCustody::enter();
         let execution = ExecutionId::new("contract").unwrap();
         let mut process = command
             .args(["--execution-id", execution.as_str()])
@@ -79,6 +86,7 @@ impl Harness {
             output: Vec::new(),
             errors: Vec::new(),
             next_signal: 1,
+            custody,
         };
         assert!(matches!(harness.next(), Event::Hello { version: VERSION, .. }));
         harness
@@ -89,7 +97,14 @@ impl Harness {
         reason = "A failed native fixture or contract assertion must terminate the test immediately"
     )]
     fn send(&mut self, command: Command) {
-        write_command(self.input.as_mut().expect("open host control"), &command).expect("write private command");
+        let mut bytes = Vec::new();
+        write_command(&mut bytes, &command).expect("encode private command");
+        write_control_until(
+            self.input.as_mut().expect("open host control"),
+            &bytes,
+            Instant::now() + WAIT,
+        )
+        .expect("write private command before deadline");
     }
 
     #[expect(
@@ -233,32 +248,17 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        if self.process.try_wait().ok().flatten().is_none() {
-            if let Some(input) = &mut self.input {
-                let _ = write_command(
-                    input,
-                    &Command::Signal {
-                        execution_id: self.execution.clone(),
-                        request_id: 1,
-                        signal: libc::SIGKILL,
-                    },
-                );
-            }
-            self.input.take();
-            let until = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < until {
-                if self.process.try_wait().ok().flatten().is_some() {
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            let _ = self.process.kill();
-            let _ = self.process.wait();
-        }
+        self.input.take();
+        let stopped = stop_helper(&mut self.process, Duration::from_millis(250));
+        let complete = self.custody.settle();
+        assert!(
+            stopped && complete || std::thread::panicking(),
+            "independent native workload teardown must complete"
+        );
     }
 }
 
-struct Sentinel(Child);
+struct Sentinel(Child, TestCustody);
 
 impl Sentinel {
     #[expect(
@@ -266,7 +266,11 @@ impl Sentinel {
         reason = "A failed native fixture or contract assertion must terminate the test immediately"
     )]
     fn start() -> Self {
-        Self(Process::new("/bin/sleep").arg("30").spawn().expect("external sentinel"))
+        let custody = TestCustody::enter();
+        Self(
+            Process::new("/bin/sleep").arg("30").spawn().expect("external sentinel"),
+            custody,
+        )
     }
 
     #[expect(
@@ -280,6 +284,7 @@ impl Sentinel {
 
 impl Drop for Sentinel {
     fn drop(&mut self) {
+        let _ = &self.1;
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
@@ -320,6 +325,20 @@ fn pin(identity: Identity) -> OwnedFd {
     descriptor
 }
 
+fn assert_exited(descriptor: &OwnedFd) {
+    let mut poll = libc::pollfd {
+        fd: descriptor.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    assert_eq!(
+        unsafe { libc::poll(&mut poll, 1, 0) },
+        1,
+        "terminal receipt requires an already exited child"
+    );
+    assert_ne!(poll.revents & libc::POLLIN, 0);
+}
+
 fn assert_dead(descriptor: &OwnedFd) {
     let mut poll = libc::pollfd {
         fd: descriptor.as_raw_fd(),
@@ -340,6 +359,7 @@ fn assert_dead(descriptor: &OwnedFd) {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn held_child_waits_for_matching_release_and_preserves_status_and_data() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("effect");
     let mut helper = Harness::start();
@@ -396,6 +416,7 @@ fn held_child_waits_for_matching_release_and_preserves_status_and_data() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn control_eof_before_release_never_executes_user_work() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("effect");
     let mut helper = Harness::start();
@@ -411,7 +432,7 @@ fn control_eof_before_release_never_executes_user_work() {
             ..
         }
     ));
-    assert_dead(&root);
+    assert_exited(&root);
     assert!(!marker.exists());
     helper.wait();
 }
@@ -422,6 +443,7 @@ fn control_eof_before_release_never_executes_user_work() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn held_cancellation_and_release_deadline_never_execute_user_work() {
+    let _custody = TestCustody::enter();
     for timeout in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let marker = directory.path().join("effect");
@@ -436,7 +458,7 @@ fn held_cancellation_and_release_deadline_never_execute_user_work() {
             root_exit_code: None, root_signal: None, timed_out, canceled: Cancellation::Canceled, .. } if bool::from(timed_out) == timeout)
         );
         if let Some(root) = root {
-            assert_dead(&root);
+            assert_exited(&root);
         }
         assert!(!marker.exists());
         helper.acknowledge();
@@ -450,6 +472,7 @@ fn held_cancellation_and_release_deadline_never_execute_user_work() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn hard_cancel_reaps_double_forked_new_session_with_empty_environment_and_preserves_sentinel() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("escaped");
     let mut sentinel = Sentinel::start();
@@ -479,8 +502,8 @@ fn hard_cancel_reaps_double_forked_new_session_with_empty_environment_and_preser
         matches!(helper.absent(), Event::FamilyAbsent { released: ReleaseState::Released,
         root_signal: Some(libc::SIGKILL), canceled: Cancellation::Canceled, reaped_count, .. } if reaped_count >= 2)
     );
-    assert_dead(&root);
-    assert_dead(&escaped);
+    assert_exited(&root);
+    assert_exited(&escaped);
     sentinel.assert_alive();
     helper.acknowledge();
 }
@@ -491,6 +514,7 @@ fn hard_cancel_reaps_double_forked_new_session_with_empty_environment_and_preser
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn clone_children_without_sigchld_are_included_in_absence() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("clone");
     let mut helper = Harness::start();
@@ -501,7 +525,7 @@ fn clone_children_without_sigchld_are_included_in_absence() {
     assert!(
         matches!(helper.absent(), Event::FamilyAbsent { reaped_count, canceled: Cancellation::Canceled, .. } if reaped_count >= 2)
     );
-    assert_dead(&child);
+    assert_exited(&child);
     helper.acknowledge();
 }
 
@@ -511,6 +535,7 @@ fn clone_children_without_sigchld_are_included_in_absence() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn exited_root_status_is_retained_until_escaped_family_is_absent() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("escaped");
     let mut helper = Harness::start();
@@ -525,7 +550,7 @@ fn exited_root_status_is_retained_until_escaped_family_is_absent() {
             ..
         }
     ));
-    assert_dead(&root);
+    assert_exited(&root);
     helper.send(Command::Status {
         execution_id: helper.execution.clone(),
     });
@@ -541,7 +566,7 @@ fn exited_root_status_is_retained_until_escaped_family_is_absent() {
         matches!(helper.absent(), Event::FamilyAbsent { root_exit_code: Some(7), root_signal: None,
         reaped_count, .. } if reaped_count >= 2)
     );
-    assert_dead(&child);
+    assert_exited(&child);
     helper.acknowledge();
 }
 
@@ -551,6 +576,7 @@ fn exited_root_status_is_retained_until_escaped_family_is_absent() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn term_and_interrupt_preserve_genuine_success_exit() {
+    let _custody = TestCustody::enter();
     for signal in [libc::SIGTERM, libc::SIGINT] {
         let directory = tempfile::tempdir().unwrap();
         let marker = directory.path().join("ready");
@@ -568,7 +594,7 @@ fn term_and_interrupt_preserve_genuine_success_exit() {
                 ..
             }
         ));
-        assert_dead(&root);
+        assert_exited(&root);
         helper.acknowledge();
     }
 }
@@ -579,6 +605,7 @@ fn term_and_interrupt_preserve_genuine_success_exit() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn graceful_root_exit_then_hard_escalation_keeps_original_status() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("escaped");
     let mut helper = Harness::start();
@@ -604,7 +631,7 @@ fn graceful_root_exit_then_hard_escalation_keeps_original_status() {
             ..
         }
     ));
-    assert_dead(&child);
+    assert_exited(&child);
     helper.acknowledge();
 }
 
@@ -614,6 +641,7 @@ fn graceful_root_exit_then_hard_escalation_keeps_original_status() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn hard_cancel_during_fork_and_thread_churn_reaps_adopted_children() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("ready");
     let mut helper = Harness::start();
@@ -625,7 +653,7 @@ fn hard_cancel_during_fork_and_thread_churn_reaps_adopted_children() {
     assert!(
         matches!(helper.absent(), Event::FamilyAbsent { reaped_count, canceled: Cancellation::Canceled, .. } if reaped_count >= 2)
     );
-    assert_dead(&root);
+    assert_exited(&root);
     helper.acknowledge();
 }
 
@@ -635,6 +663,7 @@ fn hard_cancel_during_fork_and_thread_churn_reaps_adopted_children() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn command_deadline_uses_owned_family_drain() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("escaped");
     let mut helper = Harness::start();
@@ -649,7 +678,7 @@ fn command_deadline_uses_owned_family_drain() {
             ..
         }
     ));
-    assert_dead(&child);
+    assert_exited(&child);
     helper.acknowledge();
 }
 
@@ -659,6 +688,7 @@ fn command_deadline_uses_owned_family_drain() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn completed_family_signal_is_a_noop() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("effect");
     let mut helper = Harness::start();
@@ -693,6 +723,7 @@ fn completed_family_signal_is_a_noop() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn exec_failure_is_reported_before_terminal_absence_and_preserves_real_exit() {
+    let _custody = TestCustody::enter();
     let mut helper = Harness::start();
     helper.send(Command::Init {
         version: VERSION,
@@ -750,23 +781,35 @@ fn exec_failure_is_reported_before_terminal_absence_and_preserves_real_exit() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn output_backpressure_cannot_prevent_control_eof_from_killing_root() {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir().unwrap();
     let marker = directory.path().join("flood");
     let execution = ExecutionId::new("backpressure").unwrap();
-    let process = Process::new(env!("CARGO_BIN_EXE_sandbox-command-supervisor"))
+    let custody = FamilyCustody::enter();
+    let mut command = Process::new(env!("CARGO_BIN_EXE_sandbox-command-supervisor"));
+    command
         .args(["--execution-id", execution.as_str()])
         .env_clear()
         .envs(coverage_environment())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::null());
+    let pending = syscall_notifications::PendingListener::install(
+        &mut command,
+        syscall_notifications::Syscall::ControlWrite,
+        syscall_notifications::Policy::observe(),
+    )
+    .unwrap();
+    let process = command.spawn().unwrap();
     let mut child = BackpressureChild {
         process,
         input: None,
         output: None,
+        custody,
     };
+    let control_stall = pending
+        .start_control_stall(child.process.stdout.as_ref().unwrap(), child.process.id())
+        .unwrap();
     child.input = child.process.stdin.take();
     child.output = Some(ControlReader::new(child.process.stdout.take().unwrap()).unwrap());
     let handshake = Instant::now() + WAIT;
@@ -807,10 +850,9 @@ fn output_backpressure_cannot_prevent_control_eof_from_killing_root() {
         Event::Released { .. }
     ));
     recorded(&marker);
-    std::thread::sleep(Duration::from_millis(200));
+    control_stall.wait_until_stalled(Instant::now() + WAIT).unwrap();
+    let until = Instant::now() + Duration::from_secs(5);
     child.input.take();
-    assert_dead(&root);
-    let until = Instant::now() + WAIT;
     let absent = loop {
         let event = child.output.as_mut().unwrap().next_until(until).unwrap();
         if matches!(event, Event::FamilyAbsent { .. }) {
@@ -825,6 +867,7 @@ fn output_backpressure_cannot_prevent_control_eof_from_killing_root() {
             ..
         }
     ));
+    assert_exited(&root);
     let until = Instant::now() + WAIT;
     loop {
         if let Some(status) = child.process.try_wait().unwrap() {
@@ -838,6 +881,7 @@ fn output_backpressure_cannot_prevent_control_eof_from_killing_root() {
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    control_stall.finish().unwrap();
 }
 
 #[test]
@@ -847,6 +891,7 @@ fn output_backpressure_cannot_prevent_control_eof_from_killing_root() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn missing_kernel_prerequisites_refuse_probe() {
+    let _custody = TestCustody::enter();
     for blocked in [
         libc::SYS_pidfd_open,
         libc::SYS_pidfd_send_signal,
@@ -855,46 +900,7 @@ fn missing_kernel_prerequisites_refuse_probe() {
     ] {
         let mut command = Process::new(env!("CARGO_BIN_EXE_sandbox-command-supervisor"));
         command.arg("--probe").env_clear().envs(coverage_environment());
-        unsafe {
-            command.pre_exec(move || {
-                let mut filter = [
-                    libc::sock_filter {
-                        code: (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
-                        jt: 0,
-                        jf: 0,
-                        k: 0,
-                    },
-                    libc::sock_filter {
-                        code: (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
-                        jt: 0,
-                        jf: 1,
-                        k: blocked as u32,
-                    },
-                    libc::sock_filter {
-                        code: (libc::BPF_RET | libc::BPF_K) as u16,
-                        jt: 0,
-                        jf: 0,
-                        k: libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
-                    },
-                    libc::sock_filter {
-                        code: (libc::BPF_RET | libc::BPF_K) as u16,
-                        jt: 0,
-                        jf: 0,
-                        k: libc::SECCOMP_RET_ALLOW,
-                    },
-                ];
-                let program = libc::sock_fprog {
-                    len: filter.len() as u16,
-                    filter: filter.as_mut_ptr(),
-                };
-                if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0
-                    || libc::prctl(libc::PR_SET_SECCOMP, libc::SECCOMP_MODE_FILTER, &program) < 0
-                {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
+        deny_syscall(&mut command, blocked);
         let result = command.output().expect("run prerequisite refusal control");
         assert_eq!(result.status.code(), Some(78));
         assert!(matches!(
@@ -914,6 +920,7 @@ fn missing_kernel_prerequisites_refuse_probe() {
     reason = "A failed native fixture or contract assertion must terminate the test immediately"
 )]
 fn native_signal_request_retries_do_not_repeat_effects_or_change_signal() {
+    let _custody = TestCustody::enter();
     fn signal(helper: &mut Harness, request_id: u64, signal: i32) -> Event {
         helper.send(Command::Signal {
             execution_id: helper.execution.clone(),
@@ -991,8 +998,8 @@ fn native_signal_request_retries_do_not_repeat_effects_or_change_signal() {
         timeout_ms: None,
         release_timeout_ms: None,
     });
-    let (root, group) = match helper.next() {
-        Event::Ready { root, .. } => (pin(root), -(root.pid as i32)),
+    let root = match helper.next() {
+        Event::Ready { root, .. } => pin(root),
         _ => panic!("signal replay fixture requires a held native root"),
     };
     helper.release();
@@ -1022,7 +1029,7 @@ fn native_signal_request_retries_do_not_repeat_effects_or_change_signal() {
     let forward_effect = wait_count(&second_receipt, before_forward + 1);
     let released = std::fs::write(&release, b"release").is_ok();
     let absence = helper.absent();
-    assert_dead(&root);
+    assert_exited(&root);
     let usr1_effects = count(&first_receipt);
     let usr2_effects = count(&second_receipt);
     let output_preserved = helper.output == b"signal replay stdout\n" && helper.errors == b"signal replay stderr\n";
@@ -1083,22 +1090,12 @@ fn native_signal_request_retries_do_not_repeat_effects_or_change_signal() {
     );
     assert_eq!(
         report.signal_sends,
-        BTreeMap::from([
-            (
-                syscall_notifications::ObservedSignal {
-                    target: group,
-                    signal: libc::SIGUSR1
-                },
-                2
-            ),
-            (
-                syscall_notifications::ObservedSignal {
-                    target: group,
-                    signal: libc::SIGUSR2
-                },
-                1
-            ),
-        ]),
+        BTreeMap::new(),
+        "soft signals retain one pinned target per process"
+    );
+    assert_eq!(
+        report.pidfd_sends,
+        BTreeMap::from([(libc::SIGUSR1, 2), (libc::SIGUSR2, 1)]),
         "identical, stale, colliding and foreign requests must not repeat a kernel signal send"
     );
     assert_eq!(report.continued, 3);
@@ -1157,6 +1154,7 @@ fn workload_environment(mut environment: BTreeMap<String, String>) -> BTreeMap<S
 
 #[test]
 fn legacy_fixture_profiling_preserves_exact_application_output() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir()?;
     let marker = directory.path().join("effect");
     let mut command = Process::new(env!("CARGO_BIN_EXE_supervisor-test-fixture"));
@@ -1183,6 +1181,7 @@ fn legacy_fixture_profiling_preserves_exact_application_output() -> Result<(), B
 #[test]
 fn path_resolution_uses_the_explicit_child_environment_and_working_directory() -> Result<(), Box<dyn std::error::Error>>
 {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir()?;
     let executable = directory.path().join("run");
     std::fs::write(&executable, b"#!/bin/sh\nprintf 'child:%s' \"$TOKEN\"\n")?;
@@ -1244,6 +1243,7 @@ fn path_resolution_uses_the_explicit_child_environment_and_working_directory() -
 #[test]
 fn malformed_frames_and_wrong_phase_commands_leave_the_control_channel_usable() -> Result<(), Box<dyn std::error::Error>>
 {
+    let _custody = TestCustody::enter();
     let mut helper = Harness::start();
     for bytes in [
         b"not-json\n".to_vec(),
@@ -1253,11 +1253,14 @@ fn malformed_frames_and_wrong_phase_commands_leave_the_control_channel_usable() 
         ]
         .concat(),
     ] {
-        helper
-            .input
-            .as_mut()
-            .ok_or_else(|| std::io::Error::other("open control"))?
-            .write_all(&bytes)?;
+        write_control_until(
+            helper
+                .input
+                .as_mut()
+                .ok_or_else(|| std::io::Error::other("open control"))?,
+            &bytes,
+            Instant::now() + WAIT,
+        )?;
         assert!(matches!(
             helper.next(),
             Event::Error {
@@ -1307,6 +1310,7 @@ fn malformed_frames_and_wrong_phase_commands_leave_the_control_channel_usable() 
 
 #[test]
 fn unavailable_working_directory_refuses_launch_and_reaps_the_setup_child() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     let directory = tempfile::tempdir()?;
     let marker = directory.path().join("effect");
     let mut helper = Harness::start();
@@ -1341,6 +1345,7 @@ fn unavailable_working_directory_refuses_launch_and_reaps_the_setup_child() -> R
 
 #[test]
 fn native_probe_and_cli_argument_statuses_match_the_wire_contract() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     let output = Process::new(env!("CARGO_BIN_EXE_sandbox-command-supervisor"))
         .arg("--probe")
         .env_clear()
@@ -1412,6 +1417,7 @@ fn deny_syscall(command: &mut Process, blocked: libc::c_long) {
 #[test]
 fn refused_pipe_fork_and_session_syscalls_preserve_owned_cleanup_and_never_exec()
 -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     for (blocked, expected, minimum_reaped) in [
         (libc::SYS_pipe2, ErrorCode::IoFailure, 0),
         (libc::SYS_clone, ErrorCode::SetupFailed, 0),
@@ -1449,6 +1455,7 @@ fn refused_pipe_fork_and_session_syscalls_preserve_owned_cleanup_and_never_exec(
 
 #[test]
 fn unavailable_nonblocking_io_refuses_startup_before_hello() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
     let mut command = Process::new(env!("CARGO_BIN_EXE_sandbox-command-supervisor"));
     command
         .args(["--execution-id", "contract"])
@@ -1473,6 +1480,8 @@ mod launch_review_tests;
 
 #[test]
 fn continuous_output_cannot_restart_the_control_wait_deadline() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
+    let custody = FamilyCustody::enter();
     let process = Process::new("/bin/sleep").arg("30").spawn()?;
     let (sender, events) = std::sync::mpsc::channel();
     let execution = ExecutionId::new("deadline-contract")?;
@@ -1484,6 +1493,7 @@ fn continuous_output_cannot_restart_the_control_wait_deadline() -> Result<(), Bo
         output: Vec::new(),
         errors: Vec::new(),
         next_signal: 1,
+        custody,
     };
     let producer = std::thread::spawn(move || {
         for _ in 0..10 {
@@ -1536,19 +1546,22 @@ impl ControlReader {
                 .checked_duration_since(Instant::now())
                 .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::TimedOut))?;
             if let Some(end) = self.buffered.iter().position(|byte| *byte == b'\n') {
+                if end + 1 > sandbox_command_supervisor::protocol::MAX_FRAME_BYTES {
+                    return Err(sandbox_command_supervisor::ProtocolError::OversizedFrame.into());
+                }
                 let tail = self.buffered.split_off(end + 1);
                 let mut frame = std::mem::replace(&mut self.buffered, tail);
                 frame.pop();
-                return Ok(sandbox_command_supervisor::protocol::decode_event(&frame)?);
+                return Ok(sandbox_command_supervisor::protocol::decode_event(&frame)?.into_wire());
+            }
+            if self.buffered.len() >= sandbox_command_supervisor::protocol::MAX_FRAME_BYTES {
+                return Err(sandbox_command_supervisor::ProtocolError::OversizedFrame.into());
             }
             let mut bytes = [0; 8192];
             match self.output.read(&mut bytes) {
                 Ok(0) => return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into()),
                 Ok(count) => {
                     self.buffered.extend_from_slice(&bytes[..count]);
-                    if self.buffered.len() > sandbox_command_supervisor::protocol::MAX_FRAME_BYTES {
-                        return Err(sandbox_command_supervisor::ProtocolError::OversizedFrame.into());
-                    }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -1574,25 +1587,25 @@ struct BackpressureChild {
     process: Child,
     input: Option<ChildStdin>,
     output: Option<ControlReader>,
+    custody: FamilyCustody,
 }
 
 impl Drop for BackpressureChild {
     fn drop(&mut self) {
         self.input.take();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline {
-            if self.process.try_wait().ok().flatten().is_some() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let _ = self.process.kill();
-        let _ = self.process.wait();
+        let stopped = stop_helper(&mut self.process, Duration::from_millis(250));
+        let complete = self.custody.settle();
+        assert!(
+            stopped && complete || std::thread::panicking(),
+            "backpressure workload teardown must complete"
+        );
     }
 }
 
 #[test]
 fn partial_control_frame_cannot_block_the_backpressure_handshake() -> Result<(), Box<dyn std::error::Error>> {
+    let _custody = TestCustody::enter();
+    let custody = FamilyCustody::enter();
     let process = Process::new("/bin/sh")
         .args(["-c", "printf '{'; read -r line"])
         .stdin(Stdio::piped())
@@ -1602,6 +1615,7 @@ fn partial_control_frame_cannot_block_the_backpressure_handshake() -> Result<(),
         process,
         input: None,
         output: None,
+        custody,
     };
     child.input = child.process.stdin.take();
     child.output = Some(ControlReader::new(
@@ -1619,4 +1633,79 @@ fn partial_control_frame_cannot_block_the_backpressure_handshake() -> Result<(),
     assert!(matches!(result, Err(error) if error.downcast_ref::<std::io::Error>()
         .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)));
     Ok(())
+}
+
+#[path = "native_contract/custody.rs"]
+mod custody;
+use custody::{FamilyCustody, TestCustody};
+
+#[path = "native_contract/harness_regression_tests.rs"]
+mod harness_regression_tests;
+
+#[path = "native_contract/signal_dispatch_tests.rs"]
+mod signal_dispatch_tests;
+
+fn write_control_until(input: &mut ChildStdin, mut bytes: &[u8], deadline: Instant) -> std::io::Result<()> {
+    let flags = unsafe { libc::fcntl(input.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(input.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    while !bytes.is_empty() {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::TimedOut))?;
+        match input.write(bytes) {
+            Ok(0) => return Err(std::io::Error::from(std::io::ErrorKind::WriteZero)),
+            Ok(count) => bytes = &bytes[count..],
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                let mut poll = libc::pollfd {
+                    fd: input.as_raw_fd(),
+                    events: libc::POLLOUT,
+                    revents: 0,
+                };
+                let result =
+                    unsafe { libc::poll(&mut poll, 1, remaining.as_millis().clamp(1, i32::MAX as u128) as i32) };
+                if result < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if poll.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+                    return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if Instant::now() >= deadline {
+        return Err(std::io::Error::from(std::io::ErrorKind::TimedOut));
+    }
+    Ok(())
+}
+
+fn stop_helper(process: &mut Child, grace: Duration) -> bool {
+    let until = Instant::now() + grace;
+    loop {
+        match process.try_wait() {
+            Ok(Some(_)) => return true,
+            Err(_) => return false,
+            Ok(None) => {}
+        }
+        if Instant::now() >= until {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let _ = process.kill();
+    let until = Instant::now() + Duration::from_secs(3);
+    loop {
+        match process.try_wait() {
+            Ok(Some(_)) => return true,
+            Err(_) => return false,
+            Ok(None) => {}
+        }
+        if Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
 }

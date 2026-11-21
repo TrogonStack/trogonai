@@ -1,4 +1,5 @@
 use super::*;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 
 pub(super) struct Prepared {
@@ -41,7 +42,7 @@ impl Prepared {
             })
             .unwrap_or(current);
         let command = if argv[0].contains('/') {
-            Some(argv[0].clone())
+            Some(std::path::PathBuf::from(&argv[0]))
         } else {
             let path = env
                 .get("PATH")
@@ -62,7 +63,6 @@ impl Prepared {
                     std::fs::metadata(path)
                         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
                 })
-                .map(|path| path.to_string_lossy().into_owned())
         };
         Ok(Self {
             argv: argv
@@ -76,7 +76,7 @@ impl Prepared {
                 .collect::<Result<_, _>>()
                 .map_err(|_| ErrorCode::InvalidCommand)?,
             executable: command
-                .map(CString::new)
+                .map(|path| CString::new(path.as_os_str().as_bytes()))
                 .transpose()
                 .map_err(|_| ErrorCode::InvalidCommand)?,
             cwd: cwd

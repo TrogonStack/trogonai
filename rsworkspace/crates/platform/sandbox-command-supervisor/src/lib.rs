@@ -8,6 +8,8 @@ mod constants;
 mod delivery;
 mod entrypoint;
 mod environment;
+mod event;
+mod event_wire;
 mod execution_id;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -38,6 +40,8 @@ pub use command_timeout::CommandTimeout;
 pub use command_wire::CommandWire;
 pub use delivery::Delivery;
 pub use environment::Environment;
+pub use event::Event;
+pub use event_wire::{ErrorCode, EventWire, Identity, Phase, Stream, SupervisorError};
 pub use execution_id::{ExecutionId, ExecutionIdError};
 pub use platform_support::PlatformSupport;
 pub use protocol_error::ProtocolError;
