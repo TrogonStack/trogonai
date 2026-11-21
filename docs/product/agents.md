@@ -51,10 +51,10 @@ progress:
     status: built
     note: Shared by the gateway and the egress proxy. Records that must be kept fail closed.
   - name: Agent discovery catalog
-    status: partial
+    status: in_progress
     note: The catalog model and HTTP routes exist with an in-memory store. NATS storage is not wired.
   - name: Policy bindings
-    status: partial
+    status: in_progress
     note: Contracts and an evaluator library exist. No service enforces them yet.
   - name: Agent definitions, revisions and proposals
     status: designed
