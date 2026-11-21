@@ -2,8 +2,8 @@
 import { computed } from "vue";
 import { useData } from "vitepress";
 import BrandTile from "./BrandTile.vue";
-import { STATUS_LABELS } from "./connectorLabels";
 import { data as areas } from "./product.data";
+import { PRODUCT_STATUS_LABELS } from "./productStatus";
 
 const { page } = useData();
 
@@ -19,7 +19,7 @@ const area = computed(() => {
     <div>
       <h1>
         {{ area.name }}
-        <span :class="['product-header__status', `is-${area.status}`]">{{ STATUS_LABELS[area.status] }}</span>
+        <span :class="['product-header__status', `is-${area.status}`]">{{ PRODUCT_STATUS_LABELS[area.status] }}</span>
       </h1>
       <p>{{ area.tagline }}</p>
     </div>
@@ -60,6 +60,11 @@ const area = computed(() => {
 .product-header__status.is-preview {
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-brand-1);
+}
+
+.product-header__status.is-in_progress {
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  color: color-mix(in srgb, #f59e0b 70%, var(--vp-c-text-1));
 }
 
 .product-header__status.is-planned {
