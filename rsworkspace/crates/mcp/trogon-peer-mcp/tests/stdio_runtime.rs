@@ -46,6 +46,7 @@ impl StdioPeer {
         command
             .env_clear()
             .kill_on_drop(true)
+            .env("RUST_LOG", "trace")
             .env("NATS_URL", address)
             .env("NATS_CA", broker.server.ca())
             .env(
