@@ -1,4 +1,4 @@
-# Sandbox client foundation
+# Sandbox foundation
 
 `@trogonai/sandbox-ws-client` is the TypeScript client for a compatible sandbox
 WebSocket gateway. It provides Zod request and response schemas, a low-level
@@ -110,6 +110,21 @@ Operator scripts with external infrastructure requirements are not part of
 this standalone client package's local contract test suite.
 
 ## Next runtime boundaries
+
+The Rust foundation includes standalone building blocks that do not start a
+sandbox deployment:
+
+- `sandbox-command-supervisor` owns a Linux command family, including held
+  launch, signals, output and confirmed descendant cleanup. Its caller still
+  supplies container or VM isolation and authorization.
+- `trogon-sandbox-contract` defines validated worker, dispatch and durable
+  operation identifiers, operation kinds and legal operation-state transitions.
+  The contract describes which transitions are allowed; it does not persist
+  operations, perform provider effects or prove their completion.
+
+See the [command supervisor](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/platform/sandbox-command-supervisor/README.md)
+and [operation contract](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/sandbox/trogon-sandbox-contract/README.md)
+package documentation for their public interfaces.
 
 A server-side import must integrate with the repository's existing NATS,
 telemetry, identity and credential boundaries. It must retain exact native
