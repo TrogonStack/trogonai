@@ -65,8 +65,6 @@ async fn concurrent_ensures_both_succeed() {
 
 #[tokio::test]
 async fn refuses_a_stream_that_could_drop_events_and_leaves_it_as_it_found_it() {
-    let server = JetStreamTestServer::start().await;
-    let js = server.jetstream().await;
     type Weaken = fn(&mut Config);
     let cases: [(Weaken, CredentialEventStreamMismatchError); 4] = [
         (
@@ -84,6 +82,8 @@ async fn refuses_a_stream_that_could_drop_events_and_leaves_it_as_it_found_it() 
         ),
     ];
     for (weaken, expected) in cases {
+        let server = JetStreamTestServer::start().await;
+        let js = server.jetstream().await;
         let mut weakened = stream_config();
         weaken(&mut weakened);
         js.create_stream(weakened).await.unwrap();
