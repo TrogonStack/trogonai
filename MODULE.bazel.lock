@@ -327,7 +327,7 @@
         "usagesDigest": "dnMvMkyLB/1kjDqZO50ReUEi0SbRl1IoO08MaAMa6NE=",
         "recordedInputs": [
           "REPO_MAPPING:mise-bazel+,toml.bzl toml.bzl+",
-          "FILE:@@//.config/mise/config.toml fc9bcb2c35b3c71c69b509aa1d665c76a798ceaaebaf887ef9daf4419d67cc3e"
+          "FILE:@@//.config/mise/config.toml 684c1fd775c8036679c217744c79cbf36b694be9b95fce108c7d303986198bd2"
         ],
         "generatedRepoSpecs": {
           "mise_bazel": {
@@ -369,10 +369,10 @@
               "executable": "kubeconform"
             }
           },
-          "mise_ubi_open_telemetry_weaver": {
+          "mise_github_open_telemetry_weaver": {
             "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
             "attributes": {
-              "tool": "ubi:open-telemetry/weaver",
+              "tool": "github:open-telemetry/weaver",
               "version": "0.24.2",
               "executable": "weaver"
             }
@@ -482,7 +482,7 @@
                 "actionlint": "mise_github_rhysd_actionlint",
                 "buf": "mise_buf",
                 "kubeconform": "mise_kubeconform",
-                "weaver": "mise_ubi_open_telemetry_weaver",
+                "weaver": "mise_github_open_telemetry_weaver",
                 "cargo-dylint": "mise_cargo_cargo_dylint",
                 "dylint-link": "mise_cargo_dylint_link",
                 "protoc-gen-buffa": "mise_cargo_protoc_gen_buffa",
