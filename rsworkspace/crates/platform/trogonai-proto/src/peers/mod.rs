@@ -1,3 +1,4 @@
+// Keep payload conversion errors typed at the peer contract boundary.
 mod codec;
 
 pub use crate::r#gen::trogonai::peers::state::v1alpha1 as state_v1alpha1;
