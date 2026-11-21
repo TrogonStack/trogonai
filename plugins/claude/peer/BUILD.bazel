@@ -1,0 +1,7 @@
+exports_files(["hooks/hooks.json"], visibility = ["//visibility:public"])
+
+filegroup(
+    name = "hooks",
+    srcs = ["hooks/hooks.json"],
+    visibility = ["//visibility:public"],
+)
