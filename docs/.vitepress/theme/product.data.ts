@@ -1,15 +1,14 @@
 import * as lucide from "lucide-static";
 import { createContentLoader } from "vitepress";
 import { z } from "zod";
-
-const Status = z.enum(["available", "preview", "planned"]);
+import { ProductStatusSchema, type ProductStatus } from "./productStatus";
 
 const ProductFrontmatter = z
   .object({
     name: z.string().min(1),
     tagline: z.string().min(1),
     order: z.number().int().nonnegative(),
-    status: Status,
+    status: ProductStatusSchema,
     icon: z.string().min(1),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   })
@@ -20,7 +19,7 @@ export type ProductArea = {
   name: string;
   tagline: string;
   order: number;
-  status: z.infer<typeof Status>;
+  status: ProductStatus;
   color: string;
   iconStroke: string;
 };
