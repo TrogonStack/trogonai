@@ -6,15 +6,15 @@
 
 use std::process::Command;
 
-use trogon_std::env::InMemoryEnv;
+use trogon_std::env::{InMemoryEnv, ReadEnv, SystemEnv};
 use trogon_std::fs::MemFs;
-use trogon_telemetry::{ResourceAttribute, ServiceName};
+use trogon_telemetry::{ResourceAttribute, ServiceName, TelemetryProviderShutdownError};
 
 const CHILD_MARKER: &str = "TROGON_TELEMETRY_REPEATED_LIFECYCLE_CHILD";
 
 #[test]
 fn a_repeated_init_is_a_no_op_and_a_second_shutdown_reports_every_provider() {
-    if std::env::var_os(CHILD_MARKER).is_some() {
+    if SystemEnv.var(CHILD_MARKER).is_ok() {
         let env = InMemoryEnv::new();
         env.set("TROGON_LOG_DIR", "/tmp/test-repeated-lifecycle");
         let fs = MemFs::new();
@@ -32,15 +32,13 @@ fn a_repeated_init_is_a_no_op_and_a_second_shutdown_reports_every_provider() {
             trogon_telemetry::shutdown_otel().is_ok(),
             "the first shutdown stops the providers installed by the first init"
         );
-        let message = trogon_telemetry::shutdown_otel()
-            .expect_err("stopped providers cannot be shut down again")
-            .to_string();
-        for provider in ["tracer", "meter", "logger"] {
-            assert!(
-                message.contains(&format!("failed to shutdown {provider} provider")),
-                "the error must name the {provider} provider: {message}"
-            );
-        }
+        let error = trogon_telemetry::shutdown_otel()
+            .expect_err("stopped providers cannot be shut down again");
+        let failed = error.errors();
+        assert_eq!(failed.len(), 3, "every provider must report a failure: {error}");
+        assert!(matches!(failed[0], TelemetryProviderShutdownError::Tracer { .. }), "{error}");
+        assert!(matches!(failed[1], TelemetryProviderShutdownError::Meter { .. }), "{error}");
+        assert!(matches!(failed[2], TelemetryProviderShutdownError::Logger { .. }), "{error}");
         return;
     }
 

@@ -10,7 +10,7 @@ use opentelemetry_otlp::{
     OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
 };
-use trogon_std::env::InMemoryEnv;
+use trogon_std::env::{InMemoryEnv, ReadEnv, SystemEnv};
 use trogon_std::fs::MemFs;
 use trogon_telemetry::{ResourceAttribute, ServiceName};
 
@@ -18,7 +18,7 @@ const CHILD_MARKER: &str = "TROGON_TELEMETRY_INIT_FAILURE_CHILD";
 
 #[test]
 fn logging_starts_without_otel_when_the_exporters_cannot_be_built() {
-    if std::env::var_os(CHILD_MARKER).is_some() {
+    if SystemEnv.var(CHILD_MARKER).is_ok() {
         let env = InMemoryEnv::new();
         env.set("TROGON_LOG_DIR", "/tmp/test-otel-init-failure");
         trogon_telemetry::init_logger(
