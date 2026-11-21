@@ -316,8 +316,8 @@ fn incomplete_settlement_cannot_be_admitted_as_an_authority_event() {
         event: Some(proto::PeerMessageSettled::default().into()),
     };
     assert_eq!(
-        commands::state::evolve(enrolled("recipient", 0), &event),
-        Err(EvolveError::UnsupportedEvent)
+        trogon_peer::commands::state::evolve(enrolled("recipient", 0), &event),
+        Err(EvolveError::MissingField { field: "receipt" })
     );
 }
 
