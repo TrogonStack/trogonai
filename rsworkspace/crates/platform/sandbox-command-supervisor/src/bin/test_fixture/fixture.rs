@@ -3,6 +3,7 @@ mod signal_threads;
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::{Duration, Instant};
 
 static STOP: AtomicBool = AtomicBool::new(false);
@@ -106,12 +107,12 @@ fn clone_without_notification(path: &Path) -> i32 {
 }
 
 fn churn(path: &Path) -> i32 {
-    let attempted = std::sync::Arc::new(AtomicBool::new(false));
+    let (attempted, first_attempt) = sync_channel(1);
     let mut gate = [-1; 2];
     assert_eq!(unsafe { libc::pipe2(gate.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
     let threads: Vec<_> = (0..4)
         .map(|_| {
-            let attempted = std::sync::Arc::clone(&attempted);
+            let attempted = attempted.clone();
             std::thread::spawn(move || {
                 let until = Instant::now() + Duration::from_secs(10);
                 while Instant::now() < until {
@@ -121,11 +122,10 @@ fn churn(path: &Path) -> i32 {
             })
         })
         .collect();
-    let until = Instant::now() + Duration::from_secs(5);
-    while !attempted.load(Ordering::Acquire) {
-        assert!(Instant::now() < until, "churn worker must attempt its first fork");
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    assert!(
+        first_attempt.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "churn worker must attempt its first fork"
+    );
     let keeper = unsafe { libc::fork() };
     assert!(keeper >= 0);
     churn_with_keeper(path, threads, gate, keeper)
@@ -170,7 +170,7 @@ fn churn_with_keeper(path: &Path, threads: Vec<std::thread::JoinHandle<()>>, gat
     0
 }
 
-fn churn_after_fork(child: i32, attempted: &AtomicBool) {
+fn churn_after_fork(child: i32, attempted: &SyncSender<()>) {
     if child == 0 {
         unsafe {
             libc::setsid();
@@ -182,7 +182,7 @@ fn churn_after_fork(child: i32, attempted: &AtomicBool) {
             libc::_exit(0);
         }
     }
-    attempted.store(true, Ordering::Release);
+    let _ = attempted.try_send(());
     if child > 0 {
         let mut status = 0;
         unsafe {
