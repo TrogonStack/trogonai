@@ -24,6 +24,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 use trogon_std::env::ReadEnv;
 use trogon_std::fs::{CreateDirAll, OpenAppendFile};
 
+static LOGGER_INIT: std::sync::Once = std::sync::Once::new();
+
 #[derive(Debug, thiserror::Error)]
 #[error("{}", self.fmt_errors())]
 pub struct TelemetryShutdownError {
@@ -31,6 +33,11 @@ pub struct TelemetryShutdownError {
 }
 
 impl TelemetryShutdownError {
+    /// The providers that failed to shut down, in shutdown order (tracer, meter, logger).
+    pub fn errors(&self) -> &[TelemetryProviderShutdownError] {
+        &self.errors
+    }
+
     fn fmt_errors(&self) -> String {
         let mut out = String::from("failed to shutdown OpenTelemetry providers:\n");
         for error in &self.errors {
@@ -97,75 +104,85 @@ where
     F: CreateDirAll + OpenAppendFile,
     A: IntoIterator<Item = ResourceAttribute>,
 {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // The providers and the subscriber are process-wide. A second call would build exporters
+    // nobody stops and a subscriber that cannot be installed, so only the first call runs, and
+    // concurrent callers wait for it to finish. The first call wins even if OpenTelemetry setup
+    // fails in it: later calls do not retry.
+    if LOGGER_INIT.is_completed() {
+        eprintln!("WARN: logger already initialized");
+        return;
+    }
 
-    let stderr_layer = tracing_subscriber::fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_thread_ids(true)
-        .with_span_events(FmtSpan::CLOSE)
-        .json();
+    LOGGER_INIT.call_once(|| {
+        let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    let (log_file, file_logging) = try_open_log_file(service_name, env, fs);
-    let file_layer = log_file.map(|file| {
-        tracing_subscriber::fmt::layer()
-            .with_writer(file)
+        let stderr_layer = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
             .with_thread_ids(true)
             .with_span_events(FmtSpan::CLOSE)
-            .json()
+            .json();
+
+        let (log_file, file_logging) = try_open_log_file(service_name, env, fs);
+        let file_layer = log_file.map(|file| {
+            tracing_subscriber::fmt::layer()
+                .with_writer(file)
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::CLOSE)
+                .json()
+        });
+
+        match try_init_otel(service_name, resource_attributes, env) {
+            Ok((tracer_provider, meter_provider, logger_provider)) => {
+                opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
+
+                let tracer = tracer_provider.tracer(service_name.as_str().to_owned());
+                let otel_trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+                // `LOGGER_INIT` makes this the only call that reaches here, so the cells are empty;
+                // the assertions catch any other writer that would split global and stored providers.
+                opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+                let stored = trace::TRACER_PROVIDER.set(tracer_provider).is_ok();
+                debug_assert!(stored, "init_logger must be the only writer of TRACER_PROVIDER");
+
+                opentelemetry::global::set_meter_provider(meter_provider.clone());
+                let stored = metric::METER_PROVIDER.set(meter_provider).is_ok();
+                debug_assert!(stored, "init_logger must be the only writer of METER_PROVIDER");
+
+                let otel_logs_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+                let stored = log::LOGGER_PROVIDER.set(logger_provider).is_ok();
+                debug_assert!(stored, "init_logger must be the only writer of LOGGER_PROVIDER");
+
+                if let Err(e) = tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(stderr_layer)
+                    .with(file_layer)
+                    .with(otel_trace_layer)
+                    .with(otel_logs_layer)
+                    .try_init()
+                {
+                    eprintln!("WARN: tracing subscriber already initialized: {e}");
+                }
+
+                tracing::info!("Logger initialized with OpenTelemetry");
+                file_logging.record();
+            }
+            Err(e) => {
+                if let Err(init_error) = tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(stderr_layer)
+                    .with(file_layer)
+                    .try_init()
+                {
+                    eprintln!("WARN: tracing subscriber already initialized: {init_error}");
+                }
+
+                tracing::warn!(
+                    error = %e,
+                    "Logger initialized without OpenTelemetry (init failed)"
+                );
+                file_logging.record();
+            }
+        }
     });
-
-    match try_init_otel(service_name, resource_attributes, env) {
-        Ok((tracer_provider, meter_provider, logger_provider)) => {
-            opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
-            opentelemetry::global::set_tracer_provider(tracer_provider.clone());
-
-            let tracer = tracer_provider.tracer(service_name.as_str().to_owned());
-            let otel_trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-            if trace::TRACER_PROVIDER.set(tracer_provider).is_err() {
-                eprintln!("WARN: tracer provider already initialized");
-            }
-
-            opentelemetry::global::set_meter_provider(meter_provider.clone());
-            if metric::METER_PROVIDER.set(meter_provider).is_err() {
-                eprintln!("WARN: meter provider already initialized");
-            }
-
-            let otel_logs_layer = OpenTelemetryTracingBridge::new(&logger_provider);
-            if log::LOGGER_PROVIDER.set(logger_provider).is_err() {
-                eprintln!("WARN: logger provider already initialized");
-            }
-
-            if let Err(e) = tracing_subscriber::registry()
-                .with(env_filter)
-                .with(stderr_layer)
-                .with(file_layer)
-                .with(otel_trace_layer)
-                .with(otel_logs_layer)
-                .try_init()
-            {
-                eprintln!("WARN: tracing subscriber already initialized: {e}");
-            }
-
-            tracing::info!("Logger initialized with OpenTelemetry");
-            file_logging.record();
-        }
-        Err(e) => {
-            if let Err(init_error) = tracing_subscriber::registry()
-                .with(env_filter)
-                .with(stderr_layer)
-                .with(file_layer)
-                .try_init()
-            {
-                eprintln!("WARN: tracing subscriber already initialized: {init_error}");
-            }
-
-            tracing::warn!(
-                error = %e,
-                "Logger initialized without OpenTelemetry (init failed)"
-            );
-            file_logging.record();
-        }
-    }
 }
 
 fn try_init_otel<A>(
