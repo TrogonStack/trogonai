@@ -1,12 +1,31 @@
 # Sandbox contract
 
 `trogon-sandbox-contract` provides validated worker, dispatch-attempt, and operation
-identifiers, operation kinds, and the operation state transition rules.
+identifiers, artifact metadata, operation kinds, and the operation state transition
+rules.
 
 `WorkerId`, `DispatchAttemptId`, and `OperationId` serialize as JSON strings. Each
 accepts 1 to 128 bytes containing only ASCII letters, digits, `_`, or `-`.
 Construction, parsing, and deserialization enforce the same grammar and return
 typed validation errors.
+
+`Digest` serializes as a JSON string containing `sha256:` followed by exactly 64
+lowercase ASCII hexadecimal characters. Construction, parsing, and deserialization
+enforce this grammar. `DigestError` distinguishes a missing prefix from an invalid
+hash. Validation checks the identifier's form; it does not hash or verify artifact
+content.
+
+`ArtifactType` preserves the JSON names and media types below. These describe
+artifact metadata; they do not establish provider or runtime support.
+
+| JSON name | Media type |
+| --- | --- |
+| `sandbox_rootfs_v1` | `application/vnd.trogon.sandbox.rootfs.v1+tar` |
+| `hyperlight_snapshot_v1` | `application/vnd.trogon.hyperlight.snapshot.v1` |
+| `firecracker_snapshot_v1` | `application/vnd.trogon.firecracker.snapshot.v1` |
+| `kubevirt_disk_v1` | `application/vnd.trogon.kubevirt.disk.v1+qcow2` |
+| `sbom_v1` | `application/vnd.trogon.sbom.v1` |
+| `scan_report_v1` | `application/vnd.trogon.scan-report.v1` |
 
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
