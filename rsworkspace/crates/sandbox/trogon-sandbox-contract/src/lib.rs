@@ -27,6 +27,7 @@ mod idle_policy;
 mod idle_policy_error;
 mod idle_stage;
 mod image_pattern;
+mod image_reference_parts;
 mod ingress_capability;
 mod isolation_capability;
 mod lease_id;

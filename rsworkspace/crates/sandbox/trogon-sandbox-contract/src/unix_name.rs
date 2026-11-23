@@ -1,7 +1,5 @@
 use crate::UnixNameError;
-
-/// Longest Unix user or group name the wire accepts, in bytes.
-pub(crate) const MAX_UNIX_NAME_LEN: usize = 32;
+use crate::constants::MAX_UNIX_NAME_LEN;
 
 pub(crate) fn validate_unix_name(name: &str) -> Result<(), UnixNameError> {
     if name.is_empty() || name.len() > MAX_UNIX_NAME_LEN {

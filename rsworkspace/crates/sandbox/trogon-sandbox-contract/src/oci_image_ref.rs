@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::Digest;
-use crate::image_pattern::{split_digest, split_registry, split_tag};
+use crate::image_reference_parts::{split_digest, split_registry, split_tag};
 
 /// An OCI image reference split into registry, repository, optional tag, and optional digest.
 ///
