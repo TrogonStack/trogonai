@@ -62,8 +62,10 @@ fn enums_preserve_their_wire_spellings_and_reject_unknown_values() -> Result<(),
 #[test]
 fn capability_values_preserve_defaults_and_constants() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(EgressCapability::NONE, EgressCapability::default());
-    assert_eq!(EgressCapability::DENY_ONLY.deny_all, true);
-    assert_eq!(EgressCapability::PROXIED.host_allowlist, true);
+    const {
+        assert!(EgressCapability::DENY_ONLY.deny_all);
+        assert!(EgressCapability::PROXIED.host_allowlist);
+    }
     assert_eq!(ResourceLimitMechanism::default(), ResourceLimitMechanism::None);
     let json = serde_json::to_string(&EgressCapability::PROXIED)?;
     assert_eq!(
