@@ -48,7 +48,9 @@ fn unsupported_provider_kinds_and_json_shapes_are_rejected() {
         ("[]", Syntax),
         ("{}", Syntax),
     ] {
-        let error = serde_json::from_str::<ProviderKind>(json).expect_err(json);
-        assert_eq!(error.classify(), category, "{json}");
+        let actual = serde_json::from_str::<ProviderKind>(json)
+            .map(|_| None)
+            .unwrap_or_else(|error| Some(error.classify()));
+        assert_eq!(actual, Some(category), "{json}");
     }
 }
