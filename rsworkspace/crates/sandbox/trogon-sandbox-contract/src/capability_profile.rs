@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ArtifactType, DormancyCapability, EgressCapability, EgressEnforcementLevel, IngressCapability, IsolationTier,
-    PlacementCapability, ProviderCapabilityProfile, ProviderKind, ResourceCapability, ResourceLimitMechanism,
-    VolumeMode,
+    ArtifactType, CapabilitySupport, DormancyCapability, EgressCapability, EgressEnforcementLevel, IngressCapability,
+    IsolationTier, PlacementCapability, ProviderCapabilityProfile, ProviderKind, ResourceCapability,
+    ResourceLimitMechanism, VolumeMode,
 };
 
 /// Tenant-facing, flattened view of a [`ProviderCapabilityProfile`].
@@ -16,72 +16,72 @@ pub struct CapabilityProfile {
     pub default_isolation_tier: IsolationTier,
     pub supported_isolation_tiers: Vec<IsolationTier>,
     pub egress_enforcement: EgressEnforcementLevel,
-    pub can_snapshot: bool,
-    pub can_checkpoint_running: bool,
-    pub can_restore: bool,
+    pub can_snapshot: CapabilitySupport,
+    pub can_checkpoint_running: CapabilitySupport,
+    pub can_restore: CapabilitySupport,
     pub supported_artifact_types: Vec<ArtifactType>,
-    pub supports_s3_volumes: bool,
-    pub supports_fuse_mounts: bool,
+    pub supports_s3_volumes: CapabilitySupport,
+    pub supports_fuse_mounts: CapabilitySupport,
     #[serde(default)]
-    pub supports_native_snapshots: bool,
+    pub supports_native_snapshots: CapabilitySupport,
     #[serde(default)]
-    pub supports_interactive_stdin: bool,
+    pub supports_interactive_stdin: CapabilitySupport,
     #[serde(default)]
-    pub supports_named_processes: bool,
+    pub supports_named_processes: CapabilitySupport,
     #[serde(default)]
-    pub supports_process_readiness: bool,
+    pub supports_process_readiness: CapabilitySupport,
     #[serde(default)]
-    pub supports_graceful_stop: bool,
+    pub supports_graceful_stop: CapabilitySupport,
     #[serde(default)]
-    pub supports_command_restart: bool,
+    pub supports_command_restart: CapabilitySupport,
     #[serde(default)]
-    pub supports_command_cancellation: bool,
+    pub supports_command_cancellation: CapabilitySupport,
     #[serde(default)]
-    pub supports_command_launch_cancellation: bool,
-    pub supports_port_preview: bool,
+    pub supports_command_launch_cancellation: CapabilitySupport,
+    pub supports_port_preview: CapabilitySupport,
     #[serde(default)]
-    pub supports_expose_after_create: bool,
+    pub supports_expose_after_create: CapabilitySupport,
     #[serde(default)]
-    pub supports_evidence_streaming: bool,
+    pub supports_evidence_streaming: CapabilitySupport,
     #[serde(default)]
-    pub supports_domain_allowlist: bool,
+    pub supports_domain_allowlist: CapabilitySupport,
     #[serde(default)]
-    pub supports_tls_intercept: bool,
+    pub supports_tls_intercept: CapabilitySupport,
     #[serde(default)]
-    pub supports_secret_substitution: bool,
+    pub supports_secret_substitution: CapabilitySupport,
     #[serde(default)]
-    pub supports_secret_bindings: bool,
+    pub supports_secret_bindings: CapabilitySupport,
     #[serde(default)]
-    pub supports_masked_files: bool,
+    pub supports_masked_files: CapabilitySupport,
     #[serde(default)]
-    pub supports_fs_policy: bool,
+    pub supports_fs_policy: CapabilitySupport,
     #[serde(default)]
-    pub supports_file_ops: bool,
+    pub supports_file_ops: CapabilitySupport,
     #[serde(default)]
-    pub supports_file_search: bool,
+    pub supports_file_search: CapabilitySupport,
     #[serde(default)]
-    pub supports_file_archive: bool,
+    pub supports_file_archive: CapabilitySupport,
     #[serde(default)]
-    pub supports_output_redaction: bool,
+    pub supports_output_redaction: CapabilitySupport,
     #[serde(default)]
-    pub supports_terminal: bool,
+    pub supports_terminal: CapabilitySupport,
     #[serde(default)]
     pub resource_limits: ResourceLimitMechanism,
     #[serde(default)]
-    pub supports_change_tracking: bool,
+    pub supports_change_tracking: CapabilitySupport,
     #[serde(default)]
-    pub supports_file_watch: bool,
+    pub supports_file_watch: CapabilitySupport,
     #[serde(default)]
-    pub supports_dir_transfer: bool,
-    pub supports_browser: bool,
+    pub supports_dir_transfer: CapabilitySupport,
+    pub supports_browser: CapabilitySupport,
     pub supported_volume_modes: Vec<VolumeMode>,
-    pub supports_warm_pool: bool,
+    pub supports_warm_pool: CapabilitySupport,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_warm_pool_size: Option<u32>,
-    pub supports_named_tags: bool,
-    pub supports_prewarm_per_tenant: bool,
+    pub supports_named_tags: CapabilitySupport,
+    pub supports_prewarm_per_tenant: CapabilitySupport,
     #[serde(default)]
-    pub supports_pause_resume: bool,
+    pub supports_pause_resume: CapabilitySupport,
     #[serde(default)]
     pub dormancy: DormancyCapability,
     pub cold_start_p50_ms: u32,
@@ -93,19 +93,19 @@ pub struct CapabilityProfile {
     #[serde(default)]
     pub egress: EgressCapability,
     #[serde(default)]
-    pub supports_hardening_overrides: bool,
+    pub supports_hardening_overrides: CapabilitySupport,
     #[serde(default)]
     pub placement: PlacementCapability,
     #[serde(default)]
     pub ingress: IngressCapability,
     #[serde(default)]
-    pub supports_persistent_runtime: bool,
+    pub supports_persistent_runtime: CapabilitySupport,
     #[serde(default)]
-    pub supports_network_policy_update: bool,
+    pub supports_network_policy_update: CapabilitySupport,
     #[serde(default)]
-    pub supports_sandbox_groups: bool,
+    pub supports_sandbox_groups: CapabilitySupport,
     #[serde(default)]
-    pub supports_native_auto_stop: bool,
+    pub supports_native_auto_stop: CapabilitySupport,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_lease_lifetime_seconds: Option<u32>,
 }
@@ -135,8 +135,10 @@ impl From<&ProviderCapabilityProfile> for CapabilityProfile {
             supports_graceful_stop: isolation.supports_graceful_stop,
             supports_command_restart: isolation.supports_command_restart,
             supports_command_cancellation: isolation.supports_command_cancellation,
-            supports_command_launch_cancellation: isolation.supports_command_cancellation
-                && isolation.supports_command_launch_cancellation,
+            supports_command_launch_cancellation: CapabilitySupport::from(
+                isolation.supports_command_cancellation.is_supported()
+                    && isolation.supports_command_launch_cancellation.is_supported(),
+            ),
             supports_port_preview: isolation.supports_port_preview,
             supports_expose_after_create: isolation.supports_expose_after_create,
             supports_evidence_streaming: isolation.supports_evidence_streaming,

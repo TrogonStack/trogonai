@@ -35,37 +35,40 @@ impl ProviderCapabilityProfile {
         SdkFeature::ALL
             .into_iter()
             .filter(|feature| match feature {
-                SdkFeature::PauseResume => lifecycle.supports_pause_resume,
-                SdkFeature::WriteStdin => isolation.supports_interactive_stdin,
-                SdkFeature::RestartCommand => isolation.supports_command_restart,
-                SdkFeature::CommandCancellation => isolation.supports_command_cancellation,
+                SdkFeature::PauseResume => lifecycle.supports_pause_resume.is_supported(),
+                SdkFeature::WriteStdin => isolation.supports_interactive_stdin.is_supported(),
+                SdkFeature::RestartCommand => isolation.supports_command_restart.is_supported(),
+                SdkFeature::CommandCancellation => isolation.supports_command_cancellation.is_supported(),
                 SdkFeature::CommandLaunchCancellation => {
-                    isolation.supports_command_cancellation && isolation.supports_command_launch_cancellation
+                    isolation.supports_command_cancellation.is_supported()
+                        && isolation.supports_command_launch_cancellation.is_supported()
                 }
-                SdkFeature::Users => isolation.supports_sandbox_users,
+                SdkFeature::Users => isolation.supports_sandbox_users.is_supported(),
                 SdkFeature::Drives => !self.volume.supported_modes.is_empty(),
-                SdkFeature::Snapshots => snapshot.can_snapshot,
-                SdkFeature::Fork => snapshot.can_checkpoint_running && snapshot.can_restore,
-                SdkFeature::UpdateNetworkPolicy => isolation.supports_network_policy_update,
-                SdkFeature::SandboxDomain | SdkFeature::PortPreview => isolation.supports_port_preview,
-                SdkFeature::ExposeAfterCreate => isolation.supports_expose_after_create,
-                SdkFeature::EvidenceStreaming => isolation.supports_evidence_streaming,
-                SdkFeature::Groups => isolation.supports_sandbox_groups,
-                SdkFeature::ChangeTracking => isolation.supports_change_tracking,
-                SdkFeature::FileWatch => isolation.supports_file_watch,
-                SdkFeature::DirTransfer => isolation.supports_dir_transfer,
-                SdkFeature::FileOps => isolation.supports_file_ops,
-                SdkFeature::FileSearch => isolation.supports_file_search,
-                SdkFeature::FileArchive => isolation.supports_file_archive,
-                SdkFeature::Terminal => isolation.supports_terminal,
-                SdkFeature::NamedProcesses => isolation.supports_named_processes,
-                SdkFeature::GracefulStop => isolation.supports_graceful_stop,
-                SdkFeature::PersistentRuntime => isolation.supports_persistent_runtime,
-                SdkFeature::Browser => isolation.supports_browser,
-                SdkFeature::OutputStreaming => isolation.supports_output_streaming,
-                SdkFeature::UsageGauges => self.resources.reports_usage_gauges,
-                SdkFeature::NativeAutoStop => lifecycle.supports_native_auto_stop,
-                SdkFeature::NativePassthrough => self.placement.supports_native_passthrough,
+                SdkFeature::Snapshots => snapshot.can_snapshot.is_supported(),
+                SdkFeature::Fork => {
+                    snapshot.can_checkpoint_running.is_supported() && snapshot.can_restore.is_supported()
+                }
+                SdkFeature::UpdateNetworkPolicy => isolation.supports_network_policy_update.is_supported(),
+                SdkFeature::SandboxDomain | SdkFeature::PortPreview => isolation.supports_port_preview.is_supported(),
+                SdkFeature::ExposeAfterCreate => isolation.supports_expose_after_create.is_supported(),
+                SdkFeature::EvidenceStreaming => isolation.supports_evidence_streaming.is_supported(),
+                SdkFeature::Groups => isolation.supports_sandbox_groups.is_supported(),
+                SdkFeature::ChangeTracking => isolation.supports_change_tracking.is_supported(),
+                SdkFeature::FileWatch => isolation.supports_file_watch.is_supported(),
+                SdkFeature::DirTransfer => isolation.supports_dir_transfer.is_supported(),
+                SdkFeature::FileOps => isolation.supports_file_ops.is_supported(),
+                SdkFeature::FileSearch => isolation.supports_file_search.is_supported(),
+                SdkFeature::FileArchive => isolation.supports_file_archive.is_supported(),
+                SdkFeature::Terminal => isolation.supports_terminal.is_supported(),
+                SdkFeature::NamedProcesses => isolation.supports_named_processes.is_supported(),
+                SdkFeature::GracefulStop => isolation.supports_graceful_stop.is_supported(),
+                SdkFeature::PersistentRuntime => isolation.supports_persistent_runtime.is_supported(),
+                SdkFeature::Browser => isolation.supports_browser.is_supported(),
+                SdkFeature::OutputStreaming => isolation.supports_output_streaming.is_supported(),
+                SdkFeature::UsageGauges => self.resources.reports_usage_gauges.is_supported(),
+                SdkFeature::NativeAutoStop => lifecycle.supports_native_auto_stop.is_supported(),
+                SdkFeature::NativePassthrough => self.placement.supports_native_passthrough.is_supported(),
             })
             .collect()
     }

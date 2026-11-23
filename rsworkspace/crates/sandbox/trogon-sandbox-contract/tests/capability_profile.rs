@@ -3,11 +3,12 @@ use std::collections::HashSet;
 use serde_json::error::Category::Data;
 use serde_json::json;
 use trogon_sandbox_contract::{
-    ArtifactType, CapabilityProfile, Digest, DigestError, DormancyCapability, EgressCapability, EgressEnforcementLevel,
-    EnvDigest, IngressCapability, IsolationCapability, IsolationTier, LifecycleCapability, ListCapabilitiesRequest,
-    ListCapabilitiesResponse, PerformanceProfile, PlacementCapability, ProviderCapabilityProfile, ProviderKind,
-    ResourceCapability, ResourceLimitMechanism, ResourceRange, ResourceRangeError, SdkFeature, SnapshotCapability,
-    SuspendLevel, SuspendRequestLevel, VolumeCapability, VolumeMode, WorkerCapabilities, WorkerCapabilitiesError,
+    ArtifactType, CapabilityProfile, CapabilitySupport, Digest, DigestError, DormancyCapability, EgressCapability,
+    EgressEnforcementLevel, EnvDigest, IngressCapability, IsolationCapability, IsolationTier, LifecycleCapability,
+    ListCapabilitiesRequest, ListCapabilitiesResponse, PerformanceProfile, PlacementCapability,
+    ProviderCapabilityProfile, ProviderKind, ResourceCapability, ResourceLimitMechanism, ResourceRange,
+    ResourceRangeError, SdkFeature, SnapshotCapability, SuspendLevel, SuspendRequestLevel, VolumeCapability,
+    VolumeMode, WorkerCapabilities, WorkerCapabilitiesError,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -19,40 +20,40 @@ fn isolation() -> IsolationCapability {
         default_tier: IsolationTier::Container,
         supported_tiers: vec![IsolationTier::Container, IsolationTier::MicroVm],
         egress_enforcement: EgressEnforcementLevel::Mandatory,
-        supports_privileged: false,
-        supports_sandbox_users: false,
-        supports_interactive_stdin: false,
-        supports_named_processes: false,
-        supports_process_readiness: false,
-        supports_graceful_stop: false,
-        supports_command_restart: false,
-        supports_command_cancellation: false,
-        supports_command_launch_cancellation: false,
-        supports_port_preview: false,
-        supports_expose_after_create: false,
-        supports_evidence_streaming: false,
-        supports_output_streaming: false,
-        supports_domain_allowlist: true,
-        supports_tls_intercept: true,
-        supports_secret_substitution: true,
-        supports_secret_bindings: true,
-        supports_masked_files: true,
-        supports_fs_policy: true,
-        supports_file_ops: false,
-        supports_file_search: false,
-        supports_file_archive: false,
-        supports_output_redaction: true,
-        supports_terminal: false,
+        supports_privileged: CapabilitySupport::Unsupported,
+        supports_sandbox_users: CapabilitySupport::Unsupported,
+        supports_interactive_stdin: CapabilitySupport::Unsupported,
+        supports_named_processes: CapabilitySupport::Unsupported,
+        supports_process_readiness: CapabilitySupport::Unsupported,
+        supports_graceful_stop: CapabilitySupport::Unsupported,
+        supports_command_restart: CapabilitySupport::Unsupported,
+        supports_command_cancellation: CapabilitySupport::Unsupported,
+        supports_command_launch_cancellation: CapabilitySupport::Unsupported,
+        supports_port_preview: CapabilitySupport::Unsupported,
+        supports_expose_after_create: CapabilitySupport::Unsupported,
+        supports_evidence_streaming: CapabilitySupport::Unsupported,
+        supports_output_streaming: CapabilitySupport::Unsupported,
+        supports_domain_allowlist: CapabilitySupport::Supported,
+        supports_tls_intercept: CapabilitySupport::Supported,
+        supports_secret_substitution: CapabilitySupport::Supported,
+        supports_secret_bindings: CapabilitySupport::Supported,
+        supports_masked_files: CapabilitySupport::Supported,
+        supports_fs_policy: CapabilitySupport::Supported,
+        supports_file_ops: CapabilitySupport::Unsupported,
+        supports_file_search: CapabilitySupport::Unsupported,
+        supports_file_archive: CapabilitySupport::Unsupported,
+        supports_output_redaction: CapabilitySupport::Supported,
+        supports_terminal: CapabilitySupport::Unsupported,
         resource_limits: ResourceLimitMechanism::CgroupV2,
         egress: EgressCapability::PROXIED,
-        supports_hardening_overrides: true,
-        supports_change_tracking: false,
-        supports_file_watch: false,
-        supports_persistent_runtime: false,
-        supports_dir_transfer: false,
-        supports_browser: false,
-        supports_network_policy_update: false,
-        supports_sandbox_groups: false,
+        supports_hardening_overrides: CapabilitySupport::Supported,
+        supports_change_tracking: CapabilitySupport::Unsupported,
+        supports_file_watch: CapabilitySupport::Unsupported,
+        supports_persistent_runtime: CapabilitySupport::Unsupported,
+        supports_dir_transfer: CapabilitySupport::Unsupported,
+        supports_browser: CapabilitySupport::Unsupported,
+        supports_network_policy_update: CapabilitySupport::Unsupported,
+        supports_sandbox_groups: CapabilitySupport::Unsupported,
     }
 }
 
@@ -60,28 +61,28 @@ fn profile() -> Result<ProviderCapabilityProfile, Box<dyn std::error::Error>> {
     Ok(ProviderCapabilityProfile {
         provider: ProviderKind::Mock,
         snapshot: SnapshotCapability {
-            can_snapshot: false,
-            can_checkpoint_running: false,
-            can_restore: false,
+            can_snapshot: CapabilitySupport::Unsupported,
+            can_checkpoint_running: CapabilitySupport::Unsupported,
+            can_restore: CapabilitySupport::Unsupported,
             supported_artifact_types: vec![ArtifactType::SandboxRootfsV1],
-            layered_deltas: false,
+            layered_deltas: CapabilitySupport::Unsupported,
             max_snapshot_size_bytes: None,
-            supports_native_snapshots: true,
-            supports_in_place_rollback: false,
+            supports_native_snapshots: CapabilitySupport::Supported,
+            supports_in_place_rollback: CapabilitySupport::Unsupported,
         },
         volume: VolumeCapability {
             supported_modes: Vec::new(),
-            supports_s3_backend: false,
-            supports_fuse_mounts: false,
+            supports_s3_backend: CapabilitySupport::Unsupported,
+            supports_fuse_mounts: CapabilitySupport::Unsupported,
         },
         isolation: isolation(),
         lifecycle: LifecycleCapability {
-            supports_warm_pool: true,
+            supports_warm_pool: CapabilitySupport::Supported,
             max_warm_pool_size: Some(8),
-            supports_named_tags: true,
-            supports_prewarm_per_tenant: false,
-            supports_pause_resume: false,
-            supports_native_auto_stop: false,
+            supports_named_tags: CapabilitySupport::Supported,
+            supports_prewarm_per_tenant: CapabilitySupport::Unsupported,
+            supports_pause_resume: CapabilitySupport::Unsupported,
+            supports_native_auto_stop: CapabilitySupport::Unsupported,
             max_lease_lifetime_seconds: Some(3_600),
             dormancy: DormancyCapability::FREEZE,
         },
@@ -93,11 +94,11 @@ fn profile() -> Result<ProviderCapabilityProfile, Box<dyn std::error::Error>> {
         resources: ResourceCapability {
             vcpu_millis: Some(ResourceRange::new(100, 64_000)?),
             disk_mib: None,
-            reports_usage_gauges: false,
+            reports_usage_gauges: CapabilitySupport::Unsupported,
         },
         placement: PlacementCapability {
             regions: vec!["region-a".to_owned()],
-            supports_native_passthrough: false,
+            supports_native_passthrough: CapabilitySupport::Unsupported,
             env_digest: Some(EnvDigest::new(ENV_DIGEST)?),
         },
         ingress: IngressCapability {
@@ -108,40 +109,40 @@ fn profile() -> Result<ProviderCapabilityProfile, Box<dyn std::error::Error>> {
 
 fn fully_capable() -> Result<ProviderCapabilityProfile, Box<dyn std::error::Error>> {
     let mut p = profile()?;
-    p.lifecycle.supports_pause_resume = true;
-    p.lifecycle.supports_native_auto_stop = true;
-    p.isolation.supports_privileged = true;
-    p.isolation.supports_sandbox_users = true;
-    p.isolation.supports_interactive_stdin = true;
-    p.isolation.supports_named_processes = true;
-    p.isolation.supports_process_readiness = true;
-    p.isolation.supports_graceful_stop = true;
-    p.isolation.supports_command_restart = true;
-    p.isolation.supports_command_cancellation = true;
-    p.isolation.supports_command_launch_cancellation = true;
-    p.isolation.supports_port_preview = true;
-    p.isolation.supports_expose_after_create = true;
-    p.isolation.supports_evidence_streaming = true;
-    p.isolation.supports_output_streaming = true;
-    p.isolation.supports_file_ops = true;
-    p.isolation.supports_file_search = true;
-    p.isolation.supports_file_archive = true;
-    p.isolation.supports_terminal = true;
-    p.isolation.supports_change_tracking = true;
-    p.isolation.supports_file_watch = true;
-    p.isolation.supports_persistent_runtime = true;
-    p.isolation.supports_dir_transfer = true;
-    p.isolation.supports_browser = true;
-    p.isolation.supports_network_policy_update = true;
-    p.isolation.supports_sandbox_groups = true;
+    p.lifecycle.supports_pause_resume = CapabilitySupport::Supported;
+    p.lifecycle.supports_native_auto_stop = CapabilitySupport::Supported;
+    p.isolation.supports_privileged = CapabilitySupport::Supported;
+    p.isolation.supports_sandbox_users = CapabilitySupport::Supported;
+    p.isolation.supports_interactive_stdin = CapabilitySupport::Supported;
+    p.isolation.supports_named_processes = CapabilitySupport::Supported;
+    p.isolation.supports_process_readiness = CapabilitySupport::Supported;
+    p.isolation.supports_graceful_stop = CapabilitySupport::Supported;
+    p.isolation.supports_command_restart = CapabilitySupport::Supported;
+    p.isolation.supports_command_cancellation = CapabilitySupport::Supported;
+    p.isolation.supports_command_launch_cancellation = CapabilitySupport::Supported;
+    p.isolation.supports_port_preview = CapabilitySupport::Supported;
+    p.isolation.supports_expose_after_create = CapabilitySupport::Supported;
+    p.isolation.supports_evidence_streaming = CapabilitySupport::Supported;
+    p.isolation.supports_output_streaming = CapabilitySupport::Supported;
+    p.isolation.supports_file_ops = CapabilitySupport::Supported;
+    p.isolation.supports_file_search = CapabilitySupport::Supported;
+    p.isolation.supports_file_archive = CapabilitySupport::Supported;
+    p.isolation.supports_terminal = CapabilitySupport::Supported;
+    p.isolation.supports_change_tracking = CapabilitySupport::Supported;
+    p.isolation.supports_file_watch = CapabilitySupport::Supported;
+    p.isolation.supports_persistent_runtime = CapabilitySupport::Supported;
+    p.isolation.supports_dir_transfer = CapabilitySupport::Supported;
+    p.isolation.supports_browser = CapabilitySupport::Supported;
+    p.isolation.supports_network_policy_update = CapabilitySupport::Supported;
+    p.isolation.supports_sandbox_groups = CapabilitySupport::Supported;
     p.volume.supported_modes = vec![VolumeMode::ReadWrite];
-    p.volume.supports_s3_backend = true;
-    p.volume.supports_fuse_mounts = true;
-    p.snapshot.can_snapshot = true;
-    p.snapshot.can_checkpoint_running = true;
-    p.snapshot.can_restore = true;
-    p.resources.reports_usage_gauges = true;
-    p.placement.supports_native_passthrough = true;
+    p.volume.supports_s3_backend = CapabilitySupport::Supported;
+    p.volume.supports_fuse_mounts = CapabilitySupport::Supported;
+    p.snapshot.can_snapshot = CapabilitySupport::Supported;
+    p.snapshot.can_checkpoint_running = CapabilitySupport::Supported;
+    p.snapshot.can_restore = CapabilitySupport::Supported;
+    p.resources.reports_usage_gauges = CapabilitySupport::Supported;
+    p.placement.supports_native_passthrough = CapabilitySupport::Supported;
     Ok(p)
 }
 
@@ -191,9 +192,9 @@ fn isolation_flags_default_to_unsupported_when_absent() -> TestResult {
     assert_eq!(parsed.default_tier, IsolationTier::MicroVm);
     assert_eq!(parsed.egress, EgressCapability::NONE);
     assert_eq!(parsed.resource_limits, ResourceLimitMechanism::None);
-    assert!(!parsed.supports_privileged);
-    assert!(!parsed.supports_terminal);
-    assert!(!parsed.supports_sandbox_groups);
+    assert_eq!(parsed.supports_privileged, CapabilitySupport::Unsupported);
+    assert_eq!(parsed.supports_terminal, CapabilitySupport::Unsupported);
+    assert_eq!(parsed.supports_sandbox_groups, CapabilitySupport::Unsupported);
     for missing in ["default_tier", "supported_tiers", "egress_enforcement"] {
         let mut value = serde_json::to_value(isolation())?;
         let object = value.as_object_mut().ok_or("isolation is not an object")?;
@@ -214,17 +215,17 @@ fn sdk_features_list_each_backed_feature_once_in_canonical_order() -> TestResult
     assert_eq!(profile()?.sdk_features(), Vec::<SdkFeature>::new());
 
     let mut launch_without_cancel = profile()?;
-    launch_without_cancel.isolation.supports_command_launch_cancellation = true;
+    launch_without_cancel.isolation.supports_command_launch_cancellation = CapabilitySupport::Supported;
     assert_eq!(launch_without_cancel.sdk_features(), Vec::<SdkFeature>::new());
 
     let mut restore_only = profile()?;
-    restore_only.snapshot.can_restore = true;
+    restore_only.snapshot.can_restore = CapabilitySupport::Supported;
     assert_eq!(restore_only.sdk_features(), Vec::<SdkFeature>::new());
-    restore_only.snapshot.can_checkpoint_running = true;
+    restore_only.snapshot.can_checkpoint_running = CapabilitySupport::Supported;
     assert_eq!(restore_only.sdk_features(), vec![SdkFeature::Fork]);
 
     let mut preview = profile()?;
-    preview.isolation.supports_port_preview = true;
+    preview.isolation.supports_port_preview = CapabilitySupport::Supported;
     assert_eq!(
         preview.sdk_features(),
         vec![SdkFeature::SandboxDomain, SdkFeature::PortPreview]
@@ -285,10 +286,21 @@ fn tenant_profile_flattens_the_provider_profile() -> TestResult {
     assert_eq!(summary.default_isolation_tier, IsolationTier::Container);
     assert_eq!(summary.supported_isolation_tiers, source.isolation.supported_tiers);
     assert_eq!(summary.egress_enforcement, EgressEnforcementLevel::Mandatory);
-    assert!(summary.can_snapshot && summary.can_checkpoint_running && summary.can_restore);
+    assert!(
+        summary.can_snapshot.is_supported()
+            && summary.can_checkpoint_running.is_supported()
+            && summary.can_restore.is_supported()
+    );
     assert_eq!(summary.supported_artifact_types, vec![ArtifactType::SandboxRootfsV1]);
-    assert!(summary.supports_s3_volumes && summary.supports_fuse_mounts && summary.supports_native_snapshots);
-    assert!(summary.supports_command_launch_cancellation);
+    assert!(
+        summary.supports_s3_volumes.is_supported()
+            && summary.supports_fuse_mounts.is_supported()
+            && summary.supports_native_snapshots.is_supported()
+    );
+    assert_eq!(
+        summary.supports_command_launch_cancellation,
+        CapabilitySupport::Supported
+    );
     assert_eq!(summary.resource_limits, ResourceLimitMechanism::CgroupV2);
     assert_eq!(summary.supported_volume_modes, vec![VolumeMode::ReadWrite]);
     assert_eq!(summary.max_warm_pool_size, Some(8));
@@ -313,8 +325,11 @@ fn tenant_profile_flattens_the_provider_profile() -> TestResult {
     );
 
     let mut launch_without_cancel = profile()?;
-    launch_without_cancel.isolation.supports_command_launch_cancellation = true;
-    assert!(!CapabilityProfile::from(&launch_without_cancel).supports_command_launch_cancellation);
+    launch_without_cancel.isolation.supports_command_launch_cancellation = CapabilitySupport::Supported;
+    assert_eq!(
+        CapabilityProfile::from(&launch_without_cancel).supports_command_launch_cancellation,
+        CapabilitySupport::Unsupported
+    );
     Ok(())
 }
 
@@ -367,8 +382,8 @@ fn worker_capabilities_derive_from_the_profile_and_serialize_as_bits() -> TestRe
     }
 
     let mut partial = profile()?;
-    partial.snapshot.can_restore = true;
-    partial.isolation.supports_named_processes = true;
+    partial.snapshot.can_restore = CapabilitySupport::Supported;
+    partial.isolation.supports_named_processes = CapabilitySupport::Supported;
     let mut expected = WorkerCapabilities::SUPPORTS_RESTORE;
     expected |= WorkerCapabilities::SUPPORTS_NAMED_PROCESSES;
     assert_eq!(WorkerCapabilities::from(&partial), expected);
@@ -724,7 +739,7 @@ fn each_profile_flag_backs_exactly_its_own_feature_bit_and_tenant_field() -> Tes
     }
 
     let mut passthrough = baseline.clone();
-    passthrough.placement.supports_native_passthrough = true;
+    passthrough.placement.supports_native_passthrough = CapabilitySupport::Supported;
     assert_eq!(passthrough.sdk_features(), [SdkFeature::NativePassthrough]);
 
     let mut drives = baseline.clone();
@@ -732,19 +747,22 @@ fn each_profile_flag_backs_exactly_its_own_feature_bit_and_tenant_field() -> Tes
     assert_eq!(drives.sdk_features(), [SdkFeature::Drives]);
 
     let mut fork = baseline.clone();
-    fork.snapshot.can_checkpoint_running = true;
-    fork.snapshot.can_restore = true;
+    fork.snapshot.can_checkpoint_running = CapabilitySupport::Supported;
+    fork.snapshot.can_restore = CapabilitySupport::Supported;
     assert_eq!(fork.sdk_features(), [SdkFeature::Fork]);
 
     let mut launch = baseline;
-    launch.isolation.supports_command_cancellation = true;
-    launch.isolation.supports_command_launch_cancellation = true;
+    launch.isolation.supports_command_cancellation = CapabilitySupport::Supported;
+    launch.isolation.supports_command_launch_cancellation = CapabilitySupport::Supported;
     assert_eq!(
         launch.sdk_features(),
         [SdkFeature::CommandCancellation, SdkFeature::CommandLaunchCancellation]
     );
     let tenant = CapabilityProfile::from(&launch);
-    assert!(tenant.supports_command_launch_cancellation);
+    assert_eq!(
+        tenant.supports_command_launch_cancellation,
+        CapabilitySupport::Supported
+    );
     Ok(())
 }
 
@@ -778,8 +796,11 @@ fn tenant_profile_accepts_a_minimal_peer_and_omits_absent_limits() -> TestResult
     assert_eq!(parsed.resources, ResourceCapability::default());
     assert_eq!(parsed.placement, PlacementCapability::default());
     assert_eq!(parsed.ingress, IngressCapability::default());
-    assert!(!parsed.supports_command_launch_cancellation);
-    assert!(!parsed.supports_native_auto_stop);
+    assert_eq!(
+        parsed.supports_command_launch_cancellation,
+        CapabilitySupport::Unsupported
+    );
+    assert_eq!(parsed.supports_native_auto_stop, CapabilitySupport::Unsupported);
 
     let value = serde_json::to_value(&parsed)?;
     let object = value.as_object().ok_or("tenant profile is not an object")?;

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::EnvDigest;
+use crate::{CapabilitySupport, EnvDigest};
 
 /// Where a worker can place a sandbox and whether it accepts vendor options.
 ///
@@ -12,7 +12,7 @@ pub struct PlacementCapability {
     pub regions: Vec<String>,
     /// The worker honours validated vendor-native lease options.
     #[serde(default)]
-    pub supports_native_passthrough: bool,
+    pub supports_native_passthrough: CapabilitySupport,
     /// The execution environment this worker runs. A restore naming one belongs on a worker
     /// advertising the same digest.
     #[serde(default, skip_serializing_if = "Option::is_none")]

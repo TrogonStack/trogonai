@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ResourceRange;
+use crate::{CapabilitySupport, ResourceRange};
 
 /// Machine-size ranges a worker can honour.
 ///
@@ -14,5 +14,5 @@ pub struct ResourceCapability {
     pub disk_mib: Option<ResourceRange>,
     /// Live CPU and memory readings are available for a running lease.
     #[serde(default)]
-    pub reports_usage_gauges: bool,
+    pub reports_usage_gauges: CapabilitySupport,
 }

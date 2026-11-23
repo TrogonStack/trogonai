@@ -45,8 +45,10 @@ Capability metadata uses `VolumeMode` values `read_only`, `read_write`, and
 `mandatory`; and `ResourceLimitMechanism` values `none`, `rlimit`, `cgroup_v2`,
 `job_object`, and `runtime`. `SnapshotCapability`, `VolumeCapability`, and
 `EgressCapability` describe provider support and preserve their defaulted JSON
-fields. These values report capabilities; they do not authorize or select a
-provider.
+fields. Each support flag is a `CapabilitySupport` value, `Supported` or
+`Unsupported`, serialized as a JSON boolean so existing peers keep parsing it;
+an omitted flag reads as `Unsupported`. These values report capabilities; they
+do not authorize or select a provider.
 
 `ProviderCapabilityProfile` is the full profile a provider's worker declares:
 snapshot, volume, isolation, lifecycle, and performance axes, plus resource

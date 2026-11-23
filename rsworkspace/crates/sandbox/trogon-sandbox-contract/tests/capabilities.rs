@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use serde_json::error::Category::{Data, Syntax};
 use trogon_sandbox_contract::{
-    ArtifactType, EgressCapability, EgressEnforcementLevel, ResourceLimitMechanism, SnapshotCapability,
-    VolumeCapability, VolumeMode,
+    ArtifactType, CapabilitySupport, EgressCapability, EgressEnforcementLevel, ResourceLimitMechanism,
+    SnapshotCapability, VolumeCapability, VolumeMode,
 };
 
 #[test]
@@ -63,8 +63,8 @@ fn enums_preserve_their_wire_spellings_and_reject_unknown_values() -> Result<(),
 fn capability_values_preserve_defaults_and_constants() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(EgressCapability::NONE, EgressCapability::default());
     const {
-        assert!(EgressCapability::DENY_ONLY.deny_all);
-        assert!(EgressCapability::PROXIED.host_allowlist);
+        assert!(EgressCapability::DENY_ONLY.deny_all.is_supported());
+        assert!(EgressCapability::PROXIED.host_allowlist.is_supported());
     }
     assert_eq!(ResourceLimitMechanism::default(), ResourceLimitMechanism::None);
     let json = serde_json::to_string(&EgressCapability::PROXIED)?;
@@ -78,19 +78,19 @@ fn capability_values_preserve_defaults_and_constants() -> Result<(), Box<dyn std
 #[test]
 fn snapshot_and_volume_capabilities_round_trip_with_optional_fields() -> Result<(), Box<dyn std::error::Error>> {
     let snapshot = SnapshotCapability {
-        can_snapshot: true,
-        can_checkpoint_running: false,
-        can_restore: true,
+        can_snapshot: CapabilitySupport::Supported,
+        can_checkpoint_running: CapabilitySupport::Unsupported,
+        can_restore: CapabilitySupport::Supported,
         supported_artifact_types: vec![ArtifactType::SandboxRootfsV1],
-        layered_deltas: true,
+        layered_deltas: CapabilitySupport::Supported,
         max_snapshot_size_bytes: None,
-        supports_native_snapshots: true,
-        supports_in_place_rollback: false,
+        supports_native_snapshots: CapabilitySupport::Supported,
+        supports_in_place_rollback: CapabilitySupport::Unsupported,
     };
     let volume = VolumeCapability {
         supported_modes: vec![VolumeMode::ReadOnly, VolumeMode::CopyOnWrite],
-        supports_s3_backend: true,
-        supports_fuse_mounts: false,
+        supports_s3_backend: CapabilitySupport::Supported,
+        supports_fuse_mounts: CapabilitySupport::Unsupported,
     };
     assert_eq!(
         serde_json::from_str::<SnapshotCapability>(&serde_json::to_string(&snapshot)?)?,

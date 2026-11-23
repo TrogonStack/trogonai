@@ -90,7 +90,7 @@ impl From<&ProviderCapabilityProfile> for WorkerCapabilities {
             (isolation.supports_process_readiness, Self::SUPPORTS_PROCESS_READINESS),
         ]
         .into_iter()
-        .filter(|(supported, _)| *supported)
+        .filter(|(support, _)| support.is_supported())
         .fold(Self::empty(), |bits, (_, flag)| bits | flag)
     }
 }

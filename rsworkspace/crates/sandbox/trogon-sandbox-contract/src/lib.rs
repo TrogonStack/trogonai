@@ -3,6 +3,7 @@
 
 mod artifact_type;
 mod capability_profile;
+mod capability_support;
 mod constants;
 mod digest;
 mod digest_error;
@@ -41,6 +42,7 @@ mod worker_id;
 
 pub use artifact_type::ArtifactType;
 pub use capability_profile::CapabilityProfile;
+pub use capability_support::CapabilitySupport;
 pub use digest::Digest;
 pub use digest_error::DigestError;
 pub use dispatch_attempt_id::DispatchAttemptId;
