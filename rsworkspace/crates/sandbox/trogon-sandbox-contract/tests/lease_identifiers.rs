@@ -43,7 +43,7 @@ fn tenant_id_rejects_invalid_new_values() {
     let too_long = "a".repeat(TenantId::MAX_LEN + 1);
     for (value, expected) in [
         ("", TenantIdError::Empty),
-        (too_long.as_str(), TenantIdError::TooLong),
+        (too_long.as_str(), TenantIdError::TooLong { max: TenantId::MAX_LEN }),
         ("acme\nteam", TenantIdError::ControlCharacter),
         ("acme\u{7f}", TenantIdError::ControlCharacter),
     ] {
@@ -84,7 +84,7 @@ fn tenant_id_deserialization_stays_unchecked() -> TestResult {
 fn tenant_id_errors_describe_the_rule() {
     assert_eq!(TenantIdError::Empty.to_string(), "tenant id must not be empty");
     assert_eq!(
-        TenantIdError::TooLong.to_string(),
+        TenantIdError::TooLong { max: 128 }.to_string(),
         "tenant id must be at most 128 bytes"
     );
     assert_eq!(

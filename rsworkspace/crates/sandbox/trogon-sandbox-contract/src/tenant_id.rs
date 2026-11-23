@@ -25,7 +25,7 @@ impl TenantId {
             return Err(TenantIdError::Empty);
         }
         if value.len() > Self::MAX_LEN {
-            return Err(TenantIdError::TooLong);
+            return Err(TenantIdError::TooLong { max: Self::MAX_LEN });
         }
         if value.chars().any(char::is_control) {
             return Err(TenantIdError::ControlCharacter);
