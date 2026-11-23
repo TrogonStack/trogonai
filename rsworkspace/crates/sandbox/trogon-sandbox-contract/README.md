@@ -27,6 +27,13 @@ artifact metadata; they do not establish provider or runtime support.
 | `sbom_v1` | `application/vnd.trogon.sbom.v1` |
 | `scan_report_v1` | `application/vnd.trogon.scan-report.v1` |
 
+`ProviderKind` preserves the provider identity used by sandbox wire messages.
+Its JSON names are `k8s_micro_vm`, `subprocess`, `local_docker`, `daytona`,
+`modal`, `hyperlight`, `v8_wasm`, `kube_virt`, `azure_container_apps`,
+`substrate`, `firecracker`, `proxmox`, `fly`, `e2b`, `vercel`, `space`, and
+`mock`. The enum records identity only; it does not select, start, or authorize
+a provider.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
