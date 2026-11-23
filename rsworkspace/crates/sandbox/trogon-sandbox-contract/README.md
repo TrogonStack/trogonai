@@ -1,8 +1,8 @@
 # Sandbox contract
 
 `trogon-sandbox-contract` provides validated worker, dispatch-attempt, and operation
-identifiers, artifact metadata, operation kinds, and the operation state transition
-rules.
+identifiers, lease identifiers and policies, artifact metadata, operation kinds, and
+the operation state transition rules.
 
 `WorkerId`, `DispatchAttemptId`, and `OperationId` serialize as JSON strings. Each
 accepts 1 to 128 bytes containing only ASCII letters, digits, `_`, or `-`.
@@ -61,6 +61,31 @@ serializes as a `u32` bit set and rejects unknown bits. `DormancyCapability`
 resolves a `SuspendRequestLevel` only to a suspend level the provider offers,
 and `EnvDigest` reuses the `Digest` grammar. These profiles report capabilities;
 they do not select, place, or authorize a provider.
+
+`LeaseId`, `TenantId`, and `CorrelationId` serialize as JSON strings and accept
+any string on deserialization, so identifiers minted before a rule existed keep
+parsing. `TenantId::new` validates a tenant being introduced: it rejects an empty
+value, one longer than 128 bytes, or one containing a control character.
+`EmptyObject` serializes as `{}` for enum variants that carry no fields.
+
+`SandboxTags` serializes as a JSON object of string values and rejects more than
+five tags on construction and deserialization. `contains_all` matches a tag
+filter, and an empty filter matches every lease.
+
+`IdlePolicy` lists `IdleStage` values, each applying an `IdleAction` (`pause`,
+`suspend`, or `release`) once a lease has been quiet for more than
+`after_seconds`. `IdlePolicy::validate` requires at least one stage, stage times
+within the operator's limit and strictly increasing, and strictly more severe
+actions.
+
+`SnapshotPolicy` names the `ArtifactType` and target repository for a lease's
+snapshots, plus an optional `RetentionPolicy`, `PrewarmSpec`, and tag name that
+are omitted from JSON when absent. `RetentionPolicy::new` and `validate` keep
+`max_tags` between 1 and 10; deserialization does not validate, so stored
+policies keep parsing. `delete_evicted` is an `EvictedArtifactAction`, `Delete`
+or `Keep`, serialized as a JSON boolean; an omitted value reads as `Keep`, which
+leaves the evicted artifact in the registry. These policies describe intent;
+they do not schedule idle handling, take snapshots, or prune a registry.
 
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
