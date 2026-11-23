@@ -66,7 +66,8 @@ they do not select, place, or authorize a provider.
 any string on deserialization, so identifiers minted before a rule existed keep
 parsing. `TenantId::new` validates a tenant being introduced: it rejects an empty
 value, one longer than 128 bytes, or one containing a control character.
-`EmptyObject` serializes as `{}` for enum variants that carry no fields.
+`EmptyObject` serializes as `{}` for enum variants that carry no fields, and
+deserializes only from an empty JSON object.
 
 `SandboxTags` serializes as a JSON object of string values and rejects more than
 five tags on construction and deserialization. `contains_all` matches a tag

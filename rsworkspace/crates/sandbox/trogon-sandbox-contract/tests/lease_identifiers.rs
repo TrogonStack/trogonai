@@ -102,7 +102,7 @@ fn empty_object_serializes_as_an_empty_json_object() -> TestResult {
 
 #[test]
 fn empty_object_rejects_fields_and_non_objects() {
-    for json in [r#"{"field":1}"#, "\"\"", "null", "1"] {
+    for json in [r#"{"field":1}"#, "[]", "[1]", "\"\"", "null", "1"] {
         let actual = serde_json::from_str::<EmptyObject>(json)
             .map(|_| None)
             .unwrap_or_else(|error| Some(error.classify()));
