@@ -45,8 +45,22 @@ Capability metadata uses `VolumeMode` values `read_only`, `read_write`, and
 `mandatory`; and `ResourceLimitMechanism` values `none`, `rlimit`, `cgroup_v2`,
 `job_object`, and `runtime`. `SnapshotCapability`, `VolumeCapability`, and
 `EgressCapability` describe provider support and preserve their defaulted JSON
-fields. These values report capabilities; they do not authorize or select a
-provider.
+fields. Each support flag is a `CapabilitySupport` value, `Supported` or
+`Unsupported`, serialized as a JSON boolean so existing peers keep parsing it;
+an omitted flag reads as `Unsupported`. These values report capabilities; they
+do not authorize or select a provider.
+
+`ProviderCapabilityProfile` is the full profile a provider's worker declares:
+snapshot, volume, isolation, lifecycle, and performance axes, plus resource
+ranges, placement, and ingress limits that default when an older peer omits
+them. `ResourceRange` rejects a minimum above its maximum. `CapabilityProfile` is the flattened tenant view derived from it, and
+`ListCapabilitiesRequest` and `ListCapabilitiesResponse` carry those views.
+`sdk_features` lists the `SdkFeature` values a profile vouches for, in a fixed
+order, leaving out any feature without a backing flag. `WorkerCapabilities`
+serializes as a `u32` bit set and rejects unknown bits. `DormancyCapability`
+resolves a `SuspendRequestLevel` only to a suspend level the provider offers,
+and `EnvDigest` reuses the `Digest` grammar. These profiles report capabilities;
+they do not select, place, or authorize a provider.
 
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
