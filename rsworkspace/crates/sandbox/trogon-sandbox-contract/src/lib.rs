@@ -20,6 +20,6 @@ pub use dispatch_attempt_id::DispatchAttemptId;
 pub use operation_id::OperationId;
 pub use operation_kind::OperationKind;
 pub use operation_state::OperationState;
-pub use provider_kind::ProviderKind;
+pub use provider_kind::{IsolationTier, ProviderKind};
 pub use token_error::TokenError;
 pub use worker_id::WorkerId;

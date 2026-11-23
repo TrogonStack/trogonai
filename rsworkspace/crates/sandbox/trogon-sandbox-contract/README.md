@@ -34,6 +34,12 @@ Its JSON names are `k8s_micro_vm`, `subprocess`, `local_docker`, `daytona`,
 `mock`. The enum records identity only; it does not select, start, or authorize
 a provider.
 
+`IsolationTier` names the isolation strength requested by a lease. Its JSON names
+are `container`, `bwrap`, `user_space_kernel`, `micro_vm`, `full_vm`, and
+`wasm_micro_vm`. The contract preserves the ordered provider mappings for each
+tier and the inverse provider capabilities; it does not select or authorize a
+provider.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
