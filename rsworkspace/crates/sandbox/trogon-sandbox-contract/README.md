@@ -48,6 +48,18 @@ Capability metadata uses `VolumeMode` values `read_only`, `read_write`, and
 fields. These values report capabilities; they do not authorize or select a
 provider.
 
+`ProviderCapabilityProfile` is the full profile a provider's worker declares:
+snapshot, volume, isolation, lifecycle, and performance axes, plus resource
+ranges, placement, and ingress limits that default when an older peer omits
+them. `CapabilityProfile` is the flattened tenant view derived from it, and
+`ListCapabilitiesRequest` and `ListCapabilitiesResponse` carry those views.
+`sdk_features` lists the `SdkFeature` values a profile vouches for, in a fixed
+order, leaving out any feature without a backing flag. `WorkerCapabilities`
+serializes as a `u32` bit set and rejects unknown bits. `DormancyCapability`
+resolves a `SuspendRequestLevel` only to a suspend level the provider offers,
+and `EnvDigest` reuses the `Digest` grammar. These profiles report capabilities;
+they do not select, place, or authorize a provider.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
