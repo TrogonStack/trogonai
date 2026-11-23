@@ -40,6 +40,14 @@ are `container`, `bwrap`, `user_space_kernel`, `micro_vm`, `full_vm`, and
 tier and the inverse provider capabilities; it does not select or authorize a
 provider.
 
+Capability metadata uses `VolumeMode` values `read_only`, `read_write`, and
+`copy_on_write`; `EgressEnforcementLevel` values `none`, `best_effort`, and
+`mandatory`; and `ResourceLimitMechanism` values `none`, `rlimit`, `cgroup_v2`,
+`job_object`, and `runtime`. `SnapshotCapability`, `VolumeCapability`, and
+`EgressCapability` describe provider support and preserve their defaulted JSON
+fields. These values report capabilities; they do not authorize or select a
+provider.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
